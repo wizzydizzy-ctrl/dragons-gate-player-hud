@@ -1,6 +1,6 @@
-# Dragons Gate GMCP HUD
+# Dragons Gate Player HUD
 
-An original bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
+The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
 The header shows the player's local computer time and a synchronized Dragons Gate clock. Game time advances at the configurable 2× default, labels 6:00 AM–5:59 PM as `Daytime` and 6:00 PM–5:59 AM as `Night`, and resynchronizes from startup or manually entered `time` output.
 
@@ -28,19 +28,19 @@ The HUD runs `info mag` during character startup and whenever the command is ent
 ## Local build and install
 
 ```bash
-python3 scripts/build.py --owner wizzydizzy-ctrl --repository dragons-gate-hud
+python3 scripts/build.py --owner wizzydizzy-ctrl --repository dragons-gate-player-hud
 ```
 
 In the Dragons Gate Mudlet profile command line, replace the path and run:
 
 ```lua
-lua installPackage("/absolute/path/to/dragons-gate-hud/dist/DragonsGateHUD.mpackage")
+lua installPackage("/absolute/path/to/dragons-gate-player-hud/dist/DragonsGateHUD.mpackage")
 ```
 
 After the first GitHub release, install directly with:
 
 ```lua
-lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/download/v0.1.0/DragonsGateHUD.mpackage")
+lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/download/v0.1.0/DragonsGateHUD.mpackage")
 ```
 
 This executes code from that release inside the current Mudlet profile. Use only your own repository URL.
