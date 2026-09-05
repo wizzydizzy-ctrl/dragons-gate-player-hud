@@ -32,8 +32,8 @@ local function portalSegment(line,lower,colors)
 end
 
 local function specialSegments(line,lower,colors)
-  if lower:match("^%s*this area is illuminated%.%s*$") then return whole(line,"illumination",colors) end
-  if lower:match("^%s*this area is not illuminated%.%s*$") then return whole(line,"darkness",colors) end
+  if lower:match("^%s*this area is illuminated%.%s*$") or lower:match("^%s*this room is illuminated%.%s*$") then return whole(line,"illumination",colors) end
+  if lower:match("^%s*this area is not illuminated%.%s*$") or lower:match("^%s*this room is not illuminated%.%s*$") then return whole(line,"darkness",colors) end
   if lower:match("^%s*your .+ takes %d+ points? of .+ damage!%s*$") then return whole(line,"damage",colors) end
   if lower:match("^%s*the .+ you!%s*$") then
     local narrative=lower:match("%f[%a]depicts%f[%A]") or lower:match("%f[%a]shows%f[%A]") or lower:match("%f[%a]reads%f[%A]")

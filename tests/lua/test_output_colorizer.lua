@@ -69,6 +69,7 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
     {"The novice hithual cleric casts a curse at you!","spell"},
     {"You have discovered a secret path!","discovery"},
     {"This area is illuminated.","illumination"},
+    {"This room is illuminated.","illumination"},
   }
   for _,sample in ipairs(samples) do local parts=assert(Colorizer.parse(sample[1])); eq(#parts,1); eq(parts[1].kind,sample[2]); eq(sample[1]:sub(parts[1].start,parts[1].start+parts[1].length-1),sample[1]:match("^%s*(.-)%s*$")) end
   eq(Colorizer.parse("The dark hound claws at Gia!"),nil)
@@ -77,6 +78,7 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
   eq(Colorizer.parse("The novice hithual cleric casts a curse at Gia!"),nil)
   eq(Colorizer.parse("The teller whispers to you about a gate."),nil)
   local dark=assert(Colorizer.parse("This area is not illuminated.")); eq(dark[1].kind,"darkness"); eq(dark[1].color[1],105)
+  eq(assert(Colorizer.parse("This room is not illuminated."))[1].kind,"darkness")
 end)
 
 test("special lines retain independently filterable currency segments",function()
