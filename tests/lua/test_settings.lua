@@ -49,7 +49,7 @@ end)
 test("legacy highlight preference migrates to every individual category",function()
   local resolved,migrated,changed=Settings.resolve(defaults,{colorization={highlights_enabled=false}})
   eq(changed,true)
-  for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery"}) do
+  for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}) do
     eq(migrated.colorization[name.."_enabled"],false); eq(resolved.colorization[name.."_enabled"],false)
   end
 end)

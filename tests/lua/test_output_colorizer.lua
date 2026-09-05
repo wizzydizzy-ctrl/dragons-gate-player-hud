@@ -68,6 +68,7 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
     {"The novice hithual cleric quickly casts his gaze across the room.","spell"},
     {"The novice hithual cleric casts a curse at you!","spell"},
     {"You have discovered a secret path!","discovery"},
+    {"This area is illuminated.","illumination"},
   }
   for _,sample in ipairs(samples) do local parts=assert(Colorizer.parse(sample[1])); eq(#parts,1); eq(parts[1].kind,sample[2]); eq(sample[1]:sub(parts[1].start,parts[1].start+parts[1].length-1),sample[1]:match("^%s*(.-)%s*$")) end
   eq(Colorizer.parse("The dark hound claws at Gia!"),nil)
@@ -75,6 +76,7 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
   eq(Colorizer.parse("The fisherman casts his net across the room."),nil)
   eq(Colorizer.parse("The novice hithual cleric casts a curse at Gia!"),nil)
   eq(Colorizer.parse("The teller whispers to you about a gate."),nil)
+  eq(Colorizer.parse("This area is not illuminated."),nil)
 end)
 
 test("special lines retain independently filterable currency segments",function()
@@ -104,8 +106,9 @@ end)
 test("legacy highlight group and individual feature toggles coexist",function()
   local f=fake(); local c=Colorizer.new(f,true,{highlights_enabled=false}); assert(c:start())
   eq(c:onLine("Your head takes 8 points of impact damage!"),false)
+  eq(c:onLine("This area is illuminated."),false)
   assert(c:setFeature("damage",true)); eq(c:onLine("Your head takes 8 points of impact damage!"),true); eq(c:status().highlights,false)
-  assert(c:setFeature("highlights",true)); eq(c:status().highlights,true)
+  assert(c:setFeature("highlights",true)); eq(c:status().highlights,true); eq(c:onLine("This area is illuminated."),true)
   c:shutdown()
 end)
 

@@ -222,8 +222,8 @@ function View.new(settings)
   self.color_menu_bg=label("DGHUD.Header.ColorMenu.Background",self.color_menu,"background:"..t.panel..";border:1px solid "..t.border..";border-radius:6px;")
   self.options_scroll=Geyser.ScrollBox:new({name="DGHUD.Header.Options.Scroll",x=4,y=4,width=212,height=156},self.color_menu)
   self.color_option_buttons={}
-  self.color_option_order={"enabled","room","exits","currency","portal","attack","damage","danger","recovery","upkeep","spell","discovery"}
-  local optionLabels={enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT"}
+  self.color_option_order={"enabled","room","exits","currency","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+  local optionLabels={enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)

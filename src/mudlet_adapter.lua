@@ -113,7 +113,7 @@ end
 function Adapter:reportColorizerStatus(status)
   if type(status)~="table" then status={enabled=status==true} end
   local function word(value) return value and "ON" or "OFF" end
-  cecho("\n<gold>[DGHUD Options]<reset> All "..word(status.enabled).."  Room "..word(status.room).."  Exits "..word(status.exits).."  Currency "..word(status.currency).."  Travel "..word(status.portal).."  Attacks "..word(status.attack).."  Damage "..word(status.damage).."  Danger "..word(status.danger).."  Recovery "..word(status.recovery).."  Costs "..word(status.upkeep).."  Spells "..word(status.spell).."  Discovery "..word(status.discovery).."\n")
+  cecho("\n<gold>[DGHUD Options]<reset> All "..word(status.enabled).."  Room "..word(status.room).."  Exits "..word(status.exits).."  Currency "..word(status.currency).."  Travel "..word(status.portal).."  Attacks "..word(status.attack).."  Damage "..word(status.damage).."  Danger "..word(status.danger).."  Recovery "..word(status.recovery).."  Costs "..word(status.upkeep).."  Spells "..word(status.spell).."  Discovery "..word(status.discovery).."  Illumination "..word(status.illumination).."\n")
   return true
 end
 function Adapter:reportRoller(message) cecho("\n<gold>[DGHUD Roller]<reset> "..tostring(message or "").."\n"); return true end

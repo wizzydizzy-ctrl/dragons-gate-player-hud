@@ -2,7 +2,7 @@ return {
   schema = 1,
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.2.113",
+  version = "0.2.114",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   chat = { enabled=true, height_percent=.21, target_height=240, min_height=160, max_height=320, visible_limit=1000, dedupe_seconds=3, timestamps=true },
   colorization = {
@@ -19,6 +19,7 @@ return {
     upkeep_enabled=true,
     spell_enabled=true,
     discovery_enabled=true,
+    illumination_enabled=true,
     room_color={224,184,79},
     label_color={139,45,45},
     direction_color={191,91,33},
@@ -32,6 +33,7 @@ return {
     upkeep_color={185,105,45},
     spell_color={145,95,190},
     discovery_color={225,185,70},
+    illumination_color={220,200,85},
   },
   time = { speed=2, sunrise_hour=6, sunset_hour=18 },
   roller = {

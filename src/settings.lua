@@ -13,7 +13,7 @@ function Settings.migrate(input)
   if schema<1 then result.update=result.update or {}; result.update.auto_apply=false; result.auto_update=nil; result.schema=1; changed=true end
   local colors=type(result.colorization)=="table" and result.colorization or nil
   if colors and colors.highlights_enabled~=nil then
-    for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery"}) do
+    for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}) do
       local key=name.."_enabled"; if colors[key]==nil then colors[key]=colors.highlights_enabled~=false; changed=true end
     end
   end
