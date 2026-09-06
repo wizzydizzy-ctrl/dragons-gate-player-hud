@@ -167,7 +167,7 @@ local function place(item,x,y,w,h) item:move(x,y); item:resize(w,h); item:show()
 local help_entries={
   {command="dghud help",description="Open this command guide."},
   {command="dghud colors [on|off|toggle|status]",description="Control all optional DGHUD output colors."},
-  {command="dghud colors <feature> on|off|toggle|status",description="Toggle room, exits, currency, travel, combat, spell, or discovery highlights."},
+  {command="dghud colors <feature> on|off|toggle|status",description="Toggle room, exits, currency, races, classes, travel, combat, spell, discovery, or illumination highlights."},
   {command="dghud check",description="Check GitHub for a newer HUD release."},
   {command="dghud update",description="Install the newest verified HUD release, then refresh character data."},
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
@@ -222,8 +222,8 @@ function View.new(settings)
   self.color_menu_bg=label("DGHUD.Header.ColorMenu.Background",self.color_menu,"background:"..t.panel..";border:1px solid "..t.border..";border-radius:6px;")
   self.options_scroll=Geyser.ScrollBox:new({name="DGHUD.Header.Options.Scroll",x=4,y=4,width=212,height=156},self.color_menu)
   self.color_option_buttons={}
-  self.color_option_order={"enabled","room","exits","currency","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
-  local optionLabels={enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
+  self.color_option_order={"enabled","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+  local optionLabels={enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)

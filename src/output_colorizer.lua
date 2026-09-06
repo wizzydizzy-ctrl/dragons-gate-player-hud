@@ -4,9 +4,40 @@ local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},g
 local directions={north=true,northeast=true,east=true,southeast=true,south=true,southwest=true,west=true,northwest=true,up=true,down=true,['in']=true,out=true,n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,u=true,d=true}
 local travelNouns={door=true,doors=true,gate=true,gates=true,arch=true,arches=true,portal=true,portals=true,staircase=true,staircases=true,stairs=true,ladder=true,ladders=true,trapdoor=true,trapdoors=true,bridge=true,bridges=true,tunnel=true,tunnels=true,passage=true,passages=true,entrance=true,entrances=true,exit=true,exits=true}
 local attackVerbs={attacks=true,swings=true,slashes=true,stabs=true,bites=true,claws=true,kicks=true,strikes=true,shoots=true,breathes=true,charges=true,pounces=true,throws=true}
+local raceColors={
+  ["go-blin-al"]={153,204,255},["muatana-al"]={102,153,204},["drag-al"]={0,204,204},["fir elf"]={102,204,153},["san elf"]={153,153,255},["usil elf"]={102,102,255},["oog-ra"]={0,153,153},
+  anthian={102,204,255},arachnian={204,153,255},dragon={51,153,255},draco={51,153,255},drake={51,153,255},imperial={51,153,255},firian={102,204,153},sanene={153,153,255},usilin={102,102,255},frontacian={0,153,204},flerian={102,255,204},hithual={51,204,153},human={102,255,255},leuian={0,204,255},monitanian={102,204,102},oogra={0,153,153},penthanian={0,204,153},psycian={153,204,204},secian={204,255,255},thugian={0,102,204},goblin={153,255,204},
+}
+local classColors={
+  ["non-elemental mages"]={204,102,153},["non-elemental mage"]={204,102,153},["elemental mages"]={255,179,71},["elemental mage"]={255,179,71},["hand cleric"]={255,204,153},["heart cleric"]={255,153,153},["sword cleric"]={204,102,51},["rune mage"]={255,102,0},["air mage"]={255,204,102},["earth mage"]={204,119,34},["fire mage"]={255,51,0},["water mage"]={255,102,102},runemages={255,102,0},runemage={255,102,0},barbarian={255,102,102},bard={255,153,204},cleric={255,204,102},fighter={255,153,51},forester={255,204,51},psion={255,102,204},thief={255,102,153},
+}
+local function orderedKeys(values)
+  local result={}; for key in pairs(values) do result[#result+1]=key end
+  table.sort(result,function(a,b) if #a==#b then return a<b end return #a>#b end); return result
+end
+local raceNames,classNames=orderedKeys(raceColors),orderedKeys(classColors)
 
-local function segment(first,last,kind,colors)
-  return {start=first,length=last-first+1,kind=kind,color=colors[kind]}
+local function segment(first,last,kind,colors,override)
+  return {start=first,length=last-first+1,kind=kind,color=override or colors[kind]}
+end
+
+local function appendNamedSegments(result,line,lower,colors)
+  result=result or {}; local claimed={}
+  local function scan(names,palette,kind)
+    for _,name in ipairs(names) do
+      local cursor=1
+      while true do
+        local first,last=lower:find(name,cursor,true); if not first then break end
+        local before=first>1 and lower:sub(first-1,first-1) or ""; local after=last<#lower and lower:sub(last+1,last+1) or ""
+        local free=not before:match("[%a%-]") and not after:match("[%a%-]")
+        if free then for index=first,last do if claimed[index] then free=false; break end end end
+        if free then result[#result+1]=segment(first,last,kind,colors,palette[name]); for index=first,last do claimed[index]=true end end
+        cursor=last+1
+      end
+    end
+  end
+  scan(raceNames,raceColors,"races"); scan(classNames,classColors,"classes")
+  table.sort(result,function(a,b) return a.start<b.start end); return result
 end
 
 local function whole(line,kind,colors)
@@ -64,7 +95,7 @@ function Colorizer.parse(line,colors)
       if normalized=="gold" or normalized=="gp" then special[#special+1]=segment(wordFirst,wordFirst+#word-1,"gold",colors)
       elseif normalized=="silver" or normalized=="sp" then special[#special+1]=segment(wordFirst,wordFirst+#word-1,"silver",colors) end
     end
-    return special
+    return appendNamedSegments(special,line,lower,colors)
   end
   local labelFirst,labelLast=lower:find("obvious%s+exits%s*:")
   if not labelFirst then labelFirst,labelLast=lower:find("obvious%s+paths%s*:") end
@@ -84,6 +115,7 @@ function Colorizer.parse(line,colors)
     elseif word=="silver" or word=="sp" then result[#result+1]=segment(wordFirst,wordLast,"silver",colors) end
     cursor=wordLast+1
   end
+  result=appendNamedSegments(result,line,lower,colors)
   return #result>0 and result or nil
 end
 
@@ -91,7 +123,7 @@ function Colorizer.new(adapter,enabled,settings)
   settings=type(settings)=="table" and settings or {}
   local colors={room=settings.room_color or defaultColors.room,label=settings.label_color or defaultColors.label,direction=settings.direction_color or defaultColors.direction,gold=settings.gold_color or defaultColors.gold,silver=settings.silver_color or defaultColors.silver,portal=settings.portal_color or defaultColors.portal,attack=settings.attack_color or defaultColors.attack,damage=settings.damage_color or defaultColors.damage,danger=settings.danger_color or defaultColors.danger,recovery=settings.recovery_color or defaultColors.recovery,upkeep=settings.upkeep_color or defaultColors.upkeep,spell=settings.spell_color or defaultColors.spell,discovery=settings.discovery_color or defaultColors.discovery,illumination=settings.illumination_color or defaultColors.illumination,darkness=settings.darkness_color or defaultColors.darkness}
   local legacyHighlights=settings.highlights_enabled~=false
-  local features={room=settings.room_enabled~=false,exits=settings.exits_enabled~=false,currency=settings.currency_enabled~=false}
+  local features={room=settings.room_enabled~=false,exits=settings.exits_enabled~=false,currency=settings.currency_enabled~=false,races=settings.races_enabled~=false,classes=settings.classes_enabled~=false}
   for _,kind in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}) do
     local configured=settings[kind.."_enabled"]
     if configured==nil then features[kind]=legacyHighlights else features[kind]=configured~=false end

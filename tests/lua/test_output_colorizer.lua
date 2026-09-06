@@ -42,6 +42,22 @@ test("colors exact gold silver gp and sp words",function()
   eq(parts[1].kind,"gold"); eq(parts[2].kind,"gold"); eq(parts[3].kind,"silver"); eq(parts[4].kind,"silver")
 end)
 
+test("colors every race and class occurrence with longest names taking precedence",function()
+  local line="A Monitanian Fighter greets a Human Cleric and a Fir Elf Rune Mage."
+  local parts=assert(Colorizer.parse(line)); eq(#parts,6)
+  local words={}; for _,part in ipairs(parts) do words[#words+1]={line:sub(part.start,part.start+part.length-1),part.kind,part.color} end
+  eq(words[1][1],"Monitanian"); eq(words[1][2],"races"); eq(words[1][3][1],102); eq(words[1][3][2],204); eq(words[1][3][3],102)
+  eq(words[2][1],"Fighter"); eq(words[2][2],"classes")
+  eq(words[3][1],"Human"); eq(words[3][2],"races"); eq(words[4][1],"Cleric"); eq(words[4][2],"classes")
+  eq(words[5][1],"Fir Elf"); eq(words[5][2],"races"); eq(words[6][1],"Rune Mage"); eq(words[6][2],"classes")
+end)
+
+test("race and class toggles independently filter all positional matches",function()
+  local f=fake(); local c=Colorizer.new(f,true,{races_enabled=false,classes_enabled=true}); assert(c:start())
+  assert(c:onLine("Monitanian Fighter and Human Cleric")); eq(#f.applied[1],2); eq(f.applied[1][1].kind,"classes"); eq(f.applied[1][2].kind,"classes")
+  assert(c:setFeature("races",true)); eq(c:setFeature("classes",false),false); assert(c:onLine("Monitanian Fighter and Human Cleric")); eq(#f.applied[2],2); eq(f.applied[2][1].kind,"races"); eq(f.applied[2][2].kind,"races"); c:shutdown()
+end)
+
 test("colors only travel-object clauses at the end of room prose",function()
   local line="The wall is cracked. An open sinister black iron gate is here."
   local parts=assert(Colorizer.parse(line)); eq(#parts,1); eq(parts[1].kind,"portal")
@@ -71,11 +87,15 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
     {"This area is illuminated.","illumination"},
     {"This room is illuminated.","illumination"},
   }
-  for _,sample in ipairs(samples) do local parts=assert(Colorizer.parse(sample[1])); eq(#parts,1); eq(parts[1].kind,sample[2]); eq(sample[1]:sub(parts[1].start,parts[1].start+parts[1].length-1),sample[1]:match("^%s*(.-)%s*$")) end
+  for _,sample in ipairs(samples) do
+    local parts=assert(Colorizer.parse(sample[1])); local found
+    for _,part in ipairs(parts) do if part.kind==sample[2] then found=part; break end end
+    assert(found); eq(sample[1]:sub(found.start,found.start+found.length-1),sample[1]:match("^%s*(.-)%s*$"))
+  end
   eq(Colorizer.parse("The dark hound claws at Gia!"),nil)
   eq(Colorizer.parse("The mural depicts attacks at you!"),nil)
   eq(Colorizer.parse("The fisherman casts his net across the room."),nil)
-  eq(Colorizer.parse("The novice hithual cleric casts a curse at Gia!"),nil)
+  local untargeted=assert(Colorizer.parse("The novice hithual cleric casts a curse at Gia!")); eq(#untargeted,2); eq(untargeted[1].kind,"races"); eq(untargeted[2].kind,"classes")
   eq(Colorizer.parse("The teller whispers to you about a gate."),nil)
   local dark=assert(Colorizer.parse("This area is not illuminated.")); eq(dark[1].kind,"darkness"); eq(dark[1].color[1],105)
   eq(assert(Colorizer.parse("This room is not illuminated."))[1].kind,"darkness")

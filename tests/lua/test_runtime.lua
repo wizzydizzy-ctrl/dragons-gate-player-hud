@@ -704,6 +704,7 @@ test("optional output colors toggle through one owned alias and public API",func
   DGHUD={controller=hud}; Main.installChatApi(DGHUD)
   local colors=assert(aliasCallback(f,"^dghud colors(?: (.*))?$")); eq(DGHUD.colors.status().enabled,true); eq(colors({"","off"}),false); eq(f.reportedColorizer.enabled,false)
   eq(colors({"","on"}),true); eq(colors({"","exits off"}),false); eq(DGHUD.colors.status().exits,false); eq(colors({"","exits on"}),true)
+  eq(colors({"","races off"}),false); eq(DGHUD.colors.status().races,false); eq(colors({"","classes off"}),false); eq(DGHUD.colors.status().classes,false); eq(colors({"","races on"}),true); eq(colors({"","classes on"}),true)
   eq(colors({"","highlights off"}),false); eq(DGHUD.colors.status().highlights,false); eq(DGHUD.user_settings.colorization.highlights_enabled,false); eq(DGHUD.colors.setFeature("highlights",true),true); eq(colors({"","highlights on"}),true)
   local trigger=assert(f.triggers[f.colorizerTrigger]); trigger("Obvious paths: north east west."); eq(#f.coloredSegments,4)
   eq(DGHUD.colors.toggle(),false); eq(DGHUD.user_settings.colorization.enabled,false); eq(DGHUD.colors.setEnabled(true),true); eq(DGHUD.colors.status().started,true); eq(hud.colorizer_enabled,true); eq(f.viewColorEnabled,true)

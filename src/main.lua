@@ -1,7 +1,7 @@
 package.loaded["output_colorizer"]=nil
 local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup")
 local Main={}; Main.__index=Main
-local colorFeatures={"room","exits","currency","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local function colorOptions(status)
   local result={enabled=status.enabled}
   for _,name in ipairs(colorFeatures) do result[name]=status[name] end
@@ -487,7 +487,7 @@ function Main:start()
   if self.view.setColorOptionsCallback then self.view:setColorOptionsCallback(function(name,wanted) local feature=name=="room_titles" and "room" or name; local enabled,err=self:setColorFeature(feature,wanted); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
   local colorSettings=type(self.settings.colorization)=="table" and self.settings.colorization or {}
   if self.view.setColorOptions then
-    local initial={enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false}
+    local initial={enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
     local legacy=colorSettings.highlights_enabled~=false
     for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}) do local value=colorSettings[name.."_enabled"]; if value==nil then initial[name]=legacy else initial[name]=value~=false end end
     self.view:setColorOptions(initial)
@@ -564,7 +564,7 @@ function Main:start()
     elseif action=="off" then enabled=self:setColorizerEnabled(false)
     elseif action=="toggle" or action=="" then enabled=self:setColorizerEnabled(not self.colorizer_enabled)
     elseif action=="status" then enabled=self.colorizer:status().enabled
-    else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination]" end
+    else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|races|classes|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination]" end
     if enabled==nil then return nil,err end
     if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled
   end)
