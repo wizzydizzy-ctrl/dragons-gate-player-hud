@@ -656,7 +656,18 @@ function Main:start()
     elseif action=="confirm" then return self:confirmMapTransfer()
     elseif action=="cancel" then self.pending_map_import=nil; self.view.map_library_status="Import cancelled. Your map was not changed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return true
     elseif action=="report" then local message=self.last_map_library_error or "No map-library error has been recorded."; self.adapter:copyText("DGHUD map-library error: "..message); return self.adapter:openFeedback("DGHUD map-library error",message)
-    elseif action=="publish" then self.adapter:openMapTransferFolder(); return self.adapter:openMapLibrary("publish") end
+    elseif action=="publish" then
+      local stamp=os.date("%Y%m%d-%H%M%S"); local author=self:mapTransferCreator(); local publisher=author:lower():gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$",""):sub(1,39); if publisher=="" then publisher="anonymous" end
+      local slug="community-map-"..stamp; local data,buildErr=self.map_transfer:exportData({artifact_id="submission:"..stamp..":"..slug,author=author,publisher=publisher,slug=slug})
+      if not data then self.view.map_library_status="Publish failed: "..tostring(buildErr); self:reportMapTransfer(buildErr,true); return nil,buildErr end
+      self.view.map_library_status="Uploading and validating "..#data.rooms.." rooms…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
+      local function completed(result,publishErr)
+        if publishErr then self.last_map_library_error=tostring(publishErr); self.view.map_library_status="Publish failed: "..tostring(publishErr); self:reportMapTransfer(publishErr,true)
+        else self.view.map_library_status="Submitted for owner review. Submission "..tostring(result.submission_id or "received").."."; self:reportMapTransfer("Map submitted for owner review. It will appear in the library after validation and approval.",false) end
+        if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
+      end
+      local started,publishErr=self.adapter:publishMap({publisher=publisher,slug=slug,map=data},completed); if not started then completed(nil,publishErr) end; return started,publishErr
+    end
     return nil,"unknown map library action"
   end) end
   if self.view.setRollerSettingsCallback then self.view:setRollerSettingsCallback(function(values) local ok,err=self.roller:configure(values); if not ok then return nil,err end; return true,nil,self.roller.cfg end) end

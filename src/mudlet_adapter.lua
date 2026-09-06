@@ -172,6 +172,20 @@ function Adapter:downloadCatalogMap(entry,done)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,actualUrl) if actualUrl==url then finish(nil,message or "map download failed") end end)
   timer=tempTimer(30,function() timer=nil; finish(nil,"map download timed out") end); downloadFile(path,url); return true
 end
+function Adapter:publishMap(data,done)
+  if type(done)~="function" then return nil,"publish callback is required" end
+  if type(postHTTP)~="function" then return nil,"Mudlet HTTP upload support is unavailable" end
+  local ok,payload=pcall(yajl.to_string,data); if not ok or type(payload)~="string" then return nil,"could not encode map submission" end
+  if #payload>20000000 then return nil,"map submission exceeds the 20 MB limit" end
+  local url="https://dghud-maps.wallfamilyarchive.com/v1/maps"; local ids={}; local timer; local finished=false
+  local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end end
+  local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
+  ids[#ids+1]=registerAnonymousEventHandler("sysPostHttpDone",function(_,actual,body) if actual~=url then return end; local parsed,value=pcall(yajl.to_value,body or ""); if not parsed or type(value)~="table" then return finish(nil,"publisher returned an invalid response") end; if value.ok~=true then return finish(nil,value.error or "map submission was rejected") end; finish(value) end)
+  ids[#ids+1]=registerAnonymousEventHandler("sysPostHttpError",function(_,message,actual) if actual==url then finish(nil,message or "map upload failed") end end)
+  timer=tempTimer(60,function() timer=nil; finish(nil,"map upload timed out") end)
+  local queued,err=postHTTP(payload,url,{["Content-Type"]="application/json",["Accept"]="application/json"}); if queued==false then cleanup(); return nil,err or "Mudlet could not start the upload" end
+  return true
+end
 local function urlEncode(value) return tostring(value or ""):gsub("\n","%%0A"):gsub("([^%w%-_%.~%%])",function(char) return string.format("%%%02X",string.byte(char)) end) end
 function Adapter:openFeedback(title,body)
   local url="https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/issues/new?template=feedback.yml"
