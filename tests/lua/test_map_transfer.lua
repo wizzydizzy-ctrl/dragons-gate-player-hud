@@ -24,12 +24,12 @@ test("map transfer validation canonicalizes deterministic rooms tags and exits",
   eq(model.rooms[2].exits[1].direction,"w"); eq(model.rooms[2].special_exits[1].command,"go door")
 end)
 
-test("map transfer rejects sparse duplicate colliding and externally linked data",function()
+test("map transfer rejects sparse duplicate and colliding data while repairing external links",function()
   local transfer=Transfer.new(backend())
   local sparse=artifact({room(1)}); sparse.rooms[3]=room(3); eq(transfer:validate(sparse),nil)
   local duplicate=artifact({room(1),room(1,"B",2)}); eq(transfer:validate(duplicate),nil)
   local collision=artifact({room(1,"A",1),room(2,"A",1)}); eq(transfer:validate(collision),nil)
-  local linked=artifact({room(1)}); linked.rooms[1].exits={{direction="n",to=999}}; eq(transfer:validate(linked),nil)
+  local linked=artifact({room(1)}); linked.rooms[1].exits={{direction="n",to=999}}; eq(#assert(transfer:validate(linked)).rooms[1].exits,0)
 end)
 
 test("export is deterministic JSON-ready and carries POI plus provenance",function()
@@ -44,10 +44,10 @@ test("export omits links to personal or otherwise excluded rooms",function()
   eq(#out.rooms[1].exits,0); eq(#out.rooms[1].special_exits,0)
 end)
 
-test("invalid exits explain the exact bad destination",function()
+test("legacy exits to omitted rooms are repaired during import",function()
   local one=room(1); one.exits={{direction="e",to=99}}
-  local value,err=Transfer.new(backend()):validate(artifact({one}))
-  eq(value,nil); assert(err:find("points to room 99",1,true)); assert(err:find("index 1",1,true))
+  local value=assert(Transfer.new(backend()):validate(artifact({one})))
+  eq(#value.rooms[1].exits,0)
 end)
 
 test("shared maps reject unsafe and ambiguous special travel commands",function()

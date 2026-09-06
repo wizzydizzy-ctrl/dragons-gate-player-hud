@@ -42,7 +42,10 @@ local function sortedExits(values,special,roomIDs)
   for index=1,count do
     local item=values[index]; if type(item)~="table" then return nil,"entry "..index.." is not an object" end
     local to=integer(item.to); if not to then return nil,"entry "..index.." has an invalid destination" end
-    if not roomIDs[to] then return nil,"entry "..index.." points to room "..to..", which is not included in this map" end
+    if not roomIDs[to] then
+      -- Older exports retained links to personal or otherwise excluded rooms.
+      -- A self-contained imported stash cannot recreate those destinations.
+    else
     local key
     if special then
       local command=text(item.command,160,false); if not command then return nil,"entry "..index.." has an invalid command" end
@@ -54,7 +57,8 @@ local function sortedExits(values,special,roomIDs)
       if not DIRECTIONS[direction] then return nil,"entry "..index.." has unsupported direction '"..tostring(item.direction).."'" end
       key=direction; item={direction=direction,to=to}
     end
-    if seen[key] then return nil,"entry "..index.." is duplicated" end; seen[key]=true; out[#out+1]=item
+      if seen[key] then return nil,"entry "..index.." is duplicated" end; seen[key]=true; out[#out+1]=item
+    end
   end
   table.sort(out,function(a,b) local ak=special and a.command or a.direction; local bk=special and b.command or b.direction; return ak==bk and a.to<b.to or ak<bk end)
   return out
