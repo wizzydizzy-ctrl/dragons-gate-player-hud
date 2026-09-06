@@ -598,7 +598,7 @@ function View:layoutColorMenu(layout)
   local anchor=self.options_anchor or {}; local anchorY=tonumber(anchor.y) or 0; local anchorHeight=tonumber(anchor.height) or 0
   local columns=(width>=420 or height<300) and 2 or 1; local rows=math.ceil(#all/columns)
   local menuWidth=math.min(columns==2 and 460 or 230,math.max(1,width-8)); local rowHeight=math.max(25,(layout.color_toggle_font or 11)+14); local y=anchorY+anchorHeight+4; local availableHeight=math.max(1,height-y-4); local menuHeight=math.min(availableHeight,rowHeight*rows+8)
-  local x=math.max(0,width-menuWidth)
+  local x=0
   place(self.color_menu_scrim,0,0,"100%","100%"); place(self.color_menu,x,y,menuWidth,menuHeight); place(self.color_menu_bg,0,0,"100%","100%"); place(self.options_scroll,4,4,menuWidth-8,math.max(1,menuHeight-8))
   local columnWidth=(menuWidth-8)/columns; self.options_scroll.content_height=rowHeight*rows
   for index,item in ipairs(all) do local column=math.floor((index-1)/rows); local row=(index-1)%rows; local button=item.kind=="color" and self.color_option_buttons[item.key] or self.option_action_buttons[item.key]; place(button,column*columnWidth,row*rowHeight,columnWidth,rowHeight) end

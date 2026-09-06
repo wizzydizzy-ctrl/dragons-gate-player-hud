@@ -257,7 +257,7 @@ test("color options menu closes by button outside click and resize remains bound
   for _,size in ipairs({{220,120},{420,500},{760,700},{800,650},{1200,800},{1920,1080}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); view.color_toggle.click()
     eq(view.color_menu.x>=0,true); eq(view.color_menu.x+view.color_menu.width<=size[1],true)
-    eq(view.color_menu.x+view.color_menu.width,size[1])
+    eq(view.color_menu.x,0)
     eq(view.color_menu.y,view.options_anchor.y+view.options_anchor.height+4)
     eq(view.color_menu.y+view.color_menu.height<=size[2],true)
     eq(view.options_scroll.visible,true); eq(view.options_scroll.x+view.options_scroll.width<=view.color_menu.width,true)
@@ -267,11 +267,11 @@ test("color options menu closes by button outside click and resize remains bound
   end
 end)
 
-test("open options menu remains flush right through responsive resizing",function()
+test("open options menu remains flush left through responsive resizing",function()
   local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   for _,size in ipairs({{1920,1080},{800,650},{420,500},{220,120},{760,700}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
-    eq(view.color_menu_visible,true); eq(view.color_menu.x+view.color_menu.width,size[1])
+    eq(view.color_menu_visible,true); eq(view.color_menu.x,0)
     eq(view.color_menu.x>=0,true); eq(view.color_menu.y+view.color_menu.height<=size[2],true)
     for _,key in ipairs(view.option_action_order) do local button=view.option_action_buttons[key]; eq(button.x>=0,true); eq(button.x+button.width<=view.options_scroll.width,true) end
   end
