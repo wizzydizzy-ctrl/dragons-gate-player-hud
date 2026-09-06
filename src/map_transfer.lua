@@ -112,11 +112,21 @@ function Transfer:exportData(provenance)
   local ids,err=invoke(self.backend,"listRooms"); if not ids then return nil,err end
   local count=dense(ids,self.room_limit); if not count then return nil,"backend returned an invalid room list" end
   local included={}; for _,id in ipairs(ids) do included[id]=true end
-  local rooms={}; for index=1,count do
+  local rooms,occupied={},{}; for index=1,count do
     local room,readErr=invoke(self.backend,"getRoom",ids[index]); if not room then return nil,readErr or "room read failed" end
     room=copy(room)
     local function internal(values) local out={}; for _,entry in ipairs(values or {}) do if included[tonumber(entry.to)] then out[#out+1]=entry end end; return out end
     room.exits=internal(room.exits); room.special_exits=internal(room.special_exits)
+    local function key(x,y) return tostring(room.partition).."\0"..tostring(x)..","..tostring(y)..","..tostring(room.z) end
+    if occupied[key(room.x,room.y)] then
+      local radius,found=1,false
+      while not found do
+        for dx=-radius,radius do for _,dy in ipairs({-radius,radius}) do if not occupied[key(room.x+dx,room.y+dy)] then room.x,room.y=room.x+dx,room.y+dy; found=true; break end end if found then break end end
+        if not found then for dy=-radius+1,radius-1 do for _,dx in ipairs({-radius,radius}) do if not occupied[key(room.x+dx,room.y+dy)] then room.x,room.y=room.x+dx,room.y+dy; found=true; break end end if found then break end end end
+        radius=radius+1
+      end
+    end
+    occupied[key(room.x,room.y)]=true
     rooms[#rooms+1]=room
   end
   return self:validate({format="DragonsGateHUD-map",schema=1,provenance=copy(provenance),rooms=rooms})

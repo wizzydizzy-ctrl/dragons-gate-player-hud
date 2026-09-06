@@ -44,6 +44,12 @@ test("export omits links to personal or otherwise excluded rooms",function()
   eq(#out.rooms[1].exits,0); eq(#out.rooms[1].special_exits,0)
 end)
 
+test("export repairs legacy coordinate collisions without mutating the backend",function()
+  local one,two=room(1,"A",1),room(2,"A",1); local store=backend({[1]=one,[2]=two})
+  local out=assert(Transfer.new(store):exportData({artifact_id="local:1",author="Deklan"}))
+  assert(out.rooms[1].x~=out.rooms[2].x or out.rooms[1].y~=out.rooms[2].y); eq(store.rooms[2].x,1); eq(store.rooms[2].y,0)
+end)
+
 test("legacy exits to omitted rooms are repaired during import",function()
   local one=room(1); one.exits={{direction="e",to=99}}
   local value=assert(Transfer.new(backend()):validate(artifact({one})))
