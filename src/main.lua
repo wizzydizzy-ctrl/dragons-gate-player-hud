@@ -283,7 +283,7 @@ function Main:safetySnapshot()
     -- cleanup forever.
     local specialOK,special=pcall(self.special_transition.pending,self.special_transition)
     if not specialOK then return nil,"cleanup safety state is unavailable" end
-    if self.automapper.pending~=nil and type(self.automapper.pending)~="table" then return nil,"cleanup safety state is unavailable" end
+    if self.automapper.pending~=nil and type(self.automapper.pending)~="table" then self.automapper.pending=nil end
     if self.automapper.pending~=nil or special~=nil then
       return {current_room=current,walking=false,route_rooms=route,pending_automap=self.automapper.pending~=nil,pending_special=special~=nil}
     end
@@ -298,13 +298,23 @@ function Main:safetySnapshot()
   if nativeActive then
     local pathCount=denseArray(globalPath,validRoomID,false)
     local directionCount=denseArray(globalDirections,validCommand,false)
-    if not pathCount or not directionCount or pathCount~=directionCount then return nil,"cleanup safety state is unavailable" end
-    local destination=globalPath[pathCount]
-    if walkerActive and destination~=self.walker.destination then return nil,"cleanup safety state is unavailable" end
-    appendRooms(route,globalPath,1,pathCount)
+    if not pathCount or not directionCount or pathCount~=directionCount then
+      -- Mudlet and other mapper packages can leave partial speedwalk globals
+      -- behind after a route finishes.  They are not evidence of live movement
+      -- when DGHUD's own walker is idle, so ignore them for cleanup safety.
+      if walkerActive then return nil,"cleanup safety state is unavailable" end
+      nativeActive=false
+    else
+      local destination=globalPath[pathCount]
+      if walkerActive and destination~=self.walker.destination then return nil,"cleanup safety state is unavailable" end
+      appendRooms(route,globalPath,1,pathCount)
+    end
   end
   local specialOK,special=pcall(self.special_transition.pending,self.special_transition); if not specialOK then return nil,"cleanup safety state is unavailable" end
-  if self.automapper.pending~=nil and type(self.automapper.pending)~="table" then return nil,"cleanup safety state is unavailable" end
+  if self.automapper.pending~=nil and type(self.automapper.pending)~="table" then
+    if walkerActive then return nil,"cleanup safety state is unavailable" end
+    self.automapper.pending=nil
+  end
   return {current_room=current,walking=walkerActive or nativeActive,route_rooms=route,pending_automap=self.automapper.pending~=nil,pending_special=special~=nil}
 end
 function Main:beforeCleanupDelete()

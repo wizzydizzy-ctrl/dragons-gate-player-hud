@@ -266,10 +266,10 @@ test("cleanup safety blocks current active and uncertain movement state",functio
   hud.walker.route={rooms={100,101},commands={"n"}}; hud.walker.index=1; hud.walker.destination=101
   ok,err=room({"","101"}); eq(ok,nil); eq(err,"map walking is active"); hud.walker.route=nil
   hud.generated_command="n"; assert(room({"","101"})); eq(hud.generated_command,nil); hud.cleanup:cancel()
-  _G.speedWalkPath="malformed"; ok,err=room({"","101"}); eq(ok,nil); eq(err,"cleanup safety state is unavailable"); _G.speedWalkPath=nil
+  _G.speedWalkPath="malformed"; assert(room({"","101"})); hud.cleanup:cancel(); _G.speedWalkPath=nil
 end)
 
-test("cleanup safety rejects partial sparse and inconsistent native speedwalk state",function()
+test("cleanup safety ignores stale partial sparse and inconsistent native speedwalk state",function()
   local oldPath,oldDir=_G.speedWalkPath,_G.speedWalkDir
   local f=fake(); f.gmcp=gmcpRoom(1); local hud=Main.new(f,{layout={}}); assert(hud:start()); addCleanupRoom(f,100,7,"zone")
   local room=aliasCallback(f,"^dghud map delete room (\\d+)$")
@@ -285,8 +285,8 @@ test("cleanup safety rejects partial sparse and inconsistent native speedwalk st
   }
   for _,state in ipairs(invalid) do
     _G.speedWalkPath,_G.speedWalkDir=state[1],state[2]
-    local ok,err=room({"","100"}); _G.speedWalkPath,_G.speedWalkDir=nil,nil
-    eq(ok,nil); eq(err,"cleanup safety state is unavailable"); eq(f.map.rooms[100]~=nil,true)
+    assert(room({"","100"})); hud.cleanup:cancel(); _G.speedWalkPath,_G.speedWalkDir=nil,nil
+    eq(f.map.rooms[100]~=nil,true)
   end
   _G.speedWalkPath,_G.speedWalkDir={100},{"n"}
   local ok,err=room({"","100"}); _G.speedWalkPath,_G.speedWalkDir=nil,nil
