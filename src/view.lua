@@ -177,6 +177,7 @@ local help_entries={
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
   {command="dghud chatstatus",description="Show chat capture, filter, and storage status."},
   {command="dghud mapstatus",description="Show mapper, walking, and latest-error status."},
+  {command="dghud mapper [on|off|toggle|status]",description="Show or hide the mapper and enable or pause automatic mapping without deleting saved rooms."},
   {command="walkto <room number>",description="Walk to a known mapped room."},
   {command="walkstop",description="Stop the current automatic walk."},
   {command="mapcenter",description="Center the embedded map on your current room."},
@@ -222,8 +223,8 @@ function View.new(settings)
   self.color_menu_bg=label("DGHUD.Header.ColorMenu.Background",self.color_menu,"background:"..t.panel..";border:1px solid "..t.border..";border-radius:6px;")
   self.options_scroll=Geyser.ScrollBox:new({name="DGHUD.Header.Options.Scroll",x=4,y=4,width=212,height=156},self.color_menu)
   self.color_option_buttons={}
-  self.color_option_order={"enabled","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
-  local optionLabels={enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
+  self.color_option_order={"mapper","enabled","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)

@@ -377,7 +377,7 @@ test("cleanup reconciliation requires a valid fresh current room after mutation"
 end)
 
 test("cleanup shutdown removes all seven owned map aliases",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+11)
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+12)
   local owned={}; for id,alias in pairs(f.aliases) do if alias.pattern:match("%^dghud map ") then owned[id]=true end end; eq(f:count(owned),7)
   assert(hud:shutdown()); for id in pairs(owned) do eq(f.killed[id],true) end; eq(f:count(f.aliases),0)
 end)
@@ -532,6 +532,17 @@ test("runtime wires one automapper handler per event and cleans it exactly",func
   eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),2); eq(count("sysDataSendRequest"),2)
   hud:reload(); eq(f.createdMaps,2); eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDataSendRequest"),2)
   hud:shutdown(); eq(f.events[personal],"gmcp.Room.Info"); eq(count("gmcp.Room.Info"),1); eq(count("gmcp.Room.WrongDir"),0); eq(count("sysDataSendRequest"),0)
+end)
+
+test("mapper toggle hides and pauses mapping without deleting saved rooms",function()
+  local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={},mapper={enabled=true}}); assert(hud:start())
+  DGHUD={controller=hud,user_settings={}}
+  local toggle=assert(aliasCallback(f,"^dghud map(?:per)?(?: (on|off|toggle|status))?$"))
+  local before=f.map.rooms[100]; eq(toggle({"","off"}),false); eq(hud:mapperEnabled(),false); eq(DGHUD.user_settings.mapper.enabled,false)
+  eq(f.layouts[#f.layouts].mapper_visible,false); eq(f.layouts[#f.layouts].lower_mapper_height,0)
+  f.callbacks["sysDataSendRequest"](nil,"north"); f.gmcp=gmcpRoom(101); f.callbacks["gmcp.Room.Info"](); eq(f.map.rooms[101],nil); eq(f.map.rooms[100],before)
+  eq(toggle({"","on"}),true); eq(hud:mapperEnabled(),true); eq(f.map.rooms[101]~=nil,true); eq(f.layouts[#f.layouts].mapper_visible,true)
+  hud:shutdown(); DGHUD=nil
 end)
 
 test("runtime routes movement, wrong direction, teleport commands, and disconnect",function()

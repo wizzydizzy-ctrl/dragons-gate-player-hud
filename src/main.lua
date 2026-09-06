@@ -186,6 +186,24 @@ function Main:applyResponsiveLayout(state)
   if self.view and self.view.applyLayout then self.view:applyLayout(layout) end; return layout
 end
 function Main:mapperEnabled() return not (self.settings.mapper and self.settings.mapper.enabled==false) end
+function Main:setMapperEnabled(enabled)
+  enabled=enabled==true
+  self.settings.mapper=type(self.settings.mapper)=="table" and self.settings.mapper or {}; self.settings.mapper.enabled=enabled
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.mapper=type(root.user_settings.mapper)=="table" and root.user_settings.mapper or {}; root.user_settings.mapper.enabled=enabled end
+  if not enabled then
+    self:callSpecialTransition("cancel","disabled")
+    if self.automapper then self.automapper:onWrongDirection() end
+    if self.walker and self.walker:active() then self.walker:stop("mapper disabled") end
+    self:removeMapClickHook()
+  else
+    self:installMapClickHook()
+    local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info
+    if self.automapper and info then local ok=self:callAutomapper("onRoom",info); if ok and tonumber(info.num) then self.managed_rooms[tonumber(info.num)]=true end end
+  end
+  if self.view and self.view.setColorOptions then local options=colorOptions(self.colorizer and self.colorizer:status() or {}); options.mapper=enabled; self.view:setColorOptions(options) end
+  self:applyResponsiveLayout(); self:refresh(); return enabled
+end
 function Main:mapperStatus(kind,message,isError)
   self.last_mapper_status=tostring(message or kind or "none")
   if kind=="invalid_room" or kind=="ownership_conflict" or kind=="error" or isError==true then self.last_mapper_error=tostring(message or "unknown mapper error") end
@@ -506,10 +524,13 @@ function Main:start()
     self.settings.roller=config; local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.roller=config end; return true
   end)
   if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
-  if self.view.setColorOptionsCallback then self.view:setColorOptionsCallback(function(name,wanted) local feature=name=="room_titles" and "room" or name; local enabled,err=self:setColorFeature(feature,wanted); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
+  if self.view.setColorOptionsCallback then self.view:setColorOptionsCallback(function(name,wanted)
+    if name=="mapper" then return self:setMapperEnabled(wanted) end
+    local feature=name=="room_titles" and "room" or name; local enabled,err=self:setColorFeature(feature,wanted); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled
+  end) end
   local colorSettings=type(self.settings.colorization)=="table" and self.settings.colorization or {}
   if self.view.setColorOptions then
-    local initial={enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
+    local initial={mapper=self:mapperEnabled(),enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
     local legacy=colorSettings.highlights_enabled~=false
     for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}) do local value=colorSettings[name.."_enabled"]; if value==nil then initial[name]=legacy else initial[name]=value~=false end end
     self.view:setColorOptions(initial)
@@ -559,6 +580,14 @@ function Main:start()
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud mapstatus$",function() return self:reportMapStatus() end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map(?:per)?(?: (on|off|toggle|status))?$",function(value)
+    local action=tostring(aliasArgument(value) or "toggle"):lower()
+    if action=="status" then return self:mapperEnabled() end
+    if action=="on" then return self:setMapperEnabled(true) end
+    if action=="off" then return self:setMapperEnabled(false) end
+    if action=="toggle" then return self:setMapperEnabled(not self:mapperEnabled()) end
+    return nil,"usage: dghud map [on|off|toggle|status]"
+  end)
   local cleanupAliases={
     {"^dghud map delete room (\\d+)$",function(value) return self:previewCleanup("previewRoom",aliasArgument(value)) end},
     {"^dghud map clear submap (\\d+)$",function(value) return self:previewCleanup("previewSubmap",aliasArgument(value)) end},
@@ -625,7 +654,7 @@ end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
-  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+11) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
+  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+12) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
   local ok=pcall(function() self:refresh() end); if not ok then return nil,"state refresh failed" end; return true
 end
 return Main

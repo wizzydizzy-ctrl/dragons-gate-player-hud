@@ -216,6 +216,12 @@ test("compact layouts may hide the embedded mapper",function()
   local r=Layout.compute(760,700)
   eq(r.mapper_visible,false); eq(r.lower_mapper_height,0); eq(r.lower_mapper_toolbar_height,0)
 end)
+test("disabled mapper releases its layout space at every noncompact resolution",function()
+  for _,size in ipairs({{1920,1080},{1100,800}}) do
+    local r=Layout.compute(size[1],size[2],{}, {enabled=false})
+    eq(r.mapper_visible,false); eq(r.lower_mapper_height,0); eq(r.lower_mapper_toolbar_height,0)
+  end
+end)
 test("lower panel reduction preserves location and mapper floors before hiding the mapper",function()
   local wide=Layout.compute(2560,1400); local full=Layout.lowerPanelGeometry(wide,true,true)
   eq(full.optional_count,2); eq(full.room_height,wide.lower_room_height); eq(full.mapper_height>=140,true)

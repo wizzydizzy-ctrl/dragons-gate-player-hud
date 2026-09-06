@@ -109,7 +109,7 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   layout.bottom=layout.vitals_strip_height; layout.window_height=height
   chatMetrics(width,height,layout,chatSettings)
   layout.lower_mapper_gap=layout.lower_row_gap
-  if layout.mode=="compact" then
+  if layout.mode=="compact" or (type(mapperSettings)=="table" and mapperSettings.enabled==false) then
     layout.mapper_visible=false; layout.lower_mapper_height=0; layout.lower_mapper_min_height=0; layout.lower_mapper_toolbar_height=0; layout.lower_room_visible_height=0
   else
     mapperSettings=type(mapperSettings)=="table" and mapperSettings or {}
