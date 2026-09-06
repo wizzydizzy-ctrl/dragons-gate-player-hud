@@ -388,6 +388,7 @@ function Main:previewCleanup(method,target)
     message=message.."\nCount: "..tostring(#preview.room_ids).."\nRoom IDs: "..table.concat(ids,",")
   end
   message=message.."\n[DGHUD Map] Preview "..preview.token.." expires in 30 seconds.\n[DGHUD Map] Confirm with: dghud map confirm "..preview.token
+  if preview.operation=="clear_all" then message=message.."\n[DGHUD Map] Or click the red CLICK AGAIN button to permanently clear every DGHUD map and submap." end
   self:reportCleanup(message,false); return preview
 end
 function Main:confirmCleanup(token)
@@ -409,7 +410,10 @@ function Main:clearAllMapsAction()
   local pending=self.cleanup and self.cleanup:pending()
   if pending and pending.operation=="clear_all" then
     local now=self.adapter.cleanupClock and self.adapter:cleanupClock() or os.time()
-    if self.clear_all_armed_at and now-self.clear_all_armed_at<1 then return nil,"wait one second before confirming clear all" end
+    if self.clear_all_armed_at and now-self.clear_all_armed_at<1 then
+      local err="CLEAR ALL is armed. Wait one second, then click the red button again."
+      self:reportCleanup(err,false); return nil,err
+    end
     return self:confirmCleanup(pending.token)
   end
   local preview,err=self:previewCleanup("previewAll")

@@ -235,10 +235,9 @@ test("map clear button previews then confirms a complete owned-map reset",functi
   eq(f.map.areas[8],nil); eq(f.map.rooms[201],nil); eq(f.map.rooms[200]~=nil,true)
   eq(f.map.rooms[200].owned,true); eq(f.cleanupReports[#f.cleanupReports].error,false)
 end)
-test("map clear button rejects immediate double click while typed confirmation remains immediate",function()
+test("map clear button reports rapid double click and remains armed",function()
   local f=fake(); f.gmcp=gmcpRoom(200); local hud=Main.new(f,{layout={}}); assert(hud:start()); addCleanupRoom(f,200,8,"zone"); addCleanupRoom(f,201,8,"zone"); f.map.areaNames.Alpha=8
-  assert(f.mapClearAllCallback()); local result,err=f.mapClearAllCallback(); eq(result,nil); eq(err,"wait one second before confirming clear all"); eq(f.map.rooms[201]~=nil,true)
-  assert(aliasCallback(f,"^dghud map confirm (\\S+)$")({"",hud.cleanup:pending().token})); eq(f.map.rooms[201],nil)
+  assert(f.mapClearAllCallback()); local result,err=f.mapClearAllCallback(); eq(result,nil); assert(err:find("Wait one second",1,true)); eq(f.map.rooms[201]~=nil,true); assert(hud.cleanup:pending())
 end)
 test("clear-all preview reports bounded counts instead of every room id",function()
   local f=fake(); f.gmcp=gmcpRoom(1); local hud=Main.new(f,{layout={}}); assert(hud:start()); for area=1,25 do f.map.areaNames["Area"..area]=area; addCleanupRoom(f,area+1000,area,"zone"..area) end

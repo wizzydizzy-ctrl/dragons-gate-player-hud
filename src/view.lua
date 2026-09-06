@@ -807,7 +807,7 @@ function View:setMapClearAllCallback(callback) self.map_clear_all_callback=type(
 function View:setMapClearPending(pending)
   self.map_clear_pending=pending==true
   local font=self.layout and self.layout.lower_utility_font or 12
-  local text=self.map_clear_pending and "CONFIRM" or "CLEAR ALL"
+  local text=self.map_clear_pending and "CLICK AGAIN" or "CLEAR ALL"
   self.map_clear_all:echo(View.withFont("<center><b>"..text.."</b></center>",font))
   return true
 end
