@@ -471,6 +471,7 @@ function Main:exportMapTransfer(name,publisher)
 end
 local function transferChoice(value) return ({keep="keep_mine",replace="use_imported",skip="skip_area"})[tostring(value or ""):lower()] end
 function Main:reportMapImportPlan(plan,name)
+  if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(true) end
   local lines={"Import preview for '"..tostring(name).."': "..plan.creates.." new, "..plan.conflicts.." conflicts, "..plan.keeps.." keep mine, "..plan.replaces.." use imported, "..plan.skips.." skipped."}
   for _,area in ipairs(plan.areas) do lines[#lines+1]="Area "..area.name..": "..area.conflicts.." conflicts; policy "..tostring(area.policy):gsub("_"," ") end
   if plan.blocked then lines[#lines+1]="Blocked: at least one canonical room ID belongs to a personal/non-DGHUD map." end
@@ -498,7 +499,7 @@ end
 function Main:confirmMapTransfer()
   local pending=self.pending_map_import; if not pending then return nil,"no map import preview is pending" end
   local result,err=self.map_transfer:apply(pending.plan,self:mapTransferCreator()); if not result then self:reportMapTransfer(err,true); return nil,err end
-  self.pending_map_import=nil; self:reportMapTransfer("Imported editable stash: "..result.applied.." rooms applied, "..result.kept.." kept, "..result.skipped.." skipped. Original attribution retained as derived-from metadata.",false); return result
+  self.pending_map_import=nil; if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end; self:reportMapTransfer("Map installed: "..result.applied.." rooms added or updated, "..result.kept.." of your rooms kept, "..result.skipped.." skipped.",false); return result
 end
 function Main:routeShape(fromID,toID,route)
   if type(route)~="table" then return nil,"invalid map route" end
@@ -638,6 +639,7 @@ function Main:start()
   end) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action)
     if action=="browse" then
+      if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end
       self.view:setMapLibraryCatalog({},"Loading community map catalog…")
       local started,err=self.adapter:fetchMapCatalog(function(raw,downloadErr) if downloadErr then return self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(downloadErr)) end; local catalog,validationErr=MapCatalog.validate(raw); if not catalog then return self.view:setMapLibraryCatalog({},validationErr) end; self.map_catalog=catalog; self.view:setMapLibraryCatalog(catalog.maps) end); if not started then self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(err)) end; return started,err
     elseif action=="export" then
@@ -654,7 +656,7 @@ function Main:start()
     elseif action=="replace" then return self:setDefaultMapImportPolicy("replace")
     elseif action=="skip" then return self:setDefaultMapImportPolicy("skip")
     elseif action=="confirm" then return self:confirmMapTransfer()
-    elseif action=="cancel" then self.pending_map_import=nil; self.view.map_library_status="Import cancelled. Your map was not changed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return true
+    elseif action=="cancel" then self.pending_map_import=nil; if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end; self.view.map_library_status="Stopped. Your map was not changed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return true
     elseif action=="report" then local message=self.last_map_library_error or "No map-library error has been recorded."; self.adapter:copyText("DGHUD map-library error: "..message); return self.adapter:openFeedback("DGHUD map-library error",message)
     elseif action=="publish" then
       local stamp=os.date("%Y%m%d-%H%M%S"); local author=self:mapTransferCreator(); local publisher=author:lower():gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$",""):sub(1,39); if publisher=="" then publisher="anonymous" end

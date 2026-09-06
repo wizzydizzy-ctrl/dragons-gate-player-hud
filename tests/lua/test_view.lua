@@ -293,7 +293,8 @@ test("map settings opens a responsive map library presentation",function()
   for _,size in ipairs({{320,260},{760,700},{1200,800},{1920,1080}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
     eq(view.map_library_panel.x>=0,true); eq(view.map_library_panel.y>=0,true); eq(view.map_library_panel.x+view.map_library_panel.width<=size[1],true); eq(view.map_library_panel.y+view.map_library_panel.height<=size[2],true)
-    for _,key in ipairs(view.map_library_action_order) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
+    for _,key in ipairs({"browse","install","publish","export","report"}) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
+    for _,key in ipairs({"keep","replace","skip","confirm","cancel"}) do eq(view.map_library_actions[key].visible,false) end
   end
   view.map_library_close.click(); eq(view.map_library_visible,false); eq(view.map_library_panel.visible,false)
 end)
@@ -310,10 +311,16 @@ end)
 test("map library displays and selects downloaded catalog entries internally",function()
   local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}}); eq(#view.map_library_rows,1); assert(view.map_library_rows[1].click()); eq(view:selectedMapLibraryEntry().slug,"spur"); eq(view.map_library_status:find("42 rooms",1,true)~=nil,true)
 end)
+test("map library shows conflict choices only during installation review",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryImportPending(true)
+  for _,key in ipairs({"keep","replace","skip","confirm","cancel","report"}) do eq(view.map_library_actions[key].visible,true) end
+  for _,key in ipairs({"browse","install","publish","export"}) do eq(view.map_library_actions[key].visible,false) end
+  view:setMapLibraryImportPending(false); eq(view.map_library_actions.browse.visible,true); eq(view.map_library_actions.keep.visible,false)
+end)
 test("help and map library expose copyable plain-text instructions",function()
   local view=chatView(); local copied={}; view:setCopyTextCallback(function(value) copied[#copied+1]=value; return true end); view:applyLayout(require("layout").compute(1000,700))
   view:showHelp(); assert(view.help_copy.click()); eq(copied[#copied]:find("dghud update",1,true)~=nil,true); eq(copied[#copied]:find("<span",1,true),nil)
-  view:showMapLibrary(); assert(view.map_library_copy_button.click()); eq(copied[#copied]:find("entirely from this window",1,true)~=nil,true)
+  view:showMapLibrary(); assert(view.map_library_copy_button.click()); eq(copied[#copied]:find("No GitHub account is needed",1,true)~=nil,true)
 end)
 test("map import conflict review defaults safely and accepts only known choices",function()
   local rows=View.mapImportConflictModel({{area="Spur",local_rooms=12,imported_rooms=15},{area="Temple",local_rooms=4,imported_rooms=7}}, {[1]="keep_mine",[2]="use_imported"})
