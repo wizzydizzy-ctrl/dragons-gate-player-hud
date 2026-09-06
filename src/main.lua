@@ -320,6 +320,7 @@ function Main:safetySnapshot()
   local ok,data=pcall(self.adapter.getGMCP,self.adapter)
   local info=ok and type(data)=="table" and type(data.Room)=="table" and type(data.Room.Info)=="table" and data.Room.Info or nil
   local current=info and positiveRoom(info.num) or nil
+  if not current and self.automapper and type(self.automapper.currentRoom)=="function" then local currentOK,fallback=pcall(self.automapper.currentRoom,self.automapper); if currentOK then current=positiveRoom(fallback) end end
   if not current or not self.walker or type(self.walker.active)~="function" or not self.automapper or not self.special_transition then return nil,"cleanup safety state is unavailable" end
   local activeOK,walkerActive=pcall(self.walker.active,self.walker); if not activeOK or type(walkerActive)~="boolean" then return nil,"cleanup safety state is unavailable" end
   local route={}
@@ -624,6 +625,7 @@ function Main:start()
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
     if action=="feedback" then return self.adapter:openFeedback() end
+    if action=="map_settings" then return self.settings.mapper end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)

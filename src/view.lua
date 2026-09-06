@@ -270,8 +270,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","feedback","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
+  self.option_action_order={"command_help","feedback","map_settings","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -752,7 +752,7 @@ end
 function View:setHelpCloseCallback(callback) self.help_close_callback=type(callback)=="function" and callback or nil; return true end
 function View:setHelpVisible(visible,entries)
   self.help_visible=visible==true
-  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings() end
+  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary() end
   if entries~=nil then self.help_entries=type(entries)=="table" and entries or View.defaultHelpEntries() end
   if self.layout then return self:layoutHelp(self.layout) end
   return true
@@ -771,6 +771,7 @@ function View:setMapSettingsActionCallback(callback) self.map_settings_action_ca
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
   if action=="command_help" then return self:showHelp() end
+  if action=="map_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showMapSettings(config) end; return config end; return nil,"map settings are unavailable" end
   if action=="roller_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showRollerSettings(config) end; return config end; return nil,"autoroller settings are unavailable" end
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
@@ -788,7 +789,7 @@ function View:layoutMapLibrary(layout)
   local closeWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); local copyWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); place(self.map_library_title,16,10,panelWidth-closeWidth-copyWidth-48,34); place(self.map_library_copy_button,panelWidth-closeWidth-copyWidth-18,8,copyWidth,30); place(self.map_library_close,panelWidth-closeWidth-12,8,closeWidth,30)
   self.map_library_title:echo(View.withFont("<b>MAP LIBRARY</b>",font+2)); self.map_library_copy_button:echo(View.withFont("<center><b>COPY</b></center>",font)); self.map_library_close:echo(View.withFont("<center><b>× CLOSE</b></center>",font))
   place(self.map_library_copy,18,54,panelWidth-36,math.max(72,math.floor(panelHeight*.25))); self.map_library_copy:echo(View.withFont("Browse credited public maps, export your DGHUD-owned map, import an editable local stash, or publish your changes under your own GitHub name.<br><br><span style='color:"..self.settings.theme.muted.."'>Canonical room-number conflicts require: <b>Keep Mine</b>, <b>Use Imported</b>, or <b>Skip Area</b>. Original creator/source attribution remains attached as derived-from metadata. Validation occurs before any map changes.</span>",font))
-  local top=math.max(142,math.floor(panelHeight*.36)); local gap=10; local columns=panelWidth>=500 and 2 or 1; local buttonWidth=columns==2 and (panelWidth-46)/2 or panelWidth-36; local buttonHeight=math.max(34,font+20)
+  local top=math.max(112,math.floor(panelHeight*.36)); local gap=10; local columns=panelWidth>=280 and 2 or 1; local buttonWidth=columns==2 and (panelWidth-46)/2 or panelWidth-36; local buttonHeight=math.max(32,font+18)
   for index,key in ipairs(self.map_library_action_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); local button=self.map_library_actions[key]; place(button,18+column*(buttonWidth+gap),top+row*(buttonHeight+gap),buttonWidth,buttonHeight); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
   View.raiseCards(widgets); return true
 end
@@ -810,7 +811,7 @@ function View:renderColorOptions()
 end
 local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 function View:showRollerSettings(config)
-  self:hideHelp(); self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
   self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
@@ -828,7 +829,7 @@ function View:mapSettingsValues()
   local values={transition_submaps={}}; for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; values[key]=f.input.getText and f.input:getText() or "" end; values.height_percent=(tonumber(values.height_percent) or 0)/100; values.enabled=self.map_settings_draft.enabled~=false; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do values.transition_submaps[key]=self.map_settings_draft[key]~=false end; return values
 end
 function View:saveMapSettings()
-  if not self.map_settings_callback then return nil,"map settings callback is unavailable" end; local ok,err,config=self.map_settings_callback(self:mapSettingsValues()); if not ok then self.map_settings_error=err; self:renderMapSettings(false); return nil,err end; self:hideMapSettings(); return true,config
+  if not self.map_settings_callback then return nil,"map settings callback is unavailable" end; local called,ok,err,config=pcall(self.map_settings_callback,self:mapSettingsValues()); if not called then err="Could not save mapper settings: "..tostring(ok); ok=nil end; if not ok then self.map_settings_error=err; self:renderMapSettings(false); return nil,err end; self:hideMapSettings(); return true,config
 end
 function View:hideRollerSettings() self.roller_settings_visible=false; self.roller_draft=nil; self.roller_error=nil; if self.layout then self:layoutRollerSettings(self.layout) end; return true end
 function View:renderRollerSettings(populate)

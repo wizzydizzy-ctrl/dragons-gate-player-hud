@@ -117,25 +117,30 @@ local function mapToken(value,kind)
   return value
 end
 function Adapter:mapTransferDirectory()
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/maps"; lfs.mkdir(directory); return directory
+  local base=getMudletHomeDir().."/DragonsGateHUD"; local directory=base.."/maps"
+  for _,path in ipairs({base,directory}) do if lfs.attributes(path,"mode")~="directory" then local ok,err=lfs.mkdir(path); if not ok and lfs.attributes(path,"mode")~="directory" then return nil,"could not create map export directory "..path..": "..tostring(err) end end end
+  return directory
 end
 function Adapter:saveMapTransfer(name,data)
   local slug,err=mapToken(name,"map name"); if not slug then return nil,err end
   local ok,payload=pcall(yajl.to_string,data); if not ok or type(payload)~="string" then return nil,"could not encode map JSON" end
-  local destination=self:mapTransferDirectory().."/"..slug..".json"; local temporary=destination..".tmp"
-  local file,openErr=io.open(temporary,"wb"); if not file then return nil,openErr end
-  local wrote,writeErr=file:write(payload.."\n"); if not wrote then file:close(); os.remove(temporary); return nil,writeErr end
-  local closed,closeErr=file:close(); if closed==nil then os.remove(temporary); return nil,closeErr end
-  local moved,moveErr=os.rename(temporary,destination); if not moved then os.remove(temporary); return nil,moveErr end
+  local directory,directoryErr=self:mapTransferDirectory(); if not directory then return nil,directoryErr end
+  local destination=directory.."/"..slug..".json"; local nonce=tostring(os.time())..tostring({}):gsub("[^%w]",""); local temporary=destination..".tmp-"..nonce; local backup=destination..".bak"
+  local file,openErr=io.open(temporary,"wb"); if not file then return nil,"could not open temporary map export "..temporary..": "..tostring(openErr) end
+  local wrote,writeErr=file:write(payload.."\n"); if not wrote then file:close(); os.remove(temporary); return nil,"could not write temporary map export "..temporary..": "..tostring(writeErr) end
+  local closed,closeErr=file:close(); if closed==nil then os.remove(temporary); return nil,"could not close temporary map export "..temporary..": "..tostring(closeErr) end
+  os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local preserved,preserveErr=os.rename(destination,backup); if not preserved then os.remove(temporary); return nil,"could not preserve existing map export "..destination..": "..tostring(preserveErr) end end
+  local moved,moveErr=os.rename(temporary,destination); if not moved then local restored,restoreErr=os.rename(backup,destination); os.remove(temporary); return nil,"could not install map export "..destination..": "..tostring(moveErr)..(restored and "" or "; rollback failed: "..tostring(restoreErr)) end
+  os.remove(backup)
   return destination,slug
 end
 function Adapter:loadMapTransfer(name)
   local slug,err=mapToken(name,"map name"); if not slug then return nil,err end
-  local path=self:mapTransferDirectory().."/"..slug..".json"; local file,openErr=io.open(path,"rb"); if not file then return nil,openErr or "map file was not found" end
+  local directory,directoryErr=self:mapTransferDirectory(); if not directory then return nil,directoryErr end; local path=directory.."/"..slug..".json"; local file,openErr=io.open(path,"rb"); if not file then return nil,openErr or "map file was not found" end
   local payload=file:read("*a"); file:close(); if type(payload)~="string" or #payload>20000000 then return nil,"map file exceeds the 20 MB safety limit" end
   local ok,data=pcall(yajl.to_value,payload); if not ok then return nil,"map JSON is invalid" end; return data,path,slug
 end
-function Adapter:openMapTransferFolder() local directory=self:mapTransferDirectory(); if type(openUrl)=="function" then openUrl("file://"..directory) end; return directory end
+function Adapter:openMapTransferFolder() local directory,err=self:mapTransferDirectory(); if not directory then return nil,err end; if type(openUrl)=="function" then openUrl("file://"..directory:gsub(" ","%%20")) end; return directory end
 function Adapter:copyText(value)
   local text=tostring(value or "")
   if type(setClipboardText)=="function" then local ok,err=pcall(setClipboardText,text); if ok then return true end; return nil,tostring(err) end

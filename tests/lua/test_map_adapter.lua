@@ -94,6 +94,11 @@ test("transfer backend lists only owned canonical rooms and snapshots complete s
   local room=assert(map:getRoom(10)); eq(room.id,10); eq(room.area,"A"); eq(room.partition,"A"); eq(room.x,2); eq(room.y,3); eq(room.z,1); eq(room.name,"Market"); eq(table.concat(room.flags,","),"safe,shop"); eq(table.concat(room.poi,","),"bank,trainer"); eq(room.exits[1].direction,"n"); eq(room.exits[1].to,11); eq(room.special_exits[1].command,"go arch"); eq(room.stash_owner,"Deklan"); eq(room.derived_from.author,"Gia")
   eq(assert(map:getRoom(99)).owner,"personal")
 end)
+test("transfer export ignores missing ownership on personal rooms and absent optional metadata",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); assert(map:ensureRoom(descriptor(10,"A","Market"),{x=2,y=3,z=0},"A")); api.rooms[99]={name="Personal",area=7,x=9,y=9,z=0,user={},exits={},stubs={}}
+  local native=api.getRoomUserData; api.getRoomUserData=function(id,key) local value=native(id,key); if value=="" then return nil,"no user data with key '"..key.."' in roomID "..id end; return value end
+  local ids=assert(map:listRooms()); eq(table.concat(ids,","),"10"); local room=assert(map:getRoom(10)); eq(room.stash_owner,nil); eq(room.derived_from,nil); eq(assert(map:getRoom(99)).owner,"personal")
+end)
 
 test("transfer put replaces a whole owned room and removes stale exits",function()
   local api=fakeMapApi(); local map=Adapter.new(api); assert(map:ensureRoom(descriptor(20,"Old","Old"),{x=8,y=8,z=2},"Old")); assert(map:ensureRoom(descriptor(21,"Old","Peer"),{},"Old")); assert(map:connect(20,21,"n",false)); assert(map:connectSpecial(20,21,"old door"))

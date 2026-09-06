@@ -305,6 +305,10 @@ test("cleanup safety accepts Mudlet idle empty speedwalk globals",function()
   end
   _G.speedWalkPath,_G.speedWalkDir=oldPath,oldDir
 end)
+test("cleanup safety uses the canonical automapper room during a temporary GMCP gap",function()
+  local f=fake(); f.gmcp=gmcpRoom(1); local hud=Main.new(f,{layout={}}); assert(hud:start()); addCleanupRoom(f,100,7,"zone"); hud.automapper.current_id=1; f.gmcp={}
+  local snapshot,err=hud:safetySnapshot(); eq(err,nil); assert(snapshot); eq(snapshot.current_room,1); hud:shutdown()
+end)
 
 test("cleanup safety rejects inconsistent walker route destination and index state",function()
   local f=fake(); f.gmcp=gmcpRoom(1); local hud=Main.new(f,{layout={}}); assert(hud:start()); addCleanupRoom(f,100,7,"zone")

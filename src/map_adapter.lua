@@ -111,7 +111,7 @@ function MapAdapter:listRooms()
   local ids={}
   for key in pairs(rooms) do
     local id=type(key)=="number" and positiveInteger(key) or nil; if not id then return nil,"Mudlet mapper API getRooms returned invalid data" end
-    local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end
+    local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
     if owner==self.owner then ids[#ids+1]=id end
   end
   table.sort(ids); return ids
@@ -120,7 +120,7 @@ end
 function MapAdapter:getRoom(roomID)
   local id=positiveInteger(roomID); if not id then return nil,"room ID must be a positive integer" end
   local exists,existsErr=read(self.api,"roomExists",id); if exists==nil then return nil,existsErr end; if not exists then return nil end
-  local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end
+  local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
   if owner~=self.owner then return {id=id,owner=tostring(owner or "")~="" and tostring(owner) or "personal"} end
   local record,recordErr=self:roomRecord(id); if not record then return nil,recordErr end
   local exits,exitsErr=read(self.api,"getRoomExits",id); if exits==nil then return nil,exitsErr end; if type(exits)~="table" then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
@@ -129,7 +129,7 @@ function MapAdapter:getRoom(roomID)
   table.sort(ordinary,function(a,b) return a.direction==b.direction and a.to<b.to or a.direction<b.direction end)
   local specialList={}; for destination,commands in pairs(special) do local to=positiveInteger(destination); if not to or type(commands)~="table" then return nil,"Mudlet mapper API getSpecialExits returned invalid data" end; for command in pairs(commands) do specialList[#specialList+1]={command=normalizeCommand(command):lower(),to=to} end end
   table.sort(specialList,function(a,b) return a.command==b.command and a.to<b.to or a.command<b.command end)
-  local function metadata(key) local value,valueErr=read(self.api,"getRoomUserData",id,key); if value==nil and valueErr~=nil then return nil,valueErr end; return tostring(value or "") end
+  local function metadata(key) local value,valueErr=read(self.api,"getRoomUserData",id,key); if value==nil and valueErr~=nil and not absentUserData(valueErr) then return nil,valueErr end; return tostring(value or "") end
   local roomName,roomNameErr=metadata("dghud.room_name"); if roomName==nil then return nil,roomNameErr end
   local poi,poiErr=metadata("dghud.poi_tags"); if poi==nil then return nil,poiErr end
   local stash,stashErr=metadata("dghud.stash_owner"); if stash==nil then return nil,stashErr end

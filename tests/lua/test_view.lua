@@ -293,9 +293,15 @@ test("map settings opens a responsive map library presentation",function()
   for _,size in ipairs({{320,260},{760,700},{1200,800},{1920,1080}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
     eq(view.map_library_panel.x>=0,true); eq(view.map_library_panel.y>=0,true); eq(view.map_library_panel.x+view.map_library_panel.width<=size[1],true); eq(view.map_library_panel.y+view.map_library_panel.height<=size[2],true)
-    for _,key in ipairs(view.map_library_action_order) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true) end
+    for _,key in ipairs(view.map_library_action_order) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
   end
   view.map_library_close.click(); eq(view.map_library_visible,false); eq(view.map_library_panel.visible,false)
+end)
+test("options keeps map settings reachable when mapper controls are hidden",function()
+  local view=chatView(); view:setOptionsActionCallback(function(action) if action=="map_settings" then return {enabled=false,transition_submaps={}} end end); view:applyLayout(require("layout").compute(320,260)); view.color_toggle.click(); assert(view.option_action_buttons.map_settings.click()); eq(view.map_settings_visible,true)
+end)
+test("map settings contains callback exceptions and keeps the dialog open",function()
+  local view=chatView(); view:setMapSettingsCallback(function() error("disk failed") end); view:applyLayout(require("layout").compute(800,650)); view:showMapSettings({transition_submaps={}}); local ok,err=view:saveMapSettings(); eq(ok,nil); eq(err:find("disk failed",1,true)~=nil,true); eq(view.map_settings_visible,true)
 end)
 test("map library actions are explicit presentation callbacks",function()
   local view=chatView(); local selected; view:setMapLibraryActionCallback(function(action) selected=action; return true end); view:applyLayout(require("layout").compute(1000,700)); view:showMapLibrary()
