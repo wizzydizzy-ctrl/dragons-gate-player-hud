@@ -138,6 +138,69 @@ function Adapter:mapTransferDirectory()
   for _,path in ipairs({base,directory}) do if lfs.attributes(path,"mode")~="directory" then local ok,err=lfs.mkdir(path); if not ok and lfs.attributes(path,"mode")~="directory" then return nil,"could not create map export directory "..path..": "..tostring(err) end end end
   return directory
 end
+function Adapter:mapCollectionDirectory()
+  local base=getMudletHomeDir().."/DragonsGateHUD"; local directory=base.."/map-collections"
+  for _,path in ipairs({base,directory}) do if lfs.attributes(path,"mode")~="directory" then local ok,err=lfs.mkdir(path); if not ok and lfs.attributes(path,"mode")~="directory" then return nil,"could not create map collection directory "..path..": "..tostring(err) end end end
+  return directory
+end
+function Adapter:mapCollectionPath(id)
+  local slug,err=mapToken(id,"collection id"); if not slug then return nil,err end
+  local directory,dirErr=self:mapCollectionDirectory(); if not directory then return nil,dirErr end
+  return directory.."/"..slug..".dat",slug
+end
+function Adapter:saveMapCollection(id)
+  if type(saveMap)~="function" then return nil,"Mudlet saveMap support is unavailable" end
+  local path,err=self:mapCollectionPath(id); if not path then return nil,err end
+  local temporary=path..".tmp"; os.remove(temporary)
+  local called,saved,saveErr=pcall(saveMap,temporary); if not called then os.remove(temporary); return nil,tostring(saved) end
+  if saved~=true then os.remove(temporary); return nil,tostring(saveErr or "Mudlet could not save the map") end
+  local backup=path..".bak"; os.remove(backup)
+  if lfs.attributes(path,"mode")=="file" then local ok,moveErr=os.rename(path,backup); if not ok then os.remove(temporary); return nil,"could not preserve previous collection: "..tostring(moveErr) end end
+  local installed,installErr=os.rename(temporary,path); if not installed then if lfs.attributes(backup,"mode")=="file" then os.rename(backup,path) end; os.remove(temporary); return nil,"could not install collection snapshot: "..tostring(installErr) end
+  os.remove(backup)
+  local file,openErr=io.open(path,"rb"); if not file then return nil,tostring(openErr) end; local payload=file:read("*a"); file:close()
+  local rooms=type(getRooms)=="function" and getRooms() or {}; local roomCount=0; for _ in pairs(type(rooms)=="table" and rooms or {}) do roomCount=roomCount+1 end
+  return {path=path,sha256=SHA256.hex(payload),room_count=roomCount,bytes=#payload}
+end
+function Adapter:loadMapCollection(id)
+  if type(loadMap)~="function" then return nil,"Mudlet loadMap support is unavailable" end
+  local path,err=self:mapCollectionPath(id); if not path then return nil,err end
+  if lfs.attributes(path,"mode")~="file" then return nil,"map collection file was not found" end
+  local called,loaded,loadErr=pcall(loadMap,path); if not called then return nil,tostring(loaded) end
+  if loaded~=true then return nil,tostring(loadErr or "Mudlet could not load the map collection") end
+  if type(updateMap)=="function" then pcall(updateMap) end; return path
+end
+function Adapter:clearCurrentMap()
+  if type(deleteMap)~="function" then return nil,"Mudlet deleteMap support is unavailable" end
+  local called,ok,err=pcall(deleteMap); if not called then return nil,tostring(ok) end; if ok~=true then return nil,tostring(err or "Mudlet could not clear the current map") end; return true
+end
+function Adapter:deleteMapCollection(id)
+  local path,err=self:mapCollectionPath(id); if not path then return nil,err end
+  if lfs.attributes(path,"mode")~="file" then return true end
+  local removed,removeErr=os.remove(path); if not removed then return nil,"could not delete collection snapshot: "..tostring(removeErr) end; return true
+end
+function Adapter:stageDeleteMapCollection(id)
+  local path,err=self:mapCollectionPath(id); if not path then return nil,err end; if lfs.attributes(path,"mode")~="file" then return {path=path,staged=nil} end
+  local staged=path..".delete-pending"; os.remove(staged); local ok,moveErr=os.rename(path,staged); if not ok then return nil,tostring(moveErr) end; return {path=path,staged=staged}
+end
+function Adapter:rollbackDeleteMapCollection(token) if not token or not token.staged then return true end; local ok,err=os.rename(token.staged,token.path); if not ok then return nil,tostring(err) end; return true end
+function Adapter:commitDeleteMapCollection(token) if not token or not token.staged then return true end; local ok,err=os.remove(token.staged); if not ok then return nil,tostring(err) end; return true end
+function Adapter:saveMapCollectionIndex(index)
+  local directory,err=self:mapCollectionDirectory(); if not directory then return nil,err end
+  local ok,payload=pcall(yajl.to_string,index); if not ok or type(payload)~="string" then return nil,"could not encode map collection index" end
+  local path=directory.."/collections.json"; local temporary=path..".tmp"; local file,openErr=io.open(temporary,"wb"); if not file then return nil,tostring(openErr) end
+  local wrote,writeErr=file:write(payload.."\n"); if not wrote then file:close(); os.remove(temporary); return nil,tostring(writeErr) end; file:close()
+  local backup=path..".bak"; os.remove(backup); if lfs.attributes(path,"mode")=="file" then os.rename(path,backup) end
+  local installed,installErr=os.rename(temporary,path); if not installed then if lfs.attributes(backup,"mode")=="file" then os.rename(backup,path) end; return nil,tostring(installErr) end
+  return true
+end
+function Adapter:loadMapCollectionIndex()
+  local directory,err=self:mapCollectionDirectory(); if not directory then return nil,err end
+  local function read(path) local file=io.open(path,"rb"); if not file then return nil end; local payload=file:read("*a"); file:close(); local ok,value=pcall(yajl.to_value,payload); if ok and type(value)=="table" then return value end end
+  local path=directory.."/collections.json"; local value=read(path); if value then return value end; local backup=read(path..".bak"); if backup then return backup,"recovered map collection index from backup" end
+  if lfs.attributes(path,"mode")=="file" or lfs.attributes(path..".bak","mode")=="file" then return nil,"map collection index is invalid and its backup could not be recovered" end
+  return nil,"map collection index was not found"
+end
 function Adapter:saveMapTransfer(name,data)
   local slug,err=mapToken(name,"map name"); if not slug then return nil,err end
   local ok,payload=pcall(yajl.to_string,data); if not ok or type(payload)~="string" then return nil,"could not encode map JSON" end

@@ -294,10 +294,35 @@ test("map settings opens a responsive map library presentation",function()
   for _,size in ipairs({{320,260},{760,700},{1200,800},{1920,1080}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
     eq(view.map_library_panel.x>=0,true); eq(view.map_library_panel.y>=0,true); eq(view.map_library_panel.x+view.map_library_panel.width<=size[1],true); eq(view.map_library_panel.y+view.map_library_panel.height<=size[2],true)
-    for _,key in ipairs({"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea","report"}) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
+    for _,key in ipairs(view.map_collection_action_order) do local button=view.map_collection_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
     for _,key in ipairs({"keep","replace","skip","confirm","cancel"}) do eq(view.map_library_actions[key].visible,false) end
   end
   view.map_library_close.click(); eq(view.map_library_visible,false); eq(view.map_library_panel.visible,false)
+end)
+test("map library presents local collections with nontechnical editable actions",function()
+  local view=chatView(); local calls={}; view:setMapCollectionActionCallback(function(action,item) calls[#calls+1]={action,item.id}; return true end)
+  view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapCollections({
+    {id="mine",name="Treehaven — My Copy",creator="Gia",area_count=8,room_count=412,active=true,editable=true},
+    {id="spur",name="Spurian Academy",creator="Retro",areas={"Town","Temple"},room_count=90,update_available=true},
+  })
+  eq(view.map_library_mode,"collections"); eq(#view.map_collection_rows,2); assert(view.map_collection_rows[1].click()); eq(view:selectedMapCollection().id,"mine")
+  for _,key in ipairs({"use_collection","rename_collection","duplicate_edit","backup_collection","delete_collection"}) do assert(view.map_collection_actions[key].click()); eq(calls[#calls][1],key); eq(calls[#calls][2],"mine") end
+  eq(view.map_collection_rows[1].message:find("ACTIVE",1,true)~=nil,true); eq(view.map_collection_rows[2].message:find("UPDATE AVAILABLE",1,true)~=nil,true)
+end)
+test("map collection replacement requires a large second-click warning",function()
+  local view=chatView(); local replaced=0; view:setMapCollectionActionCallback(function(action) if action=="replace_collection" then replaced=replaced+1 end; return true end)
+  view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapCollections({{id="mine",name="My Map",room_count=10}}); assert(view.map_collection_rows[1].click())
+  local ok,err=view.map_collection_actions.replace_collection.click(); eq(ok,nil); eq(err,"replace confirmation required"); eq(replaced,0); eq(view.map_collection_replace_pending,true); eq(view.map_collection_actions.replace_collection.message:find("WARNING: CLICK AGAIN",1,true)~=nil,true)
+  assert(view.map_collection_actions.replace_collection.click()); eq(replaced,1); eq(view.map_collection_replace_pending,false)
+end)
+test("shared library exposes download update and upload-my-version actions",function()
+  local view=chatView(); local calls={}; view:setMapLibraryActionCallback(function(action,entry) calls[#calls+1]={action,entry and entry.slug}; return true end); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); assert(view:setMapLibraryMode("library")); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}}); assert(view.map_library_rows[1].click())
+  for _,key in ipairs(view.map_library_download_action_order) do eq(view.map_library_download_actions[key].visible,true); if key=="replace_current" then eq(view.map_library_download_actions[key].click(),nil); assert(view.map_library_download_actions[key].click()) else assert(view.map_library_download_actions[key].click()) end; eq(calls[#calls][1],key); eq(calls[#calls][2],"spur") end
+  eq(view.map_collection_list.visible,false); eq(view.map_library_list.visible,true); eq(view:setMapLibraryMode("unknown"),nil)
+end)
+test("collection and shared-library controls stay bounded on compact windows",function()
+  local view=chatView(); view:showMapLibrary(); view:setMapCollections({{id="one",name="One",room_count=1}})
+  for _,size in ipairs({{320,260},{420,500},{760,700},{1920,1080}}) do local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); for _,button in pairs(view.map_library_modes) do eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true) end; for _,button in pairs(view.map_collection_actions) do eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end end
 end)
 test("options keeps map settings reachable when mapper controls are hidden",function()
   local view=chatView(); view:setOptionsActionCallback(function(action) if action=="map_settings" then return {enabled=false,transition_submaps={}} end end); view:applyLayout(require("layout").compute(320,260)); view.color_toggle.click(); assert(view.option_action_buttons.map_settings.click()); eq(view.map_settings_visible,true)
@@ -327,7 +352,7 @@ test("map library searches friendly metadata and filters map scopes",function()
   eq(view:setMapLibraryFilter("unknown"),nil)
 end)
 test("map library search field applies on enter and remains inside the panel",function()
-  local view=chatView(); local layout=require("layout").compute(760,700); view:applyLayout(layout); view:showMapLibrary(); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}})
+  local view=chatView(); local layout=require("layout").compute(760,700); view:applyLayout(layout); view:showMapLibrary(); view:setMapLibraryMode("library"); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}})
   assert(view.map_library_search.action("Gia")); eq(view.map_library_query,"Gia"); eq(#view.map_library_rows,1)
   eq(view.map_library_search.visible,true); eq(view.map_library_search.x>=0,true); eq(view.map_library_search.x+view.map_library_search.width<=view.map_library_panel.width,true)
   for _,key in ipairs(view.map_library_filter_order) do eq(view.map_library_filters[key].visible,true) end
@@ -336,7 +361,7 @@ test("map library shows conflict choices only during installation review",functi
   local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryImportPending(true)
   for _,key in ipairs({"keep","replace","skip","confirm","cancel","report"}) do eq(view.map_library_actions[key].visible,true) end
   for _,key in ipairs({"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea"}) do eq(view.map_library_actions[key].visible,false) end
-  view:setMapLibraryImportPending(false); eq(view.map_library_actions.browse.visible,true); eq(view.map_library_actions.keep.visible,false)
+  view:setMapLibraryImportPending(false); view:setMapLibraryMode("library"); eq(view.map_library_actions.browse.visible,true); eq(view.map_library_actions.keep.visible,false)
 end)
 test("help and map library expose copyable plain-text instructions",function()
   local view=chatView(); local copied={}; view:setCopyTextCallback(function(value) copied[#copied+1]=value; return true end); view:applyLayout(require("layout").compute(1000,700))

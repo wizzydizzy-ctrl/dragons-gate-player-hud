@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local function colorOptions(status)
@@ -18,6 +18,110 @@ end
 function Main:captureFailure(category,message,context)
   if not self.failure_reports then return nil,"failure reporting is unavailable" end
   local report=self.failure_reports:record(category,message,context); self.last_failure_report=report; return report
+end
+function Main:saveMapCollectionIndex()
+  if not self.map_collections or not self.adapter.saveMapCollectionIndex then return nil,"map collections are unavailable" end
+  return self.adapter:saveMapCollectionIndex(self.map_collections:exportState())
+end
+function Main:saveActiveMapCollection()
+  local active=self.map_collections and self.map_collections:active(); if not active then return nil,"active map collection is unavailable" end
+  local metadata,err=self.adapter:saveMapCollection(active.id); if not metadata then self:captureFailure("map_collection",err,{operation="save",collection=active.id}); return nil,err end
+  local updated,updateErr=self.map_collections:updateSnapshot(active.id,metadata); if not updated then return nil,updateErr end
+  local saved,indexErr=self:saveMapCollectionIndex(); if not saved then return nil,indexErr end; return updated
+end
+function Main:initializeMapCollections()
+  if not self.adapter.loadMapCollectionIndex or not self.adapter.saveMapCollection then return true end
+  self.map_collection_counter=0
+  local function idFactory() self.map_collection_counter=self.map_collection_counter+1; return "map-"..tostring(os.time()).."-"..tostring(self.map_collection_counter) end
+  self.map_collection_options={clock=function() return os.time() end,id_factory=idFactory}
+  local state,indexErr=self.adapter:loadMapCollectionIndex(); if not state and indexErr~="map collection index was not found" then return nil,indexErr end
+  local manager,err=MapCollections.new(state,self.map_collection_options); if not manager then return nil,err end
+  self.map_collections=manager
+  if #manager:list()==0 then
+    local initial,createErr=manager:create("My Maps",{kind="local_map"},true); if not initial then return nil,createErr end; assert(manager:setActive(initial.id))
+    local metadata,saveErr=self.adapter:saveMapCollection(initial.id); if not metadata then return nil,saveErr end; assert(manager:updateSnapshot(initial.id,metadata)); return self:saveMapCollectionIndex()
+  end
+  if not manager:active() then manager:setActive(manager:list()[1].id); return self:saveMapCollectionIndex() end
+  return true
+end
+function Main:restoreMapCollectionState(state) self.map_collections=assert(MapCollections.new(state,self.map_collection_options)); return true end
+function Main:listMapCollections() return self.map_collections and self.map_collections:list() or {} end
+function Main:presentMapCollections(status)
+  if not self.view or not self.view.setMapCollections then return true end
+  local active=self.map_collections and self.map_collections:active(); local rows={}
+  for _,item in ipairs(self:listMapCollections()) do rows[#rows+1]={id=item.id,name=item.name,creator=item.source and item.source.publisher or "You",room_count=item.snapshot and item.snapshot.room_count or 0,active=active and active.id==item.id,editable=item.editable,version=item.source and item.source.artifact_id} end
+  return self.view:setMapCollections(rows,status)
+end
+function Main:switchMapCollection(id)
+  local target=self.map_collections and self.map_collections:get(id); if not target then return nil,"map collection does not exist" end
+  local current=self.map_collections:active(); if current and current.id==target.id then return target end
+  local saved,saveErr=self:saveActiveMapCollection(); if not saved then return nil,"current map could not be saved: "..tostring(saveErr) end
+  local loaded,loadErr=self.adapter:loadMapCollection(target.id); if not loaded then if current then self.adapter:loadMapCollection(current.id) end; self:captureFailure("map_collection",loadErr,{operation="switch",collection=target.id}); return nil,loadErr end
+  self.map_collections:setActive(target.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:loadMapCollection(current.id); self.map_collections:setActive(current.id); return nil,indexErr end
+  if self.automapper then self.automapper:onDisconnect(); local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info; if info then self.automapper:onRoom(info) end end
+  self:refresh(); return self.map_collections:active()
+end
+function Main:createMapCollection(name,source)
+  local saved,err=self:saveActiveMapCollection(); if not saved then return nil,err end
+  local before=self.map_collections:exportState()
+  local item,createErr=self.map_collections:create(name,source or {kind="local_map"},true); if not item then return nil,createErr end
+  local metadata,copyErr=self.adapter:saveMapCollection(item.id); if not metadata then self.map_collections:remove(item.id); return nil,copyErr end
+  self.map_collections:updateSnapshot(item.id,metadata); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:deleteMapCollection(item.id); self:restoreMapCollectionState(before); return nil,indexErr end; return item
+end
+function Main:forkMapCollection(id,name)
+  local source=self.map_collections and self.map_collections:get(id); if not source then return nil,"source collection does not exist" end
+  local active=self.map_collections:active(); if not active or active.id~=id then local switched,err=self:switchMapCollection(id); if not switched then return nil,err end end
+  local before=self.map_collections:exportState(); local fork,err=self.map_collections:fork(id,name); if not fork then return nil,err end
+  local metadata,saveErr=self.adapter:saveMapCollection(fork.id); if not metadata then self.map_collections:remove(fork.id); return nil,saveErr end
+  self.map_collections:updateSnapshot(fork.id,metadata); self.map_collections:setActive(fork.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:deleteMapCollection(fork.id); self:restoreMapCollectionState(before); return nil,indexErr end; return fork
+end
+function Main:renameMapCollection(id,name)
+  name=tostring(name or ""):match("^%s*(.-)%s*$"); if name=="" then return nil,"enter the new map name in the NAME box first" end
+  local before=self.map_collections:exportState(); local item,err=self.map_collections:rename(id,name); if not item then return nil,err end; local ok,saveErr=self:saveMapCollectionIndex(); if not ok then self:restoreMapCollectionState(before); return nil,saveErr end; self:presentMapCollections("Renamed map to "..name.."."); return item
+end
+function Main:backupMapCollection(id)
+  local item=self.map_collections:get(id); if not item then return nil,"map collection does not exist" end
+  local active=self.map_collections:active(); if not active or active.id~=id then local switched,err=self:switchMapCollection(id); if not switched then return nil,err end end
+  local backupName=item.name.." Backup "..os.date("%Y-%m-%d %H:%M"); local backup,err=self:createMapCollection(backupName,{kind="local_map"}); if not backup then return nil,err end
+  self:presentMapCollections("Backup created: "..backupName); return backup
+end
+function Main:deleteMapCollection(id)
+  local active=self.map_collections:active(); if active and active.id==id then return nil,"switch to another map before deleting the active map" end
+  local before=self.map_collections:exportState(); local token,stageErr=self.adapter:stageDeleteMapCollection(id); if not token then return nil,stageErr end
+  local removed,err=self.map_collections:remove(id); if not removed then self.adapter:rollbackDeleteMapCollection(token); return nil,err end
+  local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self:restoreMapCollectionState(before); self.adapter:rollbackDeleteMapCollection(token); return nil,indexErr end
+  local committed,commitErr=self.adapter:commitDeleteMapCollection(token); if not committed then return nil,"collection index was saved but snapshot cleanup failed: "..tostring(commitErr) end; self:presentMapCollections("Deleted "..removed.name.."."); return removed
+end
+function Main:installDownloadedCollection(entry,model,name)
+  local current=self.map_collections:active(); local saved,saveErr=self:saveActiveMapCollection(); if not saved then return nil,saveErr end
+  local before=self.map_collections:exportState()
+  local function rollback(message)
+    self:restoreMapCollectionState(before); local restored,restoreErr=current and self.adapter:loadMapCollection(current.id)
+    if current and not restored then message=tostring(message).."; CRITICAL: previous map restore failed: "..tostring(restoreErr) end
+    return nil,message
+  end
+  local source={kind="library",artifact_id=model.provenance.artifact_id,publisher=model.provenance.publisher,slug=model.provenance.slug}
+  local item,createErr=self.map_collections:create(name or entry.name,source,true); if not item then return nil,createErr end
+  local cleared,clearErr=self.adapter:clearCurrentMap(); if not cleared then self.map_collections:remove(item.id); return nil,clearErr end
+  local policies={default="use_imported",rooms={}}; local plan,previewErr=self.map_transfer:preview(model,policies); local result,applyErr=plan and self.map_transfer:apply(plan,self:mapTransferCreator())
+  if not result then return rollback(previewErr or applyErr) end
+  local metadata,snapshotErr=self.adapter:saveMapCollection(item.id); if not metadata then return rollback(snapshotErr) end
+  self.map_collections:updateSnapshot(item.id,metadata); self.map_collections:setActive(item.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:deleteMapCollection(item.id); return rollback(indexErr) end; self:presentMapCollections("Downloaded as a separate editable map: "..item.name); return item
+end
+function Main:downloadLibraryCollection(entry,replaceCurrent)
+  if type(entry)~="table" then return nil,"select a shared map first" end
+  local replaced=self.map_collections and self.map_collections:active(); local backup
+  if replaceCurrent and replaced then local made,backupErr=self:backupMapCollection(replaced.id); if not made then return nil,"automatic backup failed: "..tostring(backupErr) end; backup=made end
+  self.view.map_library_status="Downloading and verifying "..tostring(entry.name).."…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
+  local function failed(message) self:captureFailure("map_library",message,{operation=replaceCurrent and "replace_collection" or "download_collection",stage="download_or_validation"}); self.view.map_library_status="Map failed: "..tostring(message).." A sanitized report is ready."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
+  local started,err=self.adapter:downloadCatalogMap(entry,function(raw,downloadErr)
+    if downloadErr then return failed(downloadErr) end; local model,validationErr=self.map_transfer:validate(raw); if not model then return failed(validationErr) end
+    if model.provenance.publisher~=entry.publisher or model.provenance.slug~=entry.slug then return failed("map provenance does not match the catalog") end
+    local item,installErr=self:installDownloadedCollection(entry,model,entry.name); if not item then return failed(installErr) end
+    if replaceCurrent and replaced then local removed,removeErr=self:deleteMapCollection(replaced.id); if not removed then return failed(removeErr) end end
+    self.view:setMapLibraryMode("collections"); self:presentMapCollections(replaceCurrent and ("Replaced the active map. Backup kept as "..tostring(backup and backup.name)..".") or ("Installed "..item.name.." as a separate editable map."))
+  end)
+  if not started then failed(err) end; return started,err
 end
 function Main.installChatApi(namespace)
   local chat=type(namespace.chat)=="table" and namespace.chat or {}
@@ -584,6 +688,8 @@ function Main:start()
   if not map then self:shutdown(); return nil,mapErr or "map adapter construction failed" end
   self.map=map
   self.map_transfer=MapTransfer.new(self.map)
+  local collectionsOK,collectionsErr=self:initializeMapCollections()
+  if not collectionsOK then self:captureFailure("map_collection",collectionsErr,{operation="initialize"}); self:shutdown(); return nil,collectionsErr end
   if self.adapter.suppressDefaultMapInfo then
     local infoOk,infoResult,infoErr=pcall(self.adapter.suppressDefaultMapInfo,self.adapter)
     if not infoOk then self:mapperStatus("warning","Map information cleanup failed: "..tostring(infoResult),true)
@@ -634,6 +740,18 @@ function Main:start()
   self:installMapClickHook()
   local startupOk,startupErr=pcall(function()
   self.view=self.adapter:createView(self.settings)
+  if self.view.setMapCollectionActionCallback then self.view:setMapCollectionActionCallback(function(action,item,name)
+    local result,err
+    if action=="use_collection" then result,err=self:switchMapCollection(item.id)
+    elseif action=="rename_collection" then result,err=self:renameMapCollection(item.id,name)
+    elseif action=="duplicate_edit" then result,err=self:forkMapCollection(item.id,(name and name~="" and name) or ("Copy of "..item.name))
+    elseif action=="backup_collection" then result,err=self:backupMapCollection(item.id)
+    elseif action=="delete_collection" then result,err=self:deleteMapCollection(item.id)
+    elseif action=="replace_collection" then return nil,"replace a map from the Shared Library tab" else return nil,"unknown map collection action" end
+    if not result then self:captureFailure("map_collection",err,{operation=action,collection=item.id}); self:presentMapCollections("Could not complete action: "..tostring(err)); return nil,err end
+    self:presentMapCollections(); return result
+  end) end
+  self:presentMapCollections()
   self.posture=PostureTracker.new(self.adapter,function() if self.started then self:refresh() end end)
   self.roller=Autoroller.new(self.adapter,self.settings.roller,function(config)
     if self.adapter.saveRollerSettings then local saved,err=self.adapter:saveRollerSettings(config); if not saved then return nil,"Could not save settings: "..tostring(err) end end
@@ -660,7 +778,16 @@ function Main:start()
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
-  if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action)
+  if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
+    if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
+    if action=="update_collection" then
+      local entry=suppliedEntry or self.view:selectedMapLibraryEntry(); local matching
+      for _,item in ipairs(self:listMapCollections()) do if item.source and entry and item.source.kind=="library" and item.source.publisher==entry.publisher and item.source.slug==entry.slug then matching=item; break end end
+      if not matching then return nil,"download this map before updating it" end; local active=self.map_collections:active(); if not active or active.id~=matching.id then local switched,switchErr=self:switchMapCollection(matching.id); if not switched then return nil,switchErr end end
+      return self:downloadLibraryCollection(entry,true)
+    end
+    if action=="replace_current" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),true) end
+    if action=="upload_my_version" then local entry=suppliedEntry or self.view:selectedMapLibraryEntry(); local active=self.map_collections and self.map_collections:active(); if not active or not active.source or not entry or active.source.publisher~=entry.publisher or active.source.slug~=entry.slug then return nil,"use your editable copy of this map before uploading your version" end; action="publish_all" end
     if action=="browse" then
       if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end
       self.view:setMapLibraryCatalog({},"Loading community map catalog…")
@@ -705,7 +832,7 @@ function Main:start()
   if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() if self.view.showMapSettings then return self.view:showMapSettings(self.settings.mapper) end; return self:clearAllMapsAction() end) end
   if self.view.setMapSettingsCallback then self.view:setMapSettingsCallback(function(values) return self:configureMapper(values) end) end
   if self.view.setMapSettingsActionCallback then self.view:setMapSettingsActionCallback(function(action,value)
-    if action=="map_library" then return self.view:showMapLibrary() end
+    if action=="map_library" then self:presentMapCollections(); return self.view:showMapLibrary() end
     if action=="clear_all" then return self:clearAllMapsAction() end
     if action=="clear_current" then local current=self.automapper and self.automapper:currentRoom(); return self:previewCleanup("previewCurrent",current) end
     if action=="rename_area" or action=="rename_subarea" then local scope,scopeErr=self:currentMapSelection(action=="rename_area" and "area" or "subarea"); if not scope then return nil,scopeErr end; local key=action=="rename_area" and scope.area or scope.partition; local saved,saveErr=self.map:setMapLabel(action=="rename_area" and "area" or "subarea",key,value); if not saved then return nil,saveErr end; self.view.map_settings_error=nil; self.view.map_settings_status_text="Saved as "..saved; return saved end
@@ -813,6 +940,7 @@ function Main:start()
   return true
 end
 function Main:shutdown()
+  if self.started and self.map_collections then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
   if self.clock_timer then
     if type(self.adapter.stopClockTimer)=="function" then self.adapter:stopClockTimer(self.clock_timer) else self.adapter:cancelTimer(self.clock_timer) end
     self.clock_timer=nil
@@ -825,7 +953,7 @@ function Main:shutdown()
   if self.walker then self.walker:shutdown(); self.walker=nil end; self.generated_command=nil; self:removeMapClickHook()
   if self.special_transition then self:callSpecialTransition("shutdown"); self.special_transition=nil end
   self.cleanup=nil
-  if self.automapper then self.automapper:shutdown(); self.automapper=nil end; self.map=nil
+  if self.automapper then self.automapper:shutdown(); self.automapper=nil end; self.map=nil; self.map_collections=nil
   for _,id in ipairs(self.runtime.events) do self.adapter:killEvent(id) end; for _,id in ipairs(self.runtime.aliases) do self.adapter:killAlias(id) end; for _,id in ipairs(self.runtime.triggers or {}) do self.adapter:killTrigger(id) end
   self.runtime={events={},aliases={},triggers={}}; if self.view then self.view:delete(); self.view=nil end
   if self.original_borders then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]); self.original_borders=nil end
