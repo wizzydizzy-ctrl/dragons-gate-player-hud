@@ -3,7 +3,7 @@ local Parser=require("command_parser")
 local inventory={"Items carried:","  A torch [1.0 lb].","Your inventory totals 1.0 lbs.",">"}
 local stat={"Body Armor: 4%.","OR: 18  DR: 70  Move Rate: 6/6 UDs  Dam Bonus: Good/None  Stance: Aggressive","::: Equipment Readied :::","  A spear.",">"}
 local info={"You are Test Tester, a stocky bodied 28 year old Entropic Male young Monitanian.  You are 6'10\" and weigh 309 lbs.","Str Int Wis Dex Agi Con Cha Wil Voi Per App","Good Low Fair Fair Fair Good Good Good Aver Fair Fair",">"}
-local religion={"You are a Novitiate follower of Unknown.","You are Balanced within your Entropic alignment.",">"}
+local religion={"You are a Novitiate follower of Unknown.","You have earned 57000 favors.","You are Balanced within your Entropic alignment.",">"}
 local runes={"You have the following elemental runes available to you...","  force       - 100 weaves remain   healing     -  14 weaves remain","  holy        -  99 weaves remain   vigor       - 100 weaves remain","  light       - 100 weaves remain",">"}
 local skills={"Skill                     Remain Level","Biting                    105    4","Clawing                   276    2",">"}
 local time={"Current time is: Wed Sep  2 00:40:30 2026 EST.","It is now 3:22 am on the 4th day of the 8th month in the year 362.","You have been adventuring for 14 secs this session.",">"}
@@ -46,7 +46,7 @@ test("collector runs one sequential refresh after character entry",function()
   f:lines(religion); eq(f.sent[5],"info mag")
   f:lines(runes); eq(f.sent[6],"skill")
   f:lines(skills); eq(f.sent[7],"time")
-  f:lines(time); eq(changes,8); eq(c.snapshot.religion.deity,"Unknown"); eq(c.snapshot.runes.items[1].name,"Healing"); eq(#c.snapshot.skills.items,2); eq(c.snapshot.time.minute,22)
+  f:lines(time); eq(changes,8); eq(c.snapshot.religion.deity,"Unknown"); eq(c.snapshot.religion.favors,57000); eq(c.snapshot.runes.items[1].name,"Healing"); eq(#c.snapshot.skills.items,2); eq(c.snapshot.time.minute,22)
   f:line("Welcome to Dragon's Gate, Test!"); eq(#f.sent,7)
 end)
 test("collector completes every startup command with staff vitals prompts",function()

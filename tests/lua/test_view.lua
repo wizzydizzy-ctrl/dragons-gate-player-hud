@@ -91,8 +91,8 @@ test("identity details render while attributes move to the top strip",function()
 end)
 test("identity includes compact religion information",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
-  local identity=View.identityContent({full_name="Test Tester",race="Monitanian",class="Fighter",alignment="entropy",religion="Novitiate",deity="Unknown",religious_balance="Balanced"},theme,layout)
-  eq(identity:find("Novitiate · Unknown",1,true)~=nil,true); eq(identity:find("Balanced · Entropic",1,true)~=nil,true)
+  local identity=View.identityContent({full_name="Test Tester",race="Monitanian",class="Fighter",alignment="entropy",religion="Novitiate",deity="Unknown",favors=57000,religious_balance="Balanced"},theme,layout)
+  eq(identity:find("Novitiate · Unknown (57,000 favors)",1,true)~=nil,true); eq(identity:find("Balanced · Entropic",1,true)~=nil,true)
 end)
 test("right rail details keep combat information without attributes",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25,details_columns=2}

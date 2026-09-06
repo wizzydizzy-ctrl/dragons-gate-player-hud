@@ -70,6 +70,8 @@ function Parser.parseReligion(lines)
     local rank,deity=line:match("^You are an? (.-) follower of (.-)%.$")
     if rank then result.rank=rank; result.deity=deity end
     if line:match("^You have not yet dedicated to a deity%.$") then result.rank="None"; result.deity="None" end
+    local favors=line:match("^You have earned (%d+) favors?%.$")
+    if favors then result.favors=tonumber(favors) end
     local balance,alignment=line:match("^You are (.-) within your (.-) alignment%.$")
     if balance then result.balance=balance; result.alignment=alignment end
   end

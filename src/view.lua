@@ -11,6 +11,11 @@ end
 local function esc(v) return tostring(v or ""):gsub("&","&amp;"):gsub("<","&lt;"):gsub(">","&gt;") end
 local function safeText(v) return esc(tostring(v or ""):gsub("%c"," ")) end
 local function safeChatText(v) return tostring(v or ""):gsub("%c"," ") end
+local function groupedNumber(value)
+  local text=tostring(math.floor(tonumber(value) or 0)); local changed
+  repeat text,changed=text:gsub("^(-?%d+)(%d%d%d)","%1,%2") until changed==0
+  return text
+end
 local function alignmentLabel(value)
   local raw=tostring(value or ""); local key=raw:lower()
   if key=="order" then return "Orderly" elseif key=="entropy" then return "Entropic" elseif key=="chaos" then return "Chaotic" end
@@ -59,7 +64,7 @@ function View.identityContent(character,t,layout)
   local physical=character.physical or {}; local detail=""
   if physical.age or physical.sex or physical.height then detail="<br><span style='color:"..t.muted.."'>"..esc(physical.age or "")..(physical.age and " · " or "")..esc(physical.sex or "")..(physical.height and " · "..esc(physical.height) or "").."</span>" end
   local faith=""; if character.deity or character.religion then
-    local values={}; if character.religion and character.religion~="" then values[#values+1]=esc(character.religion) end; if character.deity and character.deity~="" then values[#values+1]=esc(character.deity) end
+    local values={}; if character.religion and character.religion~="" then values[#values+1]=esc(character.religion) end; if character.deity and character.deity~="" then local deity=esc(character.deity); if character.favors~=nil then deity=deity.." ("..groupedNumber(character.favors).." favors)" end; values[#values+1]=deity end
     faith="<br><span style='color:"..t.muted.."'>"..table.concat(values," · ").."</span>"
   end
   local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
