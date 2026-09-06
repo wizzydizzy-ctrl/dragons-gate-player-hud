@@ -450,7 +450,7 @@ function View:applyLayout(layout)
   self.carry:hide()
   place(self.header,0,0,"100%",top)
   local windowWidth=tonumber(layout.window_width) or 1200; local clock_x=layout.mode=="compact" and math.floor(windowWidth*.5) or windowWidth-layout.right
-  local toggle_width=math.max(72,math.min(92,math.floor(windowWidth*.10))); local toggle_x=math.max(0,p); local toggle_y=4
+  local toggle_width=math.max(72,math.min(92,math.floor(windowWidth*.10))); local toggle_x=0; local toggle_y=4
   local attributeWidth=math.max(1,clock_x-(layout.console_left or layout.left)-6)
   place(self.attribute_strip,layout.console_left or layout.left,0,attributeWidth,top); self.attribute_strip:raise()
   place(self.color_toggle,toggle_x,toggle_y,toggle_width,layout.color_toggle_height); self.options_anchor={x=toggle_x,y=toggle_y,width=toggle_width,height=layout.color_toggle_height}; self:setColorEnabled(self.color_enabled~=false); self.color_toggle:raise()

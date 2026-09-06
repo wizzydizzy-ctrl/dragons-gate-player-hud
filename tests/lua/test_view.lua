@@ -221,7 +221,7 @@ test("header owns a responsive top-left options button above the brand",function
     eq(view.color_toggle.visible,true); eq(view.color_toggle.x>=0,true)
     eq(view.color_toggle.x+view.color_toggle.width<=size[1],true)
     eq(view.color_toggle.y+view.color_toggle.height<=layout.header_height,true)
-    eq(view.color_toggle.x,layout.panel_padding)
+    eq(view.color_toggle.x,0)
     eq(view.color_toggle.y,4)
     eq(view.color_toggle.y+view.color_toggle.height<layout.header_height,true)
   end
