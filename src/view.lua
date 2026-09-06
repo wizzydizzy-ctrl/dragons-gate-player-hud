@@ -402,11 +402,11 @@ function View.new(settings)
   self.map_library_rows={}; self.map_library_catalog={}; self.map_library_selected=nil; self.map_library_status="Select BROWSE LIBRARY to load community maps."
   self.map_library_copy_button=label("DGHUD.MapLibrary.CopyButton",self.map_library_panel,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
   self.map_library_close=label("DGHUD.MapLibrary.Close",self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:4px;color:"..t.text..";font-weight:700;")
-  self.map_library_actions={}; self.map_library_action_order={"browse","export","install","publish"}
-  local libraryLabels={browse="BROWSE / REFRESH LIBRARY",export="EXPORT MY MAP",install="DOWNLOAD & REVIEW",publish="PREPARE CONTRIBUTION"}
+  self.map_library_actions={}; self.map_library_action_order={"browse","export","install","publish","keep","replace","skip","confirm","cancel","report"}
+  local libraryLabels={browse="BROWSE / REFRESH LIBRARY",export="EXPORT MY MAP",install="DOWNLOAD & REVIEW",publish="PREPARE CONTRIBUTION",keep="KEEP MY ROOMS",replace="USE DOWNLOADED",skip="SKIP CONFLICTS",confirm="IMPORT SELECTED MAP",cancel="CANCEL IMPORT",report="REPORT LAST ERROR"}
   for _,key in ipairs(self.map_library_action_order) do local button=label("DGHUD.MapLibrary.Action."..key,self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.jade..";font-weight:700;"); button.option_text=libraryLabels[key]; button:setClickCallback(function() if self.map_library_action_callback then return self.map_library_action_callback(key) end; return nil,"map library action is not connected" end); self.map_library_actions[key]=button end
   self.map_library_close:setClickCallback(function() return self:hideMapLibrary() end); self.map_library_overlay:setClickCallback(function() return self:hideMapLibrary() end)
-  self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\nBrowse public maps, export your DGHUD-owned map, import an editable local stash, or publish changes under your own GitHub name.\nCommands: dghud map library | dghud map export <name> <github-name> | dghud map folder | dghud map import <name>") end end)
+  self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\nBrowse, download, choose a conflict policy, and import community maps entirely from this window. Export and reporting controls are also available here.") end end)
   self.map_library_visible=false
   for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
   return self
@@ -791,9 +791,9 @@ function View:layoutMapLibrary(layout)
   local closeWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); local copyWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); place(self.map_library_title,16,10,panelWidth-closeWidth-copyWidth-48,34); place(self.map_library_copy_button,panelWidth-closeWidth-copyWidth-18,8,copyWidth,30); place(self.map_library_close,panelWidth-closeWidth-12,8,closeWidth,30)
   self.map_library_title:echo(View.withFont("<b>MAP LIBRARY</b>",font+2)); self.map_library_copy_button:echo(View.withFont("<center><b>COPY</b></center>",font)); self.map_library_close:echo(View.withFont("<center><b>× CLOSE</b></center>",font))
   place(self.map_library_copy,18,48,panelWidth-36,58); self.map_library_copy:echo(View.withFont(safeText(self.map_library_status or "Map library ready."),font))
-  local top=panelHeight-104; place(self.map_library_list,18,110,panelWidth-36,math.max(1,top-118)); local rowHeight=math.max(42,font*3+8)
+  local gap=6; local columns=2; local buttonHeight=math.max(28,font+14); local actionRows=math.ceil(#self.map_library_action_order/columns); local top=panelHeight-actionRows*(buttonHeight+gap)-12; place(self.map_library_list,18,110,panelWidth-36,math.max(1,top-118)); local rowHeight=math.max(42,font*3+8)
   for index,row in ipairs(self.map_library_rows or {}) do place(row,0,(index-1)*(rowHeight+4),panelWidth-58,rowHeight) end; self.map_library_list.content_height=math.max(1,#(self.map_library_rows or {})*(rowHeight+4))
-  local gap=10; local columns=2; local buttonWidth=(panelWidth-46)/2; local buttonHeight=math.max(32,font+18)
+  local buttonWidth=(panelWidth-46)/2
   for index,key in ipairs(self.map_library_action_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); local button=self.map_library_actions[key]; place(button,18+column*(buttonWidth+gap),top+row*(buttonHeight+gap),buttonWidth,buttonHeight); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
   View.raiseCards(widgets); return true
 end

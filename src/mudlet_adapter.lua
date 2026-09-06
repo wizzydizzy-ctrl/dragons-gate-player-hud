@@ -172,8 +172,10 @@ function Adapter:downloadCatalogMap(entry,done)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,actualUrl) if actualUrl==url then finish(nil,message or "map download failed") end end)
   timer=tempTimer(30,function() timer=nil; finish(nil,"map download timed out") end); downloadFile(path,url); return true
 end
-function Adapter:openFeedback()
+local function urlEncode(value) return tostring(value or ""):gsub("\n","%%0A"):gsub("([^%w%-_%.~%%])",function(char) return string.format("%%%02X",string.byte(char)) end) end
+function Adapter:openFeedback(title,body)
   local url="https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/issues/new?template=feedback.yml"
+  if title or body then url=url.."&title="..urlEncode(title).."&body="..urlEncode(body) end
   if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
 end
 function Adapter:reportMapTransfer(message,isError)

@@ -474,10 +474,16 @@ function Main:reportMapImportPlan(plan,name)
   local lines={"Import preview for '"..tostring(name).."': "..plan.creates.." new, "..plan.conflicts.." conflicts, "..plan.keeps.." keep mine, "..plan.replaces.." use imported, "..plan.skips.." skipped."}
   for _,area in ipairs(plan.areas) do lines[#lines+1]="Area "..area.name..": "..area.conflicts.." conflicts; policy "..tostring(area.policy):gsub("_"," ") end
   if plan.blocked then lines[#lines+1]="Blocked: at least one canonical room ID belongs to a personal/non-DGHUD map." end
-  lines[#lines+1]="Adjust with: dghud map import area <area> keep|replace|skip"
-  lines[#lines+1]="Or: dghud map import room <number> keep|replace|skip"
-  lines[#lines+1]="Apply with: dghud map import confirm   Cancel with: dghud map import cancel"
+  lines[#lines+1]="Use the Map Library buttons to keep your rooms, use the downloaded rooms, skip conflicts, import, or cancel."
+  if self.view then self.view.map_library_status=table.concat(lines," "); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
   self:reportMapTransfer(table.concat(lines,"\n"),plan.blocked); return plan
+end
+function Main:setDefaultMapImportPolicy(choice)
+  local pending=self.pending_map_import; if not pending then return nil,"download and review a map first" end
+  local policy=transferChoice(choice); if not policy then return nil,"choice must be keep, replace, or skip" end
+  pending.policies={default=policy,rooms={}}
+  local plan,err=self.map_transfer:preview(pending.data,pending.policies); if not plan then return nil,err end
+  pending.plan=plan; return self:reportMapImportPlan(plan,pending.name)
 end
 function Main:previewMapTransfer(name)
   local data,err=self.adapter:loadMapTransfer(name); if not data then self:reportMapTransfer(err,true); return nil,err end
@@ -642,7 +648,14 @@ function Main:start()
     elseif action=="install" then
       local entry=self.view:selectedMapLibraryEntry(); if not entry then self.view:setMapLibraryCatalog(self.map_catalog and self.map_catalog.maps or {},"Select a map first."); return nil,"select a map first" end
       self.view.map_library_status="Downloading and verifying "..entry.name.."…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
-      local started,err=self.adapter:downloadCatalogMap(entry,function(raw,downloadErr) if downloadErr then self.view.map_library_status="Download failed: "..tostring(downloadErr); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; local model,validationErr=self.map_transfer:validate(raw); if not model then self.view.map_library_status="Map rejected: "..tostring(validationErr); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; if model.provenance.publisher~=entry.publisher or model.provenance.slug~=entry.slug then self.view.map_library_status="Map provenance does not match the catalog."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; local path,saveErr=self.adapter:saveMapTransfer(entry.slug,raw); if not path then self.view.map_library_status="Could not save map: "..tostring(saveErr); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; self.view.map_library_status="Downloaded and verified. Import review written to the main display."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; self:previewMapTransfer(entry.slug) end); if not started then self.view.map_library_status="Download failed: "..tostring(err); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end; return started,err
+      local function failed(message) self.last_mapper_error=tostring(message); self.last_map_library_error=tostring(message); self:exportMapDiagnostic(false); self.view.map_library_status="Map failed: "..tostring(message).." A sanitized debug log was saved. Choose REPORT LAST ERROR if you want to send it to the owner."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
+      local started,err=self.adapter:downloadCatalogMap(entry,function(raw,downloadErr) if downloadErr then return failed(downloadErr) end; local model,validationErr=self.map_transfer:validate(raw); if not model then return failed(validationErr) end; if model.provenance.publisher~=entry.publisher or model.provenance.slug~=entry.slug then return failed("map provenance does not match the catalog") end; local path,saveErr=self.adapter:saveMapTransfer(entry.slug,raw); if not path then return failed(saveErr) end; local plan,previewErr=self:previewMapTransfer(entry.slug); if not plan then return failed(previewErr) end end); if not started then failed(err) end; return started,err
+    elseif action=="keep" then return self:setDefaultMapImportPolicy("keep")
+    elseif action=="replace" then return self:setDefaultMapImportPolicy("replace")
+    elseif action=="skip" then return self:setDefaultMapImportPolicy("skip")
+    elseif action=="confirm" then return self:confirmMapTransfer()
+    elseif action=="cancel" then self.pending_map_import=nil; self.view.map_library_status="Import cancelled. Your map was not changed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return true
+    elseif action=="report" then local message=self.last_map_library_error or "No map-library error has been recorded."; self.adapter:copyText("DGHUD map-library error: "..message); return self.adapter:openFeedback("DGHUD map-library error",message)
     elseif action=="publish" then self.adapter:openMapTransferFolder(); return self.adapter:openMapLibrary("publish") end
     return nil,"unknown map library action"
   end) end

@@ -14,7 +14,9 @@ local vectors={
 }
 
 function Model.direction(value)
-  return aliases[tostring(value or ""):lower()]
+  local command=tostring(value or ""):lower():match("^%s*(.-)%s*$")
+  command=command:match("^swim%s+(.+)$") or command
+  return aliases[command]
 end
 
 function Model.opposite(value)

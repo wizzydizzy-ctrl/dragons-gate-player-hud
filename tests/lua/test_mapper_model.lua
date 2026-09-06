@@ -35,6 +35,7 @@ test("maps every canonical direction alias vector and opposite",function()
   end
   eq(Model.direction("sideways"),nil)
   eq(Model.destination({x=4,y=7,z=0},"sideways"),nil)
+  eq(Model.direction("swim north"),"n"); eq(Model.direction("  SWIM southwest  "),"sw")
 end)
 
 test("rejects rooms without positive numeric IDs",function()

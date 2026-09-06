@@ -305,7 +305,7 @@ test("map settings contains callback exceptions and keeps the dialog open",funct
 end)
 test("map library actions are explicit presentation callbacks",function()
   local view=chatView(); local selected; view:setMapLibraryActionCallback(function(action) selected=action; return true end); view:applyLayout(require("layout").compute(1000,700)); view:showMapLibrary()
-  for _,key in ipairs({"browse","export","install","publish"}) do selected=nil; assert(view.map_library_actions[key].click()); eq(selected,key) end
+  for _,key in ipairs({"browse","export","install","publish","keep","replace","skip","confirm","cancel","report"}) do selected=nil; assert(view.map_library_actions[key].click()); eq(selected,key) end
 end)
 test("map library displays and selects downloaded catalog entries internally",function()
   local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}}); eq(#view.map_library_rows,1); assert(view.map_library_rows[1].click()); eq(view:selectedMapLibraryEntry().slug,"spur"); eq(view.map_library_status:find("42 rooms",1,true)~=nil,true)
@@ -313,7 +313,7 @@ end)
 test("help and map library expose copyable plain-text instructions",function()
   local view=chatView(); local copied={}; view:setCopyTextCallback(function(value) copied[#copied+1]=value; return true end); view:applyLayout(require("layout").compute(1000,700))
   view:showHelp(); assert(view.help_copy.click()); eq(copied[#copied]:find("dghud update",1,true)~=nil,true); eq(copied[#copied]:find("<span",1,true),nil)
-  view:showMapLibrary(); assert(view.map_library_copy_button.click()); eq(copied[#copied]:find("dghud map export",1,true)~=nil,true)
+  view:showMapLibrary(); assert(view.map_library_copy_button.click()); eq(copied[#copied]:find("entirely from this window",1,true)~=nil,true)
 end)
 test("map import conflict review defaults safely and accepts only known choices",function()
   local rows=View.mapImportConflictModel({{area="Spur",local_rooms=12,imported_rooms=15},{area="Temple",local_rooms=4,imported_rooms=7}}, {[1]="keep_mine",[2]="use_imported"})

@@ -3,6 +3,7 @@ Transfer.__index=Transfer
 
 local DIRECTIONS={n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,up=true,down=true,["in"]=true,out=true}
 local POLICIES={keep_mine=true,use_imported=true,skip_area=true}
+local SAFE_TRAVEL={go=true,enter=true,climb=true,crawl=true,swim=true,squeeze=true,cross=true}
 
 local function copy(value,seen)
   if type(value)~="table" then return value end
@@ -36,22 +37,24 @@ local function sortedStrings(values,limit)
   table.sort(out); return out
 end
 local function sortedExits(values,special,roomIDs)
-  local count=dense(values,256); if not count then return nil end
+  local count=dense(values,256); if not count then return nil,"must be a dense array" end
   local out,seen={},{}
   for index=1,count do
-    local item=values[index]; if type(item)~="table" then return nil end
-    local to=integer(item.to); if not to or not roomIDs[to] then return nil end
+    local item=values[index]; if type(item)~="table" then return nil,"entry "..index.." is not an object" end
+    local to=integer(item.to); if not to then return nil,"entry "..index.." has an invalid destination" end
+    if not roomIDs[to] then return nil,"entry "..index.." points to room "..to..", which is not included in this map" end
     local key
     if special then
-      local command=text(item.command,160,false); if not command then return nil end
-      command=command:match("^%s*(.-)%s*$"):lower(); if command=="" then return nil end
-      key=command.."\0"..to; item={command=command,to=to}
+      local command=text(item.command,160,false); if not command then return nil,"entry "..index.." has an invalid command" end
+      command=command:match("^%s*(.-)%s*$"):lower(); if command=="" then return nil,"entry "..index.." has an empty command" end
+      local verb=command:match("^(%a+)"); if not SAFE_TRAVEL[verb] then return nil,"entry "..index.." uses unsafe travel command '"..command.."'" end
+      key=command; item={command=command,to=to}
     else
       local direction=type(item.direction)=="string" and item.direction:lower() or nil
-      if not DIRECTIONS[direction] then return nil end
+      if not DIRECTIONS[direction] then return nil,"entry "..index.." has unsupported direction '"..tostring(item.direction).."'" end
       key=direction; item={direction=direction,to=to}
     end
-    if seen[key] then return nil end; seen[key]=true; out[#out+1]=item
+    if seen[key] then return nil,"entry "..index.." is duplicated" end; seen[key]=true; out[#out+1]=item
   end
   table.sort(out,function(a,b) local ak=special and a.command or a.direction; local bk=special and b.command or b.direction; return ak==bk and a.to<b.to or ak<bk end)
   return out
@@ -64,8 +67,9 @@ local function canonicalRoom(room,roomIDs)
   local position={}; for _,key in ipairs({"x","y","z"}) do local n=tonumber(room[key]); if not n or n~=n or n==math.huge or n==-math.huge or n%1~=0 or math.abs(n)>1000000 then return nil,"room has invalid coordinates" end; position[key]=n end
   local flags=sortedStrings(room.flags or {},64); local poi=sortedStrings(room.poi or {},64)
   if not flags or not poi then return nil,"room has invalid flags or POI tags" end
-  local exits=sortedExits(room.exits or {},false,roomIDs); local special=sortedExits(room.special_exits or {},true,roomIDs)
-  if not exits or not special then return nil,"room has invalid exits" end
+  local exits,exitErr=sortedExits(room.exits or {},false,roomIDs); local special,specialErr=sortedExits(room.special_exits or {},true,roomIDs)
+  if not exits then return nil,"room has invalid exits: "..tostring(exitErr) end
+  if not special then return nil,"room has invalid special exits: "..tostring(specialErr) end
   return {id=id,area=area,partition=partition,x=position.x,y=position.y,z=position.z,name=name,environment=environment,flags=flags,poi=poi,exits=exits,special_exits=special}
 end
 
@@ -103,7 +107,14 @@ function Transfer:exportData(provenance)
   if type(self.backend)~="table" or type(self.backend.listRooms)~="function" or type(self.backend.getRoom)~="function" then return nil,"map transfer backend is unavailable" end
   local ids,err=invoke(self.backend,"listRooms"); if not ids then return nil,err end
   local count=dense(ids,self.room_limit); if not count then return nil,"backend returned an invalid room list" end
-  local rooms={}; for index=1,count do local room,readErr=invoke(self.backend,"getRoom",ids[index]); if not room then return nil,readErr or "room read failed" end; rooms[#rooms+1]=copy(room) end
+  local included={}; for _,id in ipairs(ids) do included[id]=true end
+  local rooms={}; for index=1,count do
+    local room,readErr=invoke(self.backend,"getRoom",ids[index]); if not room then return nil,readErr or "room read failed" end
+    room=copy(room)
+    local function internal(values) local out={}; for _,entry in ipairs(values or {}) do if included[tonumber(entry.to)] then out[#out+1]=entry end end; return out end
+    room.exits=internal(room.exits); room.special_exits=internal(room.special_exits)
+    rooms[#rooms+1]=room
+  end
   return self:validate({format="DragonsGateHUD-map",schema=1,provenance=copy(provenance),rooms=rooms})
 end
 
@@ -178,6 +189,13 @@ function Transfer:apply(plan,character)
     local shell=copy(room); shell.exits={}; shell.special_exits={}
     local ok,writeErr=invoke(backend,"putRoom",shell); if not ok then return rollback(writeErr or ("room "..entry.id.." preparation failed")) end
   end end
+  local available={}; for _,entry in ipairs(actions) do
+    if entry.action~="skip" then available[entry.id]=true else local existing=invoke(backend,"getRoom",entry.id); available[entry.id]=existing~=nil end
+  end
+  for _,room in ipairs(prepared) do
+    local function linked(values) local out={}; for _,edge in ipairs(values or {}) do if available[edge.to] then out[#out+1]=edge end end; return out end
+    room.exits=linked(room.exits); room.special_exits=linked(room.special_exits)
+  end
   -- Link only after every destination room exists. Mudlet rejects exits whose
   -- destination has not yet been created, which otherwise made valid imports
   -- dependent on numeric room ordering.

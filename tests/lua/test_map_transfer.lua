@@ -38,6 +38,31 @@ test("export is deterministic JSON-ready and carries POI plus provenance",functi
   eq(out.format,"DragonsGateHUD-map"); eq(out.rooms[1].id,1); eq(out.rooms[2].exits[1].to,1); eq(out.rooms[2].special_exits[1].command,"go arch"); eq(out.rooms[1].poi[1],"trainer")
 end)
 
+test("export omits links to personal or otherwise excluded rooms",function()
+  local one=room(1); one.exits={{direction="e",to=99}}; one.special_exits={{command="go gate",to=99}}
+  local out=assert(Transfer.new(backend({[1]=one})):exportData({artifact_id="local:1",author="Deklan"}))
+  eq(#out.rooms[1].exits,0); eq(#out.rooms[1].special_exits,0)
+end)
+
+test("invalid exits explain the exact bad destination",function()
+  local one=room(1); one.exits={{direction="e",to=99}}
+  local value,err=Transfer.new(backend()):validate(artifact({one}))
+  eq(value,nil); assert(err:find("points to room 99",1,true)); assert(err:find("index 1",1,true))
+end)
+
+test("shared maps reject unsafe and ambiguous special travel commands",function()
+  local one,two=room(1),room(2); one.special_exits={{command="quit",to=2}}
+  local value,err=Transfer.new(backend()):validate(artifact({one,two})); eq(value,nil); assert(err:find("unsafe travel command",1,true))
+  one.special_exits={{command="go gate",to=1},{command="go gate",to=2}}
+  value,err=Transfer.new(backend()):validate(artifact({one,two})); eq(value,nil); assert(err:find("duplicated",1,true))
+end)
+
+test("skipping an absent destination removes its incoming imported links",function()
+  local one,two=room(1,"A",1),room(2,"B",2); one.exits={{direction="e",to=2}}; one.special_exits={{command="go gate",to=2}}
+  local store=backend(); local transfer=Transfer.new(store); local plan=assert(transfer:preview(artifact({one,two}),{A="use_imported",B="skip_area"}))
+  assert(transfer:apply(plan,"Deklan")); eq(#store.rooms[1].exits,0); eq(#store.rooms[1].special_exits,0); eq(store.rooms[2],nil)
+end)
+
 test("preview groups conflicts by area and performs zero mutation",function()
   local mine=room(1,"Academy",7); mine.owner="DragonsGateHUD"; local personal=room(3,"Temple",3); personal.owner="Personal"
   local store=backend({[1]=mine,[3]=personal}); local before=clone(store.rooms)
