@@ -233,7 +233,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
   local base=Adapter.updateBase(getMudletHomeDir()); local staging=base.."/staging"; lfs.mkdir(base); lfs.mkdir(staging)
   local manifestPath=staging.."/manifest.json"; local packagePath=Adapter.updateArchivePath(getMudletHomeDir())
   local rollbackManifestPath=staging.."/rollback-manifest.json"; local rollbackPackagePath=staging.."/rollback.mpackage"
-  local currentPath=base.."/current.mpackage"; local currentManifestPath=base.."/current-manifest.json"; local previousPath=base.."/previous.mpackage"
+  local currentPath=base.."/current.mpackage"; local currentManifestPath=base.."/current-manifest.json"; local previousPath=base.."/previous.mpackage"; local rollbackInstallPath=base.."/DragonsGateHUD.mpackage"
   local ids={}; local timers={}; local timeoutId; local expectedPath; local expectedUrl; local targetManifest; local targetManifestRaw; local rollbackManifest; local previousDigest; local finished=false
   local function schedule(delay,fn) local id; id=tempTimer(delay,function() for i,value in ipairs(timers) do if value==id then table.remove(timers,i); break end end; fn() end); timers[#timers+1]=id; return id end
   local function disarmTimeout() if timeoutId then killTimer(timeoutId); timeoutId=nil end end
@@ -281,7 +281,9 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       schedule(0.25,function()
         local installed=installPackage(packagePath)
         if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-        schedule(0.40,function() replaceDone(true) end)
+        -- Mudlet can finish loading a larger package after installPackage returns.
+        -- Give package scripts time to register before the updater health check.
+        schedule(1.00,function() replaceDone(true) end)
       end)
     end
     self.healthCheck=function() return DGHUD and DGHUD.healthCheck and DGHUD.healthCheck() end
@@ -293,8 +295,13 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       if DGHUD and DGHUD.shutdown then pcall(DGHUD.shutdown) end
       if hasPackage(name) then uninstallPackage(name) end
       schedule(0.25,function()
-        local restored=installPackage(previousPath)
-        schedule(0.40,function() rollbackDone(restored~=nil,restored==nil and "could not restore rollback package" or nil) end)
+        -- Mudlet derives the installed package identity from the archive filename.
+        -- Installing previous.mpackage registers a package named "previous" and
+        -- leaves DragonsGateHUD missing, so stage the verified bytes under the
+        -- canonical package filename before restoring.
+        writeFile(rollbackInstallPath,rollbackPayload)
+        local restored=installPackage(rollbackInstallPath)
+        schedule(1.00,function() rollbackDone(restored~=nil,restored==nil and "could not restore rollback package" or nil) end)
       end)
     end
     local completed=false
