@@ -733,8 +733,8 @@ function Main:start()
   local transferAliases={
     {"^dghud map library$",function() return self.adapter:openMapLibrary() end},
     {"^dghud map folder$",function() local path=self.adapter:openMapTransferFolder(); self:reportMapTransfer("Map folder: "..tostring(path),false); return path end},
-    {"^dghud map export ([%w_-]+) ([%w-]+)$",function(value) local first,second;if type(value)=="table" then first,second=value[2],value[3] elseif type(_G.matches)=="table" then first,second=_G.matches[2],_G.matches[3] end; return self:exportMapTransfer(first,second) end},
-    {"^dghud map import ([%w_-]+)$",function(value) return self:previewMapTransfer(aliasArgument(value)) end},
+    {"^dghud map export ([\\w_-]+) ([\\w-]+)$",function(value) local first,second;if type(value)=="table" then first,second=value[2],value[3] elseif type(_G.matches)=="table" then first,second=_G.matches[2],_G.matches[3] end; return self:exportMapTransfer(first,second) end},
+    {"^dghud map import ([\\w_-]+)$",function(value) return self:previewMapTransfer(aliasArgument(value)) end},
     {"^dghud map import area (.+) (keep|replace|skip)$",function(value) local area,choice;if type(value)=="table" then area,choice=value[2],value[3] elseif type(_G.matches)=="table" then area,choice=_G.matches[2],_G.matches[3] end; return self:setMapImportPolicy("area",area,choice) end},
     {"^dghud map import room (\\d+) (keep|replace|skip)$",function(value) local room,choice;if type(value)=="table" then room,choice=value[2],value[3] elseif type(_G.matches)=="table" then room,choice=_G.matches[2],_G.matches[3] end; return self:setMapImportPolicy("room",room,choice) end},
     {"^dghud map import confirm$",function() return self:confirmMapTransfer() end},
