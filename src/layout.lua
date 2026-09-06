@@ -119,7 +119,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
     layout.lower_mapper_min_height=minimum
     layout.lower_mapper_toolbar_height=toolbar
     local available=math.max(0,height-layout.top)
-    local desired=clamp(available*.40,minimum,380)
+    local percent=math.max(.20,math.min(.70,tonumber(mapperSettings.height_percent) or .40))
+    local maximum=clamp(tonumber(mapperSettings.maximum_height) or 380,minimum,700)
+    local desired=clamp(available*percent,minimum,maximum)
     layout.mapper_visible=available>=minimum+toolbar+180
     layout.lower_mapper_height=layout.mapper_visible and desired+toolbar or 0
     layout.lower_room_visible_height=layout.lower_room_height

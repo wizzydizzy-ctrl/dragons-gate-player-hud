@@ -15,8 +15,8 @@ local function positiveInteger(value)
   return number
 end
 
-function Automapper.new(model,map,onStatus)
-  return setmetatable({model=model,map=map,onStatus=onStatus or function() end,current_id=nil,pending=nil,direction_queue={}},Automapper)
+function Automapper.new(model,map,onStatus,transitionSubmaps)
+  return setmetatable({model=model,map=map,onStatus=onStatus or function() end,transition_submaps=transitionSubmaps or {},current_id=nil,pending=nil,direction_queue={}},Automapper)
 end
 
 function Automapper:status(kind,message)
@@ -50,7 +50,8 @@ function Automapper:onSpecialTransition(transition)
     self.pending=nil
     return nil,"invalid special transition"
   end
-  self.pending={kind="special",from=from,to=to,command=command}
+  local category=tostring(transition.category or "other"); local newSubmap=self.transition_submaps[category]~=false
+  self.pending={kind="special",from=from,to=to,command=command,category=category,new_submap=newSubmap}
   return true
 end
 
@@ -69,8 +70,13 @@ function Automapper:partitionFor(room,record)
     if record.owned then return self.map:effectivePartition(room.id) end
     return room.area_key
   end
-  if self.pending and self.pending.kind=="special" and self.pending.from~=room.id then
+  if self.pending and self.pending.kind=="special" and self.pending.new_submap~=false and self.pending.from~=room.id then
     return "special:"..tostring(room.id)
+  end
+  if self.pending and self.pending.kind=="special" and self.pending.new_submap==false and self.pending.from~=room.id then
+    local origin,err=self:roomRecord(self.pending.from); if not origin then return nil,err end
+    if not origin.exists or not origin.owned then return nil,"special transition origin is not owned by DragonsGateHUD" end
+    return origin.partition or self.map:effectivePartition(self.pending.from)
   end
   if self.pending and self.pending.direction and self.pending.from~=room.id then
     local origin,originErr=self:roomRecord(self.pending.from)
@@ -187,7 +193,7 @@ function Automapper:onRoom(raw)
   local partition,partitionErr=self:partitionFor(room,record)
   if not partition then return failUnensuredRoom(self,room,sameOrigin,"invalid_room",partitionErr) end
   local coordinates,coordinatesErr
-  if specialArrival and (not record.exists or record.placement_needed) then coordinates={x=0,y=0,z=0} else coordinates,coordinatesErr=self:coordinatesFor(room,partition,record) end
+  if specialArrival and self.pending.new_submap~=false and (not record.exists or record.placement_needed) then coordinates={x=0,y=0,z=0} else coordinates,coordinatesErr=self:coordinatesFor(room,partition,record) end
   if not coordinates then return failUnensuredRoom(self,room,sameOrigin,"invalid_room",coordinatesErr) end
   local ensured,ensureErr=self.map:ensureRoom(room,coordinates,partition)
   if not ensured then
@@ -228,7 +234,7 @@ function Automapper:onRoom(raw)
   if previous and previous~=room.id and not hadPending then
     self:status("teleport","room changed without a tracked direction; isolated room "..tostring(room.id))
   elseif specialArrival then
-    self:status("mapped","entered submap at room "..tostring(room.id).." via "..tostring(specialCommand or "special exit"))
+    self:status("mapped",(completedPending and completedPending.new_submap==false and "mapped special exit on current map at room " or "entered submap at room ")..tostring(room.id).." via "..tostring(specialCommand or "special exit"))
   else
     self:status("mapped","room "..tostring(room.id))
   end

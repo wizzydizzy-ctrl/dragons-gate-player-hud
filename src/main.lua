@@ -190,7 +190,8 @@ function Main:setMapperEnabled(enabled)
   enabled=enabled==true
   local wasEnabled=self:mapperEnabled()
   if wasEnabled==enabled then return enabled end
-  if self.adapter.saveMapperSettings then local saved,err=self.adapter:saveMapperSettings({enabled=enabled}); if not saved then return nil,"Could not save mapper setting: "..tostring(err) end end
+  local candidate={}; for key,value in pairs(self.settings.mapper or {}) do candidate[key]=value end; candidate.enabled=enabled
+  if self.adapter.saveMapperSettings then local saved,err=self.adapter:saveMapperSettings(candidate); if not saved then return nil,"Could not save mapper setting: "..tostring(err) end end
   self.settings.mapper=type(self.settings.mapper)=="table" and self.settings.mapper or {}; self.settings.mapper.enabled=enabled
   local root=rawget(_G,"DGHUD")
   if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.mapper=type(root.user_settings.mapper)=="table" and root.user_settings.mapper or {}; root.user_settings.mapper.enabled=enabled end
@@ -206,6 +207,20 @@ function Main:setMapperEnabled(enabled)
   end
   if self.view and self.view.setColorOptions then local options=colorOptions(self.colorizer and self.colorizer:status() or {}); options.mapper=enabled; self.view:setColorOptions(options) end
   self:applyResponsiveLayout(); self:refresh(); return enabled
+end
+function Main:configureMapper(values)
+  values=type(values)=="table" and values or {}; local wasEnabled=self:mapperEnabled(); local candidate={}; for k,v in pairs(self.settings.mapper or {}) do candidate[k]=v end
+  local rules={minimum_height={90,300},height_percent={.20,.70},maximum_height={140,700},zoom_step={.5,10},zoom_min={3,30},zoom_max={10,100},walk_timeout={3,60},special_timeout={3,60}}
+  for key,range in pairs(rules) do local n=tonumber(values[key]); if not n or n<range[1] or n>range[2] then return nil,key.." must be between "..range[1].." and "..range[2] end; candidate[key]=n end
+  if candidate.zoom_min>=candidate.zoom_max then return nil,"maximum zoom must be greater than minimum zoom" end
+  if candidate.maximum_height<candidate.minimum_height then return nil,"maximum map height must be at least the minimum height" end
+  candidate.enabled=values.enabled~=false; candidate.transition_submaps={}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do candidate.transition_submaps[key]=not (values.transition_submaps and values.transition_submaps[key]==false) end
+  if self.adapter.saveMapperSettings then local ok,err=self.adapter:saveMapperSettings(candidate); if not ok then return nil,"Could not save mapper settings: "..tostring(err) end end
+  self.settings.mapper=candidate; local root=rawget(_G,"DGHUD"); if root then root.user_settings=root.user_settings or {}; root.user_settings.mapper=candidate end
+  if self.automapper then self.automapper.transition_submaps=candidate.transition_submaps end; if self.special_transition then self.special_transition.timeout_seconds=candidate.special_timeout end; if self.walker then self.walker.timeout_seconds=candidate.walk_timeout end
+  if wasEnabled and not candidate.enabled then self:callSpecialTransition("cancel","disabled"); if self.automapper then self.automapper:onWrongDirection() end; if self.walker and self.walker:active() then self.walker:stop("mapper disabled") end; self:removeMapClickHook()
+  elseif not wasEnabled and candidate.enabled then self:installMapClickHook(); local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info; if self.automapper and info then self:callAutomapper("onRoom",info) end end
+  self:applyResponsiveLayout(); self:refresh(); return true,nil,candidate
 end
 function Main:mapperStatus(kind,message,isError)
   self.last_mapper_status=tostring(message or kind or "none")
@@ -529,12 +544,12 @@ function Main:start()
     if not cleanupOk then self:mapperStatus("warning","Map label cleanup failed: "..tostring(cleanupResult),true)
     elseif cleanupResult==nil then self:mapperStatus("warning","Map label cleanup failed: "..tostring(cleanupErr),true) end
   end
-  local factory=self.createAutomapper or function(_,model,adapter,status) return Automapper.new(model,adapter,status) end
-  local automapperOk,automapper,automapperErr=pcall(factory,self,MapperModel,self.map,function(kind,message) self:mapperStatus(kind,message) end)
+  local mapperSettings=self.settings.mapper or {}
+  local factory=self.createAutomapper or function(_,model,adapter,status,policies) return Automapper.new(model,adapter,status,policies) end
+  local automapperOk,automapper,automapperErr=pcall(factory,self,MapperModel,self.map,function(kind,message) self:mapperStatus(kind,message) end,mapperSettings.transition_submaps)
   if not automapperOk then self:shutdown(); return nil,automapper end
   if not automapper then self:shutdown(); return nil,automapperErr or "automapper construction failed" end
   self.automapper=automapper
-  local mapperSettings=self.settings.mapper or {}
   self.special_transition=SpecialTransition.new(MapperModel,self.adapter,mapperSettings.special_timeout or 12,nil,mapperSettings.special_patterns)
   local walkerAdapter={owner=self}
   function walkerAdapter:sendCommand(command)
@@ -559,7 +574,12 @@ function Main:start()
     return ok,err
   end
   local clock=function() return self.adapter:cleanupClock() end
-  local tokenFactory=function() local token,err=self.adapter:cleanupToken(); if not token then error(err or "secure random source is unavailable",0) end; return token end
+  local tokenFactory=function()
+    local token=self.adapter.cleanupToken and self.adapter:cleanupToken()
+    if token then return token end
+    self.cleanup_token_counter=(self.cleanup_token_counter or 0)+1
+    return ("local"..tostring(os.time())..tostring(self.cleanup_token_counter)..tostring(self):gsub("[^%w]","")):sub(-32)
+  end
   self.cleanup=Cleanup.new(self.map,cleanupRuntime,clock,tokenFactory,30)
   self:installMapClickHook()
   local startupOk,startupErr=pcall(function()
@@ -596,7 +616,12 @@ function Main:start()
   end) end
   if self.view.setRollerSettingsCallback then self.view:setRollerSettingsCallback(function(values) local ok,err=self.roller:configure(values); if not ok then return nil,err end; return true,nil,self.roller.cfg end) end
   if self.view.setMapZoomCallback then self.view:setMapZoomCallback(function(action) return self:mapToolbarAction(action) end) end
-  if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() return self:clearAllMapsAction() end) end
+  if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() if self.view.showMapSettings then return self.view:showMapSettings(self.settings.mapper) end; return self:clearAllMapsAction() end) end
+  if self.view.setMapSettingsCallback then self.view:setMapSettingsCallback(function(values) return self:configureMapper(values) end) end
+  if self.view.setMapSettingsActionCallback then self.view:setMapSettingsActionCallback(function(action)
+    if action=="clear_all" then return self:clearAllMapsAction() end
+    if action=="clear_current" then local current=self.automapper and self.automapper:currentRoom(); return self:previewCleanup("previewCurrent",current) end
+  end) end
   self:applyResponsiveLayout()
   self.collector=Collector.new(self.adapter,Parser,function(snapshot,key) if key=="time" then self:onClockSync(snapshot.time) else self:refresh() end end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end

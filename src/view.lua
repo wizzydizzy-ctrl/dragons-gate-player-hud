@@ -315,8 +315,8 @@ function View.new(settings)
   self.map_zoom_out=label("DGHUD.Mapper.ZoomOut",self.mapper_frame,mapButtonStyle)
   self.map_center=label("DGHUD.Mapper.Center",self.mapper_frame,mapButtonStyle)
   self.map_zoom_in=label("DGHUD.Mapper.ZoomIn",self.mapper_frame,mapButtonStyle)
-  self.map_clear_all=label("DGHUD.Mapper.ClearAll",self.mapper_frame,"background:#3a1715;border:1px solid #a94d46;border-radius:4px;color:#ffb0a8;font-weight:700;")
-  if self.map_clear_all.setToolTip then pcall(self.map_clear_all.setToolTip,self.map_clear_all,"WARNING: Clear all DGHUD maps and submaps") end
+  self.map_clear_all=label("DGHUD.Mapper.ClearAll",self.mapper_frame,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
+  if self.map_clear_all.setToolTip then pcall(self.map_clear_all.setToolTip,self.map_clear_all,"Open Map Settings") end
   self.map_clear_all:setClickCallback(function() if self.map_clear_all_callback then return self.map_clear_all_callback() end end)
   for _,control in ipairs({
     {self.map_zoom_out,"−","Show more rooms","smaller"},
@@ -359,6 +359,26 @@ function View.new(settings)
   for _,key in ipairs(self.roller_toggle_order) do local button=label("DGHUD.RollerSettings.Toggle."..key,self.roller_content); button.option_text=toggleLabels[key]; button:setClickCallback(function() self.roller_draft[key]=not self.roller_draft[key]; self:renderRollerSettings(false); return self.roller_draft[key] end); self.roller_toggles[key]=button end
   self.roller_save:setClickCallback(function() return self:saveRollerSettings() end); self.roller_cancel:setClickCallback(function() return self:hideRollerSettings() end); self.roller_overlay:setClickCallback(function() return self:hideRollerSettings() end)
   self.roller_settings_visible=false
+  self.map_settings_overlay=label("DGHUD.MapSettings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
+  self.map_settings_panel=Geyser.Container:new({name="DGHUD.MapSettings.Panel",x=0,y=0,width=760,height=600},self.root)
+  self.map_settings_bg=label("DGHUD.MapSettings.Background",self.map_settings_panel,"background:"..t.panel..";border:2px solid "..t.border..";border-radius:8px;")
+  self.map_settings_content=Geyser.ScrollBox:new({name="DGHUD.MapSettings.Content",x=14,y=44,width=732,height=470},self.map_settings_panel)
+  self.map_settings_title=label("DGHUD.MapSettings.Title",self.map_settings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
+  self.map_settings_status=label("DGHUD.MapSettings.Status",self.map_settings_panel,"background:transparent;color:"..t.muted..";")
+  self.map_settings_save=label("DGHUD.MapSettings.Save",self.map_settings_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.map_settings_cancel=label("DGHUD.MapSettings.Cancel",self.map_settings_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
+  self.map_settings_fields={}; self.map_settings_field_order={"minimum_height","height_percent","maximum_height","zoom_step","zoom_min","zoom_max","walk_timeout","special_timeout"}
+  local mapFieldLabels={minimum_height="Minimum map height (90-300 px)",height_percent="Map height share (20-70%)",maximum_height="Maximum map height (140-700 px)",zoom_step="Zoom change per click (0.5-10)",zoom_min="Minimum zoom (3-30)",zoom_max="Maximum zoom (10-100)",walk_timeout="Autowalk timeout (3-60 sec)",special_timeout="Gate/portal detection timeout (3-60 sec)"}
+  for _,key in ipairs(self.map_settings_field_order) do local caption=label("DGHUD.MapSettings.Caption."..key,self.map_settings_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.MapSettings.Input."..key,self.map_settings_content,self.geyser); self.map_settings_fields[key]={caption=caption,input=edit,label=mapFieldLabels[key]} end
+  self.map_settings_toggle_order={"enabled","gate","portal","door","arch","path","other"}; self.map_settings_toggles={}
+  local mapToggleLabels={enabled="AUTOMAPPING",gate="GATES CREATE SUBMAP",portal="PORTALS CREATE SUBMAP",door="DOORS CREATE SUBMAP",arch="ARCHES CREATE SUBMAP",path="PATHS CREATE SUBMAP",other="OTHER SPECIAL TRAVEL CREATES SUBMAP"}
+  for _,key in ipairs(self.map_settings_toggle_order) do local button=label("DGHUD.MapSettings.Toggle."..key,self.map_settings_content); button.option_text=mapToggleLabels[key]; button:setClickCallback(function() self.map_settings_draft[key]=not self.map_settings_draft[key]; self:renderMapSettings(false) end); self.map_settings_toggles[key]=button end
+  self.map_settings_clear_current=label("DGHUD.MapSettings.ClearCurrent",self.map_settings_content,"background:#302018;border:1px solid #9b6a42;border-radius:5px;color:#e5b17a;font-weight:700;")
+  self.map_settings_clear_all=label("DGHUD.MapSettings.ClearAll",self.map_settings_content,"background:#3a1715;border:1px solid #a94d46;border-radius:5px;color:#ffb0a8;font-weight:700;")
+  self.map_settings_save:setClickCallback(function() return self:saveMapSettings() end); self.map_settings_cancel:setClickCallback(function() return self:hideMapSettings() end); self.map_settings_overlay:setClickCallback(function() return self:hideMapSettings() end)
+  self.map_settings_clear_current:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_current") end end)
+  self.map_settings_clear_all:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_all") end end)
+  self.map_settings_visible=false
   local rollerWidgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel}; for _,entry in pairs(self.roller_fields) do rollerWidgets[#rollerWidgets+1]=entry.caption; rollerWidgets[#rollerWidgets+1]=entry.input end; for _,button in pairs(self.roller_toggles) do rollerWidgets[#rollerWidgets+1]=button end; for _,widget in ipairs(rollerWidgets) do widget:hide() end
   if self.help_close.setToolTip then pcall(self.help_close.setToolTip,self.help_close,"Close DGHUD command guide") end
   self.help_visible=false
@@ -629,6 +649,7 @@ function View:applyLayout(layout)
   self:layoutColorMenu(layout)
   self:layoutHelp(layout)
   self:layoutRollerSettings(layout)
+  self:layoutMapSettings(layout)
   self:layoutMapLibrary(layout)
 end
 function View:layoutColorMenu(layout)
@@ -675,6 +696,21 @@ function View:layoutRollerSettings(layout)
   local buttonY=panelHeight-buttonHeight-8; local buttonWidth=math.min(130,(panelWidth-38)/2); place(self.roller_cancel,panelWidth-14-buttonWidth*2-10,buttonY,buttonWidth,buttonHeight); place(self.roller_save,panelWidth-14-buttonWidth,buttonY,buttonWidth,buttonHeight); self.roller_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.roller_save:echo(View.withFont("<center><b>SAVE</b></center>",font))
   self:renderRollerSettings(false); View.raiseCards(widgets); return true
 end
+function View:layoutMapSettings(layout)
+  local widgets={self.map_settings_overlay,self.map_settings_panel,self.map_settings_bg,self.map_settings_content,self.map_settings_title,self.map_settings_status,self.map_settings_save,self.map_settings_cancel,self.map_settings_clear_current,self.map_settings_clear_all}
+  for _,v in pairs(self.map_settings_fields or {}) do widgets[#widgets+1]=v.caption; widgets[#widgets+1]=v.input end; for _,v in pairs(self.map_settings_toggles or {}) do widgets[#widgets+1]=v end
+  if not self.map_settings_visible then for _,w in ipairs(widgets) do w:hide() end; return true end
+  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18
+  local pw,ph=math.min(780,width-margin*2),math.min(650,height-margin*2); place(self.map_settings_overlay,0,0,"100%","100%"); place(self.map_settings_panel,math.floor((width-pw)/2),math.floor((height-ph)/2),pw,ph); place(self.map_settings_bg,0,0,"100%","100%")
+  local font=math.max(10,math.min(14,(layout.body_font or 14)-3)); place(self.map_settings_title,14,9,pw-28,32); self.map_settings_title:echo(View.withFont("<b>MAP SETTINGS</b>",font+2))
+  local footer=74; place(self.map_settings_content,14,44,pw-28,ph-44-footer); local columns=pw>=600 and 2 or 1; local gap=10; local cw=columns==2 and (pw-38)/2 or pw-28; local row=44; local items={}
+  for _,key in ipairs(self.map_settings_toggle_order) do items[#items+1]={kind="toggle",key=key} end; for _,key in ipairs(self.map_settings_field_order) do items[#items+1]={kind="field",key=key} end
+  for i,item in ipairs(items) do local col=columns==2 and ((i-1)%2) or 0; local r=columns==2 and math.floor((i-1)/2) or i-1; local x=col*(cw+gap); local y=r*row
+    if item.kind=="toggle" then place(self.map_settings_toggles[item.key],x,y+3,cw,row-6) else local f=self.map_settings_fields[item.key]; place(f.caption,x,y,cw,18); place(f.input,x,y+19,cw,row-21); f.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;") end
+  end
+  local rows=math.ceil(#items/columns); local dangerY=rows*row+12; place(self.map_settings_clear_current,0,dangerY,cw,38); place(self.map_settings_clear_all,columns==2 and cw+gap or 0,dangerY+((columns==1) and 44 or 0),cw,38); self.map_settings_content.content_height=dangerY+((columns==1) and 90 or 46)
+  place(self.map_settings_status,14,ph-footer+5,pw-300,28); local bw=120; place(self.map_settings_cancel,pw-14-bw*2-10,ph-42,bw,32); place(self.map_settings_save,pw-14-bw,ph-42,bw,32); self.map_settings_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.map_settings_save:echo(View.withFont("<center><b>SAVE</b></center>",font)); self:renderMapSettings(false); View.raiseCards(widgets); return true
+end
 function View:layoutHelp(layout)
   if not self.help_visible then
     for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_close,self.help_output,self.help_content}) do widget:hide() end
@@ -717,6 +753,8 @@ function View:setColorOptionsCallback(callback) self.color_options_callback=type
 function View:setOptionsActionCallback(callback) self.options_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapLibraryActionCallback(callback) self.map_library_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setRollerSettingsCallback(callback) self.roller_settings_callback=type(callback)=="function" and callback or nil; return true end
+function View:setMapSettingsCallback(callback) self.map_settings_callback=type(callback)=="function" and callback or nil; return true end
+function View:setMapSettingsActionCallback(callback) self.map_settings_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
   if action=="map_library" then return self:showMapLibrary() end
@@ -760,6 +798,24 @@ end
 local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 function View:showRollerSettings(config)
   self:hideHelp(); self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
+end
+function View:showMapSettings(config)
+  self:hideHelp(); self:hideRollerSettings(); self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
+  self.map_settings_visible=true; self:setColorMenuVisible(false); self.map_settings_error=nil; self:renderMapSettings(true); if self.layout then self:layoutMapSettings(self.layout) end; return true
+end
+function View:hideMapSettings() self.map_settings_visible=false; self.map_settings_draft=nil; self.map_settings_error=nil; if self.layout then self:layoutMapSettings(self.layout) end; return true end
+function View:renderMapSettings(populate)
+  if not self.map_settings_draft then return true end; local t=self.settings.theme; local font=self.layout and math.max(10,(self.layout.body_font or 14)-3) or 11
+  for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; local value=self.map_settings_draft[key]; if key=="height_percent" then value=(tonumber(value) or .4)*100 end; f.caption:echo(View.withFont(f.label,font)); if populate and f.input.print then f.input:print(tostring(value or "")) end end
+  for _,key in ipairs(self.map_settings_toggle_order) do local enabled=self.map_settings_draft[key]~=false; local b=self.map_settings_toggles[key]; b:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); b:echo(View.withFont("<center>"..b.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
+  self.map_settings_clear_current:echo(View.withFont("<center><b>DELETE CURRENT MAP…</b></center>",font)); self.map_settings_clear_all:echo(View.withFont("<center><b>"..(self.map_clear_pending and "CLICK AGAIN TO CLEAR ALL" or "WARNING: CLEAR ALL MAPS…").."</b></center>",font))
+  self.map_settings_status:echo(View.withFont(self.map_settings_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.map_settings_error).."</b></span>") or "Changes affect future discoveries; saved room numbers stay canonical.",font)); return true
+end
+function View:mapSettingsValues()
+  local values={transition_submaps={}}; for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; values[key]=f.input.getText and f.input:getText() or "" end; values.height_percent=(tonumber(values.height_percent) or 0)/100; values.enabled=self.map_settings_draft.enabled~=false; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do values.transition_submaps[key]=self.map_settings_draft[key]~=false end; return values
+end
+function View:saveMapSettings()
+  if not self.map_settings_callback then return nil,"map settings callback is unavailable" end; local ok,err,config=self.map_settings_callback(self:mapSettingsValues()); if not ok then self.map_settings_error=err; self:renderMapSettings(false); return nil,err end; self:hideMapSettings(); return true,config
 end
 function View:hideRollerSettings() self.roller_settings_visible=false; self.roller_draft=nil; self.roller_error=nil; if self.layout then self:layoutRollerSettings(self.layout) end; return true end
 function View:renderRollerSettings(populate)
@@ -807,8 +863,8 @@ function View:setMapClearAllCallback(callback) self.map_clear_all_callback=type(
 function View:setMapClearPending(pending)
   self.map_clear_pending=pending==true
   local font=self.layout and self.layout.lower_utility_font or 12
-  local text=self.map_clear_pending and "CLICK AGAIN" or "CLEAR ALL"
-  self.map_clear_all:echo(View.withFont("<center><b>"..text.."</b></center>",font))
+  self.map_clear_all:echo(View.withFont("<center><b>MAP SETTINGS</b></center>",font))
+  if self.map_settings_draft then self:renderMapSettings(false) end
   return true
 end
 function View:centerMap(roomID)

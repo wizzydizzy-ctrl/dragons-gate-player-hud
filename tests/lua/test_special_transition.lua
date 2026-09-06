@@ -35,7 +35,11 @@ test("confirms only the final genuine special-travel command",function()
   eq(tracker:onRoom(100),nil)
   local transition=assert(tracker:onRoom(900))
   eq(transition.from,100); eq(transition.to,900); eq(transition.command,"go gate")
+  eq(transition.category,"gate")
   eq(tracker:pending(),nil)
+end)
+test("classifies each configurable special-travel category",function()
+  for _,pair in ipairs({{"go gate","gate"},{"go portal","portal"},{"go door","door"},{"go arch","arch"},{"go path","path"},{"climb rope","other"}}) do local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,3); assert(tracker:onOutgoing(pair[1],100)); eq(assert(tracker:onRoom(900)).category,pair[2]) end
 end)
 
 test("normalizes command keys while classifying directions and controls safely",function()

@@ -70,6 +70,13 @@ test("special movement creates a destination-rooted submap and exact one-way edg
   eq(map.coordinatesByID[900].x,0); eq(map.coordinatesByID[900].y,0); eq(map.coordinatesByID[900].z,0)
   eq(#map.special,1); eq(map.special[1].from,100); eq(map.special[1].to,900); eq(map.special[1].command,"Go Door")
 end)
+test("special movement can remain on the origin map by category preference",function()
+  local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end,{door=false})
+  assert(mapper:onRoom(room(100,"Outside",1,{})))
+  assert(mapper:onSpecialTransition({from=100,to=900,command="go door",category="door",kind="special"}))
+  assert(mapper:onRoom(room(900,"Inside",2,{})))
+  eq(map.roomByID[900].partition,"1"); eq(#map.special,1)
+end)
 
 test("reverse special edge appears only after its exact return command is observed",function()
   local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end)

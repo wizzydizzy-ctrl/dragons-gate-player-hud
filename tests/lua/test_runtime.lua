@@ -400,11 +400,11 @@ test("Mudlet cleanup token generation fails closed without complete secure entro
   eq(token,nil); eq(err,"secure random source read failed")
 end)
 
-test("cleanup preview fails closed when secure token entropy is unavailable",function()
+test("cleanup preview uses a bounded local confirmation token when secure entropy is unavailable",function()
   local f=fake(); f.gmcp=gmcpRoom(1); function f:cleanupToken() return nil,"secure random source is unavailable" end
   local hud=Main.new(f,{layout={}}); assert(hud:start()); addCleanupRoom(f,100,7,"zone")
   local preview,err=aliasCallback(f,"^dghud map delete room (\\d+)$")({"","100"})
-  eq(preview,nil); eq(err,"secure random source is unavailable"); eq(hud.cleanup:pending(),nil); eq(f.map.rooms[100]~=nil,true); eq(f.cleanupReports[#f.cleanupReports].error,true)
+  assert(preview); eq(err,nil); assert(hud.cleanup:pending()); eq(f.map.rooms[100]~=nil,true); eq(f.cleanupReports[#f.cleanupReports].error,false)
 end)
 
 test("successful room ingestion centers the embedded mapper",function()

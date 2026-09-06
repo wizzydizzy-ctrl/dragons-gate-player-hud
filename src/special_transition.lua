@@ -20,12 +20,12 @@ local function builtInTravel(value)
   local verb,arguments=value:match("^(%S+)%s*(.*)$")
   if verb=="go" then
     for word in arguments:gmatch("[%w_'-]+") do
-      if specialNouns[word] then return true end
+      if specialNouns[word] then return word end
     end
-    return false
+    return nil
   end
-  if not traversalVerbs[verb] then return false end
-  return verb=="leave" or verb=="disembark" or arguments~=""
+  if not traversalVerbs[verb] then return nil end
+  return (verb=="leave" or verb=="disembark" or arguments~="") and "other" or nil
 end
 
 local function configuredTravel(value,patterns)
@@ -84,7 +84,9 @@ function Special:onOutgoing(command,originID)
   if not cancelled then return nil,boundedError("special transition replacement cancellation failed",cancelErr) end
   local classified=normalize(command)
   if not positive(originID) or classified=="" or self.model.direction(classified) then return nil end
-  if not builtInTravel(classified) and not configuredTravel(classified,self.extra_patterns) then return nil end
+  local category=builtInTravel(classified)
+  if not category and configuredTravel(classified,self.extra_patterns) then category="other" end
+  if not category then return nil end
   local timer,err
   local callOk
   callOk,timer,err=pcall(self.adapter.schedule,self.adapter,self.timeout_seconds,function()
@@ -92,14 +94,14 @@ function Special:onOutgoing(command,originID)
   end)
   if not callOk then err=timer; timer=nil end
   if not timer then return nil,err or "special transition timer could not be created" end
-  self.timer=timer; self.candidate={from=tonumber(originID),command=classified}
+  self.timer=timer; self.candidate={from=tonumber(originID),command=classified,category=category}
   return true
 end
 
 function Special:onRoom(roomID)
   local destination=positive(roomID) and tonumber(roomID) or nil
   if not self.candidate or not destination or destination==self.candidate.from then return nil end
-  local result={from=self.candidate.from,to=destination,command=self.candidate.command,kind="special"}
+  local result={from=self.candidate.from,to=destination,command=self.candidate.command,category=self.candidate.category or "other",kind="special"}
   local ok,err=self:cancel("confirmed")
   if not ok then return nil,err end
   return result

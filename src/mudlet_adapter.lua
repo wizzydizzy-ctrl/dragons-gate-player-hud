@@ -186,12 +186,14 @@ local function mapperSettingsPath() return getMudletHomeDir().."/DragonsGateHUD/
 function Adapter:saveMapperSettings(config)
   local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local destination=mapperSettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
-  local wrote,writeErr=file:write("return { enabled="..tostring(not (config and config.enabled==false)).." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local function n(key,default) return tonumber(config and config[key]) or default end; local transitions=config and config.transition_submaps or {}
+  local body=string.format("return { enabled=%s, minimum_height=%g, height_percent=%g, maximum_height=%g, zoom_step=%g, zoom_min=%g, zoom_max=%g, walk_timeout=%g, special_timeout=%g, transition_submaps={gate=%s,portal=%s,door=%s,arch=%s,path=%s,other=%s} }\n",tostring(not (config and config.enabled==false)),n("minimum_height",90),n("height_percent",.4),n("maximum_height",380),n("zoom_step",2.5),n("zoom_min",3),n("zoom_max",60),n("walk_timeout",12),n("special_timeout",12),tostring(transitions.gate~=false),tostring(transitions.portal~=false),tostring(transitions.door~=false),tostring(transitions.arch~=false),tostring(transitions.path~=false),tostring(transitions.other~=false))
+  local wrote,writeErr=file:write(body); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.remove(temp); return nil,renameErr end; return true
 end
 function Adapter.loadMapperSettings()
-  local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return {enabled=value.enabled} end; return nil
+  local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return value end; return nil
 end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
