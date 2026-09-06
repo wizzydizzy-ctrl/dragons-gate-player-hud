@@ -402,7 +402,8 @@ function View:renderChatTabs(categories,activeFilter)
 end
 function View:applyLayout(layout)
   self.layout=layout; local top,bottom=layout.header_height or layout.top,0; local t=self.settings.theme; local p=layout.panel_padding; local lp=layout.lower_panel_padding
-  self.header:setStyleSheet("background:"..t.background..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:10px "..p.."px;font-size:"..layout.body_font.."px;")
+  local header_top_padding=math.max(10,(layout.color_toggle_height or 20)+8)
+  self.header:setStyleSheet("background:"..t.background..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:"..header_top_padding.."px "..p.."px 6px "..p.."px;font-size:"..layout.body_font.."px;")
   self.clock_header:setStyleSheet("background:transparent;color:"..t.text..";padding:8px "..p.."px;text-align:right;")
   self.attribute_strip:setStyleSheet("background:transparent;color:"..t.text..";padding:10px 12px;font-size:"..layout.attribute_strip_font.."px;")
   self.identity:setStyleSheet("background:"..t.panel..";border-right:1px solid "..t.border..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:"..p.."px;font-size:"..layout.body_font.."px;")
@@ -444,8 +445,8 @@ function View:applyLayout(layout)
   self.carry:hide()
   place(self.header,0,0,"100%",top)
   local windowWidth=tonumber(layout.window_width) or 1200; local clock_x=layout.mode=="compact" and math.floor(windowWidth*.5) or windowWidth-layout.right
-  local toggle_width=math.max(72,math.min(92,math.floor(windowWidth*.10))); local toggle_x=math.max(4,clock_x-toggle_width-6); local toggle_y=math.max(5,math.floor((top-layout.color_toggle_height)/2))
-  local attributeWidth=math.max(1,toggle_x-(layout.console_left or layout.left)-6)
+  local toggle_width=math.max(72,math.min(92,math.floor(windowWidth*.10))); local toggle_x=math.max(0,p); local toggle_y=4
+  local attributeWidth=math.max(1,clock_x-(layout.console_left or layout.left)-6)
   place(self.attribute_strip,layout.console_left or layout.left,0,attributeWidth,top); self.attribute_strip:raise()
   place(self.color_toggle,toggle_x,toggle_y,toggle_width,layout.color_toggle_height); self.options_anchor={x=toggle_x,y=toggle_y,width=toggle_width,height=layout.color_toggle_height}; self:setColorEnabled(self.color_enabled~=false); self.color_toggle:raise()
   if layout.mode=="compact" then place(self.clock_header,"50%",0,"50%",top) else place(self.clock_header,"100%-"..layout.right,0,layout.right,top) end

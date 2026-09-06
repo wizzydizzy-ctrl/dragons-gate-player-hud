@@ -214,15 +214,16 @@ test("fatigue gauge uses its configured fill color without changing health",func
   eq(view.hp.front.style:find("background:#ba5147",1,true)~=nil,true)
 end)
 
-test("header owns a responsive top-right color options button",function()
+test("header owns a responsive top-left options button above the brand",function()
   local view=chatView()
   for _,size in ipairs({{760,700},{800,700},{1200,800},{1920,1080}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
     eq(view.color_toggle.visible,true); eq(view.color_toggle.x>=0,true)
     eq(view.color_toggle.x+view.color_toggle.width<=size[1],true)
     eq(view.color_toggle.y+view.color_toggle.height<=layout.header_height,true)
-    local clock_x=layout.mode=="compact" and math.floor(size[1]*.5) or size[1]-layout.right
-    eq(view.color_toggle.x+view.color_toggle.width<clock_x,true)
+    eq(view.color_toggle.x,layout.panel_padding)
+    eq(view.color_toggle.y,4)
+    eq(view.color_toggle.y+view.color_toggle.height<layout.header_height,true)
   end
   eq(view.color_toggle.tooltip,"Open DGHUD options")
 end)
@@ -651,7 +652,7 @@ end)
 test("attribute strip spans the center header above the chatbox",function()
   local layout=require("layout").compute(1920,1080); local view=chatView(); view:applyLayout(layout)
   eq(view.attribute_strip.x,layout.console_left); eq(view.attribute_strip.y,0)
-  eq(view.attribute_strip.width<layout.console_width,true); eq(view.attribute_strip.x+view.attribute_strip.width<view.color_toggle.x,true); eq(view.attribute_strip.height,layout.header_height)
+  eq(view.attribute_strip.width<=layout.console_width+layout.console_gutter,true); eq(view.attribute_strip.x+view.attribute_strip.width<=1920-layout.right,true); eq(view.attribute_strip.height,layout.header_height)
   eq(layout.attribute_strip_font>=10,true); eq(layout.attribute_strip_font<=14,true)
 end)
 
