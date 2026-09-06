@@ -8,7 +8,7 @@ local function fake()
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
   function f:setBorders(a,b,c,d) self.set_borders={a,b,c,d} end
   function f:getWindowSize() return self.width or 1920,self.height or 1080 end
-  function f:createView() return {
+  function f:createView() local view={
     update=function(self,state) self.state=state; f.viewUpdates=(f.viewUpdates or 0)+1 end,
     updateClock=function(self,clock) self.state.clock=clock; f.clockUpdates=(f.clockUpdates or 0)+1 end,
     applyLayout=function(self,layout) f.layouts[#f.layouts+1]=layout end,
@@ -19,6 +19,11 @@ local function fake()
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
     setOptionsActionCallback=function(self,callback) f.optionsActionCallback=callback end,
+    setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
+    setMapLibraryActionCallback=function(self,callback) f.mapLibraryActionCallback=callback end,
+    showMapLibrary=function(self) f.mapLibraryShown=true; return true end,
+    setMapLibraryMode=function(self,mode) f.mapLibraryMode=mode; return true end,
+    setMapLibraryCatalog=function(self,entries,status) f.mapLibraryCatalog=entries; f.mapLibraryCatalogStatus=status; return true end,
     setRollerSettingsCallback=function(self,callback) f.rollerSettingsCallback=callback end,
     setMapCenterCallback=function(self,callback) f.mapCenterCallback=callback end,
     setMapZoomCallback=function(self,callback) f.mapZoomCallback=callback; f.mapZoomCallbackSets=(f.mapZoomCallbackSets or 0)+1 end,
@@ -26,7 +31,7 @@ local function fake()
     setMapClearPending=function(self,pending) f.mapClearPending=pending end,
     centerMap=function(self,roomID) f.centeredRooms=f.centeredRooms or {}; f.centeredRooms[#f.centeredRooms+1]=roomID; return true end,
     delete=function() f.deleted=f.deleted+1 end,
-  } end
+  }; view.map_library_actions={browse={click=function() return f.mapLibraryActionCallback("browse") end}}; return view end
   function f:addEvent(name,fn) self.next=self.next+1; self.callbacks[name]=fn; local id="event-"..self.next; self.events[id]=name; return id end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end
   function f:killEvent(id) self.killed[id]=true; self.events[id]=nil end
@@ -54,6 +59,8 @@ local function fake()
   function f:reportMapCleanup(message,isError)
     self.cleanupReports=self.cleanupReports or {}; self.cleanupReports[#self.cleanupReports+1]={message=tostring(message),error=isError==true}; return true
   end
+  function f:submitFeedback(payload,done) self.submittedFeedback=payload; done({report_id="DG-MAP"}); return true end
+  function f:fetchMapCatalog(done) done({schema=2,maps={}}); return true end
   function f:refreshMap() self.mapRefreshes=(self.mapRefreshes or 0)+1; if self.refreshMapError then return nil,self.refreshMapError end; return true end
   function f:timestamp() return self.timestampValue or "2026-08-31T13:00:00-04:00" end
   function f:reportChatErrorOnce() self.chatErrors=(self.chatErrors or 0)+1 end
@@ -737,6 +744,12 @@ end)
 test("help alias opens the owned responsive guide",function()
   local f=fake(); local shown=0; local view=f:createView(); function view:showHelp() shown=shown+1; return true end; function f:createView() return view end
   local hud=Main.new(f,{layout={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud help$")()); eq(shown,1); hud:shutdown()
+end)
+test("map library alias opens and loads the in-HUD library without a browser",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud map library$")()); eq(f.mapLibraryShown,true); eq(f.mapLibraryMode,"library"); eq(type(f.mapLibraryCatalog),"table"); hud:shutdown()
+end)
+test("map debug alias submits a sanitized diagnostic anonymously",function()
+  local f=fake(); local hud=Main.new(f,{layout={},edition="player",version="test",mapper={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud map debug$")()); eq(f.submittedFeedback.kind,"feedback"); eq(f.submittedFeedback.summary,"Automatic mapper diagnostic"); eq(f.submittedFeedback.details:find("DGHUD mapper diagnostic",1,true)~=nil,true); eq(f.cleanupReports[#f.cleanupReports].message:find("DG%-MAP")~=nil,true); hud:shutdown()
 end)
 test("autoroller options commands and atomic settings use the active roller",function()
   local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=53,hard_stop=62,reroll_delay=.1,reroll_command="n",use_min_stats=true,min_stats={STR=5}}}); assert(hud:start())

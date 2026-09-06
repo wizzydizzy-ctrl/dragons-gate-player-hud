@@ -230,10 +230,6 @@ function Adapter:copyText(value)
   if type(setClipboard)=="function" then local ok,err=pcall(setClipboard,text); if ok then return true end; return nil,tostring(err) end
   return nil,"clipboard integration is unavailable"
 end
-function Adapter:openMapLibrary(page)
-  local base="https://github.com/wizzydizzy-ctrl/dragons-gate-map-library"; local url=page=="publish" and (base.."/compare") or base
-  if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
-end
 local function libraryRead(path,limit)
   local file,err=io.open(path,"rb"); if not file then return nil,err end; local value=file:read("*a"); file:close(); if #value>(limit or 20000000) then return nil,"download exceeds safety limit" end; return value
 end

@@ -418,7 +418,14 @@ function Main:exportMapDiagnostic(openFolder)
   local payload=self.map_diagnostics:render(self:mapDiagnosticContext()); local path,err=self.adapter:saveMapDiagnostic(payload)
   if not path then self:reportCleanup("Could not save mapper diagnostic: "..tostring(err),true); return nil,err end
   if openFolder and self.adapter.openMapDiagnosticsFolder then self.adapter:openMapDiagnosticsFolder() end
-  self:reportCleanup("Mapper diagnostic saved: "..path.."\nAttach this text file to a GitHub issue; it contains no credentials, chat, room prose, character name, IP address, or command history.",false); return path
+  self:reportCleanup("Mapper diagnostic saved privately: "..path..". It contains no credentials, chat, room prose, character name, IP address, or command history.",false); return path
+end
+function Main:submitMapDiagnostic()
+  if not self.map_diagnostics or not self.adapter.submitFeedback then local err="anonymous mapper diagnostics are unavailable"; self:reportCleanup(err,true); return nil,err end
+  local payload=self.map_diagnostics:render(self:mapDiagnosticContext()); self:reportCleanup("Sending privacy-safe mapper diagnostic…",false)
+  return self.adapter:submitFeedback({kind="feedback",summary="Automatic mapper diagnostic",details=payload},function(result,err)
+    self:reportCleanup(err and ("Could not send mapper diagnostic: "..tostring(err)) or ("Mapper diagnostic sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")),err~=nil)
+  end)
 end
 local function positiveRoom(value)
   local room=tonumber(value)
@@ -594,11 +601,11 @@ function Main:currentMapSelection(scope)
   return {scope="subarea",partition=record.partition,area=record.area,area_name=record.area_name~="" and record.area_name or nil,subarea_name=record.subarea_name~="" and record.subarea_name or nil}
 end
 function Main:exportMapTransfer(name,publisher,selection)
-  if not tostring(publisher or ""):match("^[%w][%w%-]*$") then local err="GitHub name must contain only letters, numbers, and dashes"; self:reportMapTransfer(err,true); return nil,err end
+  if not tostring(publisher or ""):match("^[%w][%w%-]*$") then local err="publisher name must contain only letters, numbers, and dashes"; self:reportMapTransfer(err,true); return nil,err end
   local stamp=self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time()); local data,err=self.map_transfer:exportData({artifact_id="local:"..stamp..":"..tostring(name),author=self:mapTransferCreator(),publisher=publisher,slug=name},selection)
   if not data then self:reportMapTransfer(err,true); return nil,err end
   local path,saveErr=self.adapter:saveMapTransfer(name,data); if not path then self:reportMapTransfer(saveErr,true); return nil,saveErr end
-  self:reportMapTransfer("Exported "..#data.rooms.." canonical rooms to "..path.."\nPublisher: "..publisher.."  Creator: "..data.provenance.author.."\nThis file is local until submitted. Open Map Settings > Map Library > Prepare Contribution for publishing instructions.",false); return path
+  self:reportMapTransfer("Saved a private backup of "..#data.rooms.." canonical rooms to "..path..". Use Map Settings > Map Library > SHARE to submit a map anonymously for review.",false); return path
 end
 local function transferChoice(value) return ({keep="keep_mine",replace="use_imported",skip="skip_area"})[tostring(value or ""):lower()] end
 function Main:reportMapImportPlan(plan,name)
@@ -893,7 +900,7 @@ function Main:start()
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud mapstatus$",function() return self:reportMapStatus() end)
-  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug$",function() return self:exportMapDiagnostic(false) end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug$",function() return self:submitMapDiagnostic() end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug folder$",function() return self:exportMapDiagnostic(true) end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map(?:per)?(?: (on|off|toggle|status))?$",function(value)
     local action=tostring(aliasArgument(value) or "toggle"):lower()
@@ -919,7 +926,7 @@ function Main:start()
   }
   for _,entry in ipairs(cleanupAliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(entry[1],entry[2]) end
   local transferAliases={
-    {"^dghud map library$",function() return self.adapter:openMapLibrary() end},
+    {"^dghud map library$",function() self.view:showMapLibrary(); self.view:setMapLibraryMode("library"); return self.view.map_library_actions.browse.click() end},
     {"^dghud map folder$",function() local path=self.adapter:openMapTransferFolder(); self:reportMapTransfer("Map folder: "..tostring(path),false); return path end},
     {"^dghud map export ([\\w_-]+) ([\\w-]+)$",function(value) local first,second;if type(value)=="table" then first,second=value[2],value[3] elseif type(_G.matches)=="table" then first,second=_G.matches[2],_G.matches[3] end; return self:exportMapTransfer(first,second) end},
     {"^dghud map import ([\\w_-]+)$",function(value) return self:previewMapTransfer(aliasArgument(value)) end},

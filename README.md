@@ -113,6 +113,8 @@ Run `dghud chatstatus` to print the active filter, the current visible-entry cou
 
 Options → Feedback & Requests opens an in-game form for anonymous feedback or feature requests. The player chooses the type, enters a short summary and detailed description, and receives a reference after submission. It uses the DGHUD upload service and does not open a browser or require a GitHub account. The form warns players not to include passwords or private account information; submissions are rate-limited and published to the DGHUD GitHub project for review.
 
+The community map library also stays inside the HUD. `dghud map library` opens the same built-in browser as Map Settings → Map Library, map sharing uses anonymous review submission, and `dghud map debug` sends its privacy-safe mapper diagnostic directly. Local backup and diagnostic-folder commands remain local and never upload automatically.
+
 ## Embedded automapper
 
 The native Mudlet map is embedded in the lower-left HUD immediately above the compass. While the mapper is enabled, each valid `gmcp.Room.Info.num` is the canonical Dragons Gate room ID. Revisiting that GMCP number refreshes safe descriptive data on the same native room; it never creates a duplicate or relocates its saved area, partition, or coordinates. Walking through the twelve standard directions (`n`, `ne`, `e`, `se`, `s`, `sw`, `w`, `nw`, `up`, `down`, `in`, and `out`) discovers rooms, creates advertised exit stubs, and confirms links only after the destination room arrives through GMCP. Teleports do not invent links.
