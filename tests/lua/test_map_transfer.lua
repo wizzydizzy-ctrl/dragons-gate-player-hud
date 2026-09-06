@@ -141,3 +141,9 @@ test("preview requires an explicit policy for every imported area",function()
   local plan,err=Transfer.new(backend()):preview(artifact({room(1,"A",1)}),{})
   eq(plan,nil); eq(err,"missing conflict policy for area A")
 end)
+
+test("invalid exits identify the room and offending exit",function()
+  local bad=room(42,"Academy",1); bad.exits={{direction="sideways",to=42}}
+  local value,err=Transfer.new(backend()):validate(artifact({bad}))
+  eq(value,nil); assert(err:find("room index 1 (ID 42)",1,true)); assert(err:find("entry 1",1,true)); assert(err:find("sideways",1,true))
+end)

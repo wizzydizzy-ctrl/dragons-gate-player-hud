@@ -92,7 +92,8 @@ function Transfer:validate(data)
   local roomIDs={}; for index=1,count do local id=type(data.rooms[index])=="table" and integer(data.rooms[index].id); if not id or roomIDs[id] then return nil,"map contains an invalid or duplicate canonical room ID" end; roomIDs[id]=true end
   local rooms,coordinates={},{}; local stringBytes=#artifact+#author
   for index=1,count do
-    local room,err=canonicalRoom(data.rooms[index],roomIDs); if not room then return nil,err.." at index "..index end
+    local source=data.rooms[index]; local roomID=type(source)=="table" and tostring(source.id or "unknown") or "unknown"
+    local room,err=canonicalRoom(source,roomIDs); if not room then return nil,"room index "..index.." (ID "..roomID.."): "..err end
     stringBytes=stringBytes+#room.area+#room.partition+#room.name+#room.environment
     for _,value in ipairs(room.flags) do stringBytes=stringBytes+#value end; for _,value in ipairs(room.poi) do stringBytes=stringBytes+#value end
     for _,value in ipairs(room.special_exits) do stringBytes=stringBytes+#value.command end
