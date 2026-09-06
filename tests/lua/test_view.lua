@@ -632,6 +632,22 @@ test("responsive mapper survives short layouts and hides cleanly in compact mode
   eq(view.map_zoom_out.visible,false); eq(view.map_center.visible,false); eq(view.map_zoom_in.visible,false)
 end)
 
+test("roundtime progress bar is readable below travel controls and collapses when ready",function()
+  local Layout=require("layout"); local layout=Layout.compute(1920,1080); local view=chatView(); view:applyLayout(layout)
+  eq(view.roundtime_bar.visible,false)
+  eq(view:updateRoundtime(8,8),true); eq(view.roundtime_bar.visible,true); eq(view.roundtime_bar.value[1],8); eq(view.roundtime_bar.value[2],8)
+  eq(view.roundtime_bar.value[3],"Roundtime  8s"); eq(view.utility_area.y+view.utility_area.height+layout.lower_roundtime_gap,view.roundtime_bar.y)
+  local consoleWidth=layout.console_width; local bottom=layout.bottom
+  view:updateRoundtime(4,8); eq(view.roundtime_bar.value[1],4); eq(view.roundtime_bar.value[2],8)
+  eq(layout.console_width,consoleWidth); eq(layout.bottom,bottom)
+  eq(view:updateRoundtime(0,8),false); eq(view.roundtime_bar.visible,false)
+  eq(view.utility_area.y+view.utility_area.height,view.right.height-layout.lower_panel_padding)
+end)
+
+test("roundtime bar stays hidden in compact mode",function()
+  local Layout=require("layout"); local view=chatView(); view:updateRoundtime(5,5); view:applyLayout(Layout.compute(760,700)); eq(view.roundtime_bar.visible,false)
+end)
+
 test("short layouts keep center vitals separate from the mapper",function()
   local layout=require("layout").compute(1200,650); local view=chatView()
   view.last_state={vitals={psi={visible=true},web={visible=true}},equipment={items={}}}

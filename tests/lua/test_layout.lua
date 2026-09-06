@@ -233,3 +233,14 @@ test("lower panel reduction preserves location and mapper floors before hiding t
   eq(reduced.mapper_height,0)
   eq(reduced.panel_height<=impossible.window_height-impossible.header_height,true)
 end)
+test("active roundtime reserves only left navigation rail space",function()
+  for _,size in ipairs({{1920,1080},{1200,800},{1000,650}}) do
+    local layout=Layout.compute(size[1],size[2]); local ready=Layout.lowerPanelGeometry(layout,false,false,false); local active=Layout.lowerPanelGeometry(layout,false,false,true)
+    eq(active.roundtime_visible,true); eq(active.roundtime_height,layout.lower_roundtime_height)
+    eq(active.roundtime_y+active.roundtime_height,active.panel_height-layout.lower_panel_padding)
+    eq(active.utility_y+active.utility_height+layout.lower_roundtime_gap,active.roundtime_y)
+    eq(layout.console_width,size[1]-layout.console_left-layout.console_right)
+    eq(layout.bottom,layout.vitals_strip_height)
+    eq(ready.roundtime_visible,false); eq(ready.utility_y+ready.utility_height,ready.panel_height-layout.lower_panel_padding)
+  end
+end)

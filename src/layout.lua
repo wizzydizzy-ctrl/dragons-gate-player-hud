@@ -1,10 +1,12 @@
 local Layout={}
-function Layout.lowerPanelGeometry(layout,psiVisible,webVisible)
+function Layout.lowerPanelGeometry(layout,psiVisible,webVisible,roundtimeActive)
   local available=math.max(0,(layout.window_height or 0)-(layout.header_height or 0))
   local inset=layout.lower_panel_padding
   local compass=layout.lower_compass_cell*3
   local utility=layout.lower_utility_height*2+5
-  local fixed_bottom=inset+utility+6+compass
+  local roundtime=roundtimeActive and (layout.lower_roundtime_height or 0) or 0
+  local roundtime_gap=roundtime>0 and (layout.lower_roundtime_gap or 0) or 0
+  local fixed_bottom=inset+roundtime+roundtime_gap+utility+6+compass
   local function contentTop() return inset end
   local room=layout.lower_room_height
   local mapper=layout.mapper_visible and layout.lower_mapper_height or 0
@@ -20,13 +22,15 @@ function Layout.lowerPanelGeometry(layout,psiVisible,webVisible)
   cut=math.min(pressure,room-room_min); room=room-cut; pressure=pressure-cut
   local panel=math.min(available,required(room,mapper))
   local content_top=contentTop()
-  local utility_y=panel-inset-utility
+  local roundtime_y=roundtime>0 and panel-inset-roundtime or panel-inset
+  local utility_y=roundtime_y-roundtime_gap-utility
   local compass_y=utility_y-6-compass
   local mapper_y=mapper>0 and compass_y-layout.lower_mapper_gap-mapper or compass_y
   return {panel_height=panel,optional_count=(psiVisible and 1 or 0)+(webVisible and 1 or 0),show_psi=psiVisible==true,
     show_web=webVisible==true,room_height=room,
     mapper_height=mapper,content_top=content_top,mapper_y=mapper_y,compass_y=compass_y,
-    utility_y=utility_y,compass_height=compass,utility_height=utility}
+    utility_y=utility_y,compass_height=compass,utility_height=utility,
+    roundtime_visible=roundtime>0,roundtime_y=roundtime_y,roundtime_height=roundtime}
 end
 function Layout.detailsPlacement() return "right" end
 function Layout.detailsCardRows(columns) return 5 end
@@ -101,6 +105,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   layout.lower_room_min_height=math.max(layout.lower_heading_font+layout.lower_body_font+20,56)
   layout.lower_compass_font=scaled(layout.compass_font); layout.lower_compass_cell=scaled(layout.compass_cell)
   layout.lower_utility_font=scaled(layout.utility_font); layout.lower_utility_height=scaled(layout.utility_height); layout.lower_section_gap=scaled(44)
+  layout.lower_roundtime_font=math.max(11,layout.lower_utility_font-1)
+  layout.lower_roundtime_height=layout.lower_roundtime_font+10
+  layout.lower_roundtime_gap=5
   layout.vitals_strip_padding=6
   layout.vitals_strip_gap=6
   local active=2+((vitals and vitals.psi and vitals.psi.visible) and 1 or 0)+((vitals and vitals.web and vitals.web.visible) and 1 or 0)

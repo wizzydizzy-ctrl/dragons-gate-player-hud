@@ -340,6 +340,8 @@ function View.new(settings)
   for i,direction in ipairs(Navigation.directions) do local b=label("DGHUD.Compass."..direction.key,self.compass_area); b:setClickCallback(function() if self.exit_available[direction.key] then send(direction.command) end end); self.direction_buttons[i]={label=b,direction=direction} end
   self.utility_area=Geyser.Container:new({name="DGHUD.Utilities",x=0,y=0,width=100,height=60},self.right)
   for i,utility in ipairs(Navigation.utilities) do local b=label("DGHUD.Utility."..i,self.utility_area); b:setClickCallback(function() send(utility.command) end); self.utility_buttons[i]={label=b,utility=utility} end
+  self.roundtime_bar=gauge("DGHUD.Roundtime",self.right,"#a86532",t)
+  self.roundtime_bar:hide(); self.roundtime_remaining=0; self.roundtime_total=0
   self.bottom=label("DGHUD.Bottom",self.root,"background:#151713;border-top:1px solid "..t.border..";color:"..t.muted..";padding:9px 15px;")
   self.compact=label("DGHUD.Compact",self.root,"background:"..t.panel..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:8px 12px;")
   self.help_overlay=label("DGHUD.Help.Overlay",self.root,"background:rgba(0,0,0,0.72);")
@@ -566,7 +568,8 @@ function View:applyLayout(layout)
     local available=math.max(100,(layout.window_height or 800)-top-bottom)
     local psi_visible=self.last_state and self.last_state.vitals.psi.visible or false
     local web_visible=self.last_state and self.last_state.vitals.web.visible or false
-    local lower=Layout.lowerPanelGeometry(layout,psi_visible,web_visible)
+    local roundtime_active=(tonumber(self.roundtime_remaining) or 0)>0
+    local lower=Layout.lowerPanelGeometry(layout,psi_visible,web_visible,roundtime_active)
     local panel_height=math.min(available,lower.panel_height)
     layout.lower_geometry=lower
     place(self.right,0,"100%-"..(bottom+panel_height),layout.left,panel_height)
@@ -639,7 +642,7 @@ function View:applyLayout(layout)
     if self.skills_output.visible then self.skills_content:show() end
     View.raiseCards({self.equipment,self.inventory,self.details,self.runes,self.skills,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes_title,self.runes_output,self.runes_content,self.skills_title,self.skills_output,self.skills_content})
   else
-    self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.right:hide(); self.attribute_strip:hide(); place(self.compact,0,62,"100%",top-62)
+    self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.roundtime_bar:hide(); self.right:hide(); self.attribute_strip:hide(); place(self.compact,0,62,"100%",top-62)
   end
   do
     local vitals=self.last_state and self.last_state.vitals or {}; local bars={self.hp,self.fatigue}
@@ -655,7 +658,7 @@ function View:applyLayout(layout)
   if layout.mode~="compact" then
     place(self.right_bg,0,0,"100%","100%"); self.right_title:hide()
     local panel_height=tonumber(self.right.height) or math.max(0,(layout.window_height or 800)-top-bottom)
-    local lower=layout.lower_geometry or Layout.lowerPanelGeometry(layout,false,false)
+    local lower=layout.lower_geometry or Layout.lowerPanelGeometry(layout,false,false,(tonumber(self.roundtime_remaining) or 0)>0)
     local inset=lp
     local compass_h,utility_h=lower.compass_height,lower.utility_height
     local utility_y,compass_y=lower.utility_y,lower.compass_y
@@ -681,6 +684,11 @@ function View:applyLayout(layout)
     place(self.compass_center,cell_width.."%",layout.lower_compass_cell,cell_width.."%",layout.lower_compass_cell)
     place(self.utility_area,inset,utility_y,"100%-"..(inset*2),utility_h); self.utility_area:raise()
     for i,entry in ipairs(self.utility_buttons) do local col=(i-1)%2; local row=math.floor((i-1)/2); place(entry.label,(col*50).."%",row*(layout.lower_utility_height+2),"49%",layout.lower_utility_height) end
+    if lower.roundtime_visible then
+      place(self.roundtime_bar,inset,lower.roundtime_y,"100%-"..(inset*2),lower.roundtime_height)
+      self.roundtime_bar.text:setStyleSheet("background:transparent;color:"..self.settings.theme.text..";font-size:"..layout.lower_roundtime_font.."px;font-weight:700;")
+      self.roundtime_bar:raise()
+    else self.roundtime_bar:hide() end
   end
   self:applyChatWrap(layout)
   self:layoutColorMenu(layout)
@@ -984,6 +992,21 @@ function View:renderNavigation(exits)
   for _,entry in ipairs(self.direction_buttons) do local active=self.exit_available[entry.direction.key]; entry.label:setStyleSheet("background:"..(active and "#193024" or "rgba(16,23,19,0.28)")..";border:1px solid "..(active and "#5d9b71" or "#273029")..";border-radius:5px;color:"..(active and "#b8efc2" or "#536058")..";font-weight:700;"); entry.label:echo(View.withFont("<center><b>"..entry.direction.label.."</b></center>",self.layout.lower_compass_font)) end
   for _,entry in ipairs(self.utility_buttons) do entry.label:setStyleSheet("background:#17231c;border:1px solid #385044;border-radius:5px;color:"..t.jade..";font-weight:700;"); entry.label:echo(View.withFont("<center><b>"..entry.utility.label.."</b></center>",self.layout.lower_utility_font)) end
 end
+function View:updateRoundtime(remaining,total)
+  remaining=tonumber(remaining) or 0; if remaining<0 then remaining=0 end
+  local wasActive=(tonumber(self.roundtime_remaining) or 0)>0
+  if remaining<=0 then
+    self.roundtime_remaining=0; self.roundtime_total=0; self.roundtime_bar:hide()
+  else
+    total=tonumber(total)
+    if not total or total<=0 then total=math.max(remaining,tonumber(self.roundtime_total) or 0) end
+    total=math.max(remaining,total,1); self.roundtime_remaining=remaining; self.roundtime_total=total
+    self.roundtime_bar:setValue(remaining,total,"Roundtime  "..tostring(math.ceil(remaining)).."s")
+  end
+  local isActive=self.roundtime_remaining>0
+  if wasActive~=isActive and self.layout then self:applyLayout(self.layout) end
+  return isActive
+end
 function View:renderInventory(s)
   local t=self.settings.theme; local layout=self.layout; if not layout or layout.mode=="compact" then return end
   local inventory=s.inventory or {}; local v=s.vitals or {}; local carry=v.carry or {}; local signature={tostring(inventory.total_weight or ""),tostring(v.gold or 0),tostring(v.silver or 0),tostring(carry.current or ""),tostring(carry.maximum or ""),tostring(carry.percent or "")}
@@ -1089,6 +1112,7 @@ function View:update(s)
   self.header:echo(View.headerContent(layout,t,s.character.full_name)); self:updateClock(s.clock); self.attribute_strip:echo(View.attributeStripContent(s.attributes,t,layout))
   self.identity:echo(View.identityContent(s.character,t,layout))
   self.equipment:echo(View.equipmentContent(v,s.equipment.items,t,layout))
+  self:updateRoundtime(v.roundtime)
   local activeBars=2+(v.psi.visible and 1 or 0)+(v.web.visible and 1 or 0)
   local shortLabels=(tonumber(layout.console_width) or 1200)/activeBars<150
   self.hp:setValue(v.hp.current,math.max(v.hp.maximum,1),(shortLabels and "HP  " or "Health  ")..v.hp.current.." / "..v.hp.maximum); self.fatigue:setValue(v.fatigue.current,math.max(v.fatigue.maximum,1),(shortLabels and "FAT  " or "Fatigue  ")..v.fatigue.current.." / "..v.fatigue.maximum)
