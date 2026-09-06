@@ -140,6 +140,10 @@ function Adapter:openMapLibrary(page)
   local base="https://github.com/wizzydizzy-ctrl/dragons-gate-map-library"; local url=page=="publish" and (base.."/compare") or base
   if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
 end
+function Adapter:openFeedback()
+  local url="https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/issues/new?template=feedback.yml"
+  if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
+end
 function Adapter:reportMapTransfer(message,isError)
   local color=isError and "red" or "gold"; cecho("\n<"..color..">[DGHUD Maps]<reset> "..tostring(message).."\n"); return true
 end

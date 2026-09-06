@@ -1,0 +1,37 @@
+name: HUD feedback or feature request
+description: Suggest an improvement or report something that is not working as expected.
+title: "[Feedback] "
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks for helping improve Dragons Gate HUD. Please be as detailed as possible so the request can be understood, reproduced, and tracked. Do not include passwords, account information, IP addresses, or private chat logs."
+  - type: dropdown
+    id: kind
+    attributes: {label: Request type, options: [Bug, Improvement, New feature, Mapper feedback, Layout or accessibility], multiple: false}
+    validations: {required: true}
+  - type: textarea
+    id: details
+    attributes: {label: Detailed request, description: "What happened or what would you like added? Explain where it appears and why it would help."}
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes: {label: Steps or example, description: "For bugs, list exact commands and steps. For requests, give an example of the desired behavior."}
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: Expected result, description: "Describe what the HUD should do instead."}
+    validations: {required: true}
+  - type: input
+    id: environment
+    attributes: {label: HUD version, Mudlet version, OS, and resolution, placeholder: "Player 0.2.132; Mudlet 5.0; Windows 11; 1920x1080"}
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes: {label: Screenshots or mapper diagnostic, description: "Drag screenshots here. For mapper problems, run `dghud map debug` and attach the generated text file."}
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed passwords, account details, IP addresses, and private conversations.
+          required: true

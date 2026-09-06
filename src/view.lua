@@ -266,8 +266,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"map_library","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local actionLabels={map_library="MAP LIBRARY…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
+  self.option_action_order={"feedback","map_library","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local actionLabels={feedback="FEEDBACK & REQUESTS…",map_library="MAP LIBRARY…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false

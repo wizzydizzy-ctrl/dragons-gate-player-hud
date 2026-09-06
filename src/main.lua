@@ -623,6 +623,7 @@ function Main:start()
   elseif self.view.setColorEnabled then self.view:setColorEnabled(self.colorizer_enabled) end
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
+    if action=="feedback" then return self.adapter:openFeedback() end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
