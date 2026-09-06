@@ -285,6 +285,22 @@ test("options menu exposes every autoroller command and settings action",functio
   view.option_action_buttons.roller_start.click(); eq(calls[#calls],"roller_start")
   view.color_toggle.click(); view.option_action_buttons.roller_settings.click(); eq(view.roller_settings_visible,true); eq(view.roller_fields.target_total.input.text,"53")
 end)
+
+test("feedback option opens an in-game anonymous submission form",function()
+  local view=chatView(); local sent,finish
+  view:setFeedbackCallback(function(payload,done) sent=payload; finish=done; return true end)
+  view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); view.option_action_buttons.feedback.click()
+  eq(view.feedback_visible,true); eq(view.feedback_panel.visible,true); eq(view.feedback_explanation.message:find("no GitHub account",1,true)~=nil,true)
+  view.feedback_kind.click(); eq(view.feedback_draft.kind,"request")
+  view.feedback_summary:print("Add a better clock"); view.feedback_details:print("Please show the next sunrise and sunset beside game time.")
+  assert(view.feedback_send.click()); eq(sent.kind,"request"); eq(sent.summary,"Add a better clock"); eq(sent.details,"Please show the next sunrise and sunset beside game time."); eq(view.feedback_sending,true)
+  finish({report_id="DG-1234"}); eq(view.feedback_sending,false); eq(view.feedback_status.message:find("DG%-1234")~=nil,true)
+end)
+
+test("feedback form contains callback failures and remains editable",function()
+  local view=chatView(); view:setFeedbackCallback(function() error("network exploded") end); view:applyLayout(require("layout").compute(760,700)); view:showFeedback(); view.feedback_summary:print("Mapper suggestion"); view.feedback_details:print("Please make the room labels easier to move.")
+  local ok,err=view:sendFeedback(); eq(ok,nil); eq(err:find("network exploded",1,true)~=nil,true); eq(view.feedback_sending,false); eq(view.feedback_visible,true)
+end)
 test("options command center opens the complete help guide",function()
   local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); assert(view.option_action_buttons.command_help.click()); eq(view.help_visible,true); eq(view.color_menu_visible,false)
 end)

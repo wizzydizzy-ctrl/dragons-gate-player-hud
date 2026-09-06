@@ -398,6 +398,23 @@ function View.new(settings)
   self.map_settings_rename_area:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("rename_area",self.map_settings_area_name:getText()) end end)
   self.map_settings_rename_subarea:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("rename_subarea",self.map_settings_subarea_name:getText()) end end)
   self.map_settings_visible=false
+  self.feedback_overlay=label("DGHUD.Feedback.Overlay",self.root,"background:rgba(0,0,0,0.72);")
+  self.feedback_panel=Geyser.Container:new({name="DGHUD.Feedback.Panel",x=0,y=0,width=680,height=430},self.root)
+  self.feedback_bg=label("DGHUD.Feedback.Background",self.feedback_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
+  self.feedback_title=label("DGHUD.Feedback.Title",self.feedback_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
+  self.feedback_explanation=label("DGHUD.Feedback.Explanation",self.feedback_panel,"background:transparent;color:"..t.text..";")
+  self.feedback_kind=label("DGHUD.Feedback.Kind",self.feedback_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
+  self.feedback_summary_label=label("DGHUD.Feedback.SummaryLabel",self.feedback_panel,"background:transparent;color:"..t.muted..";")
+  self.feedback_summary=input("DGHUD.Feedback.Summary",self.feedback_panel,self.geyser)
+  self.feedback_details_label=label("DGHUD.Feedback.DetailsLabel",self.feedback_panel,"background:transparent;color:"..t.muted..";")
+  self.feedback_details=input("DGHUD.Feedback.Details",self.feedback_panel,self.geyser)
+  self.feedback_status=label("DGHUD.Feedback.Status",self.feedback_panel,"background:transparent;color:"..t.muted..";")
+  self.feedback_send=label("DGHUD.Feedback.Send",self.feedback_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.feedback_cancel=label("DGHUD.Feedback.Cancel",self.feedback_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
+  self.feedback_kind:setClickCallback(function() self.feedback_draft.kind=self.feedback_draft.kind=="request" and "feedback" or "request"; return self:renderFeedback(false) end)
+  self.feedback_send:setClickCallback(function() return self:sendFeedback() end); self.feedback_cancel:setClickCallback(function() return self:hideFeedback() end); self.feedback_overlay:setClickCallback(function() return self:hideFeedback() end)
+  self.feedback_visible=false; self.feedback_sending=false
+  for _,widget in ipairs({self.feedback_overlay,self.feedback_panel,self.feedback_bg,self.feedback_title,self.feedback_explanation,self.feedback_kind,self.feedback_summary_label,self.feedback_summary,self.feedback_details_label,self.feedback_details,self.feedback_status,self.feedback_send,self.feedback_cancel}) do widget:hide() end
   local rollerWidgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel}; for _,entry in pairs(self.roller_fields) do rollerWidgets[#rollerWidgets+1]=entry.caption; rollerWidgets[#rollerWidgets+1]=entry.input end; for _,button in pairs(self.roller_toggles) do rollerWidgets[#rollerWidgets+1]=button end; for _,widget in ipairs(rollerWidgets) do widget:hide() end
   if self.help_close.setToolTip then pcall(self.help_close.setToolTip,self.help_close,"Close DGHUD command guide") end
   self.help_visible=false
@@ -693,6 +710,7 @@ function View:applyLayout(layout)
   self:applyChatWrap(layout)
   self:layoutColorMenu(layout)
   self:layoutHelp(layout)
+  self:layoutFeedback(layout)
   self:layoutRollerSettings(layout)
   self:layoutMapSettings(layout)
   self:layoutMapLibrary(layout)
@@ -787,10 +805,23 @@ function View:layoutHelp(layout)
   View.raiseCards({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_copy,self.help_close,self.help_output,self.help_content})
   return true
 end
+function View:feedbackWidgets() return {self.feedback_overlay,self.feedback_panel,self.feedback_bg,self.feedback_title,self.feedback_explanation,self.feedback_kind,self.feedback_summary_label,self.feedback_summary,self.feedback_details_label,self.feedback_details,self.feedback_status,self.feedback_send,self.feedback_cancel} end
+function View:layoutFeedback(layout)
+  local widgets=self:feedbackWidgets(); if not self.feedback_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
+  local width,height=math.max(1,tonumber(layout.window_width) or 1200),math.max(1,tonumber(layout.window_height) or 800); local margin=layout.mode=="compact" and 8 or 18
+  local pw,ph=math.min(700,width-margin*2),math.min(460,height-margin*2); local x=math.max(0,math.floor((width-pw)/2)); local y=math.max(0,math.floor((height-ph)/2)); local font=math.max(10,math.min(14,(layout.body_font or 14)-2))
+  place(self.feedback_overlay,0,0,"100%","100%"); place(self.feedback_panel,x,y,pw,ph); place(self.feedback_bg,0,0,"100%","100%")
+  place(self.feedback_title,16,10,pw-32,30); place(self.feedback_explanation,16,44,pw-32,76); place(self.feedback_kind,16,124,math.min(190,pw-32),32)
+  place(self.feedback_summary_label,16,164,pw-32,22); place(self.feedback_summary,16,187,pw-32,32)
+  place(self.feedback_details_label,16,226,pw-32,22); place(self.feedback_details,16,249,pw-32,math.max(32,ph-335))
+  local buttonWidth=math.min(140,(pw-42)/2); place(self.feedback_status,16,ph-78,pw-buttonWidth*2-48,60); place(self.feedback_cancel,pw-buttonWidth*2-26,ph-50,buttonWidth,34); place(self.feedback_send,pw-buttonWidth-16,ph-50,buttonWidth,34)
+  local style="background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;"; self.feedback_summary:setStyleSheet(style); self.feedback_details:setStyleSheet(style)
+  self:renderFeedback(false); View.raiseCards(widgets); return true
+end
 function View:setHelpCloseCallback(callback) self.help_close_callback=type(callback)=="function" and callback or nil; return true end
 function View:setHelpVisible(visible,entries)
   self.help_visible=visible==true
-  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary() end
+  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end end
   if entries~=nil then self.help_entries=type(entries)=="table" and entries or View.defaultHelpEntries() end
   if self.layout then return self:layoutHelp(self.layout) end
   return true
@@ -801,6 +832,7 @@ function View:setMapCenterCallback(callback) self.map_center_callback=type(callb
 function View:setColorToggleCallback(callback) self.color_toggle_callback=type(callback)=="function" and callback or nil; return true end
 function View:setColorOptionsCallback(callback) self.color_options_callback=type(callback)=="function" and callback or nil; return true end
 function View:setOptionsActionCallback(callback) self.options_action_callback=type(callback)=="function" and callback or nil; return true end
+function View:setFeedbackCallback(callback) self.feedback_callback=type(callback)=="function" and callback or nil; return true end
 function View:setCopyTextCallback(callback) self.copy_text_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapLibraryActionCallback(callback) self.map_library_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapCollectionActionCallback(callback) self.map_collection_action_callback=type(callback)=="function" and callback or nil; return true end
@@ -810,13 +842,34 @@ function View:setMapSettingsActionCallback(callback) self.map_settings_action_ca
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
   if action=="command_help" then return self:showHelp() end
+  if action=="feedback" then return self:showFeedback() end
   if action=="map_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showMapSettings(config) end; return config end; return nil,"map settings are unavailable" end
   if action=="roller_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showRollerSettings(config) end; return config end; return nil,"autoroller settings are unavailable" end
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
 end
+function View:showFeedback()
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:setColorMenuVisible(false); self.feedback_draft={kind="feedback"}; self.feedback_visible=true; self.feedback_sending=false; self.feedback_error=nil; self.feedback_result=nil
+  if self.feedback_summary.print then self.feedback_summary:print("") end; if self.feedback_details.print then self.feedback_details:print("") end
+  if self.layout then self:layoutFeedback(self.layout) end; return true
+end
+function View:hideFeedback() if self.feedback_sending then return nil,"feedback is being sent" end; self.feedback_visible=false; self.feedback_draft=nil; if self.layout then self:layoutFeedback(self.layout) end; return true end
+function View:renderFeedback()
+  if not self.feedback_draft then return true end; local font=self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11; local kind=self.feedback_draft.kind=="request" and "FEATURE REQUEST" or "FEEDBACK"
+  self.feedback_title:echo(View.withFont("<b>FEEDBACK & REQUESTS</b>",font+3)); self.feedback_explanation:echo(View.withFont("Tell us what happened or what you would like added. Be as detailed as possible. This submits anonymously to the DGHUD GitHub project; no GitHub account or browser is needed. Do not include passwords or private account information.",font))
+  self.feedback_kind:echo(View.withFont("<center><b>TYPE: "..kind.."</b></center>",font)); self.feedback_summary_label:echo(View.withFont("Short summary",font)); self.feedback_details_label:echo(View.withFont("Detailed description",font))
+  local status=self.feedback_error and ("<span style='color:"..self.settings.theme.hp.."'><b>"..safeText(self.feedback_error).."</b></span>") or safeText(self.feedback_result or "Click the type button to switch between feedback and a feature request."); self.feedback_status:echo(View.withFont(status,font)); self.feedback_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.feedback_send:echo(View.withFont("<center><b>"..(self.feedback_sending and "SENDING…" or "SEND").."</b></center>",font)); return true
+end
+function View:finishFeedback(result,err)
+  self.feedback_sending=false; if err then self.feedback_error="Could not send: "..tostring(err) else self.feedback_error=nil; self.feedback_result="Sent anonymously. Reference: "..tostring(result and (result.report_id or result.number) or "received"); if self.feedback_summary.print then self.feedback_summary:print("") end; if self.feedback_details.print then self.feedback_details:print("") end end; self:renderFeedback(false); return err==nil
+end
+function View:sendFeedback()
+  if self.feedback_sending then return nil,"feedback is already being sent" end; if not self.feedback_callback then self.feedback_error="Feedback service is unavailable"; self:renderFeedback(false); return nil,self.feedback_error end
+  local payload={kind=self.feedback_draft and self.feedback_draft.kind or "feedback",summary=self.feedback_summary.getText and self.feedback_summary:getText() or "",details=self.feedback_details.getText and self.feedback_details:getText() or ""}
+  self.feedback_sending=true; self.feedback_error=nil; self:renderFeedback(false); local called,ok,err=pcall(self.feedback_callback,payload,function(result,sendErr) self:finishFeedback(result,sendErr) end); if not called then err=tostring(ok); ok=nil end; if not ok then self.feedback_sending=false; self.feedback_error=err or "Could not start upload"; self:renderFeedback(false); return nil,self.feedback_error end; return true
+end
 function View:showMapLibrary()
-  self:hideMapSettings(); self.map_library_visible=true; self:setColorMenuVisible(false); self:hideHelp(); self:hideRollerSettings(); if self.layout then self:layoutMapLibrary(self.layout) end; return true
+  self:hideMapSettings(); self.map_library_visible=true; self:setColorMenuVisible(false); self:hideHelp(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.layout then self:layoutMapLibrary(self.layout) end; return true
 end
 function View:hideMapLibrary() self.map_library_visible=false; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
 function View:layoutMapLibrary(layout)
@@ -910,10 +963,10 @@ function View:renderColorOptions()
 end
 local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 function View:showRollerSettings(config)
-  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
-  self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
+  self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
   self.map_settings_visible=true; self:setColorMenuVisible(false); self.map_settings_error=nil; self:renderMapSettings(true); if self.layout then self:layoutMapSettings(self.layout) end; return true
 end
 function View:hideMapSettings() self.map_settings_visible=false; self.map_settings_draft=nil; self.map_settings_error=nil; if self.layout then self:layoutMapSettings(self.layout) end; return true end

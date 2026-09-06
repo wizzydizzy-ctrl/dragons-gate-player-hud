@@ -270,10 +270,21 @@ function Adapter:publishMap(data,done)
   return true
 end
 local function urlEncode(value) return tostring(value or ""):gsub("\n","%%0A"):gsub("([^%w%-_%.~%%])",function(char) return string.format("%%%02X",string.byte(char)) end) end
-function Adapter:openFeedback(title,body)
-  local url="https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/issues/new?template=feedback.yml"
-  if title or body then url=url.."&title="..urlEncode(title).."&body="..urlEncode(body) end
-  if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
+function Adapter:submitFeedback(entry,done)
+  if type(entry)~="table" then return nil,"feedback is required" end; if type(done)~="function" then return nil,"feedback callback is required" end
+  local kind=entry.kind=="request" and "request" or entry.kind=="feedback" and "feedback" or nil; if not kind then return nil,"feedback type is invalid" end
+  local summary=tostring(entry.summary or ""):match("^%s*(.-)%s*$"); local details=tostring(entry.details or ""):match("^%s*(.-)%s*$")
+  if #summary<3 or #summary>200 then return nil,"summary must be 3-200 characters" end; if #details<10 or #details>10000 then return nil,"description must be 10-10000 characters" end
+  if summary:find("[%z\1-\8\11\12\14-\31]") or details:find("[%z\1-\8\11\12\14-\31]") then return nil,"feedback contains unsupported characters" end
+  if type(postHTTP)~="function" then return nil,"Mudlet HTTP upload support is unavailable" end
+  local request={component=kind=="request" and "feature_request" or "user_feedback",edition=tostring((DGHUD and DGHUD.settings and DGHUD.settings.edition) or "unknown"),version=tostring(self.settings and self.settings.version or (DGHUD and DGHUD.settings and DGHUD.settings.version) or "unknown"),mudlet_version=tostring((self.mudletVersion and self:mudletVersion()) or "unknown"),message=summary,details="Type: "..kind.."\nDescription:\n"..details}
+  local ok,payload=pcall(yajl.to_string,request); if not ok or type(payload)~="string" then return nil,"could not encode feedback" end; if #payload>16000 then return nil,"feedback exceeds the safety limit" end
+  local url="https://dghud-maps.wallfamilyarchive.com/v1/diagnostics"; local ids={}; local timer; local finished=false
+  local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end end
+  local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
+  ids[#ids+1]=registerAnonymousEventHandler("sysPostHttpDone",function(_,actual,body) if actual~=url then return end; local parsed,value=pcall(yajl.to_value,body or ""); if not parsed or type(value)~="table" or value.ok~=true then return finish(nil,type(value)=="table" and value.error or "feedback service returned an invalid response") end; finish(value) end)
+  ids[#ids+1]=registerAnonymousEventHandler("sysPostHttpError",function(_,message,actual) if actual==url then finish(nil,message or "feedback upload failed") end end)
+  timer=tempTimer(30,function() timer=nil; finish(nil,"feedback upload timed out") end); local queued,err=postHTTP(payload,url,{["Content-Type"]="application/json",["Accept"]="application/json"}); if queued==false then cleanup(); return nil,err or "Mudlet could not start the feedback upload" end; return true
 end
 function Adapter:reportMapTransfer(message,isError)
   local color=isError and "red" or "gold"; cecho("\n<"..color..">[DGHUD Maps]<reset> "..tostring(message).."\n"); return true
