@@ -182,6 +182,13 @@ local help_entries={
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
   {command="dghud chatstatus",description="Show chat capture, filter, and storage status."},
   {command="dghud mapstatus",description="Show mapper, walking, and latest-error status."},
+  {command="OPTIONS → MAP LIBRARY…",description="Browse credited maps, export your map, review an import, or prepare an editable stash for publication."},
+  {command="dghud map export <name> <github-name>",description="Export all DGHUD-owned canonical rooms as your credited JSON stash."},
+  {command="dghud map folder",description="Open the local export/import folder."},
+  {command="dghud map import <name>",description="Validate a downloaded map and preview canonical room-ID conflicts without changing the map."},
+  {command="dghud map import area <area> keep|replace|skip",description="Choose the conflict policy for one imported area."},
+  {command="dghud map import room <number> keep|replace|skip",description="Override the choice for one canonical room number."},
+  {command="dghud map import confirm|cancel",description="Apply the exact reviewed import transaction or discard its preview."},
   {command="dghud mapper [on|off|toggle|status]",description="Show or hide the mapper and enable or pause automatic mapping without deleting saved rooms."},
   {command="walkto <room number>",description="Walk to a known mapped room."},
   {command="walkstop",description="Stop the current automatic walk."},
@@ -204,6 +211,28 @@ function View.helpContent(entries,t,layout)
     lines[#lines+1]="<span style='color:"..commandColor..";font-size:"..font.."px'><b>"..safeText(entry.command).."</b></span><br><span style='color:"..t.text..";font-size:"..font.."px'>"..safeText(entry.description).."</span>"
   end
   return table.concat(lines,"<br><br>")
+end
+function View.mapImportConflictModel(conflicts,choices)
+  local allowed={keep_mine=true,use_imported=true,skip_area=true}; local rows={}
+  for index,item in ipairs(type(conflicts)=="table" and conflicts or {}) do
+    local choice=type(choices)=="table" and choices[index] or nil
+    rows[#rows+1]={area=tostring(item.area or "Unknown area"),local_rooms=tonumber(item.local_rooms) or 0,imported_rooms=tonumber(item.imported_rooms) or 0,choice=allowed[choice] and choice or "skip_area"}
+  end
+  return rows
+end
+function View.poiTags(points,zoom,maxWidth)
+  zoom=math.max(.1,tonumber(zoom) or 1); maxWidth=math.max(4,math.floor(tonumber(maxWidth) or 18)); local result={}; local occupied={}
+  table.sort(points or {},function(a,b) local ap,bp=tonumber(a.priority) or 0,tonumber(b.priority) or 0; if ap~=bp then return ap>bp end; return tostring(a.text or "")<tostring(b.text or "") end)
+  for _,point in ipairs(points or {}) do
+    local full=tostring(point.text or ""):match("^%s*(.-)%s*$"); local x,y=tonumber(point.x),tonumber(point.y)
+    if full~="" and x and y then
+      local limit=math.max(4,math.min(maxWidth,math.floor(maxWidth*math.min(1,zoom))))
+      local shown=#full>limit and full:sub(1,math.max(1,limit-1)).."…" or full
+      local key=math.floor(x*zoom+.5)..":"..math.floor(y*zoom+.5)
+      if not occupied[key] then occupied[key]=true; result[#result+1]={x=x,y=y,text=shown,tooltip=full,priority=tonumber(point.priority) or 0} end
+    end
+  end
+  return result
 end
 local function listViewportWidth(output,plannedWidth,override)
   local outer=tonumber(plannedWidth) or 1
@@ -235,8 +264,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local actionLabels={roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
+  self.option_action_order={"map_library","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local actionLabels={map_library="MAP LIBRARY…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -334,6 +363,18 @@ function View.new(settings)
   if self.help_close.setToolTip then pcall(self.help_close.setToolTip,self.help_close,"Close DGHUD command guide") end
   self.help_visible=false
   for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_close,self.help_output,self.help_content}) do widget:hide() end
+  self.map_library_overlay=label("DGHUD.MapLibrary.Overlay",self.root,"background:rgba(0,0,0,0.72);")
+  self.map_library_panel=Geyser.Container:new({name="DGHUD.MapLibrary.Panel",x=0,y=0,width=720,height=520},self.root)
+  self.map_library_bg=label("DGHUD.MapLibrary.Background",self.map_library_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
+  self.map_library_title=label("DGHUD.MapLibrary.Title",self.map_library_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
+  self.map_library_copy=label("DGHUD.MapLibrary.Copy",self.map_library_panel,"background:transparent;color:"..t.text..";")
+  self.map_library_close=label("DGHUD.MapLibrary.Close",self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:4px;color:"..t.text..";font-weight:700;")
+  self.map_library_actions={}; self.map_library_action_order={"browse","export","install","publish"}
+  local libraryLabels={browse="BROWSE LIBRARY",export="EXPORT MY MAP",install="IMPORT / INSTALL MAP",publish="PUBLISH MY STASH"}
+  for _,key in ipairs(self.map_library_action_order) do local button=label("DGHUD.MapLibrary.Action."..key,self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.jade..";font-weight:700;"); button.option_text=libraryLabels[key]; button:setClickCallback(function() if self.map_library_action_callback then return self.map_library_action_callback(key) end; return nil,"map library action is not connected" end); self.map_library_actions[key]=button end
+  self.map_library_close:setClickCallback(function() return self:hideMapLibrary() end); self.map_library_overlay:setClickCallback(function() return self:hideMapLibrary() end)
+  self.map_library_visible=false
+  for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
   return self
 end
 local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF"}
@@ -588,6 +629,7 @@ function View:applyLayout(layout)
   self:layoutColorMenu(layout)
   self:layoutHelp(layout)
   self:layoutRollerSettings(layout)
+  self:layoutMapLibrary(layout)
 end
 function View:layoutColorMenu(layout)
   if not self.color_menu_visible then
@@ -673,12 +715,31 @@ function View:setMapCenterCallback(callback) self.map_center_callback=type(callb
 function View:setColorToggleCallback(callback) self.color_toggle_callback=type(callback)=="function" and callback or nil; return true end
 function View:setColorOptionsCallback(callback) self.color_options_callback=type(callback)=="function" and callback or nil; return true end
 function View:setOptionsActionCallback(callback) self.options_action_callback=type(callback)=="function" and callback or nil; return true end
+function View:setMapLibraryActionCallback(callback) self.map_library_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setRollerSettingsCallback(callback) self.roller_settings_callback=type(callback)=="function" and callback or nil; return true end
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
+  if action=="map_library" then return self:showMapLibrary() end
   if action=="roller_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showRollerSettings(config) end; return config end; return nil,"autoroller settings are unavailable" end
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
+end
+function View:showMapLibrary()
+  self.map_library_visible=true; self:setColorMenuVisible(false); self:hideHelp(); self:hideRollerSettings(); if self.layout then self:layoutMapLibrary(self.layout) end; return true
+end
+function View:hideMapLibrary() self.map_library_visible=false; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
+function View:layoutMapLibrary(layout)
+  local widgets={self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_close}; for _,button in pairs(self.map_library_actions or {}) do widgets[#widgets+1]=button end
+  if not self.map_library_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
+  local width,height=math.max(1,tonumber(layout.window_width) or 1200),math.max(1,tonumber(layout.window_height) or 800); local margin=layout.mode=="compact" and 8 or 18
+  local panelWidth=math.min(760,math.max(1,width-margin*2)); local panelHeight=math.min(560,math.max(1,height-margin*2)); local x=math.floor((width-panelWidth)/2); local y=math.floor((height-panelHeight)/2); local font=math.max(10,math.min(15,(layout.body_font or 16)-2))
+  place(self.map_library_overlay,0,0,"100%","100%"); place(self.map_library_panel,x,y,panelWidth,panelHeight); place(self.map_library_bg,0,0,"100%","100%")
+  local closeWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); place(self.map_library_title,16,10,panelWidth-closeWidth-38,34); place(self.map_library_close,panelWidth-closeWidth-12,8,closeWidth,30)
+  self.map_library_title:echo(View.withFont("<b>MAP LIBRARY</b>",font+2)); self.map_library_close:echo(View.withFont("<center><b>× CLOSE</b></center>",font))
+  place(self.map_library_copy,18,54,panelWidth-36,math.max(72,math.floor(panelHeight*.25))); self.map_library_copy:echo(View.withFont("Browse credited public maps, export your DGHUD-owned map, import an editable local stash, or publish your changes under your own GitHub name.<br><br><span style='color:"..self.settings.theme.muted.."'>Canonical room-number conflicts require: <b>Keep Mine</b>, <b>Use Imported</b>, or <b>Skip Area</b>. Original creator/source attribution remains attached as derived-from metadata. Validation occurs before any map changes.</span>",font))
+  local top=math.max(142,math.floor(panelHeight*.36)); local gap=10; local columns=panelWidth>=500 and 2 or 1; local buttonWidth=columns==2 and (panelWidth-46)/2 or panelWidth-36; local buttonHeight=math.max(34,font+20)
+  for index,key in ipairs(self.map_library_action_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); local button=self.map_library_actions[key]; place(button,18+column*(buttonWidth+gap),top+row*(buttonHeight+gap),buttonWidth,buttonHeight); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
+  View.raiseCards(widgets); return true
 end
 function View:setColorMenuVisible(visible)
   self.color_menu_visible=visible==true

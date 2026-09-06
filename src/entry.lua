@@ -7,7 +7,7 @@ chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
 DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending}
-local moduleNames={"defaults","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_cleanup","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
+local moduleNames={"defaults","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_cleanup","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")

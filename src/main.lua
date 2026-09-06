@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local function colorOptions(status)
@@ -417,6 +417,43 @@ function Main:clearAllMapsAction()
   if self.view and self.view.setMapClearPending then self.view:setMapClearPending(preview~=nil) end
   return preview,err
 end
+function Main:mapTransferCreator()
+  local data=self.adapter:getGMCP(); local status=data and data.Char and data.Char.Status or {}; local name=tostring(status.name or "Unknown"); local surname=tostring(status.surname or "")
+  return (name..(surname~="" and (" "..surname) or "")):match("^%s*(.-)%s*$")
+end
+function Main:reportMapTransfer(message,isError) if self.adapter.reportMapTransfer then return self.adapter:reportMapTransfer(message,isError) end; return true end
+function Main:exportMapTransfer(name,publisher)
+  if not tostring(publisher or ""):match("^[%w][%w%-]*$") then local err="GitHub name must contain only letters, numbers, and dashes"; self:reportMapTransfer(err,true); return nil,err end
+  local stamp=self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time()); local data,err=self.map_transfer:exportData({artifact_id="local:"..stamp..":"..tostring(name),author=self:mapTransferCreator(),publisher=publisher,slug=name})
+  if not data then self:reportMapTransfer(err,true); return nil,err end
+  local path,saveErr=self.adapter:saveMapTransfer(name,data); if not path then self:reportMapTransfer(saveErr,true); return nil,saveErr end
+  self:reportMapTransfer("Exported "..#data.rooms.." canonical rooms to "..path.."\nPublisher: "..publisher.."  Creator: "..data.provenance.author.."\nUse 'dghud map publish' to open the contribution page.",false); return path
+end
+local function transferChoice(value) return ({keep="keep_mine",replace="use_imported",skip="skip_area"})[tostring(value or ""):lower()] end
+function Main:reportMapImportPlan(plan,name)
+  local lines={"Import preview for '"..tostring(name).."': "..plan.creates.." new, "..plan.conflicts.." conflicts, "..plan.keeps.." keep mine, "..plan.replaces.." use imported, "..plan.skips.." skipped."}
+  for _,area in ipairs(plan.areas) do lines[#lines+1]="Area "..area.name..": "..area.conflicts.." conflicts; policy "..tostring(area.policy):gsub("_"," ") end
+  if plan.blocked then lines[#lines+1]="Blocked: at least one canonical room ID belongs to a personal/non-DGHUD map." end
+  lines[#lines+1]="Adjust with: dghud map import area <area> keep|replace|skip"
+  lines[#lines+1]="Or: dghud map import room <number> keep|replace|skip"
+  lines[#lines+1]="Apply with: dghud map import confirm   Cancel with: dghud map import cancel"
+  self:reportMapTransfer(table.concat(lines,"\n"),plan.blocked); return plan
+end
+function Main:previewMapTransfer(name)
+  local data,err=self.adapter:loadMapTransfer(name); if not data then self:reportMapTransfer(err,true); return nil,err end
+  local policies={default="keep_mine",rooms={}}; local plan,previewErr=self.map_transfer:preview(data,policies); if not plan then self:reportMapTransfer(previewErr,true); return nil,previewErr end
+  self.pending_map_import={name=name,data=data,policies=policies,plan=plan}; return self:reportMapImportPlan(plan,name)
+end
+function Main:setMapImportPolicy(kind,target,choice)
+  local pending=self.pending_map_import; if not pending then return nil,"no map import preview is pending" end; local policy=transferChoice(choice); if not policy then return nil,"choice must be keep, replace, or skip" end
+  if kind=="room" then pending.policies.rooms[tonumber(target)]=policy else pending.policies[tostring(target)]=policy end
+  local plan,err=self.map_transfer:preview(pending.data,pending.policies); if not plan then self:reportMapTransfer(err,true); return nil,err end; pending.plan=plan; return self:reportMapImportPlan(plan,pending.name)
+end
+function Main:confirmMapTransfer()
+  local pending=self.pending_map_import; if not pending then return nil,"no map import preview is pending" end
+  local result,err=self.map_transfer:apply(pending.plan,self:mapTransferCreator()); if not result then self:reportMapTransfer(err,true); return nil,err end
+  self.pending_map_import=nil; self:reportMapTransfer("Imported editable stash: "..result.applied.." rooms applied, "..result.kept.." kept, "..result.skipped.." skipped. Original attribution retained as derived-from metadata.",false); return result
+end
 function Main:routeShape(fromID,toID,route)
   if type(route)~="table" then return nil,"invalid map route" end
   local commands=type(route.commands)=="table" and route.commands or route
@@ -477,6 +514,7 @@ function Main:start()
   if not mapOk then self:shutdown(); return nil,map end
   if not map then self:shutdown(); return nil,mapErr or "map adapter construction failed" end
   self.map=map
+  self.map_transfer=MapTransfer.new(self.map)
   if self.adapter.suppressDefaultMapInfo then
     local infoOk,infoResult,infoErr=pcall(self.adapter.suppressDefaultMapInfo,self.adapter)
     if not infoOk then self:mapperStatus("warning","Map information cleanup failed: "..tostring(infoResult),true)
@@ -545,6 +583,13 @@ function Main:start()
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
+  if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action)
+    if action=="browse" then return self.adapter:openMapLibrary()
+    elseif action=="export" then self:reportMapTransfer("Export with: dghud map export <map-name> <github-name>",false); return self.adapter:openMapTransferFolder()
+    elseif action=="install" then self:reportMapTransfer("Download a JSON map from the library into the maps folder, then run: dghud map import <map-name>",false); return self.adapter:openMapTransferFolder()
+    elseif action=="publish" then self.adapter:openMapTransferFolder(); return self.adapter:openMapLibrary("publish") end
+    return nil,"unknown map library action"
+  end) end
   if self.view.setRollerSettingsCallback then self.view:setRollerSettingsCallback(function(values) local ok,err=self.roller:configure(values); if not ok then return nil,err end; return true,nil,self.roller.cfg end) end
   if self.view.setMapZoomCallback then self.view:setMapZoomCallback(function(action) return self:mapToolbarAction(action) end) end
   if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() return self:clearAllMapsAction() end) end
@@ -607,6 +652,17 @@ function Main:start()
     {"^dghud map cancel$",function() local ok,err=self.cleanup:cancel(); self.clear_all_armed_at=nil; if self.view and self.view.setMapClearPending then self.view:setMapClearPending(false) end; if not ok then self:reportCleanup(err,true); return nil,err end; self:reportCleanup("Cleanup preview cancelled.",false); return true end},
   }
   for _,entry in ipairs(cleanupAliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(entry[1],entry[2]) end
+  local transferAliases={
+    {"^dghud map library$",function() return self.adapter:openMapLibrary() end},
+    {"^dghud map folder$",function() local path=self.adapter:openMapTransferFolder(); self:reportMapTransfer("Map folder: "..tostring(path),false); return path end},
+    {"^dghud map export ([%w_-]+) ([%w-]+)$",function(value) local first,second;if type(value)=="table" then first,second=value[2],value[3] elseif type(_G.matches)=="table" then first,second=_G.matches[2],_G.matches[3] end; return self:exportMapTransfer(first,second) end},
+    {"^dghud map import ([%w_-]+)$",function(value) return self:previewMapTransfer(aliasArgument(value)) end},
+    {"^dghud map import area (.+) (keep|replace|skip)$",function(value) local area,choice;if type(value)=="table" then area,choice=value[2],value[3] elseif type(_G.matches)=="table" then area,choice=_G.matches[2],_G.matches[3] end; return self:setMapImportPolicy("area",area,choice) end},
+    {"^dghud map import room (\\d+) (keep|replace|skip)$",function(value) local room,choice;if type(value)=="table" then room,choice=value[2],value[3] elseif type(_G.matches)=="table" then room,choice=_G.matches[2],_G.matches[3] end; return self:setMapImportPolicy("room",room,choice) end},
+    {"^dghud map import confirm$",function() return self:confirmMapTransfer() end},
+    {"^dghud map import cancel$",function() self.pending_map_import=nil; self:reportMapTransfer("Import preview cancelled.",false); return true end},
+  }
+  for _,entry in ipairs(transferAliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(entry[1],entry[2]) end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud colors(?: (.*))?$",function(value)
     local action=tostring(aliasArgument(value) or "toggle"):lower():match("^%s*(.-)%s*$"); local enabled,err
     local feature,featureAction=action:match("^(%a+)%s+(%a+)$")
@@ -658,7 +714,7 @@ end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
-  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+12) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
+  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+20) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
   local ok=pcall(function() self:refresh() end); if not ok then return nil,"state refresh failed" end; return true
 end
 return Main

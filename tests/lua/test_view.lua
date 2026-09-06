@@ -284,6 +284,30 @@ test("options menu exposes every autoroller command and settings action",functio
   view.option_action_buttons.roller_start.click(); eq(calls[#calls],"roller_start")
   view.color_toggle.click(); view.option_action_buttons.roller_settings.click(); eq(view.roller_settings_visible,true); eq(view.roller_fields.target_total.input.text,"53")
 end)
+test("options opens a responsive map library presentation without controller wiring",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
+  eq(view.option_action_buttons.map_library.visible,true); assert(view.option_action_buttons.map_library.click()); eq(view.map_library_visible,true); eq(view.color_menu_visible,false)
+  for _,size in ipairs({{320,260},{760,700},{1200,800},{1920,1080}}) do
+    local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
+    eq(view.map_library_panel.x>=0,true); eq(view.map_library_panel.y>=0,true); eq(view.map_library_panel.x+view.map_library_panel.width<=size[1],true); eq(view.map_library_panel.y+view.map_library_panel.height<=size[2],true)
+    for _,key in ipairs(view.map_library_action_order) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true) end
+  end
+  view.map_library_close.click(); eq(view.map_library_visible,false); eq(view.map_library_panel.visible,false)
+end)
+test("map library actions are explicit presentation callbacks",function()
+  local view=chatView(); local selected; view:setMapLibraryActionCallback(function(action) selected=action; return true end); view:applyLayout(require("layout").compute(1000,700)); view:showMapLibrary()
+  for _,key in ipairs({"browse","export","install","publish"}) do selected=nil; assert(view.map_library_actions[key].click()); eq(selected,key) end
+end)
+test("map import conflict review defaults safely and accepts only known choices",function()
+  local rows=View.mapImportConflictModel({{area="Spur",local_rooms=12,imported_rooms=15},{area="Temple",local_rooms=4,imported_rooms=7}}, {[1]="keep_mine",[2]="use_imported"})
+  eq(rows[1].choice,"keep_mine"); eq(rows[2].choice,"use_imported"); eq(rows[1].area,"Spur")
+  local safe=View.mapImportConflictModel({{area="Unknown",local_rooms="bad"}}, {[1]="delete_everything"}); eq(safe[1].choice,"skip_area"); eq(safe[1].local_rooms,0)
+end)
+test("zoom-aware POI tags truncate suppress overlap and retain full tooltips",function()
+  local points={{x=1,y=1,text="Ancient Temple",priority=1},{x=1.1,y=1.1,text="Shop",priority=9},{x=9,y=3,text="North Gate",priority=2}}
+  local tags=View.poiTags(points,.5,10); eq(#tags,2); eq(tags[1].text,"Shop"); eq(tags[1].tooltip,"Shop"); eq(tags[2].text,"Nort…"); eq(tags[2].tooltip,"North Gate")
+  local zoomed=View.poiTags({{x=2,y=2,text="Ancient Temple"}},2,10); eq(zoomed[1].text,"Ancient T…"); eq(zoomed[1].tooltip,"Ancient Temple")
+end)
 
 test("autoroller settings modal validates through one save callback and remains bounded",function()
   local view=chatView(); local received; view:setRollerSettingsCallback(function(values) received=values; if values.target_total=="bad" then return nil,"bad target" end; return true end)

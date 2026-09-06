@@ -62,6 +62,12 @@ local function normalizeCommand(value)
   return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
+local function splitSorted(value)
+  local out,seen={},{}
+  for item in tostring(value or ""):gmatch("[^,]+") do local clean=item:match("^%s*(.-)%s*$"); if clean~="" and not seen[clean] then seen[clean]=true; out[#out+1]=clean end end
+  table.sort(out); return out
+end
+
 local function specialDestination(exits,command)
   for destination,commands in pairs(exits or {}) do
     if type(commands)=="table" and commands[command]~=nil then return destination end
@@ -93,6 +99,71 @@ function MapAdapter:isOwned(id)
   local owner=read(self.api,"getRoomUserData",id,"dghud.owner")
   return owner==self.owner
 end
+
+function MapAdapter:listRooms()
+  local rooms,roomsErr=read(self.api,"getRooms"); if rooms==nil then return nil,roomsErr end
+  if type(rooms)~="table" then return nil,"Mudlet mapper API getRooms returned invalid data" end
+  local ids={}
+  for key in pairs(rooms) do
+    local id=type(key)=="number" and positiveInteger(key) or nil; if not id then return nil,"Mudlet mapper API getRooms returned invalid data" end
+    local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end
+    if owner==self.owner then ids[#ids+1]=id end
+  end
+  table.sort(ids); return ids
+end
+
+function MapAdapter:getRoom(roomID)
+  local id=positiveInteger(roomID); if not id then return nil,"room ID must be a positive integer" end
+  local exists,existsErr=read(self.api,"roomExists",id); if exists==nil then return nil,existsErr end; if not exists then return nil end
+  local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end
+  if owner~=self.owner then return {id=id,owner=tostring(owner or "")~="" and tostring(owner) or "personal"} end
+  local record,recordErr=self:roomRecord(id); if not record then return nil,recordErr end
+  local exits,exitsErr=read(self.api,"getRoomExits",id); if exits==nil then return nil,exitsErr end; if type(exits)~="table" then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
+  local special,specialErr=read(self.api,"getSpecialExits",id,true); if special==nil then return nil,specialErr end; if type(special)~="table" then return nil,"Mudlet mapper API getSpecialExits returned invalid data" end
+  local ordinary={}; for direction,to in pairs(exits) do if positiveInteger(to) then ordinary[#ordinary+1]={direction=tostring(direction):lower(),to=positiveInteger(to)} end end
+  table.sort(ordinary,function(a,b) return a.direction==b.direction and a.to<b.to or a.direction<b.direction end)
+  local specialList={}; for destination,commands in pairs(special) do local to=positiveInteger(destination); if not to or type(commands)~="table" then return nil,"Mudlet mapper API getSpecialExits returned invalid data" end; for command in pairs(commands) do specialList[#specialList+1]={command=normalizeCommand(command):lower(),to=to} end end
+  table.sort(specialList,function(a,b) return a.command==b.command and a.to<b.to or a.command<b.command end)
+  local function metadata(key) local value,valueErr=read(self.api,"getRoomUserData",id,key); if value==nil and valueErr~=nil then return nil,valueErr end; return tostring(value or "") end
+  local roomName,roomNameErr=metadata("dghud.room_name"); if roomName==nil then return nil,roomNameErr end
+  local poi,poiErr=metadata("dghud.poi_tags"); if poi==nil then return nil,poiErr end
+  local stash,stashErr=metadata("dghud.stash_owner"); if stash==nil then return nil,stashErr end
+  local artifact,artifactErr=metadata("dghud.derived_from_artifact"); if artifact==nil then return nil,artifactErr end
+  local author,authorErr=metadata("dghud.derived_from_author"); if author==nil then return nil,authorErr end
+  local publisher,publisherErr=metadata("dghud.derived_from_publisher"); if publisher==nil then return nil,publisherErr end
+  local slug,slugErr=metadata("dghud.derived_from_slug"); if slug==nil then return nil,slugErr end
+  return {id=id,owner=self.owner,area=tostring(record.game_area or "unknown"),partition=tostring(record.partition or record.game_area or "unknown"),x=record.coordinates.x,y=record.coordinates.y,z=record.coordinates.z,name=roomName,environment=tostring(record.environment or ""),flags=splitSorted(record.flags),poi=splitSorted(poi),exits=ordinary,special_exits=specialList,stash_owner=stash~="" and stash or nil,derived_from=artifact~="" and {artifact_id=artifact,author=author,publisher=publisher,slug=slug,verified=false} or nil,read_only=record.read_only==true}
+end
+
+function MapAdapter:putRoom(room)
+  if type(room)~="table" then return nil,"room transfer record is required" end
+  local id=positiveInteger(room.id); if not id then return nil,"room ID must be a positive integer" end
+  local exists,existsErr=read(self.api,"roomExists",id); if exists==nil then return nil,existsErr end
+  if exists then local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end; if owner~=self.owner then return nil,"room "..id.." belongs to another mapper" end end
+  local partition=tostring(room.partition or room.area or "unknown"); local area,areaErr=self:ensureArea(partition); if not area then return nil,areaErr end
+  if not exists then local added,addErr=invoke(self.api,"addRoom",id); if not added then return nil,addErr end end
+  local operations={{"setRoomUserData",id,"dghud.owner",self.owner},{"setRoomUserData",id,"dghud.state","provisional"},{"setRoomUserData",id,"dghud.mapper_schema",self.schema},{"setRoomUserData",id,"dghud.environment",tostring(room.environment or "")},{"setRoomUserData",id,"dghud.flags",table.concat(room.flags or {},",")},{"setRoomUserData",id,"dghud.room_name",tostring(room.name or "")},{"setRoomUserData",id,"dghud.partition",partition},{"setRoomUserData",id,"dghud.game_area",tostring(room.area or "unknown")},{"setRoomUserData",id,"dghud.poi_tags",table.concat(room.poi or {},",")},{"setRoomUserData",id,"dghud.stash_owner",tostring(room.stash_owner or "")},{"setRoomUserData",id,"dghud.derived_from_artifact",tostring(room.derived_from and room.derived_from.artifact_id or "")},{"setRoomUserData",id,"dghud.derived_from_author",tostring(room.derived_from and room.derived_from.author or "")},{"setRoomUserData",id,"dghud.derived_from_publisher",tostring(room.derived_from and room.derived_from.publisher or "")},{"setRoomUserData",id,"dghud.derived_from_slug",tostring(room.derived_from and room.derived_from.slug or "")},{"setRoomUserData",id,"dghud.derived_from_verified","false"},{"setRoomUserData",id,"dghud.library_readonly",room.read_only and "true" or "false"},{"setRoomArea",id,area},{"setRoomCoordinates",id,tonumber(room.x) or 0,tonumber(room.y) or 0,tonumber(room.z) or 0},{"setRoomName",id,""}}
+  for _,operation in ipairs(operations) do local ok,operationErr=invoke(self.api,unpackValues(operation)); if not ok then return nil,operationErr end end
+  local wanted={}; for _,entry in ipairs(room.exits or {}) do wanted[tostring(entry.direction):lower()]=positiveInteger(entry.to) end
+  local current,currentErr=read(self.api,"getRoomExits",id); if current==nil then return nil,currentErr end
+  for direction in pairs(current) do if wanted[tostring(direction):lower()]==nil then local removed,removeErr=invoke(self.api,"setExit",id,-1,direction); if not removed then return nil,removeErr end end end
+  for direction,to in pairs(wanted) do local linked,linkErr=invoke(self.api,"setExit",id,to,direction); if not linked then return nil,linkErr end end
+  local oldSpecial,oldSpecialErr=read(self.api,"getSpecialExits",id,true); if oldSpecial==nil then return nil,oldSpecialErr end
+  for _,commands in pairs(oldSpecial) do for command in pairs(commands or {}) do local removed,removeErr=invoke(self.api,"removeSpecialExit",id,command); if not removed then return nil,removeErr end end end
+  for _,entry in ipairs(room.special_exits or {}) do local linked,linkErr=invoke(self.api,"addSpecialExit",id,entry.to,entry.command); if not linked then return nil,linkErr end end
+  local ready,readyErr=invoke(self.api,"setRoomUserData",id,"dghud.state","ready"); if not ready then return nil,readyErr end
+  return true
+end
+
+function MapAdapter:deleteTransferRoom(roomID)
+  local id=positiveInteger(roomID); if not id then return nil,"room ID must be a positive integer" end
+  local exists,existsErr=read(self.api,"roomExists",id); if exists==nil then return nil,existsErr end; if not exists then return true end
+  local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end
+  if owner~=self.owner then return nil,"room "..id.." belongs to another mapper" end
+  return invoke(self.api,"deleteRoom",id)
+end
+
+function MapAdapter:deleteRoom(roomID) return self:deleteTransferRoom(roomID) end
 
 function MapAdapter:clearOwnedRoomNames()
   local rooms,roomsErr=read(self.api,"getRooms")
@@ -734,7 +805,7 @@ end
 function MapAdapter.mudletApi(globals)
   globals=globals or _G
   local api={}
-  local names={"addRoom","deleteRoom","addAreaName","deleteArea","getAreaTable","getAreaRooms1","getMapLabels","setAreaUserData","getAreaUserData","setRoomArea","getRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","getRoomUserData","setExitStub","setExit","getRoomExits","addSpecialExit","getSpecialExits","getRoomCoordinates","getRooms","getRoomsByPosition","getAllMapUserData","setMapUserData","getMapZoom","setMapZoom","setRoomIDbyHash","centerview","updateMap","tempTimer"}
+  local names={"addRoom","deleteRoom","addAreaName","deleteArea","getAreaTable","getAreaRooms1","getMapLabels","setAreaUserData","getAreaUserData","setRoomArea","getRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","getRoomUserData","setExitStub","setExit","getRoomExits","addSpecialExit","removeSpecialExit","getSpecialExits","getRoomCoordinates","getRooms","getRoomsByPosition","getAllMapUserData","setMapUserData","getMapZoom","setMapZoom","setRoomIDbyHash","centerview","updateMap","tempTimer"}
   local function wrapper(name)
     return function(...)
       local fn=globals[name]
@@ -745,7 +816,7 @@ function MapAdapter.mudletApi(globals)
       return a,b,c
     end
   end
-  local mutations={addRoom=true,deleteRoom=true,addAreaName=true,deleteArea=true,setAreaUserData=true,setRoomArea=true,setRoomName=true,setRoomCoordinates=true,setRoomUserData=true,setExitStub=true,setExit=true,addSpecialExit=true,setMapUserData=true,setMapZoom=true,setRoomIDbyHash=true,centerview=true,updateMap=true,tempTimer=true}
+  local mutations={addRoom=true,deleteRoom=true,addAreaName=true,deleteArea=true,setAreaUserData=true,setRoomArea=true,setRoomName=true,setRoomCoordinates=true,setRoomUserData=true,setExitStub=true,setExit=true,addSpecialExit=true,removeSpecialExit=true,setMapUserData=true,setMapZoom=true,setRoomIDbyHash=true,centerview=true,updateMap=true,tempTimer=true}
   for _,name in ipairs(names) do
     if mutations[name] then
       api[name]=wrapper(name)

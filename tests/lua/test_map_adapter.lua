@@ -37,7 +37,7 @@ local function fakeMapApi(seed)
     return value==nil and "" or value
   end
   function api.setExitStub(id,d) local ok,e=gate("setExitStub"); if not ok then return nil,e end; api.rooms[id].stubs[d]=true; return true end
-  function api.setExit(id,to,d) local ok,e=gate("setExit"); if not ok then return nil,e end; api.rooms[id].exits[d]=to; return true end
+  function api.setExit(id,to,d) local ok,e=gate("setExit"); if not ok then return nil,e end; if tonumber(to) and tonumber(to)<1 then api.rooms[id].exits[d]=nil else api.rooms[id].exits[d]=to end; return true end
   function api.getRoomExits(id)
     local ok,e=gate("getRoomExits"); if not ok then return nil,e end
     local out={}; for direction,to in pairs((api.rooms[id] and api.rooms[id].exits) or {}) do out[direction]=to end; return out
@@ -46,6 +46,7 @@ local function fakeMapApi(seed)
     local ok,e=gate("addSpecialExit"); if not ok then return nil,e end
     api.special[from]=api.special[from] or {}; api.special[from][command]=to; api.specialAdds=api.specialAdds+1; return true
   end
+  function api.removeSpecialExit(from,command) local ok,e=gate("removeSpecialExit"); if not ok then return nil,e end; if api.special[from] then api.special[from][command]=nil end; return true end
   function api.getSpecialExits(from,listAll)
     local ok,e=gate("getSpecialExits"); if not ok then return nil,e end
     eq(listAll,true)
@@ -82,6 +83,35 @@ test("creates a fully tagged room and finalizes readiness last",function()
   local r=api.rooms[176]; eq(r.name,""); eq(r.user["dghud.owner"],"DragonsGateHUD"); eq(calls[#calls],"dghud.state"); eq(r.user["dghud.state"],"ready")
   eq(r.user["dghud.mapper_schema"],"1"); eq(r.user["dghud.environment"],"Plain"); eq(r.user["dghud.flags"],"indoor")
   eq(r.x,0); eq(r.y,1); eq(r.z,2); eq(api.areaUser[r.area]["dghud.owner"],"DragonsGateHUD")
+end)
+
+test("transfer backend lists only owned canonical rooms and snapshots complete state",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); local source=descriptor(10,"A","Market"); source.flags={"safe","shop"}
+  assert(map:ensureRoom(source,{x=2,y=3,z=1},"A")); assert(map:ensureRoom(descriptor(11,"A","North"),{x=2,y=4,z=1},"A")); assert(map:connect(10,11,"n",false)); assert(map:connectSpecial(10,11,"go arch"))
+  api.rooms[99]={name="Personal",area=7,x=9,y=9,z=0,user={},exits={},stubs={}}
+  assert(api.setRoomUserData(10,"dghud.poi_tags","bank,trainer")); assert(api.setRoomUserData(10,"dghud.stash_owner","Deklan")); assert(api.setRoomUserData(10,"dghud.derived_from_artifact","sha256:abc")); assert(api.setRoomUserData(10,"dghud.derived_from_author","Gia"))
+  local ids=assert(map:listRooms()); eq(table.concat(ids,","),"10,11")
+  local room=assert(map:getRoom(10)); eq(room.id,10); eq(room.area,"A"); eq(room.partition,"A"); eq(room.x,2); eq(room.y,3); eq(room.z,1); eq(room.name,"Market"); eq(table.concat(room.flags,","),"safe,shop"); eq(table.concat(room.poi,","),"bank,trainer"); eq(room.exits[1].direction,"n"); eq(room.exits[1].to,11); eq(room.special_exits[1].command,"go arch"); eq(room.stash_owner,"Deklan"); eq(room.derived_from.author,"Gia")
+  eq(assert(map:getRoom(99)).owner,"personal")
+end)
+
+test("transfer put replaces a whole owned room and removes stale exits",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); assert(map:ensureRoom(descriptor(20,"Old","Old"),{x=8,y=8,z=2},"Old")); assert(map:ensureRoom(descriptor(21,"Old","Peer"),{},"Old")); assert(map:connect(20,21,"n",false)); assert(map:connectSpecial(20,21,"old door"))
+  local replacement={id=20,area="New",partition="special:20",x=1,y=2,z=3,name="Imported",environment="City",flags={"safe"},poi={"bank"},exits={{direction="e",to=21}},special_exits={{command="go arch",to=21}},stash_owner="Deklan",derived_from={artifact_id="sha256:new",author="Gia",verified=false},read_only=false}
+  assert(map:putRoom(replacement)); local saved=assert(map:getRoom(20)); eq(saved.area,"New"); eq(saved.partition,"special:20"); eq(saved.x,1); eq(saved.name,"Imported"); eq(saved.exits[1].direction,"e"); eq(#saved.exits,1); eq(saved.special_exits[1].command,"go arch"); eq(#saved.special_exits,1); eq(saved.poi[1],"bank"); eq(saved.stash_owner,"Deklan")
+end)
+
+test("transfer backend refuses writes and deletes against personal rooms",function()
+  local personal={name="Personal",area=9,x=4,y=5,z=0,user={},exits={},stubs={}}; local api=fakeMapApi({[30]=personal}); local map=Adapter.new(api)
+  local record={id=30,area="A",partition="A",x=0,y=0,z=0,name="Bad",environment="",flags={},poi={},exits={},special_exits={}}
+  local ok,err=map:putRoom(record); eq(ok,nil); assert(err:find("another mapper",1,true)); ok,err=map:deleteRoom(30); eq(ok,nil); assert(err:find("another mapper",1,true)); eq(api.rooms[30],personal)
+end)
+
+test("transfer whole-room restore repairs partial failed replacement",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); assert(map:ensureRoom(descriptor(40,"A","Original"),{x=7,y=6,z=1},"A")); assert(map:ensureRoom(descriptor(41,"A","Peer"),{},"A")); assert(map:connect(40,41,"n",false)); assert(map:connectSpecial(40,41,"old gate")); local snapshot=assert(map:getRoom(40))
+  local replacement={id=40,area="B",partition="B",x=0,y=0,z=0,name="Replacement",environment="Dark",flags={},poi={},exits={{direction="e",to=41}},special_exits={{command="new gate",to=41}}}
+  api.fail.addSpecialExit=true; local ok,err=map:putRoom(replacement); eq(ok,nil); eq(err,"addSpecialExit rejected"); api.fail.addSpecialExit=nil
+  assert(map:putRoom(snapshot)); local restored=assert(map:getRoom(40)); eq(restored.area,snapshot.area); eq(restored.partition,snapshot.partition); eq(restored.x,snapshot.x); eq(restored.y,snapshot.y); eq(restored.z,snapshot.z); eq(restored.name,snapshot.name); eq(restored.exits[1].direction,"n"); eq(#restored.exits,1); eq(restored.special_exits[1].command,"old gate"); eq(#restored.special_exits,1)
 end)
 
 test("HUD rooms keep native mapper labels blank while preserving descriptive metadata",function()
