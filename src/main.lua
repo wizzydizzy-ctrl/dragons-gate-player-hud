@@ -56,8 +56,13 @@ function Main:switchMapCollection(id)
   local target=self.map_collections and self.map_collections:get(id); if not target then return nil,"map collection does not exist" end
   local current=self.map_collections:active(); if current and current.id==target.id then return target end
   local saved,saveErr=self:saveActiveMapCollection(); if not saved then return nil,"current map could not be saved: "..tostring(saveErr) end
-  local loaded,loadErr=self.adapter:loadMapCollection(target.id); if not loaded then if current then self.adapter:loadMapCollection(current.id) end; self:captureFailure("map_collection",loadErr,{operation="switch",collection=target.id}); return nil,loadErr end
-  self.map_collections:setActive(target.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:loadMapCollection(current.id); self.map_collections:setActive(current.id); return nil,indexErr end
+  local function restore(message)
+    local restored,restoreErr=current and self.adapter:loadMapCollection(current.id); self.map_collections:setActive(current and current.id or nil)
+    if current and not restored then self.map_collection_unsafe=true; message=tostring(message).."; CRITICAL: previous map restore failed: "..tostring(restoreErr) end
+    return nil,message
+  end
+  local loaded,loadErr=self.adapter:loadMapCollection(target.id); if not loaded then self:captureFailure("map_collection",loadErr,{operation="switch",collection=target.id}); return restore(loadErr) end
+  self.map_collections:setActive(target.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then return restore(indexErr) end
   if self.automapper then self.automapper:onDisconnect(); local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info; if info then self.automapper:onRoom(info) end end
   self:refresh(); return self.map_collections:active()
 end
@@ -690,6 +695,7 @@ function Main:start()
   self.map_transfer=MapTransfer.new(self.map)
   local collectionsOK,collectionsErr=self:initializeMapCollections()
   if not collectionsOK then self:captureFailure("map_collection",collectionsErr,{operation="initialize"}); self:shutdown(); return nil,collectionsErr end
+  self.map_collection_unsafe=false
   if self.adapter.suppressDefaultMapInfo then
     local infoOk,infoResult,infoErr=pcall(self.adapter.suppressDefaultMapInfo,self.adapter)
     if not infoOk then self:mapperStatus("warning","Map information cleanup failed: "..tostring(infoResult),true)
@@ -940,7 +946,7 @@ function Main:start()
   return true
 end
 function Main:shutdown()
-  if self.started and self.map_collections then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
+  if self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
   if self.clock_timer then
     if type(self.adapter.stopClockTimer)=="function" then self.adapter:stopClockTimer(self.clock_timer) else self.adapter:cancelTimer(self.clock_timer) end
     self.clock_timer=nil

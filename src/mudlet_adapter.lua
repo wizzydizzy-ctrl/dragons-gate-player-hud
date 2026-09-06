@@ -190,8 +190,11 @@ function Adapter:saveMapCollectionIndex(index)
   local ok,payload=pcall(yajl.to_string,index); if not ok or type(payload)~="string" then return nil,"could not encode map collection index" end
   local path=directory.."/collections.json"; local temporary=path..".tmp"; local file,openErr=io.open(temporary,"wb"); if not file then return nil,tostring(openErr) end
   local wrote,writeErr=file:write(payload.."\n"); if not wrote then file:close(); os.remove(temporary); return nil,tostring(writeErr) end; file:close()
-  local backup=path..".bak"; os.remove(backup); if lfs.attributes(path,"mode")=="file" then os.rename(path,backup) end
-  local installed,installErr=os.rename(temporary,path); if not installed then if lfs.attributes(backup,"mode")=="file" then os.rename(backup,path) end; return nil,tostring(installErr) end
+  local function valid(candidate) local input=io.open(candidate,"rb"); if not input then return false end; local raw=input:read("*a"); input:close(); local parsed,value=pcall(yajl.to_value,raw); return parsed and type(value)=="table" end
+  local backup=path..".bak"; local previous=path..".previous"; os.remove(previous); local hadPrimary=lfs.attributes(path,"mode")=="file"; local primaryValid=hadPrimary and valid(path)
+  if hadPrimary then local moved,moveErr=os.rename(path,previous); if not moved then os.remove(temporary); return nil,tostring(moveErr) end end
+  local installed,installErr=os.rename(temporary,path); if not installed then if hadPrimary then os.rename(previous,path) end; return nil,tostring(installErr) end
+  if primaryValid then os.remove(backup); local preserved,preserveErr=os.rename(previous,backup); if not preserved then return nil,"new index installed but previous index backup failed: "..tostring(preserveErr) end else os.remove(previous) end
   return true
 end
 function Adapter:loadMapCollectionIndex()
