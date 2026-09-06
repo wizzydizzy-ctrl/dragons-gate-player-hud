@@ -484,6 +484,13 @@ test("individual deletion accepts only a persisted HUD-owned room",function()
   eq(ok,nil); eq(e,"room 101 is not owned by DragonsGateHUD"); eq(api.rooms[101]~=nil,true); eq(#api.deletedRooms,1)
 end)
 
+test("legacy DGHUD areas tolerate Mudlet missing-key errors when every room is owned",function()
+  local api=fakeMapApi({[100]={area=1,user={['dghud.owner']='DragonsGateHUD'},exits={},stubs={}}})
+  api.areas['Dragons Gate - 1']=1; api.areaUser[1]={}
+  function api.getAreaUserData(id,key) return nil,"no user data with key '"..key.."' in areaID "..id end
+  local record=assert(Adapter.new(api):areaRecord(1)); eq(record.owned,true); eq(record.owner,'DragonsGateHUD')
+end)
+
 test("individual deletion rechecks persisted ownership immediately before mutation",function()
   local api=fakeMapApi(); local map=Adapter.new(api)
   assert(map:ensureRoom(descriptor(100,"A"),{x=0,y=0,z=0}))

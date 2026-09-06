@@ -46,6 +46,11 @@ local function optionalRoomUserData(api,roomID,key)
   return tostring(value)
 end
 
+local function absentUserData(errorMessage)
+  local message=tostring(errorMessage or ""):lower()
+  return message:find("no user data with key",1,true)~=nil or message:find("user data key does not exist",1,true)~=nil
+end
+
 local function positiveInteger(value)
   local number=tonumber(value)
   if not number or number~=number or number==math.huge or number==-math.huge or number<=0 or number%1~=0 then return nil end
@@ -307,7 +312,17 @@ function MapAdapter:areaRecord(areaID)
   for _,id in pairs(areas) do if positiveInteger(id)==area then exists=true; break end end
   if not exists then return nil,"mapper area "..tostring(area).." does not exist" end
   local owner,ownerErr=read(self.api,"getAreaUserData",area,"dghud.owner")
-  if owner==nil and ownerErr~=nil then return nil,ownerErr end
+  if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
+  if owner==nil then
+    local legacyName=false
+    for name,id in pairs(areas) do if positiveInteger(id)==area and tostring(name):match("^Dragons Gate %-") then legacyName=true; break end end
+    if legacyName then
+      local rooms,roomsErr=self:roomsInArea(area); if rooms==nil then return nil,roomsErr end
+      local allOwned=#rooms>0
+      for _,roomID in ipairs(rooms) do local room,roomErr=self:roomRecord(roomID); if room==nil then return nil,roomErr end; if not room.owned then allOwned=false; break end end
+      if allOwned then owner=self.owner end
+    end
+  end
   return {id=area,exists=true,owned=owner==self.owner,owner=owner}
 end
 
