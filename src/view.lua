@@ -184,6 +184,7 @@ local help_entries={
   {command="dghud mapstatus",description="Show mapper, walking, and latest-error status."},
   {command="dghud map debug",description="Save a sanitized mapper diagnostic file for a GitHub issue."},
   {command="dghud map debug folder",description="Save diagnostics and open their folder."},
+  {command="dghud map library",description="Open the public community map library."},
   {command="OPTIONS → MAP LIBRARY…",description="Browse credited maps, export your map, review an import, or prepare an editable stash for publication."},
   {command="dghud map export <name> <github-name>",description="Export all DGHUD-owned canonical rooms as your credited JSON stash."},
   {command="dghud map folder",description="Open the local export/import folder."},
@@ -266,8 +267,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"feedback","map_library","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local actionLabels={feedback="FEEDBACK & REQUESTS…",map_library="MAP LIBRARY…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
+  self.option_action_order={"command_help","feedback","map_library","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",map_library="MAP LIBRARY…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -759,6 +760,7 @@ function View:setMapSettingsCallback(callback) self.map_settings_callback=type(c
 function View:setMapSettingsActionCallback(callback) self.map_settings_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
+  if action=="command_help" then return self:showHelp() end
   if action=="map_library" then return self:showMapLibrary() end
   if action=="roller_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showRollerSettings(config) end; return config end; return nil,"autoroller settings are unavailable" end
   if self.options_action_callback then return self.options_action_callback(action) end
