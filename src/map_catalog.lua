@@ -10,6 +10,7 @@ local function integer(value) return type(value)=="number" and value==math.floor
 local function plain(value,limit,allow_empty)
   return type(value)=="string" and #value<=limit and (allow_empty or #value>0) and not value:find("[%z\1-\31\127]")
 end
+local function jsonNull(value) return type(value)=="userdata" and tostring(value)=="null" end
 local function dense(array,limit)
   if type(array)~="table" then return false end
   local count=0
@@ -56,7 +57,7 @@ local function validateEntry(entry,index)
     seen[area]=true
   end
   if entry.scope~=nil and not SCOPES[entry.scope] then return fail("maps["..index.."].scope is invalid") end
-  for _,key in ipairs({"map_name","area_name","subarea_name"}) do if entry[key]~=nil and not plain(entry[key],LIMITS.area) then return fail("maps["..index.."]."..key.." is invalid") end end
+  for _,key in ipairs({"map_name","area_name","subarea_name"}) do if entry[key]~=nil and not jsonNull(entry[key]) and not plain(entry[key],LIMITS.area) then return fail("maps["..index.."]."..key.." is invalid") end end
   if entry.subareas~=nil then
     local subareas_ok,subarea_count=dense(entry.subareas,LIMITS.subareas)
     if not subareas_ok then return fail("maps["..index.."].subareas must be a dense array") end
@@ -71,7 +72,7 @@ local function validateEntry(entry,index)
   local ref,path=entry.download_url:match("^"..prefix.."([A-Za-z0-9][A-Za-z0-9._%-]*)/(maps/.+)$")
   local expected="maps/"..entry.publisher.."/"..entry.slug..".json"
   if not ref or path~=expected then return fail("maps["..index.."].download_url is not an approved library path") end
-  return copyEntry(entry)
+  local copied=copyEntry(entry); for _,key in ipairs({"map_name","area_name","subarea_name"}) do if jsonNull(copied[key]) then copied[key]=nil end end; return copied
 end
 
 function Catalog.validate(catalog)
