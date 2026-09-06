@@ -276,7 +276,19 @@ function Main:safetySnapshot()
     local index=positiveRoom(self.walker.index); local destination=positiveRoom(self.walker.destination)
     if not roomCount or not commandCount or roomCount~=commandCount+1 or not index or index>commandCount or not destination or ownedRoute.rooms[roomCount]~=destination then return nil,"cleanup safety state is unavailable" end
     appendRooms(route,ownedRoute.rooms,index,roomCount)
-  elseif self.generated_command~=nil then return nil,"cleanup safety state is unavailable" end
+  elseif self.generated_command~=nil then
+    -- A generated command can survive a completed/aborted walk when Mudlet does
+    -- not deliver the matching outgoing-command event.  With no active walker,
+    -- automapper move, or special transition it is stale and must not wedge map
+    -- cleanup forever.
+    local specialOK,special=pcall(self.special_transition.pending,self.special_transition)
+    if not specialOK then return nil,"cleanup safety state is unavailable" end
+    if self.automapper.pending~=nil and type(self.automapper.pending)~="table" then return nil,"cleanup safety state is unavailable" end
+    if self.automapper.pending~=nil or special~=nil then
+      return {current_room=current,walking=false,route_rooms=route,pending_automap=self.automapper.pending~=nil,pending_special=special~=nil}
+    end
+    self.generated_command=nil
+  end
   local globalPath=rawget(_G,"speedWalkPath")
   local globalDirections=rawget(_G,"speedWalkDir")
   local function emptyNativeRoutePart(value)

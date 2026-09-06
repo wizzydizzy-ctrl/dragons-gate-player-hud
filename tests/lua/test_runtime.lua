@@ -265,7 +265,7 @@ test("cleanup safety blocks current active and uncertain movement state",functio
   local room=aliasCallback(f,"^dghud map delete room (\\d+)$"); local ok,err=room({"","100"}); eq(ok,nil); eq(err,"cleanup includes the current room")
   hud.walker.route={rooms={100,101},commands={"n"}}; hud.walker.index=1; hud.walker.destination=101
   ok,err=room({"","101"}); eq(ok,nil); eq(err,"map walking is active"); hud.walker.route=nil
-  hud.generated_command="n"; ok,err=room({"","101"}); eq(ok,nil); eq(err,"cleanup safety state is unavailable"); hud.generated_command=nil
+  hud.generated_command="n"; assert(room({"","101"})); eq(hud.generated_command,nil); hud.cleanup:cancel()
   _G.speedWalkPath="malformed"; ok,err=room({"","101"}); eq(ok,nil); eq(err,"cleanup safety state is unavailable"); _G.speedWalkPath=nil
 end)
 
