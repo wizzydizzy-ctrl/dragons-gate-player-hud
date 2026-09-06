@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local function colorOptions(status)
@@ -11,6 +11,7 @@ function Main.new(adapter,settings)
   local colorSettings=settings and settings.colorization
   local self=setmetatable({adapter=adapter,settings=settings,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
+  self.map_diagnostics=MapDiagnostics.new(settings and settings.version,settings and settings.edition,function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end)
   return self
 end
 function Main.installChatApi(namespace)
@@ -225,6 +226,7 @@ end
 function Main:mapperStatus(kind,message,isError)
   self.last_mapper_status=tostring(message or kind or "none")
   if kind=="invalid_room" or kind=="ownership_conflict" or kind=="error" or isError==true then self.last_mapper_error=tostring(message or "unknown mapper error") end
+  if self.map_diagnostics then self.map_diagnostics:record(kind,message) end
   if self.adapter.reportMapperStatus then self.adapter:reportMapperStatus(kind,message) end
 end
 function Main:mapToolbarAction(action)
@@ -278,6 +280,22 @@ function Main:reportMapStatus()
   local line="enabled="..tostring(status.enabled).." current room="..tostring(status.current_room or "none").." managed="..tostring(status.managed_count).." destination="..tostring(status.active_destination or "none").." last status="..tostring(status.last_status).." last error="..tostring(status.last_error)
   if type(_G.cecho)=="function" then pcall(_G.cecho,"\n<gold>[DGHUD Map]<reset> "..line.."\n") end
   return status
+end
+function Main:mapDiagnosticContext()
+  local status=self:mapStatus(); local ownedRooms,ownedAreas=0,0
+  if self.map and type(self.map.listRooms)=="function" then local ok,rooms=pcall(self.map.listRooms,self.map); if ok and type(rooms)=="table" then ownedRooms=#rooms end end
+  if self.map and self.map.api and type(self.map.api.getAreaTable)=="function" and type(self.map.areaRecord)=="function" then
+    local ok,areas=pcall(self.map.api.getAreaTable); if ok and type(areas)=="table" then for _,id in pairs(areas) do local rok,record=pcall(self.map.areaRecord,self.map,id); if rok and record and record.owned then ownedAreas=ownedAreas+1 end end end
+  end
+  local pending=self.cleanup and self.cleanup:pending(); local safety=self:safetySnapshot(); local mudlet=self.adapter.mudletVersion and self.adapter:mudletVersion()
+  return {settings=self.settings.mapper,enabled=status.enabled,current_room=status.current_room,owned_room_count=ownedRooms,owned_area_count=ownedAreas,pending_cleanup=pending and pending.operation or "none",walking=safety and safety.walking or false,pending_automap=safety and safety.pending_automap or false,pending_special=safety and safety.pending_special or false,last_status=status.last_status,last_error=status.last_error,mudlet_version=mudlet}
+end
+function Main:exportMapDiagnostic(openFolder)
+  if not self.map_diagnostics or not self.adapter.saveMapDiagnostic then local err="mapper diagnostics are unavailable"; self:reportCleanup(err,true); return nil,err end
+  local payload=self.map_diagnostics:render(self:mapDiagnosticContext()); local path,err=self.adapter:saveMapDiagnostic(payload)
+  if not path then self:reportCleanup("Could not save mapper diagnostic: "..tostring(err),true); return nil,err end
+  if openFolder and self.adapter.openMapDiagnosticsFolder then self.adapter:openMapDiagnosticsFolder() end
+  self:reportCleanup("Mapper diagnostic saved: "..path.."\nAttach this text file to a GitHub issue; it contains no credentials, chat, room prose, character name, IP address, or command history.",false); return path
 end
 local function positiveRoom(value)
   local room=tonumber(value)
@@ -382,7 +400,9 @@ function Main:afterCleanupDelete(result)
 end
 function Main:reportCleanup(message,isError)
   message=tostring(message or "cleanup failed"); if #message>1000 then message=message:sub(1,997).."..." end
+  if self.map_diagnostics then self.map_diagnostics:record(isError and "cleanup_error" or "cleanup",message) end
   if type(self.adapter.reportMapCleanup)=="function" then pcall(self.adapter.reportMapCleanup,self.adapter,message,isError==true) end
+  if isError and self.adapter and self.adapter.saveMapDiagnostic and not self.writing_map_diagnostic then self.writing_map_diagnostic=true; pcall(function() self.adapter:saveMapDiagnostic(self.map_diagnostics:render(self:mapDiagnosticContext())) end); self.writing_map_diagnostic=false end
   return isError and nil or true,message
 end
 function Main:previewCleanup(method,target)
@@ -658,6 +678,8 @@ function Main:start()
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud mapstatus$",function() return self:reportMapStatus() end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug$",function() return self:exportMapDiagnostic(false) end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug folder$",function() return self:exportMapDiagnostic(true) end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map(?:per)?(?: (on|off|toggle|status))?$",function(value)
     local action=tostring(aliasArgument(value) or "toggle"):lower()
     if action=="status" then return self:mapperEnabled() end
@@ -743,7 +765,7 @@ end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
-  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+20) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
+  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+22) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
   local ok=pcall(function() self:refresh() end); if not ok then return nil,"state refresh failed" end; return true
 end
 return Main

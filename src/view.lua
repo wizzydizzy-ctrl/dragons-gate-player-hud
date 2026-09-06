@@ -182,6 +182,8 @@ local help_entries={
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
   {command="dghud chatstatus",description="Show chat capture, filter, and storage status."},
   {command="dghud mapstatus",description="Show mapper, walking, and latest-error status."},
+  {command="dghud map debug",description="Save a sanitized mapper diagnostic file for a GitHub issue."},
+  {command="dghud map debug folder",description="Save diagnostics and open their folder."},
   {command="OPTIONS → MAP LIBRARY…",description="Browse credited maps, export your map, review an import, or prepare an editable stash for publication."},
   {command="dghud map export <name> <github-name>",description="Export all DGHUD-owned canonical rooms as your credited JSON stash."},
   {command="dghud map folder",description="Open the local export/import folder."},

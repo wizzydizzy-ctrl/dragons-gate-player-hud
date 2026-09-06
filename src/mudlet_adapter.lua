@@ -44,6 +44,15 @@ function Adapter:createMapAdapter(api)
   return map
 end
 function Adapter:createChatStorage(visibleLimit) return Storage.new(Storage.mudletApi(),getMudletHomeDir().."/DragonsGateHUD/chat",visibleLimit) end
+function Adapter:saveMapDiagnostic(payload)
+  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
+  local path=directory.."/mapper-"..os.date("%Y%m%d-%H%M%S")..".txt"; local file,err=io.open(path,"wb"); if not file then return nil,err end
+  local ok,writeErr=file:write(tostring(payload or "")); if not ok then file:close(); return nil,writeErr end; file:close(); return path
+end
+function Adapter:openMapDiagnosticsFolder()
+  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
+  if type(openUrl)=="function" then pcall(openUrl,"file://"..directory) end; return directory
+end
 function Adapter:addEvent(name,fn) return registerAnonymousEventHandler(name,fn) end
 function Adapter:killEvent(id) return killAnonymousEventHandler(id) end
 function Adapter:addAlias(pattern,fn) return tempAlias(pattern,fn) end
@@ -190,7 +199,9 @@ function Adapter:saveMapperSettings(config)
   local body=string.format("return { enabled=%s, minimum_height=%g, height_percent=%g, maximum_height=%g, zoom_step=%g, zoom_min=%g, zoom_max=%g, walk_timeout=%g, special_timeout=%g, transition_submaps={gate=%s,portal=%s,door=%s,arch=%s,path=%s,other=%s} }\n",tostring(not (config and config.enabled==false)),n("minimum_height",90),n("height_percent",.4),n("maximum_height",380),n("zoom_step",2.5),n("zoom_min",3),n("zoom_max",60),n("walk_timeout",12),n("special_timeout",12),tostring(transitions.gate~=false),tostring(transitions.portal~=false),tostring(transitions.door~=false),tostring(transitions.arch~=false),tostring(transitions.path~=false),tostring(transitions.other~=false))
   local wrote,writeErr=file:write(body); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
-  local ok,renameErr=os.rename(temp,destination); if not ok then os.remove(temp); return nil,renameErr end; return true
+  local backup=destination..".bak"; os.remove(backup)
+  local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
+  local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
 end
 function Adapter.loadMapperSettings()
   local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return value end; return nil
