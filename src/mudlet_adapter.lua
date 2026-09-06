@@ -136,6 +136,12 @@ function Adapter:loadMapTransfer(name)
   local ok,data=pcall(yajl.to_value,payload); if not ok then return nil,"map JSON is invalid" end; return data,path,slug
 end
 function Adapter:openMapTransferFolder() local directory=self:mapTransferDirectory(); if type(openUrl)=="function" then openUrl("file://"..directory) end; return directory end
+function Adapter:copyText(value)
+  local text=tostring(value or "")
+  if type(setClipboardText)=="function" then local ok,err=pcall(setClipboardText,text); if ok then return true end; return nil,tostring(err) end
+  if type(setClipboard)=="function" then local ok,err=pcall(setClipboard,text); if ok then return true end; return nil,tostring(err) end
+  return nil,"clipboard integration is unavailable"
+end
 function Adapter:openMapLibrary(page)
   local base="https://github.com/wizzydizzy-ctrl/dragons-gate-map-library"; local url=page=="publish" and (base.."/compare") or base
   if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url

@@ -185,7 +185,7 @@ local help_entries={
   {command="dghud map debug",description="Save a sanitized mapper diagnostic file for a GitHub issue."},
   {command="dghud map debug folder",description="Save diagnostics and open their folder."},
   {command="dghud map library",description="Open the public community map library."},
-  {command="OPTIONS → MAP LIBRARY…",description="Browse credited maps, export your map, review an import, or prepare an editable stash for publication."},
+  {command="MAP SETTINGS → MAP LIBRARY…",description="Browse credited maps, export your map, review an import, or prepare an editable stash for publication."},
   {command="dghud map export <name> <github-name>",description="Export all DGHUD-owned canonical rooms as your credited JSON stash."},
   {command="dghud map folder",description="Open the local export/import folder."},
   {command="dghud map import <name>",description="Validate a downloaded map and preview canonical room-ID conflicts without changing the map."},
@@ -214,6 +214,9 @@ function View.helpContent(entries,t,layout)
     lines[#lines+1]="<span style='color:"..commandColor..";font-size:"..font.."px'><b>"..safeText(entry.command).."</b></span><br><span style='color:"..t.text..";font-size:"..font.."px'>"..safeText(entry.description).."</span>"
   end
   return table.concat(lines,"<br><br>")
+end
+function View.helpText(entries)
+  local lines={}; for _,entry in ipairs(entries or View.defaultHelpEntries()) do lines[#lines+1]=tostring(entry.command).." — "..tostring(entry.description) end; return table.concat(lines,"\n")
 end
 function View.mapImportConflictModel(conflicts,choices)
   local allowed={keep_mine=true,use_imported=true,skip_area=true}; local rows={}
@@ -267,8 +270,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","feedback","map_library","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",map_library="MAP LIBRARY…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
+  self.option_action_order={"command_help","feedback","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -343,9 +346,11 @@ function View.new(settings)
   self.help_bg=label("DGHUD.Help.Background",self.help_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.help_title=label("DGHUD.Help.Title",self.help_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.help_close=label("DGHUD.Help.Close",self.help_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:4px;color:"..t.text..";font-weight:700;")
+  self.help_copy=label("DGHUD.Help.Copy",self.help_panel,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
   self.help_output=Geyser.ScrollBox:new({name="DGHUD.Help.Output",x=12,y=54,width=576,height=434},self.help_panel)
   self.help_content=label("DGHUD.Help.Content",self.help_output,"background:transparent;color:"..t.text..";")
   self.help_close:setClickCallback(function() self:hideHelp(); if self.help_close_callback then return self.help_close_callback() end end)
+  self.help_copy:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback(View.helpText(self.help_entries or View.defaultHelpEntries())) end end)
   self.roller_overlay=label("DGHUD.RollerSettings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
   self.roller_panel=Geyser.Container:new({name="DGHUD.RollerSettings.Panel",x=0,y=0,width=760,height=560},self.root)
   self.roller_bg=label("DGHUD.RollerSettings.Background",self.roller_panel,"background:"..t.panel..";border:2px solid "..t.border..";border-radius:8px;")
@@ -378,26 +383,30 @@ function View.new(settings)
   for _,key in ipairs(self.map_settings_toggle_order) do local button=label("DGHUD.MapSettings.Toggle."..key,self.map_settings_content); button.option_text=mapToggleLabels[key]; button:setClickCallback(function() self.map_settings_draft[key]=not self.map_settings_draft[key]; self:renderMapSettings(false) end); self.map_settings_toggles[key]=button end
   self.map_settings_clear_current=label("DGHUD.MapSettings.ClearCurrent",self.map_settings_content,"background:#302018;border:1px solid #9b6a42;border-radius:5px;color:#e5b17a;font-weight:700;")
   self.map_settings_clear_all=label("DGHUD.MapSettings.ClearAll",self.map_settings_content,"background:#3a1715;border:1px solid #a94d46;border-radius:5px;color:#ffb0a8;font-weight:700;")
+  self.map_settings_library=label("DGHUD.MapSettings.Library",self.map_settings_content,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.map_settings_save:setClickCallback(function() return self:saveMapSettings() end); self.map_settings_cancel:setClickCallback(function() return self:hideMapSettings() end); self.map_settings_overlay:setClickCallback(function() return self:hideMapSettings() end)
   self.map_settings_clear_current:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_current") end end)
   self.map_settings_clear_all:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_all") end end)
+  self.map_settings_library:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("map_library") end end)
   self.map_settings_visible=false
   local rollerWidgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel}; for _,entry in pairs(self.roller_fields) do rollerWidgets[#rollerWidgets+1]=entry.caption; rollerWidgets[#rollerWidgets+1]=entry.input end; for _,button in pairs(self.roller_toggles) do rollerWidgets[#rollerWidgets+1]=button end; for _,widget in ipairs(rollerWidgets) do widget:hide() end
   if self.help_close.setToolTip then pcall(self.help_close.setToolTip,self.help_close,"Close DGHUD command guide") end
   self.help_visible=false
-  for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_close,self.help_output,self.help_content}) do widget:hide() end
+  for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_copy,self.help_close,self.help_output,self.help_content}) do widget:hide() end
   self.map_library_overlay=label("DGHUD.MapLibrary.Overlay",self.root,"background:rgba(0,0,0,0.72);")
   self.map_library_panel=Geyser.Container:new({name="DGHUD.MapLibrary.Panel",x=0,y=0,width=720,height=520},self.root)
   self.map_library_bg=label("DGHUD.MapLibrary.Background",self.map_library_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.map_library_title=label("DGHUD.MapLibrary.Title",self.map_library_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.map_library_copy=label("DGHUD.MapLibrary.Copy",self.map_library_panel,"background:transparent;color:"..t.text..";")
+  self.map_library_copy_button=label("DGHUD.MapLibrary.CopyButton",self.map_library_panel,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
   self.map_library_close=label("DGHUD.MapLibrary.Close",self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:4px;color:"..t.text..";font-weight:700;")
   self.map_library_actions={}; self.map_library_action_order={"browse","export","install","publish"}
   local libraryLabels={browse="BROWSE LIBRARY",export="EXPORT MY MAP",install="IMPORT / INSTALL MAP",publish="PUBLISH MY STASH"}
   for _,key in ipairs(self.map_library_action_order) do local button=label("DGHUD.MapLibrary.Action."..key,self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.jade..";font-weight:700;"); button.option_text=libraryLabels[key]; button:setClickCallback(function() if self.map_library_action_callback then return self.map_library_action_callback(key) end; return nil,"map library action is not connected" end); self.map_library_actions[key]=button end
   self.map_library_close:setClickCallback(function() return self:hideMapLibrary() end); self.map_library_overlay:setClickCallback(function() return self:hideMapLibrary() end)
+  self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\nBrowse public maps, export your DGHUD-owned map, import an editable local stash, or publish changes under your own GitHub name.\nCommands: dghud map library | dghud map export <name> <github-name> | dghud map folder | dghud map import <name>") end end)
   self.map_library_visible=false
-  for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
+  for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
   return self
 end
 local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF"}
@@ -700,7 +709,7 @@ function View:layoutRollerSettings(layout)
   self:renderRollerSettings(false); View.raiseCards(widgets); return true
 end
 function View:layoutMapSettings(layout)
-  local widgets={self.map_settings_overlay,self.map_settings_panel,self.map_settings_bg,self.map_settings_content,self.map_settings_title,self.map_settings_status,self.map_settings_save,self.map_settings_cancel,self.map_settings_clear_current,self.map_settings_clear_all}
+  local widgets={self.map_settings_overlay,self.map_settings_panel,self.map_settings_bg,self.map_settings_content,self.map_settings_title,self.map_settings_status,self.map_settings_save,self.map_settings_cancel,self.map_settings_library,self.map_settings_clear_current,self.map_settings_clear_all}
   for _,v in pairs(self.map_settings_fields or {}) do widgets[#widgets+1]=v.caption; widgets[#widgets+1]=v.input end; for _,v in pairs(self.map_settings_toggles or {}) do widgets[#widgets+1]=v end
   if not self.map_settings_visible then for _,w in ipairs(widgets) do w:hide() end; return true end
   local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18
@@ -711,12 +720,12 @@ function View:layoutMapSettings(layout)
   for i,item in ipairs(items) do local col=columns==2 and ((i-1)%2) or 0; local r=columns==2 and math.floor((i-1)/2) or i-1; local x=col*(cw+gap); local y=r*row
     if item.kind=="toggle" then place(self.map_settings_toggles[item.key],x,y+3,cw,row-6) else local f=self.map_settings_fields[item.key]; place(f.caption,x,y,cw,18); place(f.input,x,y+19,cw,row-21); f.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;") end
   end
-  local rows=math.ceil(#items/columns); local dangerY=rows*row+12; place(self.map_settings_clear_current,0,dangerY,cw,38); place(self.map_settings_clear_all,columns==2 and cw+gap or 0,dangerY+((columns==1) and 44 or 0),cw,38); self.map_settings_content.content_height=dangerY+((columns==1) and 90 or 46)
+  local rows=math.ceil(#items/columns); local libraryY=rows*row+12; place(self.map_settings_library,0,libraryY,pw-28,38); local dangerY=libraryY+44; place(self.map_settings_clear_current,0,dangerY,cw,38); place(self.map_settings_clear_all,columns==2 and cw+gap or 0,dangerY+((columns==1) and 44 or 0),cw,38); self.map_settings_content.content_height=dangerY+((columns==1) and 90 or 46)
   place(self.map_settings_status,14,ph-footer+5,pw-300,28); local bw=120; place(self.map_settings_cancel,pw-14-bw*2-10,ph-42,bw,32); place(self.map_settings_save,pw-14-bw,ph-42,bw,32); self.map_settings_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.map_settings_save:echo(View.withFont("<center><b>SAVE</b></center>",font)); self:renderMapSettings(false); View.raiseCards(widgets); return true
 end
 function View:layoutHelp(layout)
   if not self.help_visible then
-    for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_close,self.help_output,self.help_content}) do widget:hide() end
+    for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_copy,self.help_close,self.help_output,self.help_content}) do widget:hide() end
     return true
   end
   local width=math.max(1,tonumber(layout.window_width) or 1200); local height=math.max(1,tonumber(layout.window_height) or 800)
@@ -731,13 +740,13 @@ function View:layoutHelp(layout)
   self.help_font=math.max(11,math.min(15,tonumber(layout.body_font or 16)-3)); layout.help_font=self.help_font
   place(self.help_overlay,0,0,"100%","100%"); place(self.help_panel,x,y,panelWidth,panelHeight); place(self.help_bg,0,0,"100%","100%")
   local closeWidth=math.max(64,math.min(94,math.floor(panelWidth*.22))); local headerHeight=math.max(40,self.help_font+24)
-  place(self.help_title,16,10,panelWidth-closeWidth-40,headerHeight-14); self.help_title:echo(View.withFont("<b>DGHUD COMMAND GUIDE</b>",self.help_font+2))
-  place(self.help_close,panelWidth-closeWidth-12,8,closeWidth,headerHeight-14); self.help_close:echo(View.withFont("<center><b>× CLOSE</b></center>",self.help_font))
+  local copyWidth=math.max(64,math.min(94,math.floor(panelWidth*.22))); place(self.help_title,16,10,panelWidth-closeWidth-copyWidth-50,headerHeight-14); self.help_title:echo(View.withFont("<b>DGHUD COMMAND GUIDE</b>",self.help_font+2))
+  place(self.help_copy,panelWidth-closeWidth-copyWidth-18,8,copyWidth,headerHeight-14); self.help_copy:echo(View.withFont("<center><b>COPY</b></center>",self.help_font)); place(self.help_close,panelWidth-closeWidth-12,8,closeWidth,headerHeight-14); self.help_close:echo(View.withFont("<center><b>× CLOSE</b></center>",self.help_font))
   local outputHeight=math.max(1,panelHeight-headerHeight-14); place(self.help_output,12,headerHeight,panelWidth-24,outputHeight)
   local contentWidth=math.max(1,panelWidth-52); local entries=self.help_entries or View.defaultHelpEntries()
   local contentHeight=math.max(outputHeight,#entries*math.ceil(self.help_font*3.8)+20)
   place(self.help_content,8,6,contentWidth,contentHeight); self.help_content:echo(View.helpContent(entries,self.settings.theme,layout))
-  View.raiseCards({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_close,self.help_output,self.help_content})
+  View.raiseCards({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_copy,self.help_close,self.help_output,self.help_content})
   return true
 end
 function View:setHelpCloseCallback(callback) self.help_close_callback=type(callback)=="function" and callback or nil; return true end
@@ -754,6 +763,7 @@ function View:setMapCenterCallback(callback) self.map_center_callback=type(callb
 function View:setColorToggleCallback(callback) self.color_toggle_callback=type(callback)=="function" and callback or nil; return true end
 function View:setColorOptionsCallback(callback) self.color_options_callback=type(callback)=="function" and callback or nil; return true end
 function View:setOptionsActionCallback(callback) self.options_action_callback=type(callback)=="function" and callback or nil; return true end
+function View:setCopyTextCallback(callback) self.copy_text_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapLibraryActionCallback(callback) self.map_library_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setRollerSettingsCallback(callback) self.roller_settings_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapSettingsCallback(callback) self.map_settings_callback=type(callback)=="function" and callback or nil; return true end
@@ -761,23 +771,22 @@ function View:setMapSettingsActionCallback(callback) self.map_settings_action_ca
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
   if action=="command_help" then return self:showHelp() end
-  if action=="map_library" then return self:showMapLibrary() end
   if action=="roller_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showRollerSettings(config) end; return config end; return nil,"autoroller settings are unavailable" end
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
 end
 function View:showMapLibrary()
-  self.map_library_visible=true; self:setColorMenuVisible(false); self:hideHelp(); self:hideRollerSettings(); if self.layout then self:layoutMapLibrary(self.layout) end; return true
+  self:hideMapSettings(); self.map_library_visible=true; self:setColorMenuVisible(false); self:hideHelp(); self:hideRollerSettings(); if self.layout then self:layoutMapLibrary(self.layout) end; return true
 end
 function View:hideMapLibrary() self.map_library_visible=false; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
 function View:layoutMapLibrary(layout)
-  local widgets={self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_close}; for _,button in pairs(self.map_library_actions or {}) do widgets[#widgets+1]=button end
+  local widgets={self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_copy_button,self.map_library_close}; for _,button in pairs(self.map_library_actions or {}) do widgets[#widgets+1]=button end
   if not self.map_library_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width,height=math.max(1,tonumber(layout.window_width) or 1200),math.max(1,tonumber(layout.window_height) or 800); local margin=layout.mode=="compact" and 8 or 18
   local panelWidth=math.min(760,math.max(1,width-margin*2)); local panelHeight=math.min(560,math.max(1,height-margin*2)); local x=math.floor((width-panelWidth)/2); local y=math.floor((height-panelHeight)/2); local font=math.max(10,math.min(15,(layout.body_font or 16)-2))
   place(self.map_library_overlay,0,0,"100%","100%"); place(self.map_library_panel,x,y,panelWidth,panelHeight); place(self.map_library_bg,0,0,"100%","100%")
-  local closeWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); place(self.map_library_title,16,10,panelWidth-closeWidth-38,34); place(self.map_library_close,panelWidth-closeWidth-12,8,closeWidth,30)
-  self.map_library_title:echo(View.withFont("<b>MAP LIBRARY</b>",font+2)); self.map_library_close:echo(View.withFont("<center><b>× CLOSE</b></center>",font))
+  local closeWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); local copyWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); place(self.map_library_title,16,10,panelWidth-closeWidth-copyWidth-48,34); place(self.map_library_copy_button,panelWidth-closeWidth-copyWidth-18,8,copyWidth,30); place(self.map_library_close,panelWidth-closeWidth-12,8,closeWidth,30)
+  self.map_library_title:echo(View.withFont("<b>MAP LIBRARY</b>",font+2)); self.map_library_copy_button:echo(View.withFont("<center><b>COPY</b></center>",font)); self.map_library_close:echo(View.withFont("<center><b>× CLOSE</b></center>",font))
   place(self.map_library_copy,18,54,panelWidth-36,math.max(72,math.floor(panelHeight*.25))); self.map_library_copy:echo(View.withFont("Browse credited public maps, export your DGHUD-owned map, import an editable local stash, or publish your changes under your own GitHub name.<br><br><span style='color:"..self.settings.theme.muted.."'>Canonical room-number conflicts require: <b>Keep Mine</b>, <b>Use Imported</b>, or <b>Skip Area</b>. Original creator/source attribution remains attached as derived-from metadata. Validation occurs before any map changes.</span>",font))
   local top=math.max(142,math.floor(panelHeight*.36)); local gap=10; local columns=panelWidth>=500 and 2 or 1; local buttonWidth=columns==2 and (panelWidth-46)/2 or panelWidth-36; local buttonHeight=math.max(34,font+20)
   for index,key in ipairs(self.map_library_action_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); local button=self.map_library_actions[key]; place(button,18+column*(buttonWidth+gap),top+row*(buttonHeight+gap),buttonWidth,buttonHeight); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
@@ -804,7 +813,7 @@ function View:showRollerSettings(config)
   self:hideHelp(); self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
-  self:hideHelp(); self:hideRollerSettings(); self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
+  self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
   self.map_settings_visible=true; self:setColorMenuVisible(false); self.map_settings_error=nil; self:renderMapSettings(true); if self.layout then self:layoutMapSettings(self.layout) end; return true
 end
 function View:hideMapSettings() self.map_settings_visible=false; self.map_settings_draft=nil; self.map_settings_error=nil; if self.layout then self:layoutMapSettings(self.layout) end; return true end
@@ -812,7 +821,7 @@ function View:renderMapSettings(populate)
   if not self.map_settings_draft then return true end; local t=self.settings.theme; local font=self.layout and math.max(10,(self.layout.body_font or 14)-3) or 11
   for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; local value=self.map_settings_draft[key]; if key=="height_percent" then value=(tonumber(value) or .4)*100 end; f.caption:echo(View.withFont(f.label,font)); if populate and f.input.print then f.input:print(tostring(value or "")) end end
   for _,key in ipairs(self.map_settings_toggle_order) do local enabled=self.map_settings_draft[key]~=false; local b=self.map_settings_toggles[key]; b:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); b:echo(View.withFont("<center>"..b.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
-  self.map_settings_clear_current:echo(View.withFont("<center><b>DELETE CURRENT MAP…</b></center>",font)); self.map_settings_clear_all:echo(View.withFont("<center><b>"..(self.map_clear_pending and "CLICK AGAIN TO CLEAR ALL" or "WARNING: CLEAR ALL MAPS…").."</b></center>",font))
+  self.map_settings_library:echo(View.withFont("<center><b>MAP LIBRARY…</b></center>",font)); self.map_settings_clear_current:echo(View.withFont("<center><b>DELETE CURRENT MAP…</b></center>",font)); self.map_settings_clear_all:echo(View.withFont("<center><b>"..(self.map_clear_pending and "CLICK AGAIN TO CLEAR ALL" or "WARNING: CLEAR ALL MAPS…").."</b></center>",font))
   self.map_settings_status:echo(View.withFont(self.map_settings_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.map_settings_error).."</b></span>") or "Changes affect future discoveries; saved room numbers stay canonical.",font)); return true
 end
 function View:mapSettingsValues()

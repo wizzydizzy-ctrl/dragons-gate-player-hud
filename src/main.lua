@@ -630,7 +630,11 @@ function Main:start()
   end) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action)
     if action=="browse" then return self.adapter:openMapLibrary()
-    elseif action=="export" then self:reportMapTransfer("Export with: dghud map export <map-name> <github-name>",false); return self.adapter:openMapTransferFolder()
+    elseif action=="export" then
+      local stamp=(self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time())):gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$","")
+      local path,err=self:exportMapTransfer("dghud-map-"..stamp,"local-export")
+      if path then self.adapter:openMapTransferFolder() end
+      return path,err
     elseif action=="install" then self:reportMapTransfer("Download a JSON map from the library into the maps folder, then run: dghud map import <map-name>",false); return self.adapter:openMapTransferFolder()
     elseif action=="publish" then self.adapter:openMapTransferFolder(); return self.adapter:openMapLibrary("publish") end
     return nil,"unknown map library action"
@@ -640,9 +644,11 @@ function Main:start()
   if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() if self.view.showMapSettings then return self.view:showMapSettings(self.settings.mapper) end; return self:clearAllMapsAction() end) end
   if self.view.setMapSettingsCallback then self.view:setMapSettingsCallback(function(values) return self:configureMapper(values) end) end
   if self.view.setMapSettingsActionCallback then self.view:setMapSettingsActionCallback(function(action)
+    if action=="map_library" then return self.view:showMapLibrary() end
     if action=="clear_all" then return self:clearAllMapsAction() end
     if action=="clear_current" then local current=self.automapper and self.automapper:currentRoom(); return self:previewCleanup("previewCurrent",current) end
   end) end
+  if self.view.setCopyTextCallback then self.view:setCopyTextCallback(function(text) return self.adapter:copyText(text) end) end
   self:applyResponsiveLayout()
   self.collector=Collector.new(self.adapter,Parser,function(snapshot,key) if key=="time" then self:onClockSync(snapshot.time) else self:refresh() end end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end
