@@ -156,7 +156,7 @@ local function libraryRead(path,limit)
 end
 function Adapter:fetchMapCatalog(done)
   if type(done)~="function" then return nil,"catalog callback is required" end; if type(downloadFile)~="function" then return nil,"Mudlet download integration is unavailable" end
-  local directory,dirErr=self:mapTransferDirectory(); if not directory then return nil,dirErr end; local path=directory.."/.catalog-download.json"; local url="https://raw.githubusercontent.com/wizzydizzy-ctrl/dragons-gate-map-library/main/catalog.json?dghud="..tostring(os.time()); local ids={}; local timer; local finished=false
+  local directory,dirErr=self:mapTransferDirectory(); if not directory then return nil,dirErr end; local path=directory.."/.catalog-download.json"; local url="https://raw.githubusercontent.com/wizzydizzy-ctrl/dragons-gate-map-library/main/catalog-v2.json?dghud="..tostring(os.time()); local ids={}; local timer; local finished=false
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end; os.remove(path) end
   local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,actual) if actual~=path then return end; local raw,readErr=libraryRead(path,1048576); if not raw then return finish(nil,readErr) end; local ok,value=pcall(yajl.to_value,raw); if not ok then return finish(nil,"catalog JSON is invalid") end; finish(value) end)

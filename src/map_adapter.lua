@@ -73,6 +73,16 @@ local function splitSorted(value)
   table.sort(out); return out
 end
 
+local function labelKey(kind,value)
+  return "dghud.map_label."..kind.."."..tostring(value):gsub(".",function(c) return string.format("%02x",string.byte(c)) end)
+end
+
+local function friendlyLabel(value)
+  value=tostring(value or ""):match("^%s*(.-)%s*$")
+  if value=="" or #value>100 or value:find("[%z\1-\31\127]") then return nil,"name must be 1-100 plain-text characters" end
+  return value
+end
+
 local function specialDestination(exits,command)
   for destination,commands in pairs(exits or {}) do
     if type(commands)=="table" and commands[command]~=nil then return destination end
@@ -115,6 +125,37 @@ function MapAdapter:listRooms()
     if owner==self.owner then ids[#ids+1]=id end
   end
   table.sort(ids); return ids
+end
+
+function MapAdapter:mapLabel(kind,key)
+  if kind~="area" and kind~="subarea" then return nil,"map label kind is invalid" end
+  local all,err=read(self.api,"getAllMapUserData"); if all==nil then return nil,err end
+  return tostring(all[labelKey(kind,key)] or "")
+end
+
+function MapAdapter:setMapLabel(kind,key,value)
+  if kind~="area" and kind~="subarea" then return nil,"map label kind is invalid" end
+  local clean,err=friendlyLabel(value); if not clean then return nil,err end
+  local ok,writeErr=invoke(self.api,"setMapUserData",labelKey(kind,key),clean); if ok==nil then return nil,writeErr end
+  return clean
+end
+
+function MapAdapter:listTransferScopes()
+  local ids,err=self:listRooms(); if not ids then return nil,err end
+  local areas,partitions,areaSeen,partitionSeen={},{},{},{}
+  for _,id in ipairs(ids) do
+    local room,roomErr=self:getRoom(id); if not room then return nil,roomErr end
+    if not areaSeen[room.area] then areaSeen[room.area]=true; areas[#areas+1]={key=room.area,label=self:mapLabel("area",room.area) or ""} end
+    if not partitionSeen[room.partition] then partitionSeen[room.partition]=true; partitions[#partitions+1]={key=room.partition,area=room.area,label=self:mapLabel("subarea",room.partition) or ""} end
+  end
+  local function order(a,b) return (a.label~="" and a.label or a.key):lower()<(b.label~="" and b.label or b.key):lower() end
+  table.sort(areas,order); table.sort(partitions,order)
+  return {areas=areas,subareas=partitions}
+end
+
+function MapAdapter:currentTransferScope(roomID)
+  local room,err=self:getRoom(roomID); if not room then return nil,err or "current room is not managed by DGHUD" end
+  return {area=room.area,partition=room.partition,area_name=self:mapLabel("area",room.area) or "",subarea_name=self:mapLabel("subarea",room.partition) or ""}
 end
 
 function MapAdapter:getRoom(roomID)

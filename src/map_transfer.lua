@@ -105,16 +105,41 @@ function Transfer:validate(data)
   table.sort(rooms,function(a,b) return a.id<b.id end)
   -- File-supplied attribution is descriptive, never proof of authorship. A future
   -- signed distribution layer may promote it only after external verification.
-  return {format="DragonsGateHUD-map",schema=1,provenance={artifact_id=artifact,author=author,publisher=publisher,slug=slug,derived_from=copy(data.provenance.derived_from),verified=false},rooms=rooms}
+  local scope=data.provenance.scope or "all"
+  if not ({all=true,area=true,subarea=true})[scope] then return nil,"map provenance scope is invalid" end
+  local selection=type(data.provenance.selection)=="table" and copy(data.provenance.selection) or {scope=scope}
+  selection.scope=selection.scope or scope
+  if selection.scope~=scope then return nil,"map provenance selection does not match its scope" end
+  if scope=="area" and not text(selection.area,160,false) then return nil,"map provenance area selection is invalid" end
+  if scope=="subarea" and not text(selection.partition,160,false) then return nil,"map provenance subarea selection is invalid" end
+  for key in pairs(selection) do if key~="scope" and key~="area" and key~="partition" and key~="area_name" and key~="subarea_name" then return nil,"map provenance selection has unknown field" end end
+  if selection.area_name~=nil and not text(selection.area_name,100,false) then return nil,"map provenance area name is invalid" end
+  if selection.subarea_name~=nil and not text(selection.subarea_name,100,false) then return nil,"map provenance subarea name is invalid" end
+  return {format="DragonsGateHUD-map",schema=1,provenance={artifact_id=artifact,author=author,publisher=publisher,slug=slug,scope=scope,selection=selection,derived_from=copy(data.provenance.derived_from),verified=false},rooms=rooms}
 end
 
-function Transfer:exportData(provenance)
+local function selectedRoom(room,selection)
+  if selection==nil or selection.scope==nil or selection.scope=="all" then return true end
+  if type(selection)~="table" then return false end
+  if selection.scope=="area" then return tostring(room.area)==tostring(selection.area) end
+  if selection.scope=="subarea" then return tostring(room.partition)==tostring(selection.partition) end
+  return false
+end
+
+function Transfer:exportData(provenance,selection)
   if type(self.backend)~="table" or type(self.backend.listRooms)~="function" or type(self.backend.getRoom)~="function" then return nil,"map transfer backend is unavailable" end
   local ids,err=invoke(self.backend,"listRooms"); if not ids then return nil,err end
   local count=dense(ids,self.room_limit); if not count then return nil,"backend returned an invalid room list" end
-  local included={}; for _,id in ipairs(ids) do included[id]=true end
-  local rooms,occupied={},{}; for index=1,count do
+  if selection~=nil and (type(selection)~="table" or not ({all=true,area=true,subarea=true})[selection.scope or "all"]) then return nil,"export selection is invalid" end
+  local snapshots={}; local included={}
+  for index=1,count do
     local room,readErr=invoke(self.backend,"getRoom",ids[index]); if not room then return nil,readErr or "room read failed" end
+    snapshots[index]=room
+    if selectedRoom(room,selection) then included[ids[index]]=true end
+  end
+  local rooms,occupied={},{}; for index=1,count do
+    local room=snapshots[index]
+    if included[ids[index]] then
     room=copy(room)
     local function internal(values) local out={}; for _,entry in ipairs(values or {}) do if included[tonumber(entry.to)] then out[#out+1]=entry end end; return out end
     room.exits=internal(room.exits); room.special_exits=internal(room.special_exits)
@@ -129,7 +154,10 @@ function Transfer:exportData(provenance)
     end
     occupied[key(room.x,room.y)]=true
     rooms[#rooms+1]=room
+    end
   end
+  if #rooms==0 then return nil,"the selected area or subarea has no DGHUD rooms" end
+  provenance=copy(provenance); provenance.scope=selection and selection.scope or "all"; provenance.selection=selection and copy(selection) or {scope="all"}
   return self:validate({format="DragonsGateHUD-map",schema=1,provenance=copy(provenance),rooms=rooms})
 end
 

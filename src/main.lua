@@ -462,9 +462,16 @@ function Main:mapTransferCreator()
   return (name..(surname~="" and (" "..surname) or "")):match("^%s*(.-)%s*$")
 end
 function Main:reportMapTransfer(message,isError) if self.adapter.reportMapTransfer then return self.adapter:reportMapTransfer(message,isError) end; return true end
-function Main:exportMapTransfer(name,publisher)
+function Main:currentMapSelection(scope)
+  if scope=="all" then return {scope="all"} end
+  local current=self.automapper and self.automapper:currentRoom(); if not current then return nil,"current room is unavailable" end
+  local record,err=self.map:currentTransferScope(current); if not record then return nil,err end
+  if scope=="area" then return {scope="area",area=record.area,area_name=record.area_name~="" and record.area_name or nil} end
+  return {scope="subarea",partition=record.partition,area=record.area,area_name=record.area_name~="" and record.area_name or nil,subarea_name=record.subarea_name~="" and record.subarea_name or nil}
+end
+function Main:exportMapTransfer(name,publisher,selection)
   if not tostring(publisher or ""):match("^[%w][%w%-]*$") then local err="GitHub name must contain only letters, numbers, and dashes"; self:reportMapTransfer(err,true); return nil,err end
-  local stamp=self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time()); local data,err=self.map_transfer:exportData({artifact_id="local:"..stamp..":"..tostring(name),author=self:mapTransferCreator(),publisher=publisher,slug=name})
+  local stamp=self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time()); local data,err=self.map_transfer:exportData({artifact_id="local:"..stamp..":"..tostring(name),author=self:mapTransferCreator(),publisher=publisher,slug=name},selection)
   if not data then self:reportMapTransfer(err,true); return nil,err end
   local path,saveErr=self.adapter:saveMapTransfer(name,data); if not path then self:reportMapTransfer(saveErr,true); return nil,saveErr end
   self:reportMapTransfer("Exported "..#data.rooms.." canonical rooms to "..path.."\nPublisher: "..publisher.."  Creator: "..data.provenance.author.."\nThis file is local until submitted. Open Map Settings > Map Library > Prepare Contribution for publishing instructions.",false); return path
@@ -472,10 +479,10 @@ end
 local function transferChoice(value) return ({keep="keep_mine",replace="use_imported",skip="skip_area"})[tostring(value or ""):lower()] end
 function Main:reportMapImportPlan(plan,name)
   if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(true) end
-  local lines={"Import preview for '"..tostring(name).."': "..plan.creates.." new, "..plan.conflicts.." conflicts, "..plan.keeps.." keep mine, "..plan.replaces.." use imported, "..plan.skips.." skipped."}
-  for _,area in ipairs(plan.areas) do lines[#lines+1]="Area "..area.name..": "..area.conflicts.." conflicts; policy "..tostring(area.policy):gsub("_"," ") end
-  if plan.blocked then lines[#lines+1]="Blocked: at least one canonical room ID belongs to a personal/non-DGHUD map." end
-  lines[#lines+1]="Use the Map Library buttons to keep your rooms, use the downloaded rooms, skip conflicts, import, or cancel."
+  local lines={"Ready to install '"..tostring(name).."': "..plan.creates.." new rooms and "..plan.conflicts.." overlaps."}
+  if plan.conflicts>0 then lines[#lines+1]="Choose KEEP MY MAP, USE SHARED MAP, or SKIP THIS AREA, then choose FINISH INSTALLING."
+  else lines[#lines+1]="No overlaps found. Choose FINISH INSTALLING to add this map." end
+  if plan.blocked then lines[#lines+1]="Some rooms belong to another personal map and cannot be replaced." end
   if self.view then self.view.map_library_status=table.concat(lines," "); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
   self:reportMapTransfer(table.concat(lines,"\n"),plan.blocked); return plan
 end
@@ -632,7 +639,7 @@ function Main:start()
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
     if action=="feedback" then return self.adapter:openFeedback() end
-    if action=="map_settings" then return self.settings.mapper end
+    if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
@@ -642,9 +649,10 @@ function Main:start()
       if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end
       self.view:setMapLibraryCatalog({},"Loading community map catalog…")
       local started,err=self.adapter:fetchMapCatalog(function(raw,downloadErr) if downloadErr then return self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(downloadErr)) end; local catalog,validationErr=MapCatalog.validate(raw); if not catalog then return self.view:setMapLibraryCatalog({},validationErr) end; self.map_catalog=catalog; self.view:setMapLibraryCatalog(catalog.maps) end); if not started then self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(err)) end; return started,err
-    elseif action=="export" then
+    elseif action:match("^export_") then
+      local scope=action:gsub("^export_",""); local selection,selectionErr=self:currentMapSelection(scope); if not selection then self.view.map_library_status="Backup failed: "..tostring(selectionErr); return nil,selectionErr end
       local stamp=(self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time())):gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$","")
-      local path,err=self:exportMapTransfer("dghud-map-"..stamp,"local-export")
+      local path,err=self:exportMapTransfer("dghud-"..scope.."-"..stamp,"local-export",selection)
       if path then self.adapter:openMapTransferFolder() end
       return path,err
     elseif action=="install" then
@@ -658,9 +666,10 @@ function Main:start()
     elseif action=="confirm" then return self:confirmMapTransfer()
     elseif action=="cancel" then self.pending_map_import=nil; if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end; self.view.map_library_status="Stopped. Your map was not changed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return true
     elseif action=="report" then local message=self.last_map_library_error or "No map-library error has been recorded."; self.adapter:copyText("DGHUD map-library error: "..message); return self.adapter:openFeedback("DGHUD map-library error",message)
-    elseif action=="publish" then
+    elseif action:match("^publish_") then
+      local scope=action:gsub("^publish_",""); local selection,selectionErr=self:currentMapSelection(scope); if not selection then self.view.map_library_status="Share failed: "..tostring(selectionErr); return nil,selectionErr end
       local stamp=os.date("%Y%m%d-%H%M%S"); local author=self:mapTransferCreator(); local publisher=author:lower():gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$",""):sub(1,39); if publisher=="" then publisher="anonymous" end
-      local slug="community-map-"..stamp; local data,buildErr=self.map_transfer:exportData({artifact_id="submission:"..stamp..":"..slug,author=author,publisher=publisher,slug=slug})
+      local friendly=selection.subarea_name or selection.area_name or scope; local slug=(friendly.."-"..stamp):lower():gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$",""):sub(1,64); local data,buildErr=self.map_transfer:exportData({artifact_id="submission:"..stamp..":"..slug,author=author,publisher=publisher,slug=slug},selection)
       if not data then self.view.map_library_status="Publish failed: "..tostring(buildErr); self:reportMapTransfer(buildErr,true); return nil,buildErr end
       self.view.map_library_status="Uploading and validating "..#data.rooms.." rooms…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
       local function completed(result,publishErr)
@@ -676,10 +685,11 @@ function Main:start()
   if self.view.setMapZoomCallback then self.view:setMapZoomCallback(function(action) return self:mapToolbarAction(action) end) end
   if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() if self.view.showMapSettings then return self.view:showMapSettings(self.settings.mapper) end; return self:clearAllMapsAction() end) end
   if self.view.setMapSettingsCallback then self.view:setMapSettingsCallback(function(values) return self:configureMapper(values) end) end
-  if self.view.setMapSettingsActionCallback then self.view:setMapSettingsActionCallback(function(action)
+  if self.view.setMapSettingsActionCallback then self.view:setMapSettingsActionCallback(function(action,value)
     if action=="map_library" then return self.view:showMapLibrary() end
     if action=="clear_all" then return self:clearAllMapsAction() end
     if action=="clear_current" then local current=self.automapper and self.automapper:currentRoom(); return self:previewCleanup("previewCurrent",current) end
+    if action=="rename_area" or action=="rename_subarea" then local scope,scopeErr=self:currentMapSelection(action=="rename_area" and "area" or "subarea"); if not scope then return nil,scopeErr end; local key=action=="rename_area" and scope.area or scope.partition; local saved,saveErr=self.map:setMapLabel(action=="rename_area" and "area" or "subarea",key,value); if not saved then return nil,saveErr end; self.view.map_settings_error=nil; self.view.map_settings_status_text="Saved as "..saved; return saved end
   end) end
   if self.view.setCopyTextCallback then self.view:setCopyTextCallback(function(text) return self.adapter:copyText(text) end) end
   self:applyResponsiveLayout()

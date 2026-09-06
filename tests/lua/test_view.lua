@@ -143,6 +143,7 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
     function item:raise() self.raised=true end
     function item:delete() self.deleted=true end
     function item:setClickCallback(callback) self.click=callback end
+    function item:setAction(callback) self.action=callback end
     function item:setToolTip(value) self.tooltip=value end
     function item:print(value) self.text=tostring(value) end
     function item:getText() return self.text or "" end
@@ -293,7 +294,7 @@ test("map settings opens a responsive map library presentation",function()
   for _,size in ipairs({{320,260},{760,700},{1200,800},{1920,1080}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
     eq(view.map_library_panel.x>=0,true); eq(view.map_library_panel.y>=0,true); eq(view.map_library_panel.x+view.map_library_panel.width<=size[1],true); eq(view.map_library_panel.y+view.map_library_panel.height<=size[2],true)
-    for _,key in ipairs({"browse","install","publish","export","report"}) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
+    for _,key in ipairs({"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea","report"}) do local button=view.map_library_actions[key]; eq(button.visible,true); eq(button.x>=0,true); eq(button.x+button.width<=view.map_library_panel.width,true); eq(button.y+button.height<=view.map_library_panel.height,true) end
     for _,key in ipairs({"keep","replace","skip","confirm","cancel"}) do eq(view.map_library_actions[key].visible,false) end
   end
   view.map_library_close.click(); eq(view.map_library_visible,false); eq(view.map_library_panel.visible,false)
@@ -306,15 +307,35 @@ test("map settings contains callback exceptions and keeps the dialog open",funct
 end)
 test("map library actions are explicit presentation callbacks",function()
   local view=chatView(); local selected; view:setMapLibraryActionCallback(function(action) selected=action; return true end); view:applyLayout(require("layout").compute(1000,700)); view:showMapLibrary()
-  for _,key in ipairs({"browse","export","install","publish","keep","replace","skip","confirm","cancel","report"}) do selected=nil; assert(view.map_library_actions[key].click()); eq(selected,key) end
+  for _,key in ipairs(view.map_library_action_order) do selected=nil; assert(view.map_library_actions[key].click()); eq(selected,key) end
 end)
 test("map library displays and selects downloaded catalog entries internally",function()
   local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}}); eq(#view.map_library_rows,1); assert(view.map_library_rows[1].click()); eq(view:selectedMapLibraryEntry().slug,"spur"); eq(view.map_library_status:find("42 rooms",1,true)~=nil,true)
 end)
+test("map library searches friendly metadata and filters map scopes",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(900,700)); view:showMapLibrary()
+  view:setMapLibraryCatalog({
+    {name="Complete Spur",author="Gia",publisher="gia",slug="spur",scope="full_map",room_count=42,version="1.0.0",areas={"Spur"}},
+    {name="Temple District",author="Retro",publisher="retro",slug="temple",scope="area",room_count=12,version="1.0.0",areas={"Spur"}},
+    {name="Hidden Cellar",author="Gia",publisher="gia",slug="cellar",scope="subarea",room_count=4,version="1.0.0",areas={"Spur"},subareas={"Cellar"}},
+    {name="Legacy Map",author="Old Mapper",publisher="old",slug="legacy",room_count=8,version="1.0.0",areas={"Treehaven"}},
+  })
+  eq(#view.map_library_rows,4); assert(view:setMapLibraryFilter("area")); eq(#view.map_library_rows,1); eq(view.map_library_visible_catalog[1].slug,"temple")
+  assert(view:setMapLibraryFilter("all")); assert(view:setMapLibrarySearch("gia")); eq(#view.map_library_rows,2)
+  assert(view:setMapLibrarySearch("cellar")); eq(#view.map_library_rows,1); eq(view.map_library_visible_catalog[1].slug,"cellar")
+  assert(view:setMapLibrarySearch("")); assert(view:setMapLibraryFilter("full_map")); eq(#view.map_library_rows,2); eq(view.map_library_visible_catalog[2].slug,"legacy")
+  eq(view:setMapLibraryFilter("unknown"),nil)
+end)
+test("map library search field applies on enter and remains inside the panel",function()
+  local view=chatView(); local layout=require("layout").compute(760,700); view:applyLayout(layout); view:showMapLibrary(); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}})
+  assert(view.map_library_search.action("Gia")); eq(view.map_library_query,"Gia"); eq(#view.map_library_rows,1)
+  eq(view.map_library_search.visible,true); eq(view.map_library_search.x>=0,true); eq(view.map_library_search.x+view.map_library_search.width<=view.map_library_panel.width,true)
+  for _,key in ipairs(view.map_library_filter_order) do eq(view.map_library_filters[key].visible,true) end
+end)
 test("map library shows conflict choices only during installation review",function()
   local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryImportPending(true)
   for _,key in ipairs({"keep","replace","skip","confirm","cancel","report"}) do eq(view.map_library_actions[key].visible,true) end
-  for _,key in ipairs({"browse","install","publish","export"}) do eq(view.map_library_actions[key].visible,false) end
+  for _,key in ipairs({"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea"}) do eq(view.map_library_actions[key].visible,false) end
   view:setMapLibraryImportPending(false); eq(view.map_library_actions.browse.visible,true); eq(view.map_library_actions.keep.visible,false)
 end)
 test("help and map library expose copyable plain-text instructions",function()

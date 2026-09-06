@@ -1,5 +1,6 @@
 local Navigation=require("navigation")
 local Layout=require("layout")
+local MapCatalog=require("map_catalog")
 local View={}; View.__index=View
 function View.withFont(text,size) return "<span style='font-size:"..tonumber(size).."px'>"..text.."</span>" end
 function View.raiseCards(cards) for _,card in ipairs(cards or {}) do if card and card.raise then card:raise() end end end
@@ -384,10 +385,16 @@ function View.new(settings)
   self.map_settings_clear_current=label("DGHUD.MapSettings.ClearCurrent",self.map_settings_content,"background:#302018;border:1px solid #9b6a42;border-radius:5px;color:#e5b17a;font-weight:700;")
   self.map_settings_clear_all=label("DGHUD.MapSettings.ClearAll",self.map_settings_content,"background:#3a1715;border:1px solid #a94d46;border-radius:5px;color:#ffb0a8;font-weight:700;")
   self.map_settings_library=label("DGHUD.MapSettings.Library",self.map_settings_content,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.map_settings_area_name=input("DGHUD.MapSettings.AreaName",self.map_settings_content,self.geyser)
+  self.map_settings_subarea_name=input("DGHUD.MapSettings.SubareaName",self.map_settings_content,self.geyser)
+  self.map_settings_rename_area=label("DGHUD.MapSettings.RenameArea",self.map_settings_content,"background:#17231c;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.map_settings_rename_subarea=label("DGHUD.MapSettings.RenameSubarea",self.map_settings_content,"background:#17231c;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.map_settings_save:setClickCallback(function() return self:saveMapSettings() end); self.map_settings_cancel:setClickCallback(function() return self:hideMapSettings() end); self.map_settings_overlay:setClickCallback(function() return self:hideMapSettings() end)
   self.map_settings_clear_current:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_current") end end)
   self.map_settings_clear_all:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_all") end end)
   self.map_settings_library:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("map_library") end end)
+  self.map_settings_rename_area:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("rename_area",self.map_settings_area_name:getText()) end end)
+  self.map_settings_rename_subarea:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("rename_subarea",self.map_settings_subarea_name:getText()) end end)
   self.map_settings_visible=false
   local rollerWidgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel}; for _,entry in pairs(self.roller_fields) do rollerWidgets[#rollerWidgets+1]=entry.caption; rollerWidgets[#rollerWidgets+1]=entry.input end; for _,button in pairs(self.roller_toggles) do rollerWidgets[#rollerWidgets+1]=button end; for _,widget in ipairs(rollerWidgets) do widget:hide() end
   if self.help_close.setToolTip then pcall(self.help_close.setToolTip,self.help_close,"Close DGHUD command guide") end
@@ -398,17 +405,23 @@ function View.new(settings)
   self.map_library_bg=label("DGHUD.MapLibrary.Background",self.map_library_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.map_library_title=label("DGHUD.MapLibrary.Title",self.map_library_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.map_library_copy=label("DGHUD.MapLibrary.Copy",self.map_library_panel,"background:transparent;color:"..t.text..";")
-  self.map_library_list=Geyser.ScrollBox:new({name="DGHUD.MapLibrary.List",x=18,y=118,width=684,height=250},self.map_library_panel)
-  self.map_library_rows={}; self.map_library_catalog={}; self.map_library_selected=nil; self.map_library_import_pending=false; self.map_library_status="Choose FIND MAPS to see shared maps, or SHARE MY MAP to send yours for review."
+  self.map_library_search_label=label("DGHUD.MapLibrary.SearchLabel",self.map_library_panel,"background:transparent;color:"..t.muted..";")
+  self.map_library_search=input("DGHUD.MapLibrary.Search",self.map_library_panel,self.geyser)
+  self.map_library_filters={}; self.map_library_filter_order={"all","full_map","area","subarea"}; self.map_library_filter="all"; self.map_library_query=""
+  local filterLabels={all="ALL",full_map="FULL MAPS",area="AREAS",subarea="SUBAREAS"}
+  for _,key in ipairs(self.map_library_filter_order) do local button=label("DGHUD.MapLibrary.Filter."..key,self.map_library_panel); button.option_text=filterLabels[key]; button:setClickCallback(function() return self:setMapLibraryFilter(key) end); self.map_library_filters[key]=button end
+  if self.map_library_search.setAction then self.map_library_search:setAction(function(value) return self:setMapLibrarySearch(value) end) end
+  self.map_library_list=Geyser.ScrollBox:new({name="DGHUD.MapLibrary.List",x=18,y=154,width=684,height=214},self.map_library_panel)
+  self.map_library_rows={}; self.map_library_catalog={}; self.map_library_visible_catalog={}; self.map_library_selected=nil; self.map_library_import_pending=false; self.map_library_status="Choose FIND MAPS to see shared maps, or SHARE MY MAP to send yours for review."
   self.map_library_copy_button=label("DGHUD.MapLibrary.CopyButton",self.map_library_panel,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
   self.map_library_close=label("DGHUD.MapLibrary.Close",self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:4px;color:"..t.text..";font-weight:700;")
-  self.map_library_actions={}; self.map_library_action_order={"browse","export","install","publish","keep","replace","skip","confirm","cancel","report"}
-  local libraryLabels={browse="FIND SHARED MAPS",export="SAVE A BACKUP",install="USE SELECTED MAP",publish="SHARE MY MAP",keep="KEEP MY MAP",replace="USE SHARED MAP",skip="SKIP THIS AREA",confirm="FINISH INSTALLING",cancel="GO BACK",report="REPORT A PROBLEM"}
+  self.map_library_actions={}; self.map_library_action_order={"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea","keep","replace","skip","confirm","cancel","report"}
+  local libraryLabels={browse="FIND SHARED MAPS",install="USE SELECTED MAP",publish_all="SHARE ALL",publish_area="SHARE CURRENT AREA",publish_subarea="SHARE CURRENT SUBAREA",export_all="BACK UP ALL",export_area="BACK UP CURRENT AREA",export_subarea="BACK UP CURRENT SUBAREA",keep="KEEP MY MAP",replace="USE SHARED MAP",skip="SKIP THIS AREA",confirm="FINISH INSTALLING",cancel="GO BACK",report="REPORT A PROBLEM"}
   for _,key in ipairs(self.map_library_action_order) do local button=label("DGHUD.MapLibrary.Action."..key,self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.jade..";font-weight:700;"); button.option_text=libraryLabels[key]; button:setClickCallback(function() if self.map_library_action_callback then return self.map_library_action_callback(key) end; return nil,"map library action is not connected" end); self.map_library_actions[key]=button end
   self.map_library_close:setClickCallback(function() return self:hideMapLibrary() end); self.map_library_overlay:setClickCallback(function() return self:hideMapLibrary() end)
   self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\n\nFIND SHARED MAPS: Load maps shared by other players.\nUSE SELECTED MAP: Download the map you clicked and review any room conflicts.\nSHARE MY MAP: Send your current map to the owner for safety review. No GitHub account is needed.\nSAVE A BACKUP: Keep a private JSON copy on your computer.\nREPORT A PROBLEM: Send the most recent map error for help.\n\nShared maps never silently overwrite personal rooms. You choose whether to keep yours, use the shared rooms, or skip an area before installation.") end end)
   self.map_library_visible=false
-  for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
+  for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_search_label,self.map_library_search,self.map_library_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_filters) do button:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
   return self
 end
 local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF"}
@@ -711,7 +724,7 @@ function View:layoutRollerSettings(layout)
   self:renderRollerSettings(false); View.raiseCards(widgets); return true
 end
 function View:layoutMapSettings(layout)
-  local widgets={self.map_settings_overlay,self.map_settings_panel,self.map_settings_bg,self.map_settings_content,self.map_settings_title,self.map_settings_status,self.map_settings_save,self.map_settings_cancel,self.map_settings_library,self.map_settings_clear_current,self.map_settings_clear_all}
+  local widgets={self.map_settings_overlay,self.map_settings_panel,self.map_settings_bg,self.map_settings_content,self.map_settings_title,self.map_settings_status,self.map_settings_save,self.map_settings_cancel,self.map_settings_library,self.map_settings_clear_current,self.map_settings_clear_all,self.map_settings_area_name,self.map_settings_subarea_name,self.map_settings_rename_area,self.map_settings_rename_subarea}
   for _,v in pairs(self.map_settings_fields or {}) do widgets[#widgets+1]=v.caption; widgets[#widgets+1]=v.input end; for _,v in pairs(self.map_settings_toggles or {}) do widgets[#widgets+1]=v end
   if not self.map_settings_visible then for _,w in ipairs(widgets) do w:hide() end; return true end
   local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18
@@ -722,7 +735,12 @@ function View:layoutMapSettings(layout)
   for i,item in ipairs(items) do local col=columns==2 and ((i-1)%2) or 0; local r=columns==2 and math.floor((i-1)/2) or i-1; local x=col*(cw+gap); local y=r*row
     if item.kind=="toggle" then place(self.map_settings_toggles[item.key],x,y+3,cw,row-6) else local f=self.map_settings_fields[item.key]; place(f.caption,x,y,cw,18); place(f.input,x,y+19,cw,row-21); f.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;") end
   end
-  local rows=math.ceil(#items/columns); local libraryY=rows*row+12; place(self.map_settings_library,0,libraryY,pw-28,38); local dangerY=libraryY+44; place(self.map_settings_clear_current,0,dangerY,cw,38); place(self.map_settings_clear_all,columns==2 and cw+gap or 0,dangerY+((columns==1) and 44 or 0),cw,38); self.map_settings_content.content_height=dangerY+((columns==1) and 90 or 46)
+  local rows=math.ceil(#items/columns); local namesY=rows*row+12
+  local inputStyle="background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;"
+  place(self.map_settings_area_name,0,namesY,cw,30); place(self.map_settings_rename_area,columns==2 and cw+gap or 0,namesY+((columns==1) and 34 or 0),cw,30)
+  place(self.map_settings_subarea_name,0,namesY+((columns==1) and 70 or 36),cw,30); place(self.map_settings_rename_subarea,columns==2 and cw+gap or 0,namesY+((columns==1) and 104 or 36),cw,30)
+  self.map_settings_area_name:setStyleSheet(inputStyle); self.map_settings_subarea_name:setStyleSheet(inputStyle)
+  local libraryY=namesY+((columns==1) and 142 or 74); place(self.map_settings_library,0,libraryY,pw-28,38); local dangerY=libraryY+44; place(self.map_settings_clear_current,0,dangerY,cw,38); place(self.map_settings_clear_all,columns==2 and cw+gap or 0,dangerY+((columns==1) and 44 or 0),cw,38); self.map_settings_content.content_height=dangerY+((columns==1) and 90 or 46)
   place(self.map_settings_status,14,ph-footer+5,pw-300,28); local bw=120; place(self.map_settings_cancel,pw-14-bw*2-10,ph-42,bw,32); place(self.map_settings_save,pw-14-bw,ph-42,bw,32); self.map_settings_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.map_settings_save:echo(View.withFont("<center><b>SAVE</b></center>",font)); self:renderMapSettings(false); View.raiseCards(widgets); return true
 end
 function View:layoutHelp(layout)
@@ -783,7 +801,7 @@ function View:showMapLibrary()
 end
 function View:hideMapLibrary() self.map_library_visible=false; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
 function View:layoutMapLibrary(layout)
-  local widgets={self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_list,self.map_library_copy_button,self.map_library_close}; for _,button in pairs(self.map_library_actions or {}) do widgets[#widgets+1]=button end; for _,row in ipairs(self.map_library_rows or {}) do widgets[#widgets+1]=row end
+  local widgets={self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_search_label,self.map_library_search,self.map_library_list,self.map_library_copy_button,self.map_library_close}; for _,button in pairs(self.map_library_filters or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.map_library_actions or {}) do widgets[#widgets+1]=button end; for _,row in ipairs(self.map_library_rows or {}) do widgets[#widgets+1]=row end
   if not self.map_library_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width,height=math.max(1,tonumber(layout.window_width) or 1200),math.max(1,tonumber(layout.window_height) or 800); local margin=layout.mode=="compact" and 8 or 18
   local panelWidth=math.min(760,math.max(1,width-margin*2)); local panelHeight=math.min(560,math.max(1,height-margin*2)); local x=math.floor((width-panelWidth)/2); local y=math.floor((height-panelHeight)/2); local font=math.max(10,math.min(15,(layout.body_font or 16)-2))
@@ -791,20 +809,30 @@ function View:layoutMapLibrary(layout)
   local closeWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); local copyWidth=math.min(92,math.max(58,math.floor(panelWidth*.2))); place(self.map_library_title,16,10,panelWidth-closeWidth-copyWidth-48,34); place(self.map_library_copy_button,panelWidth-closeWidth-copyWidth-18,8,copyWidth,30); place(self.map_library_close,panelWidth-closeWidth-12,8,closeWidth,30)
   self.map_library_title:echo(View.withFont("<b>MAP LIBRARY</b>",font+2)); self.map_library_copy_button:echo(View.withFont("<center><b>COPY</b></center>",font)); self.map_library_close:echo(View.withFont("<center><b>× CLOSE</b></center>",font))
   place(self.map_library_copy,18,48,panelWidth-36,58); self.map_library_copy:echo(View.withFont(safeText(self.map_library_status or "Map library ready."),font))
-  local actionOrder=self.map_library_import_pending and {"keep","replace","skip","confirm","cancel","report"} or {"browse","install","publish","export","report"}
+  local searchTop=106; place(self.map_library_search_label,18,searchTop,64,28); self.map_library_search_label:echo(View.withFont("<b>SEARCH</b>",font)); place(self.map_library_search,82,searchTop,panelWidth-100,28); if self.map_library_search.setStyleSheet then self.map_library_search:setStyleSheet("background:#080b0a;color:"..self.settings.theme.text..";border:1px solid "..self.settings.theme.border..";") end
+  local filterTop=138; local filterGap=4; local filterWidth=(panelWidth-36-filterGap*3)/4
+  for index,key in ipairs(self.map_library_filter_order) do local button=self.map_library_filters[key]; local active=self.map_library_filter==key; button:setStyleSheet("background:"..(active and "#193024" or "#111512")..";border:1px solid "..(active and self.settings.theme.jade or self.settings.theme.border)..";border-radius:4px;color:"..(active and self.settings.theme.jade or self.settings.theme.muted)..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.."</center>",math.max(9,font-1))); place(button,18+(index-1)*(filterWidth+filterGap),filterTop,filterWidth,26) end
+  local actionOrder=self.map_library_import_pending and {"keep","replace","skip","confirm","cancel","report"} or {"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea","report"}
   for _,button in pairs(self.map_library_actions or {}) do button:hide() end
-  local gap=6; local columns=2; local buttonHeight=math.max(28,font+14); local actionRows=math.ceil(#actionOrder/columns); local top=panelHeight-actionRows*(buttonHeight+gap)-12; place(self.map_library_list,18,110,panelWidth-36,math.max(1,top-118)); local rowHeight=math.max(42,font*3+8)
+  local gap=6; local columns=2; local buttonHeight=math.max(28,font+14); local actionRows=math.ceil(#actionOrder/columns); local top=panelHeight-actionRows*(buttonHeight+gap)-12; place(self.map_library_list,18,168,panelWidth-36,math.max(1,top-176)); local rowHeight=math.max(48,font*3+10)
   for index,row in ipairs(self.map_library_rows or {}) do place(row,0,(index-1)*(rowHeight+4),panelWidth-58,rowHeight) end; self.map_library_list.content_height=math.max(1,#(self.map_library_rows or {})*(rowHeight+4))
   local buttonWidth=(panelWidth-46)/2
   for index,key in ipairs(actionOrder) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); local button=self.map_library_actions[key]; place(button,18+column*(buttonWidth+gap),top+row*(buttonHeight+gap),buttonWidth,buttonHeight); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
   View.raiseCards(widgets); return true
 end
 function View:setMapLibraryCatalog(entries,status)
-  for _,row in ipairs(self.map_library_rows or {}) do if row.delete then pcall(row.delete,row) else row:hide() end end; self.map_library_rows={}; self.map_library_catalog=entries or {}; self.map_library_selected=nil; self.map_library_status=status or (#self.map_library_catalog==0 and "No community maps have been published yet." or "Select a map, then choose DOWNLOAD & REVIEW.")
-  for index,entry in ipairs(self.map_library_catalog) do local row=label("DGHUD.MapLibrary.Row."..index,self.map_library_list,"background:#111814;border:1px solid "..self.settings.theme.border..";border-radius:4px;color:"..self.settings.theme.text..";",self.geyser); row:setClickCallback(function() self.map_library_selected=index; self.map_library_status=entry.name.." by "..entry.author.." — "..entry.room_count.." rooms; "..table.concat(entry.areas,", "); if self.layout then self:layoutMapLibrary(self.layout) end; return true end); row:echo(View.withFont("<b>"..safeText(entry.name).."</b> — "..safeText(entry.publisher).."<br>"..safeText(entry.room_count).." rooms · v"..safeText(entry.version),11)); self.map_library_rows[index]=row end
+  self.map_library_catalog=entries or {}; self.map_library_selected=nil; self.map_library_status=status or (#self.map_library_catalog==0 and "No community maps have been published yet." or "Search by map, area, subarea, or creator. Press Enter to search.")
+  return self:refreshMapLibraryRows()
+end
+function View:refreshMapLibraryRows()
+  for _,row in ipairs(self.map_library_rows or {}) do if row.delete then pcall(row.delete,row) else row:hide() end end; self.map_library_rows={}; self.map_library_visible_catalog=MapCatalog.filterEntries(self.map_library_catalog,self.map_library_query,self.map_library_filter); self.map_library_selected=nil
+  for index,entry in ipairs(self.map_library_visible_catalog) do local row=label("DGHUD.MapLibrary.Row."..index,self.map_library_list,"background:#111814;border:1px solid "..self.settings.theme.border..";border-radius:4px;color:"..self.settings.theme.text..";",self.geyser); row:setClickCallback(function() self.map_library_selected=index; self.map_library_status=entry.name.." by "..entry.author.." — "..entry.room_count.." rooms; "..table.concat(entry.areas or {},", "); if self.layout then self:layoutMapLibrary(self.layout) end; return true end); local scope=MapCatalog.scopeLabel(entry):upper(); row:echo(View.withFont("<span style='color:"..self.settings.theme.jade.."'><b>"..scope.."</b></span> &nbsp; <b>"..safeText(entry.name).."</b><br>by "..safeText(entry.author or entry.publisher).." · "..safeText(entry.room_count).." rooms · "..safeText(table.concat(entry.areas or {},", ")),11)); self.map_library_rows[index]=row end
+  if #self.map_library_visible_catalog==0 and #self.map_library_catalog>0 then self.map_library_status="No shared maps match this search and filter." end
   if self.layout then self:layoutMapLibrary(self.layout) end; return true
 end
-function View:selectedMapLibraryEntry() return self.map_library_selected and self.map_library_catalog[self.map_library_selected] or nil end
+function View:setMapLibrarySearch(query) self.map_library_query=tostring(query or ""):gsub("^%s+",""):gsub("%s+$",""); return self:refreshMapLibraryRows() end
+function View:setMapLibraryFilter(scope) if scope~="all" and scope~="full_map" and scope~="area" and scope~="subarea" then return nil,"unknown map library filter" end; self.map_library_filter=scope; return self:refreshMapLibraryRows() end
+function View:selectedMapLibraryEntry() return self.map_library_selected and self.map_library_visible_catalog[self.map_library_selected] or nil end
 function View:setMapLibraryImportPending(value) self.map_library_import_pending=value==true; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
 function View:setColorMenuVisible(visible)
   self.color_menu_visible=visible==true
@@ -835,8 +863,10 @@ function View:renderMapSettings(populate)
   if not self.map_settings_draft then return true end; local t=self.settings.theme; local font=self.layout and math.max(10,(self.layout.body_font or 14)-3) or 11
   for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; local value=self.map_settings_draft[key]; if key=="height_percent" then value=(tonumber(value) or .4)*100 end; f.caption:echo(View.withFont(f.label,font)); if populate and f.input.print then f.input:print(tostring(value or "")) end end
   for _,key in ipairs(self.map_settings_toggle_order) do local enabled=self.map_settings_draft[key]~=false; local b=self.map_settings_toggles[key]; b:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); b:echo(View.withFont("<center>"..b.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
+  if populate then if self.map_settings_area_name.print then self.map_settings_area_name:print(tostring(self.map_settings_draft.current_area_name or "")) end; if self.map_settings_subarea_name.print then self.map_settings_subarea_name:print(tostring(self.map_settings_draft.current_subarea_name or "")) end end
+  self.map_settings_rename_area:echo(View.withFont("<center><b>NAME CURRENT AREA</b></center>",font)); self.map_settings_rename_subarea:echo(View.withFont("<center><b>NAME CURRENT SUBAREA</b></center>",font))
   self.map_settings_library:echo(View.withFont("<center><b>MAP LIBRARY…</b></center>",font)); self.map_settings_clear_current:echo(View.withFont("<center><b>DELETE CURRENT MAP…</b></center>",font)); self.map_settings_clear_all:echo(View.withFont("<center><b>"..(self.map_clear_pending and "CLICK AGAIN TO CLEAR ALL" or "WARNING: CLEAR ALL MAPS…").."</b></center>",font))
-  self.map_settings_status:echo(View.withFont(self.map_settings_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.map_settings_error).."</b></span>") or "Changes affect future discoveries; saved room numbers stay canonical.",font)); return true
+  self.map_settings_status:echo(View.withFont(self.map_settings_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.map_settings_error).."</b></span>") or safeText(self.map_settings_status_text or "Names are labels only; saved room numbers stay canonical."),font)); return true
 end
 function View:mapSettingsValues()
   local values={transition_submaps={}}; for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; values[key]=f.input.getText and f.input:getText() or "" end; values.height_percent=(tonumber(values.height_percent) or 0)/100; values.enabled=self.map_settings_draft.enabled~=false; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do values.transition_submaps[key]=self.map_settings_draft[key]~=false end; return values

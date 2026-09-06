@@ -44,6 +44,23 @@ test("export omits links to personal or otherwise excluded rooms",function()
   eq(#out.rooms[1].exits,0); eq(#out.rooms[1].special_exits,0)
 end)
 
+test("export selects one area or subarea and trims outside links",function()
+  local a=room(1,"Academy",1); a.partition="academy-main"; a.exits={{direction="e",to=2}}
+  local b=room(2,"Academy",2); b.partition="academy-yard"; b.exits={{direction="w",to=1},{direction="e",to=3}}
+  local c=room(3,"Temple",3); c.partition="temple"; c.special_exits={{command="go gate",to=2}}
+  local transfer=Transfer.new(backend({[1]=a,[2]=b,[3]=c}))
+  local area=assert(transfer:exportData({artifact_id="local:1",author="Deklan"},{scope="area",area="Academy",area_name="Cadet Academy"}))
+  eq(#area.rooms,2); eq(area.provenance.scope,"area"); eq(area.provenance.selection.area_name,"Cadet Academy"); eq(#area.rooms[2].exits,1)
+  local subarea=assert(transfer:exportData({artifact_id="local:2",author="Deklan"},{scope="subarea",partition="academy-yard",subarea_name="Practice Yard"}))
+  eq(#subarea.rooms,1); eq(subarea.rooms[1].id,2); eq(#subarea.rooms[1].exits,0); eq(subarea.provenance.selection.subarea_name,"Practice Yard")
+end)
+
+test("export rejects invalid and empty selections",function()
+  local transfer=Transfer.new(backend({[1]=room(1,"Academy",1)}))
+  eq(transfer:exportData({artifact_id="local:1",author="Deklan"},{scope="bad"}),nil)
+  local value,err=transfer:exportData({artifact_id="local:1",author="Deklan"},{scope="area",area="Missing"}); eq(value,nil); assert(err:find("no DGHUD rooms",1,true))
+end)
+
 test("export repairs legacy coordinate collisions without mutating the backend",function()
   local one,two=room(1,"A",1),room(2,"A",1); local store=backend({[1]=one,[2]=two})
   local out=assert(Transfer.new(store):exportData({artifact_id="local:1",author="Deklan"}))

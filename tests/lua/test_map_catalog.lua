@@ -18,6 +18,13 @@ test("map catalog validates and copies a strict schema 1 catalog",function()
   result.maps[1].areas[1]="changed"; eq(source.maps[1].areas[1],"Academy")
 end)
 
+test("map catalog accepts optional scope metadata while keeping legacy entries full maps",function()
+  local legacy=assert(Catalog.validate(catalog())).maps[1]; eq(legacy.scope,"full_map"); eq(#legacy.subareas,0)
+  local scoped=assert(Catalog.validate(catalog({entry({scope="subarea",subareas={"Crypt","Lower Crypt"}})}))).maps[1]
+  eq(scoped.scope,"subarea"); eq(scoped.subareas[2],"Lower Crypt")
+  eq(Catalog.validate(catalog({entry({scope="district"})})),nil)
+end)
+
 test("map catalog accepts an empty dense maps array",function()
   local result=assert(Catalog.validate({schema=1,maps={}})); eq(#result.maps,0)
 end)
@@ -26,7 +33,7 @@ test("map catalog rejects unknown missing and wrong-schema fields",function()
   local bad=catalog(); bad.extra=true; eq(Catalog.validate(bad),nil)
   bad=catalog(); bad.maps[1].author=nil; eq(Catalog.validate(bad),nil)
   bad=catalog(); bad.maps[1].surprise=true; eq(Catalog.validate(bad),nil)
-  eq(Catalog.validate({schema=2,maps={}}),nil)
+  eq(Catalog.validate({schema=3,maps={}}),nil)
 end)
 
 test("map catalog requires dense bounded arrays",function()
@@ -70,4 +77,13 @@ test("map catalog search matches visible metadata literally",function()
   local matches=assert(Catalog.search(catalog(maps),"academy")); eq(#matches,1); eq(matches[1].slug,"spur-academy")
   matches=assert(Catalog.search(catalog(maps),"Gia Afari")); eq(#matches,1)
   matches=assert(Catalog.search(catalog(maps),".")); eq(#matches,2)
+end)
+
+test("map catalog filters by friendly scope name author area and subarea",function()
+  local entries={entry(),entry({slug="crypt",name="Old Crypt",author="Retro",publisher="retro",scope="subarea",areas={"Cemetery"},subareas={"Lower Vault"},download_url="https://raw.githubusercontent.com/wizzydizzy-ctrl/dragons-gate-map-library/main/maps/retro/crypt.json",sha256=string.rep("b",64)})}
+  local normalized=assert(Catalog.validate(catalog(entries))).maps
+  local matches=Catalog.filterEntries(normalized,"retro","subarea"); eq(#matches,1); eq(matches[1].slug,"crypt")
+  matches=Catalog.filterEntries(normalized,"lower vault","all"); eq(#matches,1)
+  matches=Catalog.filterEntries(normalized,"gia","full_map"); eq(#matches,1); eq(Catalog.scopeLabel(matches[1]),"Full Map")
+  eq(Catalog.scopeLabel(normalized[2]),"Subarea")
 end)

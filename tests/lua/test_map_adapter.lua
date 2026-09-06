@@ -68,6 +68,15 @@ local function fakeMapApi(seed)
   return api
 end
 
+test("friendly area and subarea names preserve stable room identity",function()
+  local api=fakeMapApi(); local map=Adapter.new(api)
+  assert(map:putRoom({id=10,area="1",partition="special:10",x=0,y=0,z=0,name="Gate",environment="City",flags={},poi={},exits={},special_exits={}}))
+  assert(map:setMapLabel("area","1","Spurian Academy")); assert(map:setMapLabel("subarea","special:10","Temple Gate"))
+  local current=assert(map:currentTransferScope(10)); eq(current.area,"1"); eq(current.partition,"special:10"); eq(current.area_name,"Spurian Academy"); eq(current.subarea_name,"Temple Gate")
+  local scopes=assert(map:listTransferScopes()); eq(scopes.areas[1].label,"Spurian Academy"); eq(scopes.subareas[1].label,"Temple Gate")
+  local room=assert(map:getRoom(10)); eq(room.id,10); eq(room.area,"1"); eq(room.partition,"special:10")
+end)
+
 local function descriptor(id,area,name)
   return {id=id,name=name or ("Room "..id),area_key=area or "A",environment="Plain",flags={"indoor"},exits={}}
 end
