@@ -271,8 +271,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.Header.ColorMenu."..key,self.options_scroll)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","feedback","map_settings","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
+  self.option_action_order={"command_help","feedback","send_debug","map_settings","roller_settings","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local actionLabels={command_help="COMMANDS & HELP…",feedback="FEEDBACK & REQUESTS…",send_debug="SEND LAST DEBUG REPORT",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER SETTINGS…",roller_start="ROLLER START",roller_stop="ROLLER STOP",roller_stats="ROLLER STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET ROLL SESSION",roller_help="ROLLER HELP"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false

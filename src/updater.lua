@@ -71,6 +71,7 @@ function Updater:update(done,validatedManifest,manifestRaw)
   local completed=false
   local function finish(updated,message)
     if completed then return end; completed=true
+    if not updated and message and self.adapter.reportUpdateFailure then self.adapter:reportUpdateFailure(message) end
     self:release(); if done then done(updated,message) end
   end
   local success,result,message=pcall(self.adapter.startUpdate,self.adapter,self,finish,validatedManifest,manifestRaw); if not success then self:release(); return nil,result end

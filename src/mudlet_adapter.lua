@@ -49,6 +49,23 @@ function Adapter:saveMapDiagnostic(payload)
   local path=directory.."/mapper-"..os.date("%Y%m%d-%H%M%S")..".txt"; local file,err=io.open(path,"wb"); if not file then return nil,err end
   local ok,writeErr=file:write(tostring(payload or "")); if not ok then file:close(); return nil,writeErr end; file:close(); return path
 end
+function Adapter:saveFailureReport(report)
+  local ok,payload=pcall(yajl.to_string,report); if not ok or type(payload)~="string" then return nil,"could not encode failure report" end; if #payload>16000 then return nil,"failure report exceeds the safety limit" end
+  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory); local path=directory.."/failure-"..os.date("%Y%m%d-%H%M%S")..".json"; local file,err=io.open(path,"wb"); if not file then return nil,err end
+  local wrote,writeErr=file:write(payload.."\n"); if not wrote then file:close(); return nil,writeErr end; file:close(); return path
+end
+function Adapter:submitFailureReport(report,done)
+  if type(done)~="function" then return nil,"failure report callback is required" end; if type(postHTTP)~="function" then return nil,"Mudlet HTTP upload support is unavailable" end
+  local detailsOK,details=pcall(yajl.to_string,{generated_epoch=report.generated_epoch,category=report.category,context=report.context,events=report.events}); if not detailsOK then return nil,"could not encode failure report" end
+  local request={component=report.category or "unknown",edition=report.edition or "unknown",version=report.hud_version or "unknown",mudlet_version=tostring((self.mudletVersion and self:mudletVersion()) or "unknown"),message=report.message or "unknown failure",details=details}
+  local ok,payload=pcall(yajl.to_string,request); if not ok or type(payload)~="string" then return nil,"could not encode failure report" end; if #payload>16000 then return nil,"failure report exceeds the safety limit" end
+  local url="https://dghud-maps.wallfamilyarchive.com/v1/diagnostics"; local ids={}; local timer; local finished=false
+  local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end end
+  local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
+  ids[#ids+1]=registerAnonymousEventHandler("sysPostHttpDone",function(_,actual,body) if actual~=url then return end; local parsed,value=pcall(yajl.to_value,body or ""); if not parsed or type(value)~="table" or value.ok~=true then return finish(nil,type(value)=="table" and value.error or "report service returned an invalid response") end; finish(value) end)
+  ids[#ids+1]=registerAnonymousEventHandler("sysPostHttpError",function(_,message,actual) if actual==url then finish(nil,message or "failure report upload failed") end end)
+  timer=tempTimer(30,function() timer=nil; finish(nil,"failure report upload timed out") end); local queued,err=postHTTP(payload,url,{["Content-Type"]="application/json",["Accept"]="application/json"}); if queued==false then cleanup(); return nil,err or "Mudlet could not start the report upload" end; return true
+end
 function Adapter:openMapDiagnosticsFolder()
   local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
   if type(openUrl)=="function" then pcall(openUrl,"file://"..directory) end; return directory
@@ -303,7 +320,8 @@ function Adapter:consumeUpdateReinstall()
   DGHUD._update_reinstall_pending=nil
   return true
 end
-function Adapter:reportUpdateCheckFailure(message) cecho("\n<yellow>[DGHUD Update]<reset> Version check failed: "..tostring(message).."; refreshing character data.\n") end
+function Adapter:reportUpdateCheckFailure(message) cecho("\n<yellow>[DGHUD Update]<reset> Version check failed: "..tostring(message).."; refreshing character data. A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_check",stage="check"}) end end
+function Adapter:reportUpdateFailure(message) cecho("\n<red>[DGHUD Update]<reset> Update failed: "..tostring(message)..". A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_install",stage="install"}) end end
 function Adapter:updateClock()
   if type(getEpoch)=="function" then return tonumber(getEpoch()) or os.time() end
   return os.time()

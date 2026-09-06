@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local function colorOptions(status)
@@ -12,7 +12,12 @@ function Main.new(adapter,settings)
   local self=setmetatable({adapter=adapter,settings=settings,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
   self.map_diagnostics=MapDiagnostics.new(settings and settings.version,settings and settings.edition,function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end)
+  self.failure_reports=FailureReport.new({version=settings and settings.version,edition=settings and settings.edition,clock=function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end,save=function(report) if adapter.saveFailureReport then return adapter:saveFailureReport(report) end end,submit=function(report,done) if not adapter.submitFailureReport then return nil,"anonymous failure reporting is unavailable" end; return adapter:submitFailureReport(report,done) end})
   return self
+end
+function Main:captureFailure(category,message,context)
+  if not self.failure_reports then return nil,"failure reporting is unavailable" end
+  local report=self.failure_reports:record(category,message,context); self.last_failure_report=report; return report
 end
 function Main.installChatApi(namespace)
   local chat=type(namespace.chat)=="table" and namespace.chat or {}
@@ -35,7 +40,16 @@ function Main.installChatApi(namespace)
   Main.installColorizerApi(namespace)
   Main.installRunesApi(namespace)
   Main.installRollerApi(namespace)
+  Main.installFailureApi(namespace)
   return chat
+end
+function Main.installFailureApi(namespace)
+  local api=type(namespace.failures)=="table" and namespace.failures or {}; namespace.failures=api
+  local function active() local root=rawget(_G,"DGHUD"); local controller=root and root.controller; return controller,controller and controller.failure_reports end
+  api.last=function() local _,reports=active(); if not reports then return nil,"failure reporting is unavailable" end; return reports:lastReport() end
+  api.report=function(category,message,context) local controller=active(); if not controller then return nil,"HUD is not running" end; return controller:captureFailure(category,message,context) end
+  api.submitLast=function(done) local _,reports=active(); if not reports then return nil,"failure reporting is unavailable" end; return reports:submitReport(nil,done) end
+  return api
 end
 function Main.installRollerApi(namespace)
   local api=type(namespace.roller)=="table" and namespace.roller or {}; namespace.roller=api
@@ -404,6 +418,7 @@ function Main:reportCleanup(message,isError)
   if self.map_diagnostics then self.map_diagnostics:record(isError and "cleanup_error" or "cleanup",message) end
   if type(self.adapter.reportMapCleanup)=="function" then pcall(self.adapter.reportMapCleanup,self.adapter,message,isError==true) end
   if isError and self.adapter and self.adapter.saveMapDiagnostic and not self.writing_map_diagnostic then self.writing_map_diagnostic=true; pcall(function() self.adapter:saveMapDiagnostic(self.map_diagnostics:render(self:mapDiagnosticContext())) end); self.writing_map_diagnostic=false end
+  if isError then self:captureFailure("mapper",message,{operation="map_cleanup",stage="cleanup"}) end
   return isError and nil or true,message
 end
 function Main:previewCleanup(method,target)
@@ -461,7 +476,7 @@ function Main:mapTransferCreator()
   local data=self.adapter:getGMCP(); local status=data and data.Char and data.Char.Status or {}; local name=tostring(status.name or "Unknown"); local surname=tostring(status.surname or "")
   return (name..(surname~="" and (" "..surname) or "")):match("^%s*(.-)%s*$")
 end
-function Main:reportMapTransfer(message,isError) if self.adapter.reportMapTransfer then return self.adapter:reportMapTransfer(message,isError) end; return true end
+function Main:reportMapTransfer(message,isError) if isError then self:captureFailure("map_transfer",message,{operation="map_transfer",stage="operation"}) end; if self.adapter.reportMapTransfer then return self.adapter:reportMapTransfer(message,isError) end; return true end
 function Main:currentMapSelection(scope)
   if scope=="all" then return {scope="all"} end
   local current=self.automapper and self.automapper:currentRoom(); if not current then return nil,"current room is unavailable" end
@@ -639,6 +654,7 @@ function Main:start()
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
     if action=="feedback" then return self.adapter:openFeedback() end
+    if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) self:reportMapTransfer(sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")),sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
@@ -648,7 +664,7 @@ function Main:start()
     if action=="browse" then
       if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end
       self.view:setMapLibraryCatalog({},"Loading community map catalog…")
-      local started,err=self.adapter:fetchMapCatalog(function(raw,downloadErr) if downloadErr then return self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(downloadErr)) end; local catalog,validationErr=MapCatalog.validate(raw); if not catalog then return self.view:setMapLibraryCatalog({},validationErr) end; self.map_catalog=catalog; self.view:setMapLibraryCatalog(catalog.maps) end); if not started then self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(err)) end; return started,err
+      local started,err=self.adapter:fetchMapCatalog(function(raw,downloadErr) if downloadErr then self:captureFailure("map_library",downloadErr,{operation="browse",stage="download"}); return self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(downloadErr)) end; local catalog,validationErr=MapCatalog.validate(raw); if not catalog then self:captureFailure("map_library",validationErr,{operation="browse",stage="validation"}); return self.view:setMapLibraryCatalog({},validationErr) end; self.map_catalog=catalog; self.view:setMapLibraryCatalog(catalog.maps) end); if not started then self:captureFailure("map_library",err,{operation="browse",stage="start"}); self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(err)) end; return started,err
     elseif action:match("^export_") then
       local scope=action:gsub("^export_",""); local selection,selectionErr=self:currentMapSelection(scope); if not selection then self.view.map_library_status="Backup failed: "..tostring(selectionErr); return nil,selectionErr end
       local stamp=(self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time())):gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$","")
@@ -658,22 +674,25 @@ function Main:start()
     elseif action=="install" then
       local entry=self.view:selectedMapLibraryEntry(); if not entry then self.view:setMapLibraryCatalog(self.map_catalog and self.map_catalog.maps or {},"Select a map first."); return nil,"select a map first" end
       self.view.map_library_status="Downloading and verifying "..entry.name.."…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
-      local function failed(message) self.last_mapper_error=tostring(message); self.last_map_library_error=tostring(message); self:exportMapDiagnostic(false); self.view.map_library_status="Map failed: "..tostring(message).." A sanitized debug log was saved. Choose REPORT LAST ERROR if you want to send it to the owner."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
+      local function failed(message) self.last_mapper_error=tostring(message); self.last_map_library_error=tostring(message); self:captureFailure("map_library",message,{operation="install",stage="download_or_validation",map_scope=entry.scope,catalog_schema=self.map_catalog and self.map_catalog.schema}); self.view.map_library_status="Map failed: "..tostring(message).." A sanitized report is ready. Choose REPORT A PROBLEM to send it anonymously; no GitHub account is needed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
       local started,err=self.adapter:downloadCatalogMap(entry,function(raw,downloadErr) if downloadErr then return failed(downloadErr) end; local model,validationErr=self.map_transfer:validate(raw); if not model then return failed(validationErr) end; if model.provenance.publisher~=entry.publisher or model.provenance.slug~=entry.slug then return failed("map provenance does not match the catalog") end; local path,saveErr=self.adapter:saveMapTransfer(entry.slug,raw); if not path then return failed(saveErr) end; local plan,previewErr=self:previewMapTransfer(entry.slug); if not plan then return failed(previewErr) end end); if not started then failed(err) end; return started,err
     elseif action=="keep" then return self:setDefaultMapImportPolicy("keep")
     elseif action=="replace" then return self:setDefaultMapImportPolicy("replace")
     elseif action=="skip" then return self:setDefaultMapImportPolicy("skip")
     elseif action=="confirm" then return self:confirmMapTransfer()
     elseif action=="cancel" then self.pending_map_import=nil; if self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end; self.view.map_library_status="Stopped. Your map was not changed."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return true
-    elseif action=="report" then local message=self.last_map_library_error or "No map-library error has been recorded."; self.adapter:copyText("DGHUD map-library error: "..message); return self.adapter:openFeedback("DGHUD map-library error",message)
+    elseif action=="report" then
+      if not self.failure_reports:lastReport() then self:captureFailure("map_library",self.last_map_library_error or "manual problem report",{operation="map_library",stage="manual"}) end
+      self.view.map_library_status="Sending privacy-safe diagnostic…"
+      return self.failure_reports:submitReport(nil,function(result,sendErr) self.view.map_library_status=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end)
     elseif action:match("^publish_") then
       local scope=action:gsub("^publish_",""); local selection,selectionErr=self:currentMapSelection(scope); if not selection then self.view.map_library_status="Share failed: "..tostring(selectionErr); return nil,selectionErr end
       local stamp=os.date("%Y%m%d-%H%M%S"); local author=self:mapTransferCreator(); local publisher=author:lower():gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$",""):sub(1,39); if publisher=="" then publisher="anonymous" end
       local friendly=selection.subarea_name or selection.area_name or scope; local slug=(friendly.."-"..stamp):lower():gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$",""):sub(1,64); local data,buildErr=self.map_transfer:exportData({artifact_id="submission:"..stamp..":"..slug,author=author,publisher=publisher,slug=slug},selection)
-      if not data then self.view.map_library_status="Publish failed: "..tostring(buildErr); self:reportMapTransfer(buildErr,true); return nil,buildErr end
+      if not data then self:captureFailure("map_library",buildErr,{operation="publish",stage="build",map_scope=scope}); self.view.map_library_status="Publish failed: "..tostring(buildErr); self:reportMapTransfer(buildErr,true); return nil,buildErr end
       self.view.map_library_status="Uploading and validating "..#data.rooms.." rooms…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
       local function completed(result,publishErr)
-        if publishErr then self.last_map_library_error=tostring(publishErr); self.view.map_library_status="Publish failed: "..tostring(publishErr); self:reportMapTransfer(publishErr,true)
+        if publishErr then self.last_map_library_error=tostring(publishErr); self:captureFailure("map_library",publishErr,{operation="publish",stage="upload",map_scope=scope,room_count=#data.rooms}); self.view.map_library_status="Publish failed: "..tostring(publishErr); self:reportMapTransfer(publishErr,true)
         else self.view.map_library_status="Submitted for owner review. Submission "..tostring(result.submission_id or "received").."."; self:reportMapTransfer("Map submitted for owner review. It will appear in the library after validation and approval.",false) end
         if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
       end
