@@ -14,6 +14,7 @@ local function fakeMapApi(seed)
   function api.deleteRoom(id) local ok,e=gate("deleteRoom"); if not ok then return nil,e end; api.rooms[id]=nil; api.deletedRooms[#api.deletedRooms+1]=id; return true end
   function api.getAreaTable() local ok,e=gate("getAreaTable"); if not ok then return nil,e end; local t={}; for n,id in pairs(api.areas) do t[n]=id end; return t end
   function api.addAreaName(name) local ok,e=gate("addAreaName"); if not ok then return nil,e end; if api.areas[name] then return nil,"area already exists" end; local id=api.nextArea; api.nextArea=id+1; api.areas[name]=id; api.areaUser[id]={}; return id end
+  function api.setAreaName(id,name) local ok,e=gate("setAreaName"); if not ok then return nil,e end; if api.areas[name] and api.areas[name]~=id then return nil,"area already exists" end; local old; for label,areaID in pairs(api.areas) do if areaID==id then old=label; break end end; if not old then return nil,"area does not exist" end; api.areas[old]=nil; api.areas[name]=id; return true end
   function api.deleteArea(id) local ok,e=gate("deleteArea"); if not ok then return nil,e end; for name,areaID in pairs(api.areas) do if areaID==id then api.areas[name]=nil end end; api.areaUser[id]=nil; api.deletedAreas[#api.deletedAreas+1]=id; return true end
   function api.setAreaUserData(id,k,v) local ok,e=gate("setAreaUserData"); if not ok then return nil,e end; api.areaUser[id]=api.areaUser[id] or {}; api.areaUser[id][k]=v; return true end
   function api.getAreaUserData(id,k) local ok,e=gate("getAreaUserData"); if not ok then return nil,e end; return api.areaUser[id] and api.areaUser[id][k] end
@@ -72,9 +73,15 @@ test("friendly area and subarea names preserve stable room identity",function()
   local api=fakeMapApi(); local map=Adapter.new(api)
   assert(map:putRoom({id=10,area="1",partition="special:10",x=0,y=0,z=0,name="Gate",environment="City",flags={},poi={},exits={},special_exits={}}))
   assert(map:setMapLabel("area","1","Spurian Academy")); assert(map:setMapLabel("subarea","special:10","Temple Gate"))
+  eq(assert(map:renameNativePartition("special:10")),"Spurian Academy - Temple Gate [10]")
+  eq(api.areas["Spurian Academy - Temple Gate [10]"],api.rooms[10].area)
   local current=assert(map:currentTransferScope(10)); eq(current.area,"1"); eq(current.partition,"special:10"); eq(current.area_name,"Spurian Academy"); eq(current.subarea_name,"Temple Gate")
   local scopes=assert(map:listTransferScopes()); eq(scopes.areas[1].label,"Spurian Academy"); eq(scopes.subareas[1].label,"Temple Gate")
   local room=assert(map:getRoom(10)); eq(room.id,10); eq(room.area,"1"); eq(room.partition,"special:10")
+  local originalArea=api.rooms[10].area
+  assert(map:putRoom({id=10,area="1",partition="special:10",x=0,y=0,z=0,name="Gate",environment="City",flags={},poi={},exits={},special_exits={}}))
+  eq(api.rooms[10].area,originalArea)
+  eq(api.nextArea,2)
 end)
 
 local function descriptor(id,area,name)

@@ -83,6 +83,25 @@ local function friendlyLabel(value)
   return value
 end
 
+local function areaForPartition(self,key,areas)
+  local found
+  for _,area in pairs(areas) do
+    area=positiveInteger(area)
+    if area then
+      local owner,ownerErr=read(self.api,"getAreaUserData",area,"dghud.owner"); if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
+      local partition,partitionErr=read(self.api,"getAreaUserData",area,"dghud.partition"); if partition==nil and partitionErr~=nil and not absentUserData(partitionErr) then return nil,partitionErr end
+      if owner==self.owner and tostring(partition or "")==key then if found and found~=area then return nil,"multiple DGHUD mapper areas claim partition "..key end; found=area end
+    end
+  end
+  if found then return found end
+  local legacy=positiveInteger(areas[areaName(key)])
+  if legacy then
+    local owner,ownerErr=read(self.api,"getAreaUserData",legacy,"dghud.owner"); if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
+    if owner~=self.owner then return nil,"area "..areaName(key).." is not owned by DragonsGateHUD" end
+    local marked,markErr=invoke(self.api,"setAreaUserData",legacy,"dghud.partition",key); if not marked then return nil,markErr end; return legacy
+  end
+end
+
 local function specialDestination(exits,command)
   for destination,commands in pairs(exits or {}) do
     if type(commands)=="table" and commands[command]~=nil then return destination end
@@ -138,6 +157,28 @@ function MapAdapter:setMapLabel(kind,key,value)
   local clean,err=friendlyLabel(value); if not clean then return nil,err end
   local ok,writeErr=invoke(self.api,"setMapUserData",labelKey(kind,key),clean); if ok==nil then return nil,writeErr end
   return clean
+end
+
+function MapAdapter:restoreMapLabel(kind,key,value)
+  if kind~="area" and kind~="subarea" then return nil,"map label kind must be area or subarea" end
+  local saved,saveErr=invoke(self.api,"setMapUserData",labelKey(kind,key),tostring(value or ""))
+  if not saved then return nil,saveErr end
+  return true
+end
+
+function MapAdapter:renameNativePartition(partition)
+  local key=tostring(partition or ""); local areas,areasErr=read(self.api,"getAreaTable"); if areas==nil then return nil,areasErr end
+  local area,findErr=areaForPartition(self,key,areas); if not area then return nil,findErr or "mapper area for this subarea was not found" end
+  local record,recordErr=self:areaRecord(area); if not record then return nil,recordErr end; if not record.owned then return nil,"mapper area is not owned by DragonsGateHUD" end
+  local rooms,roomsErr=self:roomsInArea(area); if not rooms then return nil,roomsErr end; local gameArea
+  for _,roomID in ipairs(rooms) do local room,roomErr=self:roomRecord(roomID); if not room then return nil,roomErr end; if not room.owned or tostring(room.partition or "")~=key then return nil,"mapper area contains rooms from another map partition" end; gameArea=gameArea or tostring(room.game_area or "unknown") end
+  local areaLabel=self:mapLabel("area",gameArea or "unknown") or ""; local subLabel=self:mapLabel("subarea",key) or ""; local suffix
+  local special=key:match("^special:(%d+)$"); local isolated=key:match("^isolated:(%d+)$")
+  if special then suffix=" ["..special.."]" elseif isolated then suffix=" [Isolated "..isolated.."]" else suffix=" [Area "..key.."]" end
+  local title=subLabel~="" and ((areaLabel~="" and areaLabel.." - " or "")..subLabel) or (areaLabel~="" and areaLabel or areaName(key):gsub("^Dragons Gate %- ",""))
+  local wanted=title..suffix; local collision=positiveInteger(areas[wanted]); if collision and collision~=area then return nil,"another mapper area already uses the name "..wanted end
+  local renamed,renameErr=invoke(self.api,"setAreaName",area,wanted); if not renamed then return nil,renameErr end
+  self.areas[key]=area; if type(self.api.updateMap)=="function" then invoke(self.api,"updateMap") end; return wanted
 end
 
 function MapAdapter:listTransferScopes()
@@ -255,15 +296,20 @@ function MapAdapter:ensureArea(areaKey)
   if areas==nil then return nil,areasErr end
   local cached=self.areas[key]
   if cached~=nil then
-    if positiveInteger(areas[name])==positiveInteger(cached) then
+    local cachedExists=false
+    for _,areaID in pairs(areas) do if positiveInteger(areaID)==positiveInteger(cached) then cachedExists=true; break end end
+    if cachedExists then
       local owner,ownerErr=read(self.api,"getAreaUserData",cached,"dghud.owner")
-      if ownerErr then return nil,ownerErr end
-      if owner==self.owner then return cached end
+      if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
+      local partition,partitionErr=read(self.api,"getAreaUserData",cached,"dghud.partition")
+      if partition==nil and partitionErr~=nil and not absentUserData(partitionErr) then return nil,partitionErr end
+      if owner==self.owner and tostring(partition or "")==key then return cached end
       return nil,"area "..name.." is not owned by DragonsGateHUD"
     end
     self.areas[key]=nil; self.createdAreas[cached]=nil
   end
-  local area=areas[name]
+  local area,findErr=areaForPartition(self,key,areas)
+  if not area and findErr then return nil,findErr end
   local createdThisCall=false
   if area~=nil then
     local owner,ownerErr=read(self.api,"getAreaUserData",area,"dghud.owner")
@@ -276,7 +322,7 @@ function MapAdapter:ensureArea(areaKey)
     createdThisCall=true
     self.createdAreas[area]=true
   end
-  local areaOperations={{"setAreaUserData",area,"dghud.owner",self.owner},{"setAreaUserData",area,"dghud.state","provisional"},{"setAreaUserData",area,"dghud.mapper_schema",self.schema}}
+  local areaOperations={{"setAreaUserData",area,"dghud.owner",self.owner},{"setAreaUserData",area,"dghud.partition",key},{"setAreaUserData",area,"dghud.state","provisional"},{"setAreaUserData",area,"dghud.mapper_schema",self.schema}}
   for index,operation in ipairs(areaOperations) do
     local ok,err=invoke(self.api,unpackValues(operation))
     if ok==nil then
@@ -545,6 +591,9 @@ end
 
 local function partitionForArea(self,area)
   if area==nil then return nil,"map area is unavailable" end
+  local stored,storedErr=read(self.api,"getAreaUserData",area,"dghud.partition")
+  if stored==nil and storedErr~=nil and not absentUserData(storedErr) then return nil,storedErr end
+  if stored~=nil and tostring(stored)~="" then return tostring(stored) end
   local areas,areasErr=read(self.api,"getAreaTable")
   if areas==nil then return nil,areasErr end
   local partition
@@ -554,7 +603,11 @@ local function partitionForArea(self,area)
       local destination=areaNameValue:match("^Dragons Gate %- Submap (%d+)$")
       local isolated=areaNameValue:match("^Dragons Gate %- Isolated (%d+)$")
       partition=destination and ("special:"..destination) or isolated and ("isolated:"..isolated) or areaNameValue:match("^Dragons Gate %- (.+)$")
-      if partition then break end
+      if partition then
+        local owner=read(self.api,"getAreaUserData",area,"dghud.owner")
+        if owner==self.owner then invoke(self.api,"setAreaUserData",area,"dghud.partition",partition) end
+        break
+      end
     end
   end
   partition=partition or ("area:"..tostring(area))
@@ -861,7 +914,7 @@ end
 function MapAdapter.mudletApi(globals)
   globals=globals or _G
   local api={}
-  local names={"addRoom","deleteRoom","addAreaName","deleteArea","getAreaTable","getAreaRooms1","getMapLabels","setAreaUserData","getAreaUserData","setRoomArea","getRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","getRoomUserData","setExitStub","setExit","getRoomExits","addSpecialExit","removeSpecialExit","getSpecialExits","getRoomCoordinates","getRooms","getRoomsByPosition","getAllMapUserData","setMapUserData","getMapZoom","setMapZoom","setRoomIDbyHash","centerview","updateMap","tempTimer"}
+  local names={"addRoom","deleteRoom","addAreaName","deleteArea","setAreaName","getAreaTable","getAreaRooms1","getMapLabels","setAreaUserData","getAreaUserData","setRoomArea","getRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","getRoomUserData","setExitStub","setExit","getRoomExits","addSpecialExit","removeSpecialExit","getSpecialExits","getRoomCoordinates","getRooms","getRoomsByPosition","getAllMapUserData","setMapUserData","getMapZoom","setMapZoom","setRoomIDbyHash","centerview","updateMap","tempTimer"}
   local function wrapper(name)
     return function(...)
       local fn=globals[name]
@@ -872,7 +925,7 @@ function MapAdapter.mudletApi(globals)
       return a,b,c
     end
   end
-  local mutations={addRoom=true,deleteRoom=true,addAreaName=true,deleteArea=true,setAreaUserData=true,setRoomArea=true,setRoomName=true,setRoomCoordinates=true,setRoomUserData=true,setExitStub=true,setExit=true,addSpecialExit=true,removeSpecialExit=true,setMapUserData=true,setMapZoom=true,setRoomIDbyHash=true,centerview=true,updateMap=true,tempTimer=true}
+  local mutations={addRoom=true,deleteRoom=true,addAreaName=true,deleteArea=true,setAreaName=true,setAreaUserData=true,setRoomArea=true,setRoomName=true,setRoomCoordinates=true,setRoomUserData=true,setExitStub=true,setExit=true,addSpecialExit=true,removeSpecialExit=true,setMapUserData=true,setMapZoom=true,setRoomIDbyHash=true,centerview=true,updateMap=true,tempTimer=true}
   for _,name in ipairs(names) do
     if mutations[name] then
       api[name]=wrapper(name)
