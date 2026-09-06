@@ -1,7 +1,7 @@
 local Transfer={}
 Transfer.__index=Transfer
 
-local DIRECTIONS={n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,up=true,down=true,["in"]=true,out=true}
+local DIRECTION_ALIASES={north="n",n="n",northeast="ne",ne="ne",east="e",e="e",southeast="se",se="se",south="s",s="s",southwest="sw",sw="sw",west="w",w="w",northwest="nw",nw="nw",up="up",u="up",down="down",d="down",["in"]="in",out="out"}
 local POLICIES={keep_mine=true,use_imported=true,skip_area=true}
 local SAFE_TRAVEL={go=true,enter=true,climb=true,crawl=true,swim=true,squeeze=true,cross=true}
 
@@ -53,8 +53,8 @@ local function sortedExits(values,special,roomIDs)
       local verb=command:match("^(%a+)"); if not SAFE_TRAVEL[verb] then return nil,"entry "..index.." uses unsafe travel command '"..command.."'" end
       key=command; item={command=command,to=to}
     else
-      local direction=type(item.direction)=="string" and item.direction:lower() or nil
-      if not DIRECTIONS[direction] then return nil,"entry "..index.." has unsupported direction '"..tostring(item.direction).."'" end
+      local direction=type(item.direction)=="string" and DIRECTION_ALIASES[item.direction:lower():match("^%s*(.-)%s*$")] or nil
+      if not direction then return nil,"entry "..index.." has unsupported direction '"..tostring(item.direction).."'" end
       key=direction; item={direction=direction,to=to}
     end
       if seen[key] then return nil,"entry "..index.." is duplicated" end; seen[key]=true; out[#out+1]=item

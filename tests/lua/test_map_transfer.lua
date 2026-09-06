@@ -17,7 +17,7 @@ local function artifact(rooms)
 end
 
 test("map transfer validation canonicalizes deterministic rooms tags and exits",function()
-  local a,b=room(2,"B",2),room(1,"A",1); a.flags={"safe","indoor"}; a.poi={"shop","bank"}; a.exits={{direction="w",to=1}}; a.special_exits={{command="  GO Door ",to=1}}
+  local a,b=room(2,"B",2),room(1,"A",1); a.flags={"safe","indoor"}; a.poi={"shop","bank"}; a.exits={{direction="west",to=1}}; a.special_exits={{command="  GO Door ",to=1}}
   local model=assert(Transfer.new(backend()):validate(artifact({a,b})))
   eq(model.provenance.verified,false)
   eq(model.rooms[1].id,1); eq(model.rooms[2].id,2); eq(table.concat(model.rooms[2].flags,","),"indoor,safe"); eq(table.concat(model.rooms[2].poi,","),"bank,shop")
