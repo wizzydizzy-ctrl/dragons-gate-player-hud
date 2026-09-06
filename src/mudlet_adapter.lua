@@ -150,6 +150,17 @@ end
 function Adapter.loadRollerSettings()
   local loader=loadfile(rollerSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" then return value end; return nil
 end
+local function mapperSettingsPath() return getMudletHomeDir().."/DragonsGateHUD/mapper-settings.lua" end
+function Adapter:saveMapperSettings(config)
+  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local destination=mapperSettingsPath(); local temp=destination..".tmp"
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end
+  local wrote,writeErr=file:write("return { enabled="..tostring(not (config and config.enabled==false)).." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local ok,renameErr=os.rename(temp,destination); if not ok then os.remove(temp); return nil,renameErr end; return true
+end
+function Adapter.loadMapperSettings()
+  local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return {enabled=value.enabled} end; return nil
+end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end

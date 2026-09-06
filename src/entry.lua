@@ -17,6 +17,7 @@ local Updater=require("updater")
 local Storage=require("chat_storage")
 if type(userSettings)~="table" then userSettings={} end
 if userSettings.roller==nil then local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end
+if userSettings.mapper==nil then local persisted=Adapter.loadMapperSettings and Adapter.loadMapperSettings(); if type(persisted)=="table" then userSettings.mapper=persisted end end
 DGHUD.user_settings=userSettings
 local function applyUserSettings()
   local ok,resolvedSettings,migratedSettings=pcall(Settings.resolve,defaults,DGHUD.user_settings or {})

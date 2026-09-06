@@ -188,6 +188,9 @@ end
 function Main:mapperEnabled() return not (self.settings.mapper and self.settings.mapper.enabled==false) end
 function Main:setMapperEnabled(enabled)
   enabled=enabled==true
+  local wasEnabled=self:mapperEnabled()
+  if wasEnabled==enabled then return enabled end
+  if self.adapter.saveMapperSettings then local saved,err=self.adapter:saveMapperSettings({enabled=enabled}); if not saved then return nil,"Could not save mapper setting: "..tostring(err) end end
   self.settings.mapper=type(self.settings.mapper)=="table" and self.settings.mapper or {}; self.settings.mapper.enabled=enabled
   local root=rawget(_G,"DGHUD")
   if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.mapper=type(root.user_settings.mapper)=="table" and root.user_settings.mapper or {}; root.user_settings.mapper.enabled=enabled end
@@ -440,6 +443,7 @@ function Main:walkTo(destination,providedRoute)
 end
 function Main:installMapClickHook()
   if not self:mapperEnabled() then return true end
+  if self.speed_walk_hook and rawget(_G,"doSpeedWalk")==self.speed_walk_hook then return true end
   self.previous_speed_walk=rawget(_G,"doSpeedWalk")
   local controller=self
   self.speed_walk_hook=function()

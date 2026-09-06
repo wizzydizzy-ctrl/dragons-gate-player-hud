@@ -88,6 +88,7 @@ local function fake()
   function f:fireTimer() local id,fn=next(self.timers); if id then self.timers[id]=nil; fn() end end
   function f:sendCommand(command) self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command; return true end
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
+  function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
   function f:count(tableValue) local n=0; for _ in pairs(tableValue) do n=n+1 end; return n end
   function f:createMapAdapter()
     local map={rooms={},areas={},areaNames={},stubs={},links={},special={},current=nil,shutdowns=0,api={}}
@@ -539,9 +540,11 @@ test("mapper toggle hides and pauses mapping without deleting saved rooms",funct
   DGHUD={controller=hud,user_settings={}}
   local toggle=assert(aliasCallback(f,"^dghud map(?:per)?(?: (on|off|toggle|status))?$"))
   local before=f.map.rooms[100]; eq(toggle({"","off"}),false); eq(hud:mapperEnabled(),false); eq(DGHUD.user_settings.mapper.enabled,false)
+  eq(f.savedMapperSettings.enabled,false)
   eq(f.layouts[#f.layouts].mapper_visible,false); eq(f.layouts[#f.layouts].lower_mapper_height,0)
   f.callbacks["sysDataSendRequest"](nil,"north"); f.gmcp=gmcpRoom(101); f.callbacks["gmcp.Room.Info"](); eq(f.map.rooms[101],nil); eq(f.map.rooms[100],before)
   eq(toggle({"","on"}),true); eq(hud:mapperEnabled(),true); eq(f.map.rooms[101]~=nil,true); eq(f.layouts[#f.layouts].mapper_visible,true)
+  local hook=_G.doSpeedWalk; eq(toggle({"","on"}),true); eq(_G.doSpeedWalk,hook)
   hud:shutdown(); DGHUD=nil
 end)
 
