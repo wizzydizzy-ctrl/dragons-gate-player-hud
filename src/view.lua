@@ -186,7 +186,7 @@ local help_entries={
   {command="dghud map debug folder",description="Save diagnostics and open their folder."},
   {command="dghud map library",description="Open the public community map library."},
   {command="MAP SETTINGS → MAP LIBRARY…",description="Browse credited maps, export your map, review an import, or prepare an editable stash for publication."},
-  {command="dghud map export <name> <github-name>",description="Export all DGHUD-owned canonical rooms as your credited JSON stash."},
+  {command="dghud map export <name> <github-name>",description="Create a local credited JSON map. To share it, upload it to maps/<github-name>/<name>.json in the public map-library repository and open a pull request."},
   {command="dghud map folder",description="Open the local export/import folder."},
   {command="dghud map import <name>",description="Validate a downloaded map and preview canonical room-ID conflicts without changing the map."},
   {command="dghud map import area <area> keep|replace|skip",description="Choose the conflict policy for one imported area."},
@@ -406,7 +406,7 @@ function View.new(settings)
   local libraryLabels={browse="BROWSE / REFRESH LIBRARY",export="EXPORT MY MAP",install="DOWNLOAD & REVIEW",publish="PREPARE CONTRIBUTION",keep="KEEP MY ROOMS",replace="USE DOWNLOADED",skip="SKIP CONFLICTS",confirm="IMPORT SELECTED MAP",cancel="CANCEL IMPORT",report="REPORT LAST ERROR"}
   for _,key in ipairs(self.map_library_action_order) do local button=label("DGHUD.MapLibrary.Action."..key,self.map_library_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.jade..";font-weight:700;"); button.option_text=libraryLabels[key]; button:setClickCallback(function() if self.map_library_action_callback then return self.map_library_action_callback(key) end; return nil,"map library action is not connected" end); self.map_library_actions[key]=button end
   self.map_library_close:setClickCallback(function() return self:hideMapLibrary() end); self.map_library_overlay:setClickCallback(function() return self:hideMapLibrary() end)
-  self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\nBrowse, download, choose a conflict policy, and import community maps entirely from this window. Export and reporting controls are also available here.") end end)
+  self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\nBrowse, download, choose a conflict policy, and import community maps entirely from this window.\n\nTo publish: export with a lowercase map name and your GitHub name, open the maps folder, then upload the JSON to maps/<github-name>/<map-name>.json at https://github.com/wizzydizzy-ctrl/dragons-gate-map-library and open a pull request. Exporting alone does not upload the file. The library owner validates it and updates the catalog before it becomes downloadable.") end end)
   self.map_library_visible=false
   for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end
   return self

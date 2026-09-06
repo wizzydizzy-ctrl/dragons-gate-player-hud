@@ -467,7 +467,7 @@ function Main:exportMapTransfer(name,publisher)
   local stamp=self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time()); local data,err=self.map_transfer:exportData({artifact_id="local:"..stamp..":"..tostring(name),author=self:mapTransferCreator(),publisher=publisher,slug=name})
   if not data then self:reportMapTransfer(err,true); return nil,err end
   local path,saveErr=self.adapter:saveMapTransfer(name,data); if not path then self:reportMapTransfer(saveErr,true); return nil,saveErr end
-  self:reportMapTransfer("Exported "..#data.rooms.." canonical rooms to "..path.."\nPublisher: "..publisher.."  Creator: "..data.provenance.author.."\nUse 'dghud map publish' to open the contribution page.",false); return path
+  self:reportMapTransfer("Exported "..#data.rooms.." canonical rooms to "..path.."\nPublisher: "..publisher.."  Creator: "..data.provenance.author.."\nThis file is local until submitted. Open Map Settings > Map Library > Prepare Contribution for publishing instructions.",false); return path
 end
 local function transferChoice(value) return ({keep="keep_mine",replace="use_imported",skip="skip_area"})[tostring(value or ""):lower()] end
 function Main:reportMapImportPlan(plan,name)
