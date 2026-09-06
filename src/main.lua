@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local function colorOptions(status)
@@ -631,13 +631,18 @@ function Main:start()
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action)
-    if action=="browse" then return self.adapter:openMapLibrary()
+    if action=="browse" then
+      self.view:setMapLibraryCatalog({},"Loading community map catalog…")
+      local started,err=self.adapter:fetchMapCatalog(function(raw,downloadErr) if downloadErr then return self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(downloadErr)) end; local catalog,validationErr=MapCatalog.validate(raw); if not catalog then return self.view:setMapLibraryCatalog({},validationErr) end; self.map_catalog=catalog; self.view:setMapLibraryCatalog(catalog.maps) end); if not started then self.view:setMapLibraryCatalog({},"Could not load library: "..tostring(err)) end; return started,err
     elseif action=="export" then
       local stamp=(self.adapter.timestamp and self.adapter:timestamp() or tostring(os.time())):gsub("[^%w]+","-"):gsub("^%-+",""):gsub("%-+$","")
       local path,err=self:exportMapTransfer("dghud-map-"..stamp,"local-export")
       if path then self.adapter:openMapTransferFolder() end
       return path,err
-    elseif action=="install" then self:reportMapTransfer("Download a JSON map from the library into the maps folder, then run: dghud map import <map-name>",false); return self.adapter:openMapTransferFolder()
+    elseif action=="install" then
+      local entry=self.view:selectedMapLibraryEntry(); if not entry then self.view:setMapLibraryCatalog(self.map_catalog and self.map_catalog.maps or {},"Select a map first."); return nil,"select a map first" end
+      self.view.map_library_status="Downloading and verifying "..entry.name.."…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
+      local started,err=self.adapter:downloadCatalogMap(entry,function(raw,downloadErr) if downloadErr then self.view.map_library_status="Download failed: "..tostring(downloadErr); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; local model,validationErr=self.map_transfer:validate(raw); if not model then self.view.map_library_status="Map rejected: "..tostring(validationErr); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; if model.provenance.publisher~=entry.publisher or model.provenance.slug~=entry.slug then self.view.map_library_status="Map provenance does not match the catalog."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; local path,saveErr=self.adapter:saveMapTransfer(entry.slug,raw); if not path then self.view.map_library_status="Could not save map: "..tostring(saveErr); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; return end; self.view.map_library_status="Downloaded and verified. Import review written to the main display."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end; self:previewMapTransfer(entry.slug) end); if not started then self.view.map_library_status="Download failed: "..tostring(err); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end; return started,err
     elseif action=="publish" then self.adapter:openMapTransferFolder(); return self.adapter:openMapLibrary("publish") end
     return nil,"unknown map library action"
   end) end

@@ -3,7 +3,7 @@ import argparse, hashlib, html, json, re, zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-MODULES=['defaults','command_parser','command_collector','game_clock','chat_parser','chat_history','chat_storage','chat_controller','output_colorizer','posture_tracker','autoroller','navigation','mapper_model','map_adapter','map_transfer','map_cleanup','map_diagnostics','automapper','special_transition','map_walker','state','settings','sha256','release','events','layout','view','mudlet_adapter','main','updater']
+MODULES=['defaults','command_parser','command_collector','game_clock','chat_parser','chat_history','chat_storage','chat_controller','output_colorizer','posture_tracker','autoroller','navigation','mapper_model','map_adapter','map_transfer','map_catalog','map_cleanup','map_diagnostics','automapper','special_transition','map_walker','state','settings','sha256','release','events','layout','view','mudlet_adapter','main','updater']
 def source_version():
     match=re.search(r'\bversion\s*=\s*["\']([^"\']+)["\']',(ROOT/'src/defaults.lua').read_text())
     if not match: raise ValueError('could not determine defaults.version')

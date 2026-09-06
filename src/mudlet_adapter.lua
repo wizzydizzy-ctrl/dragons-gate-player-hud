@@ -151,6 +151,27 @@ function Adapter:openMapLibrary(page)
   local base="https://github.com/wizzydizzy-ctrl/dragons-gate-map-library"; local url=page=="publish" and (base.."/compare") or base
   if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
 end
+local function libraryRead(path,limit)
+  local file,err=io.open(path,"rb"); if not file then return nil,err end; local value=file:read("*a"); file:close(); if #value>(limit or 20000000) then return nil,"download exceeds safety limit" end; return value
+end
+function Adapter:fetchMapCatalog(done)
+  if type(done)~="function" then return nil,"catalog callback is required" end; if type(downloadFile)~="function" then return nil,"Mudlet download integration is unavailable" end
+  local directory,dirErr=self:mapTransferDirectory(); if not directory then return nil,dirErr end; local path=directory.."/.catalog-download.json"; local url="https://raw.githubusercontent.com/wizzydizzy-ctrl/dragons-gate-map-library/main/catalog.json?dghud="..tostring(os.time()); local ids={}; local timer; local finished=false
+  local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end; os.remove(path) end
+  local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
+  ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,actual) if actual~=path then return end; local raw,readErr=libraryRead(path,1048576); if not raw then return finish(nil,readErr) end; local ok,value=pcall(yajl.to_value,raw); if not ok then return finish(nil,"catalog JSON is invalid") end; finish(value) end)
+  ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,actualUrl) if actualUrl==url then finish(nil,message or "catalog download failed") end end)
+  timer=tempTimer(30,function() timer=nil; finish(nil,"catalog download timed out") end); downloadFile(path,url); return true
+end
+function Adapter:downloadCatalogMap(entry,done)
+  if type(entry)~="table" or type(done)~="function" then return nil,"selected catalog map is required" end; if type(downloadFile)~="function" then return nil,"Mudlet download integration is unavailable" end
+  local directory,dirErr=self:mapTransferDirectory(); if not directory then return nil,dirErr end; local path=directory.."/.map-download-"..entry.slug..".json"; local url=entry.download_url; local ids={}; local timer; local finished=false
+  local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end; os.remove(path) end
+  local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
+  ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,actual) if actual~=path then return end; local raw,readErr=libraryRead(path,20000000); if not raw then return finish(nil,readErr) end; if #raw~=entry.bytes then return finish(nil,"downloaded map size does not match the catalog") end; if require("sha256").hex(raw)~=entry.sha256 then return finish(nil,"downloaded map checksum does not match the catalog") end; local ok,value=pcall(yajl.to_value,raw); if not ok then return finish(nil,"downloaded map JSON is invalid") end; finish(value) end)
+  ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,actualUrl) if actualUrl==url then finish(nil,message or "map download failed") end end)
+  timer=tempTimer(30,function() timer=nil; finish(nil,"map download timed out") end); downloadFile(path,url); return true
+end
 function Adapter:openFeedback()
   local url="https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/issues/new?template=feedback.yml"
   if type(openUrl)~="function" then return nil,"Mudlet browser integration is unavailable" end; openUrl(url); return url
