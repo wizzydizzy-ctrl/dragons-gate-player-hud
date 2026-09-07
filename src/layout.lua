@@ -112,7 +112,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   layout.vitals_strip_gap=6
   local active=2+((vitals and vitals.psi and vitals.psi.visible) and 1 or 0)+((vitals and vitals.web and vitals.web.visible) and 1 or 0)
   layout.vitals_strip_rows=(layout.mode=="compact" and active>2) and 2 or 1
-  layout.vitals_strip_height=layout.lower_gauge_height*layout.vitals_strip_rows+layout.vitals_strip_gap*(layout.vitals_strip_rows-1)+layout.vitals_strip_padding*2
+  -- Keep top/side breathing room, but no lower inset: the gauges should meet
+  -- Mudlet's native command line without a visible empty band.
+  layout.vitals_strip_height=layout.lower_gauge_height*layout.vitals_strip_rows+layout.vitals_strip_gap*(layout.vitals_strip_rows-1)+layout.vitals_strip_padding
   -- Mudlet's command line/search strip occupies the bottom of the window but is
   -- not part of the console border. Keep HUD controls above that native chrome.
   -- Account for the gauge's own lower inset so its visible edge sits directly
