@@ -6,6 +6,9 @@ function Adapter.verifyArchive(payload,digest) return type(payload)=="string" an
 function Adapter.manifestUrl(github,nonce)
   return "https://github.com/"..github.owner.."/"..github.repository.."/releases/latest/download/manifest.json"
 end
+function Adapter.latestReleaseUrl(github)
+  return "https://api.github.com/repos/"..github.owner.."/"..github.repository.."/releases/latest"
+end
 function Adapter.versionManifestUrl(github,version,nonce)
   return "https://github.com/"..github.owner.."/"..github.repository.."/releases/download/v"..tostring(version).."/manifest.json"
 end
@@ -419,19 +422,26 @@ function Adapter:checkLatestAsync(updater,done)
   local settings=updater.settings; local github=settings.github or {}; local policy=settings.update or {}
   if github.owner=="GITHUB_OWNER" or not tostring(github.owner):match("^[%w_.-]+$") or not tostring(github.repository):match("^[%w_.-]+$") then return nil,"configure the GitHub owner and repository first" end
   local base=Adapter.updateBase(getMudletHomeDir()); local staging=base.."/staging"; lfs.mkdir(base); lfs.mkdir(staging)
-  local manifestPath=staging.."/startup-manifest.json"; local ids={}; local timeoutId; local finished=false
+  local releasePath=staging.."/latest-release.json"; local manifestPath=staging.."/startup-manifest.json"; local ids={}; local timeoutId; local finished=false
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; ids={}; if timeoutId then killTimer(timeoutId); timeoutId=nil end end
   local function finish(manifest,message,raw) if finished then return end; finished=true; cleanup(); done(manifest,message,raw) end
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,url) if url and url:find(github.repository,1,true) then finish(nil,message) end end)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,path)
+    if path==releasePath then
+      local raw=readFile(path); if not raw or #raw>1048576 then finish(nil,"release metadata is missing or too large"); return end
+      local ok,release=pcall(yajl.to_value,raw); if not ok or type(release)~="table" then finish(nil,"release metadata JSON is invalid"); return end
+      local version=type(release.tag_name)=="string" and release.tag_name:match("^v(%d+%.%d+%.%d+)$")
+      if not version then finish(nil,"latest release has an invalid version tag"); return end
+      os.remove(manifestPath); downloadFile(manifestPath,Adapter.versionManifestUrl(github,version)); return
+    end
     if path~=manifestPath then return end
     local raw=readFile(path); if not raw or #raw>(policy.manifest_limit or 65536) then finish(nil,"manifest is missing or too large"); return end
     local ok,manifest=pcall(yajl.to_value,raw); if not ok then finish(nil,"manifest JSON is invalid"); return end
     local valid,why=updater:validateManifest(manifest); if not valid then finish(nil,why); return end
     finish(manifest,nil,raw)
   end)
-  updateNonce=updateNonce+1
-  downloadFile(manifestPath,Adapter.manifestUrl(github,tostring(os.time()).."-"..tostring(updateNonce)))
+  updateNonce=updateNonce+1; os.remove(releasePath)
+  downloadFile(releasePath,Adapter.latestReleaseUrl(github))
   timeoutId=tempTimer(policy.timeout_seconds or 30,function() timeoutId=nil; finish(nil,"download timed out") end)
   return true
 end
