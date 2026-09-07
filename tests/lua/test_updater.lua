@@ -151,6 +151,22 @@ test("startup check skips installation when current and continues startup",funct
   eq(u:checkAtCharacterEntry(function(updated,err) completed={updated,err}; order[#order+1]="commands" end),true)
   eq(table.concat(order,","),"check,commands"); eq(completed[1],false); eq(completed[2],nil); eq(u.lock,nil)
 end)
+test("manual check reports installed and latest versions",function()
+  local reported; local result
+  local adapter={checkLatestAsync=function(_,_,done) done(releaseManifest("0.2.83")) end,reportVersionStatus=function(_,installed,latest,current) reported={installed,latest,current} end}
+  local u=Updater.new(adapter,updateSettings)
+  assert(u:check(function(value,err) result={value,err} end))
+  eq(reported[1],"0.2.83"); eq(reported[2],"0.2.83"); eq(reported[3],true)
+  eq(result[1].installed,"0.2.83"); eq(result[1].current,true); eq(u.lock,nil)
+end)
+test("manual update skips package replacement when already current",function()
+  local reported; local replaced=false; local result
+  local adapter={checkLatestAsync=function(_,_,done) done(releaseManifest("0.2.83"),nil,"raw") end,reportVersionStatus=function(_,installed,latest,current) reported={installed,latest,current} end,startUpdate=function() replaced=true end,updateClock=function() return 0 end}
+  local u=Updater.new(adapter,updateSettings)
+  assert(u:update(function(updated,err) result={updated,err} end))
+  eq(replaced,false); eq(reported[1],"0.2.83"); eq(reported[3],true)
+  eq(result[1],false); eq(result[2],nil); eq(u.lock,nil)
+end)
 test("startup check updates before allowing startup commands",function()
   local order={}; local completed; local passedManifest; local passedRaw
   local adapter={

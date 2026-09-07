@@ -407,6 +407,10 @@ end
 function Adapter:reportUpdateStage(stage,elapsed)
   cecho(string.format("\n<gold>[DGHUD Update]<reset> %s (%.1fs)\n",tostring(stage),tonumber(elapsed) or 0))
 end
+function Adapter:reportVersionStatus(installed,latest,current)
+  if current then cecho(string.format("\n<green>[DGHUD]<reset> Version %s is already up to date.\n",tostring(installed)))
+  else cecho(string.format("\n<gold>[DGHUD]<reset> Installed version: %s  Latest version: %s\n",tostring(installed),tostring(latest))) end
+end
 function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Settings: "..getMudletHomeDir().."/DragonsGateHUD/settings.lua\n") end
 local function readFile(path) local f=io.open(path,"rb"); if not f then return nil end; local data=f:read("*a"); f:close(); return data end
 local function writeFile(path,data) local f=assert(io.open(path,"wb")); f:write(data); f:close() end
@@ -417,7 +421,7 @@ function Adapter:checkLatestAsync(updater,done)
   local base=Adapter.updateBase(getMudletHomeDir()); local staging=base.."/staging"; lfs.mkdir(base); lfs.mkdir(staging)
   local manifestPath=staging.."/startup-manifest.json"; local ids={}; local timeoutId; local finished=false
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; ids={}; if timeoutId then killTimer(timeoutId); timeoutId=nil end end
-  local function finish(manifest,message) if finished then return end; finished=true; cleanup(); done(manifest,message) end
+  local function finish(manifest,message,raw) if finished then return end; finished=true; cleanup(); done(manifest,message,raw) end
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,url) if url and url:find(github.repository,1,true) then finish(nil,message) end end)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,path)
     if path~=manifestPath then return end

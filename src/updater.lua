@@ -58,14 +58,28 @@ function Updater:validateManifest(manifest)
   local running=self.adapter.mudletVersion and self.adapter:mudletVersion() or nil
   return Release.validateMinimumMudlet(manifest.minimum_mudlet,running)
 end
-function Updater:check()
+function Updater:check(done)
+  done=done or function() end
   local ok,err=self:acquire("check"); if not ok then return nil,err end
-  if not self.adapter.fetchManifest then self:release(); return nil,"manifest adapter unavailable" end
-  local success,result=pcall(self.adapter.fetchManifest,self.adapter,self.settings); self:release(); if not success then return nil,result end; return result
+  if not self.adapter.checkLatestAsync then self:release(); done(nil,"manifest adapter unavailable"); return nil,"manifest adapter unavailable" end
+  local completed=false
+  local function finish(result,message) if completed then return end; completed=true; self:release(); done(result,message) end
+  local function checked(manifest,message)
+    if not manifest then finish(nil,message or "version check failed"); return end
+    local valid,why=self:validateManifest(manifest); if not valid then finish(nil,why); return end
+    local compared,comparison=pcall(Release.compareVersions,manifest.version,self.settings.version)
+    if not compared then finish(nil,"installed version is invalid"); return end
+    local current=comparison<=0
+    if self.adapter.reportVersionStatus then self.adapter:reportVersionStatus(self.settings.version,manifest.version,current) end
+    finish({installed=self.settings.version,latest=manifest.version,current=current})
+  end
+  local callOk,started,startErr=pcall(self.adapter.checkLatestAsync,self.adapter,self,checked)
+  if not callOk then startErr=errorMessage(started); started=nil end
+  if started==nil and not completed then finish(nil,startErr or "version check failed"); return nil,startErr end
+  return true
 end
 function Updater:update(done,validatedManifest,manifestRaw)
   local ok,err=self:acquire("update"); if not ok then return nil,err end
-  if not self.adapter.startUpdate then self:release(); return nil,"update adapter unavailable" end
   if not self.update_started_at then self:beginTiming() end
   self.refresh_after_install=self.adapter.isCharacterActive and self.adapter:isCharacterActive() or false
   local completed=false
@@ -74,8 +88,31 @@ function Updater:update(done,validatedManifest,manifestRaw)
     if not updated and message and self.adapter.reportUpdateFailure then self.adapter:reportUpdateFailure(message) end
     self:release(); if done then done(updated,message) end
   end
-  local success,result,message=pcall(self.adapter.startUpdate,self.adapter,self,finish,validatedManifest,manifestRaw); if not success then self:release(); return nil,result end
-  if result==nil then self:release(); return nil,message end; return true
+  local function install(manifest,raw)
+    if not self.adapter.startUpdate then finish(false,"update adapter unavailable"); return nil,"update adapter unavailable" end
+    local success,result,message=pcall(self.adapter.startUpdate,self.adapter,self,finish,manifest,raw)
+    if not success then finish(false,result); return nil,result end
+    if result==nil then finish(false,message); return nil,message end
+    return true
+  end
+  if validatedManifest then return install(validatedManifest,manifestRaw) end
+  if not self.adapter.checkLatestAsync then finish(false,"manifest adapter unavailable"); return nil,"manifest adapter unavailable" end
+  self:stage("Checking")
+  local function checked(manifest,message,raw)
+    if not manifest then finish(false,message or "version check failed"); return end
+    local valid,why=self:validateManifest(manifest); if not valid then finish(false,why); return end
+    local compared,comparison=pcall(Release.compareVersions,manifest.version,self.settings.version)
+    if not compared then finish(false,"installed version is invalid"); return end
+    if comparison<=0 then
+      if self.adapter.reportVersionStatus then self.adapter:reportVersionStatus(self.settings.version,manifest.version,true) end
+      finish(false); return
+    end
+    install(manifest,raw)
+  end
+  local callOk,started,startErr=pcall(self.adapter.checkLatestAsync,self.adapter,self,checked)
+  if not callOk then startErr=errorMessage(started); started=nil end
+  if started==nil and not completed then finish(false,startErr or "version check failed"); return nil,startErr end
+  return true
 end
 function Updater:checkAtCharacterEntry(done)
   done=done or function() end
