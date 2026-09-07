@@ -21,9 +21,13 @@ def build(output,owner,repository,version):
     # DGHUD Start replaces this shim with the full controller health check.
     readiness='DGHUD = DGHUD or {}\nDGHUD.healthCheck = function() return true end'
     nodes=[script_node('DGHUD Install Readiness',readiness)]
+    module_loaders=[]
     for module in MODULES:
         code=(ROOT/'src'/f'{module}.lua').read_text()
-        nodes.append(script_node('DGHUD Module - '+module,f'package.preload["{module}"] = function(...)\n{code}\nend'))
+        module_loaders.append(f'package.preload["{module}"] = function(...)\n{code}\nend')
+    # Mudlet pays a substantial registration cost per package Script object.
+    # Keep all modules independently lazy-loaded while registering one loader.
+    nodes.append(script_node('DGHUD Modules','\n'.join(module_loaders)))
     nodes.append(script_node('DGHUD Start',(ROOT/'src/entry.lua').read_text()))
     xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DragonsGateHUD</packageName><title>Dragons Gate GMCP HUD</title><version>'''+html.escape(version)+'''</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DragonsGateHUD</name><packageName>DragonsGateHUD</packageName>'''+''.join(nodes)+'''</ScriptGroup></ScriptPackage></MudletPackage>''')
     package=output/'DragonsGateHUD.mpackage'

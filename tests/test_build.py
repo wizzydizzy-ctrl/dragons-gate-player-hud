@@ -23,12 +23,14 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('[DGHUD Update]&lt;reset&gt; Installed version',xml)
                 root=ElementTree.fromstring(xml)
                 scripts={node.findtext('name'):node.findtext('script') for node in root.findall('.//Script')}
-                preloads={name.removeprefix('DGHUD Module - '):code for name,code in scripts.items() if name.startswith('DGHUD Module - ')}
+                self.assertLessEqual(len(scripts),3)
+                module_bundle=scripts['DGHUD Modules']
                 required=set()
                 for path in (ROOT/'src').glob('*.lua'):
                     required.update(re.findall(r'require\(["\']([^"\']+)["\']\)',path.read_text()))
-                self.assertEqual(required-set(preloads),set())
-                self.run_lua('package.path=""; package.cpath=""\n'+'\n'.join(preloads.values())+'\nassert(require("main"))\n',td)
+                bundled=set(re.findall(r'package\.preload\["([^"]+)"\]',module_bundle))
+                self.assertEqual(required-bundled,set())
+                self.run_lua('package.path=""; package.cpath=""\n'+module_bundle+'\nassert(require("main"))\n',td)
 
                 entry=scripts['DGHUD Start']
                 reload_probe='''
