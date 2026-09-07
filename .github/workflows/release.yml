@@ -4,18 +4,26 @@ on:
     tags: ['v*']
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: leafo/gh-actions-lua@v11
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: leafo/gh-actions-lua@8aace3457a2fcf3f3c4e9007ecc6b869ff6d74d6 # v11
         with: {luaVersion: '5.1'}
       - run: lua tests/run.lua
       - run: python3 -m unittest tests/test_build.py -v
       - name: Build and verify tag matches runtime version
         run: python3 scripts/build.py --owner "${{ github.repository_owner }}" --repository "${GITHUB_REPOSITORY#*/}" --version "${GITHUB_REF_NAME#v}"
-      - uses: softprops/action-gh-release@v2
+      - name: Attest package and manifest provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            dist/DragonsGateHUD.mpackage
+            dist/manifest.json
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/DragonsGateHUD.mpackage

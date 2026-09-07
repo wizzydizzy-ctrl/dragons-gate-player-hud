@@ -957,7 +957,7 @@ function Main:start()
     return self.view:showHelp()
   end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^rr(?:\\s+(.*))?$",function(value) return self.roller:command(aliasArgument(value) or "help") end)
-  self.started=true; local data=self.adapter:getGMCP(); if self:mapperEnabled() and data and data.Room and data.Room.Info then local mapped=self.automapper:onRoom(data.Room.Info); if mapped and tonumber(data.Room.Info.num) then self.managed_rooms[tonumber(data.Room.Info.num)]=true end end; self:refresh(); self:scheduleRoundtimeTick(); self:scheduleClockTick()
+  self.runtime_registration_complete=true; self.started=true; local data=self.adapter:getGMCP(); if self:mapperEnabled() and data and data.Room and data.Room.Info then local mapped=self.automapper:onRoom(data.Room.Info); if mapped and tonumber(data.Room.Info.num) then self.managed_rooms[tonumber(data.Room.Info.num)]=true end end; self:refresh(); self:scheduleRoundtimeTick(); self:scheduleClockTick()
   local chatStarted,chatErr=self:startChat(); if not chatStarted then error(chatErr,0) end
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self:callSpecialTransition("onLine",line) end)
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self.posture:onLine(line); self.roller:onLine(line) end)
@@ -983,12 +983,13 @@ function Main:shutdown()
   for _,id in ipairs(self.runtime.events) do self.adapter:killEvent(id) end; for _,id in ipairs(self.runtime.aliases) do self.adapter:killAlias(id) end; for _,id in ipairs(self.runtime.triggers or {}) do self.adapter:killTrigger(id) end
   self.runtime={events={},aliases={},triggers={}}; if self.view then self.view:delete(); self.view=nil end
   if self.original_borders then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]); self.original_borders=nil end
-  self.character_entry_started=false; self.character_entry_name=nil; self.started=false; return true
+  self.character_entry_started=false; self.character_entry_name=nil; self.runtime_registration_complete=false; self.started=false; return true
 end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
-  if not self.started or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or #self.runtime.events~=(#Events.gmcp+5) or #self.runtime.aliases~=(#Events.aliases+22) or #self.runtime.triggers~=2 then return nil,"HUD is not healthy" end
+  local function validRegistrations(items) if type(items)~="table" or #items<1 then return false end; for _,id in ipairs(items) do if id==nil or id==false then return false end end; return true end
+  if not self.started or not self.runtime_registration_complete or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or not validRegistrations(self.runtime.events) or not validRegistrations(self.runtime.aliases) or not validRegistrations(self.runtime.triggers) then return nil,"HUD is not healthy" end
   local ok=pcall(function() self:refresh() end); if not ok then return nil,"state refresh failed" end; return true
 end
 return Main
