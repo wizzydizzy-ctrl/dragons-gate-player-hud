@@ -348,7 +348,7 @@ function View.new(settings)
   self.utility_area=Geyser.Container:new({name="DGHUD.Utilities",x=0,y=0,width=100,height=60},self.right)
   for i,utility in ipairs(Navigation.utilities) do local b=label("DGHUD.Utility."..i,self.utility_area); b:setClickCallback(function() send(utility.command) end); self.utility_buttons[i]={label=b,utility=utility} end
   self.roundtime_bar=gauge("DGHUD.Roundtime",self.right,"#a86532",t)
-  self.roundtime_bar:hide(); self.roundtime_remaining=0; self.roundtime_total=0
+  self.roundtime_bar:setValue(0,1,"Roundtime  READY"); self.roundtime_bar:hide(); self.roundtime_remaining=0; self.roundtime_total=1
   self.bottom=label("DGHUD.Bottom",self.root,"background:#151713;border-top:1px solid "..t.border..";color:"..t.muted..";padding:9px 15px;")
   self.compact=label("DGHUD.Compact",self.root,"background:"..t.panel..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:8px 12px;")
   self.help_overlay=label("DGHUD.Help.Overlay",self.root,"background:rgba(0,0,0,0.72);")
@@ -687,7 +687,7 @@ function View:applyLayout(layout)
   if layout.mode~="compact" then
     place(self.right_bg,0,0,"100%","100%"); self.right_title:hide()
     local panel_height=tonumber(self.right.height) or math.max(0,(layout.window_height or 800)-top-bottom)
-    local lower=layout.lower_geometry or Layout.lowerPanelGeometry(layout,false,false,(tonumber(self.roundtime_remaining) or 0)>0)
+    local lower=Layout.lowerPanelGeometry(layout,false,false,true)
     local inset=lp
     local compass_h,utility_h=lower.compass_height,lower.utility_height
     local utility_y,compass_y=lower.utility_y,lower.compass_y
@@ -1082,9 +1082,8 @@ function View:renderNavigation(exits)
 end
 function View:updateRoundtime(remaining,total)
   remaining=tonumber(remaining) or 0; if remaining<0 then remaining=0 end
-  local wasActive=(tonumber(self.roundtime_remaining) or 0)>0
   if remaining<=0 then
-    self.roundtime_remaining=0; self.roundtime_total=0; self.roundtime_bar:hide()
+    self.roundtime_remaining=0; self.roundtime_total=1; self.roundtime_bar:setValue(0,1,"Roundtime  READY")
   else
     total=tonumber(total)
     if not total or total<=0 then total=math.max(remaining,tonumber(self.roundtime_total) or 0) end
@@ -1092,7 +1091,7 @@ function View:updateRoundtime(remaining,total)
     self.roundtime_bar:setValue(remaining,total,"Roundtime  "..tostring(math.ceil(remaining)).."s")
   end
   local isActive=self.roundtime_remaining>0
-  if wasActive~=isActive and self.layout then self:applyLayout(self.layout) end
+  if self.layout and self.layout.mode~="compact" then self.roundtime_bar:show(); self.roundtime_bar:raise() end
   return isActive
 end
 function View:renderInventory(s)

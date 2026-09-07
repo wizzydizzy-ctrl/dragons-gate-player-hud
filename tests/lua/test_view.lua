@@ -650,16 +650,16 @@ test("responsive mapper survives short layouts and hides cleanly in compact mode
   eq(view.map_zoom_out.visible,false); eq(view.map_center.visible,false); eq(view.map_zoom_in.visible,false)
 end)
 
-test("roundtime progress bar is readable below travel controls and collapses when ready",function()
+test("roundtime progress bar remains visible and empty when ready",function()
   local Layout=require("layout"); local layout=Layout.compute(1920,1080); local view=chatView(); view:applyLayout(layout)
-  eq(view.roundtime_bar.visible,false)
+  eq(view.roundtime_bar.visible,true); eq(view.roundtime_bar.value[1],0); eq(view.roundtime_bar.value[3],"Roundtime  READY")
   eq(view:updateRoundtime(8,8),true); eq(view.roundtime_bar.visible,true); eq(view.roundtime_bar.value[1],8); eq(view.roundtime_bar.value[2],8)
   eq(view.roundtime_bar.value[3],"Roundtime  8s"); eq(view.utility_area.y+view.utility_area.height+layout.lower_roundtime_gap,view.roundtime_bar.y)
   local consoleWidth=layout.console_width; local bottom=layout.bottom
   view:updateRoundtime(4,8); eq(view.roundtime_bar.value[1],4); eq(view.roundtime_bar.value[2],8)
   eq(layout.console_width,consoleWidth); eq(layout.bottom,bottom)
-  eq(view:updateRoundtime(0,8),false); eq(view.roundtime_bar.visible,false)
-  eq(view.utility_area.y+view.utility_area.height,view.right.height-layout.lower_panel_padding)
+  eq(view:updateRoundtime(0,8),false); eq(view.roundtime_bar.visible,true); eq(view.roundtime_bar.value[1],0); eq(view.roundtime_bar.value[2],1); eq(view.roundtime_bar.value[3],"Roundtime  READY")
+  eq(view.utility_area.y+view.utility_area.height+layout.lower_roundtime_gap,view.roundtime_bar.y)
 end)
 
 test("roundtime bar stays hidden in compact mode",function()
