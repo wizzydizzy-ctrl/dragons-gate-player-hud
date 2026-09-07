@@ -82,7 +82,7 @@ test("desktop breakpoint crossings retain rails until genuinely compact widths",
   end
 end)
 test("center vitals strip reserves the bottom of the main console",function()
-  for _,size in ipairs({{760,700},{1200,800},{2560,1400}}) do local r=Layout.compute(size[1],size[2]); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.command_line_clearance>=28,true); eq(r.console_remainder,r.window_height-r.console_top-r.bottom) end
+  for _,size in ipairs({{760,700},{1200,800},{2560,1400}}) do local r=Layout.compute(size[1],size[2]); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.command_line_clearance>=19,true); eq(r.command_line_clearance<=25,true); eq(r.console_remainder,r.window_height-r.console_top-r.bottom) end
 end)
 test("console gutter approximates half a percent but caps on wide displays",function()
   for _,case in ipairs({{1920,10},{2560,12},{3840,12},{7680,12}}) do

@@ -115,7 +115,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   layout.vitals_strip_height=layout.lower_gauge_height*layout.vitals_strip_rows+layout.vitals_strip_gap*(layout.vitals_strip_rows-1)+layout.vitals_strip_padding*2
   -- Mudlet's command line/search strip occupies the bottom of the window but is
   -- not part of the console border. Keep HUD controls above that native chrome.
-  local desired_clearance=clamp(layout.body_font+12,28,36)
+  -- Account for the gauge's own lower inset so its visible edge sits directly
+  -- above Mudlet's command line instead of leaving a second empty band.
+  local desired_clearance=clamp(layout.body_font+3,19,25)
   local safe_clearance=math.max(0,height-layout.vitals_strip_height-60-50-1)
   layout.command_line_clearance=math.min(desired_clearance,safe_clearance)
   layout.bottom=layout.vitals_strip_height+layout.command_line_clearance; layout.window_height=height
