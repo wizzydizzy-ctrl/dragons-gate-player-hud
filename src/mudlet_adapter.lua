@@ -377,6 +377,9 @@ function Adapter:mudletVersion()
   return nil
 end
 function Adapter:refreshCharacterData()
+  -- The freshly installed package owns the pending refresh.  Do not let the
+  -- retiring updater consume or duplicate that startup sequence.
+  if DGHUD and DGHUD._update_reinstall_pending==true then return true end
   local controller=DGHUD and DGHUD.controller
   if not controller then return nil,"HUD controller is unavailable" end
   if controller.character_entry_started then
@@ -485,7 +488,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         -- script cannot run until replaceDone returns. The archive checksum and
         -- canonical package registration are the synchronous transaction checks;
         -- the package's normal startup performs its strict runtime health check.
-        schedule(0.10,function() replaceDone(true) end)
+        replaceDone(true)
       end)
     end
     -- During self-replacement the old package remains the executing callback.

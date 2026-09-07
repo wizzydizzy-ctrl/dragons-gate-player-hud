@@ -67,6 +67,12 @@ test("post-install refresh joins rather than restarts the new controller startup
   _G.DGHUD=prior; if not ok then error(err,0) end
   eq(entries,1); eq(refreshed,1)
 end)
+test("retiring updater leaves reinstall refresh for the new package",function()
+  local prior=_G.DGHUD; local entries=0
+  _G.DGHUD={_update_reinstall_pending=true,controller={onCharacterEntry=function() entries=entries+1 end}}
+  local ok,err=pcall(function() eq(Adapter.new():refreshCharacterData(),true); eq(DGHUD._update_reinstall_pending,true); eq(entries,0) end)
+  _G.DGHUD=prior; if not ok then error(err,0) end
+end)
 test("Mudlet activity detection survives asynchronous non-prompt output",function()
   local oldDGHUD,oldCurrent=DGHUD,getCurrentLine; DGHUD={controller={character_entry_started=true}}; getCurrentLine=function() return "The dark hound claws at you!" end
   local ok,err=pcall(function() eq(Adapter.new():isCharacterActive(),true) end); DGHUD,getCurrentLine=oldDGHUD,oldCurrent; if not ok then error(err,0) end
@@ -122,7 +128,7 @@ test("first updater-managed update bootstraps exact rollback before uninstall",f
     assert(h.downloads[3].url:find("/releases/download/v0.2.83/manifest.json",1,true)); h.handlers.sysDownloadDone(nil,"/unowned/path"); h:error("https://unrelated.example/failure","ignore me"); eq(h.uninstalls,0)
     h:done(h.downloads[3].path,"rollback"); eq(h.uninstalls,0); eq(#h.downloads,4)
     h:done(h.downloads[4].path,"old-package"); eq(h.uninstalls,1); eq(DGHUD._update_reinstall_pending,true); eq(h.files["/profile/DGHUDUpdater/previous.mpackage"],"old-package")
-    assert(h:run(.10)); assert(h:run(.10)); eq(h.result[1],true); eq(h.active,true); eq(h.hashCalls,2)
+    assert(h:run(.10)); eq(h.result[1],true); eq(h.active,true); eq(h.hashCalls,2)
   end)
 end)
 test("rollback bootstrap timeout aborts before touching active package",function()
@@ -161,10 +167,10 @@ test("manual update fetches latest manifest exactly once and reports timed stage
   replacementHarness({},function(h)
     eq(#h.downloads,1); assert(h.downloads[1].url:find("/releases/latest/download/manifest.json",1,true))
     deliverTarget(h); h:done(h.downloads[3].path,"rollback"); h:done(h.downloads[4].path,"old-package")
-    h.now=1.2; assert(h:run(.10)); h.now=1.8; assert(h:run(.10))
+    h.now=1.2; assert(h:run(.10))
     eq(h.result[1],true)
     local output=table.concat(h.messages)
-    assert(output:find("Checking",1,true)); assert(output:find("Downloading package",1,true)); assert(output:find("Preparing rollback",1,true)); assert(output:find("Installing",1,true)); assert(output:find("Completed",1,true)); assert(output:find("1.8s",1,true))
+    assert(output:find("Checking",1,true)); assert(output:find("Downloading package",1,true)); assert(output:find("Preparing rollback",1,true)); assert(output:find("Installing",1,true)); assert(output:find("Completed",1,true)); assert(output:find("1.2s",1,true))
   end)
 end)
 test("startup update reuses its validated manifest without another manifest download",function()
@@ -174,7 +180,7 @@ test("startup update reuses its validated manifest without another manifest down
     h:done(h.downloads[1].path,"new-package"); eq(#h.downloads,2)
     assert(h.downloads[2].url:find("/releases/download/v0.2.83/manifest.json",1,true))
     h:done(h.downloads[2].path,"rollback"); h:done(h.downloads[3].path,"old-package")
-    assert(h:run(.10)); assert(h:run(.10)); eq(h.result[1],true)
+    assert(h:run(.10)); eq(h.result[1],true)
   end)
 end)
 test("startup check failure reports briefly and still allows startup commands",function()
