@@ -10,10 +10,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: leafo/gh-actions-lua@8aace3457a2fcf3f3c4e9007ecc6b869ff6d74d6 # v11
-        with: {luaVersion: '5.1'}
-      - run: lua tests/run.lua
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install Lua 5.1 from Ubuntu
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
+      - run: lua5.1 tests/run.lua
       - run: python3 -m unittest tests/test_build.py -v
       - name: Build and verify tag matches runtime version
         run: python3 scripts/build.py --owner "${{ github.repository_owner }}" --repository "${GITHUB_REPOSITORY#*/}" --version "${GITHUB_REF_NAME#v}"
@@ -23,8 +23,7 @@ jobs:
           subject-path: |
             dist/DragonsGateHUD.mpackage
             dist/manifest.json
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          files: |
-            dist/DragonsGateHUD.mpackage
-            dist/manifest.json
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/DragonsGateHUD.mpackage dist/manifest.json --generate-notes --verify-tag
