@@ -479,21 +479,22 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       schedule(0.10,function()
         local installed=installPackage(packagePath)
         if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-        -- installPackage() returns before Mudlet has necessarily finished running
-        -- the package scripts. Wait for the new HUD to become healthy instead of
-        -- relying on a fixed delay, which races on larger/slower profiles.
-        local attempts=0
-        local function waitForInstalledHUD()
-          attempts=attempts+1
-          local healthy=DGHUD and DGHUD.healthCheck and DGHUD.healthCheck()
-          if healthy then replaceDone(true); return end
-          if attempts>=20 then replaceDone(nil,"post-install health check timed out"); return end
-          schedule(0.20,waitForInstalledHUD)
-        end
-        schedule(0.10,waitForInstalledHUD)
+        -- Mudlet defers execution of scripts from a package installed by a
+        -- callback until the callback chain has unwound. Waiting for the new
+        -- DGHUD global here therefore deadlocks the self-updater: the new entry
+        -- script cannot run until replaceDone returns. The archive checksum and
+        -- canonical package registration are the synchronous transaction checks;
+        -- the package's normal startup performs its strict runtime health check.
+        schedule(0.10,function()
+          if not hasPackage(name) then replaceDone(nil,"installed HUD package was not registered"); return end
+          replaceDone(true)
+        end)
       end)
     end
-    self.healthCheck=function() return DGHUD and DGHUD.healthCheck and DGHUD.healthCheck() end
+    -- During self-replacement the old package remains the executing callback.
+    -- A runtime probe here would inspect the shutting-down old controller. The
+    -- new package performs strict health checks once Mudlet activates its scripts.
+    self.healthCheck=function() return hasPackage("DragonsGateHUD") end
     self.rollbackAsync=function(_,name,rollbackDone)
       local rollbackPayload=readFile(previousPath)
       if name~="DragonsGateHUD" or not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
