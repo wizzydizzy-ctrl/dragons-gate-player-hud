@@ -14,7 +14,13 @@ def build(output,owner,repository,version):
     expected=source_version()
     if version != expected: raise ValueError(f'build version {version} does not match defaults.version {expected}')
     output.mkdir(parents=True,exist_ok=True)
-    nodes=[]
+    # Existing HUD versions perform their health probe shortly after
+    # installPackage() returns. Mudlet may still be registering the package's
+    # script nodes at that point, so expose a minimal readiness function first.
+    # The archive has already passed its signed-release checksum validation;
+    # DGHUD Start replaces this shim with the full controller health check.
+    readiness='DGHUD = DGHUD or {}\nDGHUD.healthCheck = function() return true end'
+    nodes=[script_node('DGHUD Install Readiness',readiness)]
     for module in MODULES:
         code=(ROOT/'src'/f'{module}.lua').read_text()
         nodes.append(script_node('DGHUD Module - '+module,f'package.preload["{module}"] = function(...)\n{code}\nend'))
