@@ -756,6 +756,10 @@ function Main:start()
   if self.view.setMapCollectionActionCallback then self.view:setMapCollectionActionCallback(function(action,item,name)
     local result,err
     if action=="use_collection" then result,err=self:switchMapCollection(item.id)
+    elseif action=="share_collection" then
+      local active=self.map_collections:active()
+      if not active or active.id~=item.id then result,err=self:switchMapCollection(item.id); if not result then self:captureFailure("map_collection",err,{operation=action,collection=item.id}); self:presentMapCollections("Could not share map: "..tostring(err)); return nil,err end end
+      return self.view.map_library_action_callback("publish_all",item)
     elseif action=="rename_collection" then result,err=self:renameMapCollection(item.id,name)
     elseif action=="duplicate_edit" then result,err=self:forkMapCollection(item.id,(name and name~="" and name) or ("Copy of "..item.name))
     elseif action=="backup_collection" then result,err=self:backupMapCollection(item.id)

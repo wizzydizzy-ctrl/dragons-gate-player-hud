@@ -324,7 +324,8 @@ test("map library presents local collections with nontechnical editable actions"
     {id="spur",name="Spurian Academy",creator="Retro",areas={"Town","Temple"},room_count=90,update_available=true},
   })
   eq(view.map_library_mode,"collections"); eq(#view.map_collection_rows,2); assert(view.map_collection_rows[1].click()); eq(view:selectedMapCollection().id,"mine")
-  for _,key in ipairs({"use_collection","rename_collection","duplicate_edit","backup_collection","delete_collection"}) do assert(view.map_collection_actions[key].click()); eq(calls[#calls][1],key); eq(calls[#calls][2],"mine") end
+  for _,key in ipairs({"use_collection","share_collection","rename_collection","duplicate_edit","backup_collection","delete_collection"}) do assert(view.map_collection_actions[key].click()); eq(calls[#calls][1],key); eq(calls[#calls][2],"mine") end
+  eq(view.map_collection_actions.share_collection.option_text,"SHARE SELECTED MAP")
   eq(view.map_collection_rows[1].message:find("ACTIVE",1,true)~=nil,true); eq(view.map_collection_rows[2].message:find("UPDATE AVAILABLE",1,true)~=nil,true)
 end)
 test("map collection replacement requires a large second-click warning",function()
