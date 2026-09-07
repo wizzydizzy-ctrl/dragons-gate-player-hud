@@ -176,7 +176,9 @@ function MapAdapter:renameNativePartition(partition)
   local special=key:match("^special:(%d+)$"); local isolated=key:match("^isolated:(%d+)$")
   if special then suffix=" ["..special.."]" elseif isolated then suffix=" [Isolated "..isolated.."]" else suffix=" [Area "..key.."]" end
   local title=subLabel~="" and ((areaLabel~="" and areaLabel.." - " or "")..subLabel) or (areaLabel~="" and areaLabel or areaName(key):gsub("^Dragons Gate %- ",""))
-  local wanted=title..suffix; local collision=positiveInteger(areas[wanted]); if collision and collision~=area then return nil,"another mapper area already uses the name "..wanted end
+  local wanted=title; local collision=positiveInteger(areas[wanted])
+  if collision and collision~=area then wanted=title..suffix; collision=positiveInteger(areas[wanted]) end
+  if collision and collision~=area then return nil,"another mapper area already uses the name "..wanted end
   local renamed,renameErr=invoke(self.api,"setAreaName",area,wanted); if not renamed then return nil,renameErr end
   self.areas[key]=area; if type(self.api.updateMap)=="function" then invoke(self.api,"updateMap") end; return wanted
 end

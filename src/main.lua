@@ -850,7 +850,8 @@ function Main:start()
     if action=="clear_current" then local current=self.automapper and self.automapper:currentRoom(); return self:previewCleanup("previewCurrent",current) end
     if action=="rename_area" or action=="rename_subarea" then
       local kind=action=="rename_area" and "area" or "subarea"
-      local scope,scopeErr=self:currentMapSelection(kind); if not scope then return nil,scopeErr end
+      local current=self.automapper and self.automapper:currentRoom(); if not current then return nil,"current room is unavailable" end
+      local scope,scopeErr=self.map:currentTransferScope(current); if not scope then return nil,scopeErr end
       local key=kind=="area" and scope.area or scope.partition
       local previous=self.map:mapLabel(kind,key) or ""
       local saved,saveErr=self.map:setMapLabel(kind,key,value); if not saved then return nil,saveErr end
@@ -860,7 +861,7 @@ function Main:start()
         if not restored then return nil,tostring(nativeErr).."; label rollback failed: "..tostring(restoreErr) end
         return nil,nativeErr
       end
-      self.view.map_settings_error=nil; self.view.map_settings_status_text="Saved as "..saved.." ("..native..")"; return saved
+      self.view.map_settings_error=nil; self.view.map_settings_status_text="Saved map name: "..native; return saved,native
     end
   end) end
   if self.view.setCopyTextCallback then self.view:setCopyTextCallback(function(text) return self.adapter:copyText(text) end) end

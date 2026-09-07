@@ -501,6 +501,34 @@ test("map settings popup is responsive and submits transition choices",function(
   view:applyLayout(require("layout").compute(1000,700)); eq(view.map_settings_panel.visible,true); eq(view.map_settings_panel.x>=0,true); eq(view.map_settings_panel.x+view.map_settings_panel.width<=1000,true)
   eq(view.map_settings_draft.portal,false); view.map_settings_fields.minimum_height.input.text="120"; assert(view:saveMapSettings()); eq(received.minimum_height,"120"); eq(received.transition_submaps.portal,false); eq(view.map_settings_visible,false)
 end)
+test("map naming buttons apply names and show the native mapper label",function()
+  local view=chatView(); local calls={}
+  view:setMapSettingsActionCallback(function(action,value)
+    calls[#calls+1]=action..":"..value
+    if action=="rename_area" then return value,"Spur" end
+    return value,"Spur - Town Square Center Area"
+  end)
+  assert(view:showMapSettings({current_area_name="",current_subarea_name="",transition_submaps={}}))
+  view.map_settings_area_name.text="Spur"; assert(view.map_settings_rename_area.click())
+  eq(calls[1],"rename_area:Spur"); eq(view.map_settings_draft.current_area_name,"Spur")
+  eq(view.map_settings_status.message:find("Saved map name: Spur",1,true)~=nil,true)
+  view.map_settings_subarea_name.text="Town Square Center Area"; assert(view.map_settings_rename_subarea.click())
+  eq(calls[2],"rename_subarea:Town Square Center Area")
+  eq(view.map_settings_status.message:find("Spur - Town Square Center Area",1,true)~=nil,true)
+end)
+test("saving map settings applies changed area and subarea names first",function()
+  local view=chatView(); local calls={}
+  view:setMapSettingsActionCallback(function(action,value)
+    calls[#calls+1]=action
+    return value,action=="rename_area" and "Spur" or "Spur - Town Square Center Area"
+  end)
+  view:setMapSettingsCallback(function(values) calls[#calls+1]="save"; return true,nil,values end)
+  assert(view:showMapSettings({current_area_name="Old",current_subarea_name="Old Center",transition_submaps={}}))
+  view.map_settings_area_name.text="Spur"; view.map_settings_subarea_name.text="Town Square Center Area"
+  assert(view:saveMapSettings())
+  eq(table.concat(calls,","),"rename_area,rename_subarea,save")
+  eq(view.map_settings_visible,false)
+end)
 test("skill viewport uses live geometry with a conservative scrollbar reservation",function()
   local view=chatView(7); local layout=require("layout").compute(1920,1080); view:applyLayout(layout)
   eq(view.list_resolved_scrollbar_width>=40,true)

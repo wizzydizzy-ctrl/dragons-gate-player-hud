@@ -405,8 +405,14 @@ function View.new(settings)
   self.map_settings_clear_current:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_current") end end)
   self.map_settings_clear_all:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("clear_all") end end)
   self.map_settings_library:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("map_library") end end)
-  self.map_settings_rename_area:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("rename_area",self.map_settings_area_name:getText()) end end)
-  self.map_settings_rename_subarea:setClickCallback(function() if self.map_settings_action_callback then return self.map_settings_action_callback("rename_subarea",self.map_settings_subarea_name:getText()) end end)
+  local function renameMapPart(action,input,key)
+    if not self.map_settings_action_callback then return nil,"map naming is unavailable" end
+    local ok,native=self.map_settings_action_callback(action,input:getText())
+    if not ok then self.map_settings_error=native; self:renderMapSettings(false); return nil,native end
+    self.map_settings_error=nil; self.map_settings_draft[key]=ok; self.map_settings_status_text="Saved map name: "..tostring(native or ok); self:renderMapSettings(false); return ok
+  end
+  self.map_settings_rename_area:setClickCallback(function() return renameMapPart("rename_area",self.map_settings_area_name,"current_area_name") end)
+  self.map_settings_rename_subarea:setClickCallback(function() return renameMapPart("rename_subarea",self.map_settings_subarea_name,"current_subarea_name") end)
   self.map_settings_visible=false
   self.feedback_overlay=label("DGHUD.Feedback.Overlay",self.root,"background:rgba(0,0,0,0.72);")
   self.feedback_panel=Geyser.Container:new({name="DGHUD.Feedback.Panel",x=0,y=0,width=680,height=430},self.root)
@@ -1018,7 +1024,17 @@ function View:mapSettingsValues()
   local values={transition_submaps={}}; for _,key in ipairs(self.map_settings_field_order) do local f=self.map_settings_fields[key]; values[key]=f.input.getText and f.input:getText() or "" end; values.height_percent=(tonumber(values.height_percent) or 0)/100; values.enabled=self.map_settings_draft.enabled~=false; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do values.transition_submaps[key]=self.map_settings_draft[key]~=false end; return values
 end
 function View:saveMapSettings()
-  if not self.map_settings_callback then return nil,"map settings callback is unavailable" end; local called,ok,err,config=pcall(self.map_settings_callback,self:mapSettingsValues()); if not called then err="Could not save mapper settings: "..tostring(ok); ok=nil end; if not ok then self.map_settings_error=err; self:renderMapSettings(false); return nil,err end; self:hideMapSettings(); return true,config
+  if not self.map_settings_callback then return nil,"map settings callback is unavailable" end
+  for _,entry in ipairs({{"rename_area",self.map_settings_area_name,"current_area_name"},{"rename_subarea",self.map_settings_subarea_name,"current_subarea_name"}}) do
+    local value=entry[2].getText and entry[2]:getText() or ""; value=tostring(value):match("^%s*(.-)%s*$")
+    if value~="" and value~=tostring(self.map_settings_draft[entry[3]] or "") then
+      if not self.map_settings_action_callback then self.map_settings_error="map naming is unavailable"; self:renderMapSettings(false); return nil,self.map_settings_error end
+      local named,nameErr=self.map_settings_action_callback(entry[1],value)
+      if not named then self.map_settings_error=nameErr; self:renderMapSettings(false); return nil,nameErr end
+      self.map_settings_draft[entry[3]]=named
+    end
+  end
+  local called,ok,err,config=pcall(self.map_settings_callback,self:mapSettingsValues()); if not called then err="Could not save mapper settings: "..tostring(ok); ok=nil end; if not ok then self.map_settings_error=err; self:renderMapSettings(false); return nil,err end; self:hideMapSettings(); return true,config
 end
 function View:hideRollerSettings() self.roller_settings_visible=false; self.roller_draft=nil; self.roller_error=nil; if self.layout then self:layoutRollerSettings(self.layout) end; return true end
 function View:renderRollerSettings(populate)
