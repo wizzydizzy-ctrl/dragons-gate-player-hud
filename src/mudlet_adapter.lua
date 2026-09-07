@@ -401,6 +401,12 @@ function Adapter:consumeUpdateReinstall()
   DGHUD._update_reinstall_pending=nil
   return true
 end
+function Adapter:activateInstalledHUD()
+  if type(resetProfile)~="function" then return nil,"profile reload is unavailable" end
+  if type(saveProfile)=="function" then local ok,err=pcall(saveProfile); if not ok then return nil,tostring(err) end end
+  tempTimer(0.05,function() resetProfile() end)
+  return true
+end
 function Adapter:reportUpdateCheckFailure(message) cecho("\n<yellow>[DGHUD Update]<reset> Version check failed: "..tostring(message).."; refreshing character data. A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_check",stage="check"}) end end
 function Adapter:reportUpdateFailure(message) cecho("\n<red>[DGHUD Update]<reset> Update failed: "..tostring(message)..". A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_install",stage="install"}) end end
 function Adapter:updateClock()
@@ -529,7 +535,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       completed=true
       if not installed then fail(message); return end
       writeFile(currentPath,readFile(packagePath)); writeFile(currentManifestPath,targetManifestRaw)
-      if finished then return end; updater:stage("Completed"); local elapsed=updater.update_started_at and math.max(0,updater.adapter:updateClock()-updater.update_started_at) or 0; finished=true; cleanup(); cecho(string.format("\n<green>[DGHUD Update]<reset> Installed version %s (%.1fs)\n",tostring(targetManifest.version),elapsed)); if done then done(true) end
+      if finished then return end; updater:stage("Completed"); local elapsed=updater.update_started_at and math.max(0,updater.adapter:updateClock()-updater.update_started_at) or 0; finished=true; cleanup(); cecho(string.format("\n<green>[DGHUD Update]<reset> Installed version %s (%.1fs)\n",tostring(targetManifest.version),elapsed)); if done then done(true) end; local activated,activateErr=self:activateInstalledHUD(); if not activated then cecho("\n<yellow>[DGHUD Update]<reset> Installed successfully; automatic HUD reload was unavailable: "..tostring(activateErr).."\n") end
     end,true)
     if not started and not completed then fail(why) end
   end

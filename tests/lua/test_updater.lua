@@ -83,6 +83,12 @@ test("Mudlet version adapter captures the API numeric tuple",function()
   local value=Adapter.new():mudletVersion(); _G.getMudletVersion=prior
   eq(value[1],5); eq(value[2],0); eq(value[3],1)
 end)
+test("successful package replacement schedules one saved profile reload",function()
+  local oldSave,oldReset,oldTimer=_G.saveProfile,_G.resetProfile,_G.tempTimer; local saved,reloaded=0,0
+  saveProfile=function() saved=saved+1 end; resetProfile=function() reloaded=reloaded+1 end; tempTimer=function(delay,fn) eq(delay,.05); fn(); return 1 end
+  local ok,err=Adapter.new():activateInstalledHUD(); saveProfile,resetProfile,tempTimer=oldSave,oldReset,oldTimer
+  eq(ok,true); eq(err,nil); eq(saved,1); eq(reloaded,1)
+end)
 local function replacementHarness(options,body)
   options=options or {}; local globalNames={"lfs","yajl","getMudletHomeDir","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","getPackages","uninstallPackage","installPackage","cecho","DGHUD","getMudletVersion"}
   globalNames[#globalNames+1]="getEpoch"
