@@ -479,9 +479,18 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       schedule(0.10,function()
         local installed=installPackage(packagePath)
         if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-        -- Mudlet can finish loading a larger package after installPackage returns.
-        -- Give package scripts time to register before the updater health check.
-        schedule(0.50,function() replaceDone(true) end)
+        -- installPackage() returns before Mudlet has necessarily finished running
+        -- the package scripts. Wait for the new HUD to become healthy instead of
+        -- relying on a fixed delay, which races on larger/slower profiles.
+        local attempts=0
+        local function waitForInstalledHUD()
+          attempts=attempts+1
+          local healthy=DGHUD and DGHUD.healthCheck and DGHUD.healthCheck()
+          if healthy then replaceDone(true); return end
+          if attempts>=20 then replaceDone(nil,"post-install health check timed out"); return end
+          schedule(0.20,waitForInstalledHUD)
+        end
+        schedule(0.10,waitForInstalledHUD)
       end)
     end
     self.healthCheck=function() return DGHUD and DGHUD.healthCheck and DGHUD.healthCheck() end
