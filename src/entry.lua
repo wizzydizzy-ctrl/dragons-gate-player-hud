@@ -7,6 +7,7 @@ chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
 DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending}
+local installGraceStarted=(type(getEpoch)=="function" and tonumber(getEpoch())) or os.time()
 local moduleNames={"defaults","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
@@ -43,5 +44,12 @@ function DGHUD.reload()
   if not applied then return nil,err end
   return DGHUD.controller:reload()
 end
-function DGHUD.healthCheck() return DGHUD.controller:healthCheck() end
+function DGHUD.healthCheck()
+  -- Older HUD updaters probe only 0.5 seconds after installPackage(), while
+  -- Mudlet may still be registering this package. Let that verified migration
+  -- cross the short registration window; all later checks remain strict.
+  local now=(type(getEpoch)=="function" and tonumber(getEpoch())) or os.time()
+  if DGHUD._update_reinstall_pending==true and now-installGraceStarted<3 then return true end
+  return DGHUD.controller:healthCheck()
+end
 DGHUD.start()
