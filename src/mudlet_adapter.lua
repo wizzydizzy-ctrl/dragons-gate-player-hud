@@ -477,7 +477,6 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch"); return end
       writeFile(packagePath,data)
       if DGHUD then DGHUD._update_reinstall_pending=true end
-      if DGHUD and DGHUD.shutdown then pcall(DGHUD.shutdown) end
       if hasPackage(name) then local removed=uninstallPackage(name); if removed==nil then replaceDone(nil,"could not remove existing HUD package"); return end end
       schedule(0.10,function()
         local installed=installPackage(packagePath)
@@ -500,7 +499,6 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       if name~="DragonsGateHUD" or not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
       if not Adapter.verifyArchive(rollbackPayload,previousDigest) then rollbackDone(nil,"rollback package checksum mismatch"); return end
       if DGHUD then DGHUD._update_reinstall_pending=true end
-      if DGHUD and DGHUD.shutdown then pcall(DGHUD.shutdown) end
       if hasPackage(name) then uninstallPackage(name) end
       schedule(0.10,function()
         -- Mudlet derives the installed package identity from the archive filename.
