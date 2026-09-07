@@ -4,10 +4,10 @@ function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
 function Adapter.verifyArchive(payload,digest) return type(payload)=="string" and type(digest)=="string" and SHA256.hex(payload)==digest end
 function Adapter.manifestUrl(github,nonce)
-  return "https://github.com/"..github.owner.."/"..github.repository.."/releases/latest/download/manifest.json?dghud="..tostring(nonce)
+  return "https://github.com/"..github.owner.."/"..github.repository.."/releases/latest/download/manifest.json"
 end
 function Adapter.versionManifestUrl(github,version,nonce)
-  return "https://github.com/"..github.owner.."/"..github.repository.."/releases/download/v"..tostring(version).."/manifest.json?dghud="..tostring(nonce)
+  return "https://github.com/"..github.owner.."/"..github.repository.."/releases/download/v"..tostring(version).."/manifest.json"
 end
 local updateNonce=0
 function Adapter.new() return setmetatable({},Adapter) end
