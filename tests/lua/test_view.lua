@@ -338,6 +338,7 @@ test("shared library exposes download update and upload-my-version actions",func
   local view=chatView(); local calls={}; view:setMapLibraryActionCallback(function(action,entry) calls[#calls+1]={action,entry and entry.slug}; return true end); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); assert(view:setMapLibraryMode("library")); view:setMapLibraryCatalog({{name="Spur",author="Gia",publisher="gia",slug="spur",room_count=42,version="1.0.0",areas={"Spur"}}}); assert(view.map_library_rows[1].click())
   for _,key in ipairs(view.map_library_download_action_order) do eq(view.map_library_download_actions[key].visible,true); if key=="replace_current" then eq(view.map_library_download_actions[key].click(),nil); assert(view.map_library_download_actions[key].click()) else assert(view.map_library_download_actions[key].click()) end; eq(calls[#calls][1],key); eq(calls[#calls][2],"spur") end
   eq(view.map_collection_list.visible,false); eq(view.map_library_list.visible,true); eq(view:setMapLibraryMode("unknown"),nil)
+  eq(view.map_library_download_actions.merge_current.option_text,"ADD TO CURRENT MAP")
 end)
 test("collection and shared-library controls stay bounded on compact windows",function()
   local view=chatView(); view:showMapLibrary(); view:setMapCollections({{id="one",name="One",room_count=1}})
@@ -381,6 +382,13 @@ test("map library shows conflict choices only during installation review",functi
   for _,key in ipairs({"keep","replace","skip","confirm","cancel","report"}) do eq(view.map_library_actions[key].visible,true) end
   for _,key in ipairs({"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea"}) do eq(view.map_library_actions[key].visible,false) end
   view:setMapLibraryImportPending(false); view:setMapLibraryMode("library"); eq(view.map_library_actions.browse.visible,true); eq(view.map_library_actions.keep.visible,false)
+end)
+test("combined-map review names primary and secondary collision priority",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryImportPending(true,true)
+  eq(view.map_library_actions.keep.message:find("PRIMARY WINS",1,true)~=nil,true)
+  eq(view.map_library_actions.replace.message:find("SECONDARY WINS",1,true)~=nil,true)
+  eq(view.map_library_actions.skip.message:find("SKIP COLLISIONS",1,true)~=nil,true)
+  eq(view.map_library_actions.confirm.message:find("CREATE COMBINED MAP",1,true)~=nil,true)
 end)
 test("help and map library expose copyable plain-text instructions",function()
   local view=chatView(); local copied={}; view:setCopyTextCallback(function(value) copied[#copied+1]=value; return true end); view:applyLayout(require("layout").compute(1000,700))

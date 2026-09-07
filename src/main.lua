@@ -128,6 +128,20 @@ function Main:downloadLibraryCollection(entry,replaceCurrent)
   end)
   if not started then failed(err) end; return started,err
 end
+function Main:mergeLibraryIntoCurrent(entry)
+  if type(entry)~="table" then return nil,"select a shared map first" end
+  local active=self.map_collections and self.map_collections:active(); if not active then return nil,"active map collection is unavailable" end
+  self.view.map_library_status="Downloading and checking "..tostring(entry.name).." before combining…"; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end
+  local function failed(message) self.last_mapper_error=tostring(message); self.last_map_library_error=tostring(message); self:captureFailure("map_library",message,{operation="combine_collection",stage="download_or_validation"}); self.view.map_library_status="Combine failed: "..tostring(message).." A sanitized report is ready."; if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
+  local started,err=self.adapter:downloadCatalogMap(entry,function(raw,downloadErr)
+    if downloadErr then return failed(downloadErr) end; local model,validationErr=self.map_transfer:validate(raw); if not model then return failed(validationErr) end
+    if model.provenance.publisher~=entry.publisher or model.provenance.slug~=entry.slug then return failed("map provenance does not match the catalog") end
+    local policies={default="keep_mine",rooms={}}; local plan,previewErr=self.map_transfer:preview(model,policies); if not plan then return failed(previewErr) end
+    self.pending_map_import={name=entry.name,data=model,policies=policies,plan=plan,combine={base_id=active.id,base_name=active.name,incoming_name=entry.name,priority="primary"}}
+    return self:reportMapImportPlan(plan,entry.name)
+  end)
+  if not started then failed(err) end; return started,err
+end
 function Main.installChatApi(namespace)
   local chat=type(namespace.chat)=="table" and namespace.chat or {}
   namespace.chat=chat
@@ -609,9 +623,13 @@ function Main:exportMapTransfer(name,publisher,selection)
 end
 local function transferChoice(value) return ({keep="keep_mine",replace="use_imported",skip="skip_area"})[tostring(value or ""):lower()] end
 function Main:reportMapImportPlan(plan,name)
-  if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(true) end
+  local combine=self.pending_map_import and self.pending_map_import.combine
+  if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(true,combine~=nil) end
   local lines={"Ready to install '"..tostring(name).."': "..plan.creates.." new rooms and "..plan.conflicts.." overlaps."}
-  if plan.conflicts>0 then lines[#lines+1]="Choose KEEP MY MAP, USE SHARED MAP, or SKIP THIS AREA, then choose FINISH INSTALLING."
+  if combine then
+    lines[#lines+1]="Primary: "..tostring(combine.base_name)..". Secondary: "..tostring(combine.incoming_name).."."
+    if plan.conflicts>0 then lines[#lines+1]="Choose PRIMARY WINS or SECONDARY WINS for room-number collisions, or SKIP COLLISIONS, then choose CREATE COMBINED MAP." end
+  elseif plan.conflicts>0 then lines[#lines+1]="Choose KEEP MY MAP, USE SHARED MAP, or SKIP THIS AREA, then choose FINISH INSTALLING."
   else lines[#lines+1]="No overlaps found. Choose FINISH INSTALLING to add this map." end
   if plan.blocked then lines[#lines+1]="Some rooms belong to another personal map and cannot be replaced." end
   if self.view then self.view.map_library_status=table.concat(lines," "); if self.view.layout then self.view:layoutMapLibrary(self.view.layout) end end
@@ -621,6 +639,7 @@ function Main:setDefaultMapImportPolicy(choice)
   local pending=self.pending_map_import; if not pending then return nil,"download and review a map first" end
   local policy=transferChoice(choice); if not policy then return nil,"choice must be keep, replace, or skip" end
   pending.policies={default=policy,rooms={}}
+  if pending.combine then pending.combine.priority=policy=="use_imported" and "secondary" or (policy=="keep_mine" and "primary" or "skip") end
   local plan,err=self.map_transfer:preview(pending.data,pending.policies); if not plan then return nil,err end
   pending.plan=plan; return self:reportMapImportPlan(plan,pending.name)
 end
@@ -636,8 +655,18 @@ function Main:setMapImportPolicy(kind,target,choice)
 end
 function Main:confirmMapTransfer()
   local pending=self.pending_map_import; if not pending then return nil,"no map import preview is pending" end
+  local combined
+  if pending.combine then
+    local active=self.map_collections and self.map_collections:active(); if not active or active.id~=pending.combine.base_id then return nil,"active map changed; start the combine again" end
+    local combinedName=(tostring(pending.combine.base_name).." + "..tostring(pending.combine.incoming_name)):sub(1,100)
+    local created,createErr=self:createMapCollection(combinedName,{kind="local_map"}); if not created then self:reportMapTransfer(createErr,true); return nil,createErr end
+    local switched,switchErr=self:switchMapCollection(created.id); if not switched then self:reportMapTransfer(switchErr,true); return nil,switchErr end; combined=created
+  end
   local result,err=self.map_transfer:apply(pending.plan,self:mapTransferCreator()); if not result then self:reportMapTransfer(err,true); return nil,err end
-  self.pending_map_import=nil; if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end; self:reportMapTransfer("Map installed: "..result.applied.." rooms added or updated, "..result.kept.." of your rooms kept, "..result.skipped.." skipped.",false); return result
+  if combined then local saved,saveErr=self:saveActiveMapCollection(); if not saved then self:reportMapTransfer("Combined map was applied but could not be saved: "..tostring(saveErr),true); return nil,saveErr end end
+  self.pending_map_import=nil; if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end
+  local message=(combined and ("Combined map saved as '"..combined.name.."': ") or "Map installed: ")..result.applied.." rooms added or updated, "..result.kept.." of your rooms kept, "..result.skipped.." skipped."
+  self:reportMapTransfer(message,false); if combined and self.view then self.view:setMapLibraryMode("collections"); self:presentMapCollections(message) end; return result
 end
 function Main:routeShape(fromID,toID,route)
   if type(route)~="table" then return nil,"invalid map route" end
@@ -796,6 +825,7 @@ function Main:start()
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
+    if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
     if action=="update_collection" then
       local entry=suppliedEntry or self.view:selectedMapLibraryEntry(); local matching
