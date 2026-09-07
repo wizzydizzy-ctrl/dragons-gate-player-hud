@@ -242,28 +242,29 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
+  eq(#view.option_action_order,5); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
   eq(view.color_option_buttons.damage.message:find("DAMAGE TO YOU",1,true)~=nil,true)
   eq(view.color_option_buttons.races.message:find("RACES",1,true)~=nil,true); eq(view.color_option_buttons.classes.message:find("CLASSES",1,true)~=nil,true)
   eq(view.color_option_buttons.illumination.message:find("ILLUMINATED AREAS",1,true)~=nil,true)
-  view.color_option_buttons.exits.click(); eq(calls[#calls].key,"exits"); eq(calls[#calls].value,true); eq(view.color_menu_visible,false)
-  view.color_toggle.click(); view.color_option_buttons.damage.click(); eq(calls[#calls].key,"damage"); eq(calls[#calls].value,false); eq(view.color_menu_visible,false)
-  view.color_toggle.click(); view.color_option_buttons.enabled.click(); eq(calls[#calls].key,"enabled"); eq(view.color_enabled,false)
+  view.color_option_buttons.exits.click(); eq(calls[#calls].key,"exits"); eq(calls[#calls].value,true); eq(view.color_settings_visible,true)
+  view.color_option_buttons.damage.click(); eq(calls[#calls].key,"damage"); eq(calls[#calls].value,false)
+  view.color_option_buttons.enabled.click(); eq(calls[#calls].key,"enabled"); eq(view.color_enabled,false)
 end)
 
 test("color options menu closes by button outside click and resize remains bounded",function()
   local view=chatView()
   for _,size in ipairs({{220,120},{420,500},{760,700},{800,650},{1200,800},{1920,1080}}) do
-    local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); view.color_toggle.click()
+    local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); view.color_toggle.click(); view.option_action_buttons.color_settings.click()
     eq(view.color_menu.x>=0,true); eq(view.color_menu.x+view.color_menu.width<=size[1],true)
     eq(view.color_menu.x,0)
     eq(view.color_menu.y,view.options_anchor.y+view.options_anchor.height+4)
     eq(view.color_menu.y+view.color_menu.height<=size[2],true)
-    eq(view.options_scroll.visible,true); eq(view.options_scroll.x+view.options_scroll.width<=view.color_menu.width,true)
-    for _,key in ipairs(view.color_option_order) do local button=view.color_option_buttons[key]; eq(button.parent,view.options_scroll); eq(button.x>=0,true); eq(button.x+button.width<=view.options_scroll.width,true); eq(button.y>=0,true); eq(button.height>=25,true) end
-    view.color_menu_scrim.click(); eq(view.color_menu_visible,false); eq(view.color_menu.visible,false)
+    eq(view.color_settings_panel.x>=0,true); eq(view.color_settings_panel.x+view.color_settings_panel.width<=size[1],true)
+    for _,key in ipairs(view.color_option_order) do local button=view.color_option_buttons[key]; eq(button.parent,view.color_settings_content); eq(button.x>=0,true); eq(button.x+button.width<=view.color_settings_content.width,true); eq(button.y>=0,true); eq(button.height>=25,true) end
+    view.color_settings_overlay.click(); eq(view.color_settings_visible,false); eq(view.color_settings_panel.visible,false)
     view.color_toggle.click(); view.color_toggle.click(); eq(view.color_menu_visible,false)
   end
 end)
@@ -282,14 +283,15 @@ test("options menu exposes every autoroller command and settings action",functio
   local view=chatView(); local calls={}; view:setOptionsActionCallback(function(action) calls[#calls+1]=action; if action=="roller_settings" then return {target_total=53,hard_stop=62,reroll_delay=.1,reroll_command="n",min_stats={STR=5}} end; return true end)
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   for _,key in ipairs(view.option_action_order) do eq(view.option_action_buttons[key].visible,true) end
-  view.option_action_buttons.roller_start.click(); eq(calls[#calls],"roller_start")
-  view.color_toggle.click(); view.option_action_buttons.roller_settings.click(); eq(view.roller_settings_visible,true); eq(view.roller_fields.target_total.input.text,"53")
+  view.option_action_buttons.roller_settings.click(); eq(view.roller_settings_visible,true); eq(view.roller_fields.target_total.input.text,"53")
+  for _,key in ipairs(view.roller_action_order) do eq(view.roller_action_buttons[key].visible,true) end
+  view.roller_action_buttons.roller_start.click(); eq(calls[#calls],"roller_start")
 end)
 
 test("feedback option opens an in-game anonymous submission form",function()
   local view=chatView(); local sent,finish
   view:setFeedbackCallback(function(payload,done) sent=payload; finish=done; return true end)
-  view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); view.option_action_buttons.feedback.click()
+  view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); view.option_action_buttons.support.click(); eq(view.support_visible,true); view.support_feedback.click()
   eq(view.feedback_visible,true); eq(view.feedback_panel.visible,true); eq(view.feedback_explanation.message:find("no GitHub account",1,true)~=nil,true)
   view.feedback_kind.click(); eq(view.feedback_draft.kind,"request")
   view.feedback_summary:print("Add a better clock"); view.feedback_details:print("Please show the next sunrise and sunset beside game time.")

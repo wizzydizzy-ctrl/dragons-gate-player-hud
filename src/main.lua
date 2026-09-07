@@ -785,7 +785,7 @@ function Main:start()
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setFeedbackCallback then self.view:setFeedbackCallback(function(payload,done) return self.adapter:submitFeedback(payload,done) end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
-    if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) self:reportMapTransfer(sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")),sendErr~=nil) end) end
+    if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
