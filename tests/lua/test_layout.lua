@@ -41,7 +41,7 @@ test("functional chat chrome floor adapts the console minimum at medium and comp
 end)
 test("extreme compact height compresses header before chat or console overrun",function()
   local r=Layout.compute(760,150)
-  eq(r.header_height,50); eq(r.chat_height,60); eq(r.chat_output_height,16); eq(r.console_remainder,1)
+  eq(r.header_height,56); eq(r.chat_height,60); eq(r.chat_output_height,16); eq(r.console_remainder,1)
   eq(r.console_top<=r.window_height,true)
 end)
 test("normal layouts retain their breakpoint headers and chat geometry",function()
@@ -81,8 +81,8 @@ test("desktop breakpoint crossings retain rails until genuinely compact widths",
     eq(r.left>0,true); eq(r.right>0,true); eq(r.console_width>0,true)
   end
 end)
-test("center vitals strip reserves the bottom of the main console",function()
-  for _,size in ipairs({{760,700},{1200,800},{2560,1400}}) do local r=Layout.compute(size[1],size[2]); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.command_line_clearance>=19,true); eq(r.command_line_clearance<=25,true); eq(r.console_remainder,r.window_height-r.console_top-r.bottom) end
+test("center vitals strip meets the native command line without duplicate clearance",function()
+  for _,size in ipairs({{760,700},{1200,800},{2560,1400}}) do local r=Layout.compute(size[1],size[2]); eq(r.bottom,r.vitals_strip_height); eq(r.command_line_clearance,0); eq(r.console_remainder,r.window_height-r.console_top-r.bottom) end
 end)
 test("console gutter approximates half a percent but caps on wide displays",function()
   for _,case in ipairs({{1920,10},{2560,12},{3840,12},{7680,12}}) do

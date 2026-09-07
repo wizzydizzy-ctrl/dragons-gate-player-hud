@@ -115,13 +115,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   -- Keep top/side breathing room, but no lower inset: the gauges should meet
   -- Mudlet's native command line without a visible empty band.
   layout.vitals_strip_height=layout.lower_gauge_height*layout.vitals_strip_rows+layout.vitals_strip_gap*(layout.vitals_strip_rows-1)+layout.vitals_strip_padding
-  -- Mudlet's command line/search strip occupies the bottom of the window but is
-  -- not part of the console border. Keep HUD controls above that native chrome.
-  -- Account for the gauge's own lower inset so its visible edge sits directly
-  -- above Mudlet's command line instead of leaving a second empty band.
-  local desired_clearance=clamp(layout.body_font+3,19,25)
-  local safe_clearance=math.max(0,height-layout.vitals_strip_height-60-50-1)
-  layout.command_line_clearance=math.min(desired_clearance,safe_clearance)
+  -- Geyser's usable root already ends above Mudlet's native command line.
+  -- Reserving its height again creates a visible empty band above the input.
+  layout.command_line_clearance=0
   layout.bottom=layout.vitals_strip_height+layout.command_line_clearance; layout.window_height=height
   chatMetrics(width,height,layout,chatSettings)
   layout.lower_mapper_gap=layout.lower_row_gap
