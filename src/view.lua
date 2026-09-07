@@ -537,6 +537,7 @@ function View:renderChatTabs(categories,activeFilter)
 end
 function View:applyLayout(layout)
   self.layout=layout; local top,bottom=layout.header_height or layout.top,0; local t=self.settings.theme; local p=layout.panel_padding; local lp=layout.lower_panel_padding
+  local side_bottom=layout.command_line_clearance or 0
   local header_top_padding=math.max(10,(layout.color_toggle_height or 20)+8)
   self.header:setStyleSheet("background:"..t.background..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:"..header_top_padding.."px "..p.."px 6px "..p.."px;font-size:"..layout.body_font.."px;")
   self.clock_header:setStyleSheet("background:transparent;color:"..t.text..";padding:8px "..p.."px;text-align:right;")
@@ -594,16 +595,15 @@ function View:applyLayout(layout)
     self.compact:hide()
     place(self.left_bg,0,top,layout.left,"100%-"..top)
     place(self.identity,0,top,layout.left,layout.identity_height)
-    place(self.left,"100%-"..layout.right,top,layout.right,"100%-"..(top+bottom))
-    local available=math.max(100,(layout.window_height or 800)-top-bottom)
+    place(self.left,"100%-"..layout.right,top,layout.right,"100%-"..(top+side_bottom))
+    local available=math.max(100,(layout.window_height or 800)-top-side_bottom)
     local psi_visible=self.last_state and self.last_state.vitals.psi.visible or false
     local web_visible=self.last_state and self.last_state.vitals.web.visible or false
-    local roundtime_active=(tonumber(self.roundtime_remaining) or 0)>0
-    local lower=Layout.lowerPanelGeometry(layout,psi_visible,web_visible,roundtime_active)
+    local lower=Layout.lowerPanelGeometry(layout,psi_visible,web_visible,true)
     local panel_height=math.min(available,lower.panel_height)
     layout.lower_geometry=lower
-    place(self.right,0,"100%-"..(bottom+panel_height),layout.left,panel_height)
-    local lower_y=(layout.window_height or 800)-bottom-panel_height
+    place(self.right,0,"100%-"..(side_bottom+panel_height),layout.left,panel_height)
+    local lower_y=(layout.window_height or 800)-side_bottom-panel_height
     local card_x="100%-"..(layout.right-p); local card_w=layout.right-p*2; local eq_rows=2
     local rp=layout.list_padding or p; local list_x="100%-"..(layout.right-p-rp); local list_w=card_w-rp*2
     self.list_outer_width=list_w
@@ -636,7 +636,7 @@ function View:applyLayout(layout)
     local right_details_h=(layout.combat_line_height or layout.details_line_height)*Layout.detailsCardRows(layout.details_columns)+combat_padding*2+4
     local combat_y=top+p
     place(self.details,card_x,combat_y,card_w,right_details_h)
-    local inventory_y=combat_y+right_details_h+10; local rail_bottom=(layout.window_height or 800)-12
+    local inventory_y=combat_y+right_details_h+10; local rail_bottom=(layout.window_height or 800)-side_bottom-12
     local rows=layout.list_visible_rows or 5; local list_h=layout.list_viewport_height or layout.list_row_height*rows
     if self.list_horizontal_overflow then list_h=list_h+(layout.list_horizontal_scrollbar_height or 18) end
     local title_h=layout.list_row_height+4; local footer_h=layout.list_row_height*2+6
@@ -681,14 +681,14 @@ function View:applyLayout(layout)
     local inset=layout.vitals_strip_padding or 6; local gap=layout.vitals_strip_gap or 6
     local rows=layout.vitals_strip_rows or 1; local columns=math.ceil(#bars/rows)
     local width=math.max(1,tonumber(layout.console_width) or 1); local usable=math.max(columns,width-inset*2-gap*(columns-1)); local barWidth=usable/columns
-    place(self.vitals_right,layout.console_left or 0,"100%-"..(layout.bottom or 0),layout.console_width or "100%",layout.bottom or layout.vitals_strip_height)
+    place(self.vitals_right,layout.console_left or 0,"100%-"..(layout.bottom or 0),layout.console_width or "100%",layout.vitals_strip_height)
     for index,g in ipairs(bars) do local row=math.floor((index-1)/columns); local column=(index-1)%columns; place(g,inset+column*(barWidth+gap),inset+row*(layout.lower_gauge_height+gap),barWidth,layout.lower_gauge_height) end
     self.carry:hide(); self.vitals_right:raise()
   end
   if layout.mode~="compact" then
     place(self.right_bg,0,0,"100%","100%"); self.right_title:hide()
     local panel_height=tonumber(self.right.height) or math.max(0,(layout.window_height or 800)-top-bottom)
-    local lower=Layout.lowerPanelGeometry(layout,false,false,true)
+    local lower=layout.lower_geometry or Layout.lowerPanelGeometry(layout,false,false,true)
     local inset=lp
     local compass_h,utility_h=lower.compass_height,lower.utility_height
     local utility_y,compass_y=lower.utility_y,lower.compass_y

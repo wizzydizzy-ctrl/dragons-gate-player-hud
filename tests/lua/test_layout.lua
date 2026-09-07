@@ -72,7 +72,7 @@ test("medium screens preserve the seventeen sixty-six seventeen split",function(
   local r=Layout.compute(1200,800); eq(r.mode,"medium"); eq(r.left,204); eq(r.right,204); eq(r.console_gutter,6); eq(r.console_left,210); eq(r.console_width,780); eq(r.header_height,66); eq(r.show_character_rail,true); eq(r.show_room_compass,true); eq(r.vitals_side,"center")
 end)
 test("compact screens move all status out of side rails",function()
-  local r=Layout.compute(760,700); eq(r.mode,"compact"); eq(r.left,0); eq(r.right,0); eq(r.header_height,116); eq(r.bottom,r.vitals_strip_height); eq(r.bottom>0,true); eq(r.show_room_compass,false)
+  local r=Layout.compute(760,700); eq(r.mode,"compact"); eq(r.left,0); eq(r.right,0); eq(r.header_height,116); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.bottom>0,true); eq(r.show_room_compass,false)
 end)
 test("desktop breakpoint crossings retain rails until genuinely compact widths",function()
   for _,width in ipairs({999,1000,1399,1400}) do
@@ -82,7 +82,7 @@ test("desktop breakpoint crossings retain rails until genuinely compact widths",
   end
 end)
 test("center vitals strip reserves the bottom of the main console",function()
-  for _,size in ipairs({{760,700},{1200,800},{2560,1400}}) do local r=Layout.compute(size[1],size[2]); eq(r.bottom,r.vitals_strip_height); eq(r.console_remainder,r.window_height-r.console_top-r.bottom) end
+  for _,size in ipairs({{760,700},{1200,800},{2560,1400}}) do local r=Layout.compute(size[1],size[2]); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.command_line_clearance>=28,true); eq(r.console_remainder,r.window_height-r.console_top-r.bottom) end
 end)
 test("console gutter approximates half a percent but caps on wide displays",function()
   for _,case in ipairs({{1920,10},{2560,12},{3840,12},{7680,12}}) do
@@ -240,7 +240,7 @@ test("active roundtime reserves only left navigation rail space",function()
     eq(active.roundtime_y+active.roundtime_height,active.panel_height-layout.lower_panel_padding)
     eq(active.utility_y+active.utility_height+layout.lower_roundtime_gap,active.roundtime_y)
     eq(layout.console_width,size[1]-layout.console_left-layout.console_right)
-    eq(layout.bottom,layout.vitals_strip_height)
+    eq(layout.bottom,layout.vitals_strip_height+layout.command_line_clearance)
     eq(ready.roundtime_visible,false); eq(ready.utility_y+ready.utility_height,ready.panel_height-layout.lower_panel_padding)
   end
 end)

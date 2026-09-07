@@ -440,7 +440,7 @@ test("health check requires root handlers and an owned chat trigger",function()
   local hud=Main.new(fake(),{layout={left_width=190,right_width=270}}); eq(hud:healthCheck(),nil); hud:start(); eq(hud:healthCheck(),true); hud.runtime.aliases[#hud.runtime.aliases+1]=99999; eq(hud:healthCheck(),true); hud.chat.trigger=nil; eq(hud:healthCheck(),nil)
 end)
 test("window resize recomputes absolute borders and view layout",function()
-  local f=fake(); f.borders={1290,234,1610,120}; local hud=Main.new(f,{layout={}}); hud:start(); eq(f.layouts[#f.layouts].mode,"wide"); eq(f.set_borders[1],336); eq(f.set_borders[2],314); eq(f.set_borders[3],336); eq(f.set_borders[4],f.layouts[#f.layouts].vitals_strip_height); f.width=760; f.height=700; f.callbacks["sysWindowResizeEvent"](); eq(f.layouts[#f.layouts].mode,"compact"); eq(f.set_borders[1],0); eq(f.set_borders[2],276); eq(f.set_borders[3],0); eq(f.set_borders[4],f.layouts[#f.layouts].vitals_strip_height)
+  local f=fake(); f.borders={1290,234,1610,120}; local hud=Main.new(f,{layout={}}); hud:start(); eq(f.layouts[#f.layouts].mode,"wide"); eq(f.set_borders[1],336); eq(f.set_borders[2],314); eq(f.set_borders[3],336); eq(f.set_borders[4],f.layouts[#f.layouts].bottom); f.width=760; f.height=700; f.callbacks["sysWindowResizeEvent"](); eq(f.layouts[#f.layouts].mode,"compact"); eq(f.set_borders[1],0); eq(f.set_borders[2],276); eq(f.set_borders[3],0); eq(f.set_borders[4],f.layouts[#f.layouts].bottom)
 end)
 test("runtime wires one mapper toolbar callback across resize and reports zoom outcomes",function()
   local f=fake(); f.gmcp=gmcpRoom(175); f.zoomResult=17.5

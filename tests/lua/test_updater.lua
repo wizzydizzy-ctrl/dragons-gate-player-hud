@@ -59,12 +59,13 @@ test("manifest compatibility blocks replacement on an older known Mudlet",functi
   local u=Updater.new({mudletVersion=function() return "4.17.2" end},updateSettings)
   local ok,err=u:validateManifest(releaseManifest("0.2.84")); eq(ok,nil); assert(err:find("older than required",1,true))
 end)
-test("post-install refresh joins the new controller startup sequence",function()
-  local prior=_G.DGHUD; local entries=0; local forced=0
-  _G.DGHUD={controller={character_entry_started=false,onCharacterEntry=function(self) entries=entries+1; self.character_entry_started=true; return true end,collector={restartRefresh=function() forced=forced+1; return true end}}}
-  local ok,err=pcall(function() eq(Adapter.new():refreshCharacterData(),true); eq(Adapter.new():refreshCharacterData(),true) end)
+test("post-install refresh joins rather than restarts the new controller startup sequence",function()
+  local prior=_G.DGHUD; local entries=0; local refreshed=0
+  local collector={active=nil,refreshed=false,refresh=function(self) refreshed=refreshed+1; self.refreshed=true; self.active={command="inventory"}; return true end}
+  _G.DGHUD={controller={character_entry_started=false,onCharacterEntry=function(self) entries=entries+1; self.character_entry_started=true; return true end,collector=collector}}
+  local ok,err=pcall(function() eq(Adapter.new():refreshCharacterData(),true); eq(Adapter.new():refreshCharacterData(),true); eq(Adapter.new():refreshCharacterData(),true) end)
   _G.DGHUD=prior; if not ok then error(err,0) end
-  eq(entries,1); eq(forced,1)
+  eq(entries,1); eq(refreshed,1)
 end)
 test("Mudlet activity detection survives asynchronous non-prompt output",function()
   local oldDGHUD,oldCurrent=DGHUD,getCurrentLine; DGHUD={controller={character_entry_started=true}}; getCurrentLine=function() return "The dark hound claws at you!" end

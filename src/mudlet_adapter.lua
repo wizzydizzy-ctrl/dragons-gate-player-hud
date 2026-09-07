@@ -381,8 +381,10 @@ function Adapter:refreshCharacterData()
   if not controller then return nil,"HUD controller is unavailable" end
   if controller.character_entry_started then
     local collector=controller.collector
-    if collector and type(collector.restartRefresh)=="function" then return collector:restartRefresh() end
-    if collector and type(collector.forceRefresh)=="function" then return collector:forceRefresh() end
+    -- A freshly installed controller starts its own character refresh. Joining
+    -- that sequence avoids cancelling it and sending every startup command twice.
+    if collector and (collector.active or collector.refreshed) then return true end
+    if collector and type(collector.refresh)=="function" then return collector:refresh() end
     return nil,"HUD command collector is unavailable"
   end
   if type(controller.onCharacterEntry)=="function" then return controller:onCharacterEntry() end
