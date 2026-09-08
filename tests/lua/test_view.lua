@@ -383,10 +383,10 @@ test("map library shows conflict choices only during installation review",functi
   for _,key in ipairs({"browse","install","publish_all","publish_area","publish_subarea","export_all","export_area","export_subarea"}) do eq(view.map_library_actions[key].visible,false) end
   view:setMapLibraryImportPending(false); view:setMapLibraryMode("library"); eq(view.map_library_actions.browse.visible,true); eq(view.map_library_actions.keep.visible,false)
 end)
-test("combined-map review names primary and secondary collision priority",function()
+test("combined-map review names current and downloaded map collision priority",function()
   local view=chatView(); view:applyLayout(require("layout").compute(760,700)); view:showMapLibrary(); view:setMapLibraryImportPending(true,true)
-  eq(view.map_library_actions.keep.message:find("PRIMARY WINS",1,true)~=nil,true)
-  eq(view.map_library_actions.replace.message:find("SECONDARY WINS",1,true)~=nil,true)
+  eq(view.map_library_actions.keep.message:find("CURRENT MAP WINS",1,true)~=nil,true)
+  eq(view.map_library_actions.replace.message:find("DOWNLOADED MAP WINS",1,true)~=nil,true)
   eq(view.map_library_actions.skip.message:find("SKIP COLLISIONS",1,true)~=nil,true)
   eq(view.map_library_actions.confirm.message:find("CREATE COMBINED MAP",1,true)~=nil,true)
 end)

@@ -627,8 +627,8 @@ function Main:reportMapImportPlan(plan,name)
   if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(true,combine~=nil) end
   local lines={"Ready to install '"..tostring(name).."': "..plan.creates.." new rooms and "..plan.conflicts.." overlaps."}
   if combine then
-    lines[#lines+1]="Primary: "..tostring(combine.base_name)..". Secondary: "..tostring(combine.incoming_name).."."
-    if plan.conflicts>0 then lines[#lines+1]="Choose PRIMARY WINS or SECONDARY WINS for room-number collisions, or SKIP COLLISIONS, then choose CREATE COMBINED MAP." end
+    lines[#lines+1]="Current Map: "..tostring(combine.base_name)..". Downloaded Map: "..tostring(combine.incoming_name).."."
+    if plan.conflicts>0 then lines[#lines+1]="Choose CURRENT MAP WINS or DOWNLOADED MAP WINS for room-number collisions, or SKIP COLLISIONS, then choose CREATE COMBINED MAP." end
   elseif plan.conflicts>0 then lines[#lines+1]="Choose KEEP MY MAP, USE SHARED MAP, or SKIP THIS AREA, then choose FINISH INSTALLING."
   else lines[#lines+1]="No overlaps found. Choose FINISH INSTALLING to add this map." end
   if plan.blocked then lines[#lines+1]="Some rooms belong to another personal map and cannot be replaced." end
