@@ -418,7 +418,7 @@ function Adapter:reportUpdateStage(stage,elapsed)
 end
 function Adapter:reportVersionStatus(installed,latest,current)
   if current then cecho(string.format("\n<green>[DGHUD]<reset> Version %s is already up to date.\n",tostring(installed)))
-  else cecho(string.format("\n<gold>[DGHUD]<reset> Installed version: %s  Latest version: %s\n",tostring(installed),tostring(latest))) end
+  else cecho(string.format("\n<gold>[DGHUD]<reset> Update available: %s (installed: %s). Run <white>dghud update<reset> when ready.\n",tostring(latest),tostring(installed))) end
 end
 function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Settings: "..getMudletHomeDir().."/DragonsGateHUD/settings.lua\n") end
 local function readFile(path) local f=io.open(path,"rb"); if not f then return nil end; local data=f:read("*a"); f:close(); return data end

@@ -143,9 +143,13 @@ function Updater:checkAtCharacterEntry(done)
       finish(false,whyCompare); return
     end
     if comparison<=0 then finish(false); return end
-    self.lock=nil
-    local started,startErr=self:update(function(updated,updateErr) finish(updated,updateErr) end,manifest,manifestRaw)
-    if not started then finish(false,startErr) end
+    -- Login checks must never replace the running package. Mudlet can destroy
+    -- callbacks owned by a package while uninstalling it, which can leave the
+    -- profile without a HUD if activation fails. Report the available version
+    -- and keep the verified current HUD running until the player explicitly
+    -- uses `dghud update`.
+    if self.adapter.reportVersionStatus then self.adapter:reportVersionStatus(current,manifest.version,false) end
+    finish(false,"update available; run dghud update")
   end
   local callOk,started,startErr=pcall(self.adapter.checkLatestAsync,self.adapter,self,checked)
   if not callOk then startErr=errorMessage(started); started=nil end

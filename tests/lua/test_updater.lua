@@ -175,17 +175,17 @@ test("manual update skips package replacement when already current",function()
   eq(replaced,false); eq(reported[1],"0.2.83"); eq(reported[3],true)
   eq(result[1],false); eq(result[2],nil); eq(u.lock,nil)
 end)
-test("startup check updates before allowing startup commands",function()
-  local order={}; local completed; local passedManifest; local passedRaw
+test("startup check reports an update without replacing the running HUD",function()
+  local order={}; local completed; local reported
   local adapter={
     checkLatestAsync=function(_,updater,done) order[#order+1]="check"; done(releaseManifest("0.2.84"),nil,"validated-raw") end,
-    startUpdate=function(_,updater,done,manifest,raw) order[#order+1]="update"; passedManifest=manifest; passedRaw=raw; done(true); return true end,
-    isCharacterActive=function() return true end,
+    startUpdate=function() error("login check must not replace the package") end,
+    reportVersionStatus=function(_,installed,latest,current) reported={installed,latest,current} end,
   }
   local u=Updater.new(adapter,updateSettings)
   eq(u:checkAtCharacterEntry(function(updated,err) completed={updated,err}; order[#order+1]="commands" end),true)
-  eq(table.concat(order,","),"check,update,commands"); eq(completed[1],true); eq(completed[2],nil); eq(u.lock,nil)
-  eq(passedManifest.version,"0.2.84"); eq(passedRaw,"validated-raw")
+  eq(table.concat(order,","),"check,commands"); eq(completed[1],false); eq(completed[2],"update available; run dghud update"); eq(u.lock,nil)
+  eq(reported[1],"0.2.83"); eq(reported[2],"0.2.84"); eq(reported[3],false)
 end)
 test("manual update fetches latest manifest exactly once and reports timed stages",function()
   replacementHarness({},function(h)
