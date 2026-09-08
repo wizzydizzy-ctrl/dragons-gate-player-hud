@@ -33,7 +33,9 @@ function Layout.lowerPanelGeometry(layout,psiVisible,webVisible,roundtimeActive)
     roundtime_visible=roundtime>0,roundtime_y=roundtime_y,roundtime_height=roundtime}
 end
 function Layout.detailsPlacement() return "right" end
-function Layout.detailsCardRows(columns) return 5 end
+-- Heading plus four table rows. Reserve one additional line because Qt's HTML
+-- table metrics can exceed the nominal font line height on Windows.
+function Layout.detailsCardRows(columns) return 6 end
 function Layout.detailsFit(rail_bottom,inventory_y,details_height,minimum_inventory_height)
   return (tonumber(rail_bottom) or 0)-(tonumber(details_height) or 0)-12-(tonumber(inventory_y) or 0)>=(tonumber(minimum_inventory_height) or 0)
 end
