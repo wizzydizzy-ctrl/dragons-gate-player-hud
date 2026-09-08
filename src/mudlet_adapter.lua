@@ -402,9 +402,9 @@ function Adapter:consumeUpdateReinstall()
   return true
 end
 function Adapter:activateInstalledHUD()
-  if type(resetProfile)~="function" then return nil,"profile reload is unavailable" end
-  if type(saveProfile)=="function" then local ok,err=pcall(saveProfile); if not ok then return nil,tostring(err) end end
-  tempTimer(0.05,function() resetProfile() end)
+  -- Mudlet activates newly installed package scripts after this callback
+  -- unwinds. A forced profile reset races that registration and can remove the
+  -- package just installed. Native activation is the safe handoff.
   return true
 end
 function Adapter:reportUpdateCheckFailure(message) cecho("\n<yellow>[DGHUD Update]<reset> Version check failed: "..tostring(message).."; refreshing character data. A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_check",stage="check"}) end end
@@ -507,6 +507,23 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         -- script cannot run until replaceDone returns. The archive checksum and
         -- canonical package registration are the synchronous transaction checks;
         -- the package's normal startup performs its strict runtime health check.
+        -- This timer survives the retiring package callback.  If Mudlet fails
+        -- to retain the newly installed package, retry the verified archive
+        -- once under its canonical filename and then restore the verified
+        -- rollback rather than leaving the HUD absent.
+        tempTimer(0.75,function()
+          if hasPackage(name) then return end
+          cecho("\n<yellow>[DGHUD Update]<reset> Package registration was delayed; recovering automatically.\n")
+          local retried=installPackage(packagePath)
+          tempTimer(0.75,function()
+            if hasPackage(name) then return end
+            local rollbackPayload=readFile(previousPath)
+            if rollbackPayload and Adapter.verifyArchive(rollbackPayload,previousDigest) then
+              writeFile(rollbackInstallPath,rollbackPayload)
+              installPackage(rollbackInstallPath)
+            end
+          end)
+        end)
         replaceDone(true)
       end)
     end
