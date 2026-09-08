@@ -61,7 +61,7 @@ function View.chatLine(entry,t,timestamps)
   local prefix=stamp.."#"..tostring(color):gsub("^#","")..safeText(category).."#r"
   return prefix," "..safeChatText(entry.line or entry.message).."\n"
 end
-function View.identityContent(character,t,layout)
+function View.identityContent(character,t,layout,needs)
   local physical=character.physical or {}; local detail=""
   if physical.age or physical.sex or physical.height then detail="<br><span style='color:"..t.muted.."'>"..esc(physical.age or "")..(physical.age and " · " or "")..esc(physical.sex or "")..(physical.height and " · "..esc(physical.height) or "").."</span>" end
   local faith=""; if character.deity or character.religion then
@@ -71,7 +71,11 @@ function View.identityContent(character,t,layout)
   local favorsLine=character.favors~=nil and "<br><span style='color:"..t.muted.."'>Favors: "..groupedNumber(character.favors).."</span>" or ""
   local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
   local standingLine=#standing>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(standing," · ").."</span>" or ""
-  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(character.class).."</b></span>"..detail..faith..favorsLine..standingLine,layout.body_font)
+  needs=type(needs)=="table" and needs or {}; local hunger=needs.hunger or {}; local thirst=needs.thirst or {}
+  local hungerText={unknown="—",satiated="OK",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
+  local hungerColor={unknown=t.muted,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
+  local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
+  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(character.class).."</b></span>"..detail..faith..favorsLine..standingLine..needsLine,layout.body_font)
 end
 function View.headerContent(layout,t,fullName)
   local detail=layout.mode=="compact" and " &nbsp; <span style='color:"..t.text.."'><b>"..esc(fullName).."</b></span>" or ""
@@ -643,35 +647,25 @@ function View:applyLayout(layout)
     local combat_y=top+p
     place(self.details,card_x,combat_y,card_w,right_details_h)
     local inventory_y=combat_y+right_details_h+10; local rail_bottom=(layout.window_height or 800)-side_bottom-12
-    local rows=layout.list_visible_rows or 5; local list_h=layout.list_viewport_height or layout.list_row_height*rows
-    if self.list_horizontal_overflow then list_h=list_h+(layout.list_horizontal_scrollbar_height or 18) end
     local title_h=layout.list_row_height+4; local footer_h=layout.list_row_height*2+6
-    local inventory_h=rp*2+title_h+list_h+footer_h+8; local runes_h=rp*2+title_h+list_h+4; local skills_h=rp*2+title_h+list_h+4
-    local required=inventory_h+12+runes_h+12+skills_h
-    if rail_bottom-inventory_y>=required then
-      local skills_y=rail_bottom-skills_h
-      local runes_y=skills_y-12-runes_h
-      inventory_y=runes_y-12-inventory_h
-      place(self.inventory,card_x,inventory_y,card_w,inventory_h)
-      place(self.inventory_title,list_x,inventory_y+rp,list_w,title_h)
-      place(self.inventory_output,list_x,inventory_y+rp+title_h,list_w,list_h)
-      place(self.inventory_footer,list_x,inventory_y+rp+title_h+list_h+4,list_w,footer_h)
-      place(self.runes,card_x,runes_y,card_w,runes_h); place(self.runes_title,list_x,runes_y+rp,list_w,title_h); place(self.runes_output,list_x,runes_y+rp+title_h,list_w,list_h)
-      place(self.skills,card_x,skills_y,card_w,skills_h); place(self.skills_title,list_x,skills_y+rp,list_w,title_h); place(self.skills_output,list_x,skills_y+rp+title_h,list_w,list_h)
+    local remaining=math.max(0,rail_bottom-inventory_y); local gap=8
+    local minimum_inventory=rp*2+title_h+layout.list_row_height+footer_h+4
+    local minimum_runes=rp*2+title_h+layout.list_row_height+4
+    local minimum_skills=rp*2+title_h+layout.list_row_height+4
+    if remaining>=minimum_inventory+gap+minimum_runes+gap+minimum_skills then
+      local usable=remaining-gap*2; local inventory_h=math.floor(usable/3); local runes_h=math.floor((usable-inventory_h)/2); local skills_h=usable-inventory_h-runes_h
+      local runes_y=inventory_y+inventory_h+gap; local skills_y=runes_y+runes_h+gap
+      local inventory_view_h=math.max(layout.list_row_height,inventory_h-rp*2-title_h-footer_h-4)
+      local runes_view_h=math.max(layout.list_row_height,runes_h-rp*2-title_h-4)
+      local skills_view_h=math.max(layout.list_row_height,skills_h-rp*2-title_h-4)
+      place(self.inventory,card_x,inventory_y,card_w,inventory_h); place(self.inventory_title,list_x,inventory_y+rp,list_w,title_h); place(self.inventory_output,list_x,inventory_y+rp+title_h,list_w,inventory_view_h); place(self.inventory_footer,list_x,inventory_y+inventory_h-rp-footer_h,list_w,footer_h)
+      place(self.runes,card_x,runes_y,card_w,runes_h); place(self.runes_title,list_x,runes_y+rp,list_w,title_h); place(self.runes_output,list_x,runes_y+rp+title_h,list_w,runes_view_h)
+      place(self.skills,card_x,skills_y,card_w,skills_h); place(self.skills_title,list_x,skills_y+rp,list_w,title_h); place(self.skills_output,list_x,skills_y+rp+title_h,list_w,skills_view_h)
+      self.inventory_content:resize(self.inventory_content_width,math.max(inventory_view_h,inventory_rows*layout.list_row_height))
+      self.runes_content:resize(self.runes_content_width,math.max(runes_view_h,rune_rows*layout.list_row_height))
+      self.skills_content:resize(self.skills_content_width,math.max(skills_view_h,skill_rows*layout.list_row_height))
     else
-      local fallback_h=math.max(0,rail_bottom-inventory_y); local gap=8
-      local minimum_inventory=rp*2+title_h+layout.list_row_height+footer_h+4
-      local minimum_runes=rp*2+title_h+layout.list_row_height+4
-      local minimum_skills=rp*2+title_h+layout.list_row_height+4
-      if fallback_h>=minimum_inventory+gap+minimum_runes+gap+minimum_skills then
-        local usable=fallback_h-gap*2; local inventory_h=math.floor(usable/3); local runes_h=math.floor((usable-inventory_h)/2); local skills_h=usable-inventory_h-runes_h
-        local runes_y=inventory_y+inventory_h+gap; local skills_y=runes_y+runes_h+gap
-        place(self.inventory,card_x,inventory_y,card_w,inventory_h); place(self.inventory_title,list_x,inventory_y+rp,list_w,title_h); place(self.inventory_output,list_x,inventory_y+rp+title_h,list_w,math.min(list_h,math.max(layout.list_row_height,inventory_h-rp*2-title_h-footer_h-4))); place(self.inventory_footer,list_x,inventory_y+inventory_h-rp-footer_h,list_w,footer_h)
-        place(self.runes,card_x,runes_y,card_w,runes_h); place(self.runes_title,list_x,runes_y+rp,list_w,title_h); place(self.runes_output,list_x,runes_y+rp+title_h,list_w,math.min(list_h,math.max(layout.list_row_height,runes_h-rp*2-title_h-4)))
-        place(self.skills,card_x,skills_y,card_w,skills_h); place(self.skills_title,list_x,skills_y+rp,list_w,title_h); place(self.skills_output,list_x,skills_y+rp+title_h,list_w,math.min(list_h,math.max(layout.list_row_height,skills_h-rp*2-title_h-4)))
-      else
         self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide()
-      end
     end
     if self.inventory_output.visible then self.inventory_content:show() end
     if self.runes_output.visible then self.runes_content:show() end
@@ -1214,16 +1208,12 @@ end
 function View:update(s)
   self.last_state=s; local t=self.settings.theme; local v=s.vitals; local layout=self.layout or {mode="wide",heading_font=20}; local ready=function(x) return x and "<span style='color:"..t.jade.."'><b>READY</b></span>" or "<span style='color:"..t.hp.."'><b>NOT READY</b></span>" end
   self.header:echo(View.headerContent(layout,t,s.character.full_name)); self:updateClock(s.clock); self.attribute_strip:echo(View.attributeStripContent(s.attributes,t,layout))
-  self.identity:echo(View.identityContent(s.character,t,layout))
+  self.identity:echo(View.identityContent(s.character,t,layout,s.needs))
   self.equipment:echo(View.equipmentContent(v,s.equipment.items,t,layout))
   self:updateRoundtime(v.roundtime)
   local activeBars=2+(v.psi.visible and 1 or 0)+(v.web.visible and 1 or 0)
-  local needs=s.needs or {}; local hunger=needs.hunger or {status="unknown"}; local thirst=needs.thirst or {status="unknown"}
-  local hungerText={unknown="—",satiated="OK",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
-  local hungerColor={unknown=t.muted,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
   local shortLabels=(tonumber(layout.console_width) or 1200)/activeBars<150
-  self.hp:setValue(v.hp.current,math.max(v.hp.maximum,1),(shortLabels and "HP  " or "Health  ")..v.hp.current.." / "..v.hp.maximum.."  <span style='color:"..(hungerColor[hunger.status] or t.muted).."'>Food: "..(hungerText[hunger.status] or "—").."</span>"); self.fatigue:setValue(v.fatigue.current,math.max(v.fatigue.maximum,1),(shortLabels and "FAT  " or "Fatigue  ")..v.fatigue.current.." / "..v.fatigue.maximum.."  <span style='color:"..(thirstColor[thirst.status] or t.muted).."'>Water: "..(thirstText[thirst.status] or "—").."</span>")
-  if self.hp.setToolTip then pcall(self.hp.setToolTip,self.hp,hunger.raw or "Food status unknown") end; if self.fatigue.setToolTip then pcall(self.fatigue.setToolTip,self.fatigue,thirst.raw or "Water status unknown") end
+  self.hp:setValue(v.hp.current,math.max(v.hp.maximum,1),(shortLabels and "HP  " or "Health  ")..v.hp.current.." / "..v.hp.maximum); self.fatigue:setValue(v.fatigue.current,math.max(v.fatigue.maximum,1),(shortLabels and "FAT  " or "Fatigue  ")..v.fatigue.current.." / "..v.fatigue.maximum)
   if v.psi.visible then self.psi:setValue(v.psi.current,math.max(v.psi.maximum,1),"PSI  "..v.psi.current.." / "..v.psi.maximum) end; if v.web.visible then self.web:setValue(v.web.current,math.max(v.web.maximum,1),"Web  "..v.web.current.." / "..v.web.maximum) end
   self.room:echo(View.withFont("<span style='color:"..t.accent..";font-size:"..layout.lower_heading_font.."px'><b>"..esc(s.room.name).."</b></span><br><span style='color:"..t.muted.."'>Room "..esc(s.room.num or "—").." · Area "..esc(s.room.area or "—").."</span><br><br>"..esc(s.room.environment).."<br>Players &nbsp; <b>"..#s.room.players.."</b><br>Flags &nbsp; "..esc(table.concat(s.room.flags,", ")),layout.lower_body_font))
   self.compact:echo(View.withFont("<span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(v.gold or 0).."gp</b></span> &nbsp; <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(v.silver or 0).."sp</b></span><br>Carry <b>"..esc(v.carry.current or 0).." / "..esc(v.carry.maximum or 0).." / "..esc(v.carry.percent or 0).."%</b><br><span style='color:"..t.accent.."'>"..esc(s.room.name).."</span> &nbsp; EXITS "..esc(table.concat(s.room.exits,", ")),layout.body_font))

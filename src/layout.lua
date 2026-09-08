@@ -90,7 +90,7 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   layout.combat_font=clamp(layout.equipment_font-1,12,17); layout.combat_line_height=layout.combat_font+3; layout.combat_padding=clamp(layout.equipment_padding-1,7,12)
   layout.title_height=layout.heading_font+30
   layout.room_height=layout.heading_font+layout.body_font*6+54; layout.exit_height=layout.small_font+16
-  layout.identity_height=layout.heading_font+layout.body_font*6+56
+  layout.identity_height=layout.heading_font+layout.body_font*7+56
   layout.inventory_font=clamp(layout.body_font-2,14,20); layout.inventory_row_height=layout.inventory_font+10
   layout.list_font=clamp(layout.inventory_font-4,10,14); layout.list_title_font=layout.list_font+3; layout.list_row_height=math.ceil(layout.list_font*1.3); layout.list_visible_rows=5
   layout.list_padding=clamp(layout.panel_padding*.5,6,10)
