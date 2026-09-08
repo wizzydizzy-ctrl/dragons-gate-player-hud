@@ -114,12 +114,12 @@ local function replacementHarness(options,body)
     downloadFile=function(path,url) h.downloads[#h.downloads+1]={path=path,url=url}; return true end
     getPackages=function() return h.active and {"DragonsGateHUD"} or {} end
     uninstallPackage=function() h.uninstalls=h.uninstalls+1; h.active=false; return true end
-    installPackage=function(path) h.installs[#h.installs+1]=path; if options.failTarget and path==Adapter.updateArchivePath("/profile") then return nil end; h.active=true; return true end
+    installPackage=function(path) h.installs[#h.installs+1]=path; if options.failTarget and path==Adapter.updateArchivePath("/profile") then return nil end; h.active=true; local version=path=="/profile/DGHUDUpdater/DragonsGateHUD.mpackage" and rollback.version or target.version; if not (options.suppressTargetActivation and version==target.version) then h.pendingVersion=version end; return true end
     h.messages={}; h.now=0; getEpoch=function() return h.now end
-    cecho=function(message) h.messages[#h.messages+1]=message end; DGHUD={shutdown=function() end,healthCheck=function() return true end}
+    cecho=function(message) h.messages[#h.messages+1]=message end; DGHUD={settings={version=rollback.version},shutdown=function() end,healthCheck=function() return true end}
     function h:done(path,payload) self.files[path]=payload; self.handlers.sysDownloadDone(nil,path) end
     function h:error(url,message) self.handlers.sysDownloadError(nil,message or "download failed",url) end
-    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); return true end end return false end
+    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingVersion then DGHUD={settings={version=self.pendingVersion},healthCheck=function() return true end}; self.pendingVersion=nil end; return true end end return false end
     h.adapter=Adapter.new(); h.updater=Updater.new(h.adapter,updateSettings); assert(h.updater:update(function(success,message) h.result={success,message} end,options.manifest,options.manifestRaw))
     body(h)
   end)
@@ -136,7 +136,7 @@ test("first updater-managed update bootstraps exact rollback before uninstall",f
     assert(h.downloads[4].url:find("/releases/download/v0.2.83/manifest.json",1,true)); h.handlers.sysDownloadDone(nil,"/unowned/path"); h:error("https://unrelated.example/failure","ignore me"); eq(h.uninstalls,0)
     h:done(h.downloads[4].path,"rollback"); eq(h.uninstalls,0); eq(#h.downloads,5)
     h:done(h.downloads[5].path,"old-package"); eq(h.uninstalls,1); eq(DGHUD._update_reinstall_pending,true); eq(h.files["/profile/DGHUDUpdater/previous.mpackage"],"old-package")
-    assert(h:run(.10)); eq(h.result[1],true); eq(h.active,true); eq(h.hashCalls,2)
+    assert(h:run(.10)); assert(h:run(.25)); eq(h.result[1],true); eq(h.active,true); eq(h.hashCalls,2)
   end)
 end)
 test("rollback bootstrap timeout aborts before touching active package",function()
@@ -148,8 +148,16 @@ end)
 test("failed first replacement restores checksum-verified bootstrapped package",function()
   replacementHarness({failTarget=true},function(h)
     deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
-    eq(h.uninstalls,1); assert(h:run(.10)); eq(h.active,false); assert(h:run(.10)); assert(h:run(.50))
+    eq(h.uninstalls,1); assert(h:run(.10)); eq(h.active,false); assert(h:run(.10)); assert(h:run(.25))
     eq(h.active,true); eq(h.installs[#h.installs],"/profile/DGHUDUpdater/DragonsGateHUD.mpackage"); eq(h.files[h.installs[#h.installs]],"old-package"); eq(h.result[1],nil); assert(h.result[2]:find("could not install HUD package",1,true))
+  end)
+end)
+test("registered target without a healthy runtime rolls back before reporting failure",function()
+  replacementHarness({suppressTargetActivation=true},function(h)
+    deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
+    assert(h:run(.10)); for _=1,12 do assert(h:run(.25)) end
+    assert(h:run(.10)); assert(h:run(.25))
+    eq(h.result[1],nil); assert(h.result[2]:find("did not activate",1,true)); eq(DGHUD.settings.version,"0.2.83")
   end)
 end)
 test("startup check skips installation when current and continues startup",function()
@@ -191,7 +199,7 @@ test("manual update fetches latest manifest exactly once and reports timed stage
   replacementHarness({},function(h)
     eq(#h.downloads,1); assert(h.downloads[1].url:find("api.github.com/repos/",1,true)); assert(h.downloads[1].url:find("/releases/latest",1,true))
     deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
-    h.now=1.2; assert(h:run(.10))
+    h.now=1.2; assert(h:run(.10)); assert(h:run(.25))
     eq(h.result[1],true)
     local output=table.concat(h.messages)
     assert(output:find("Checking",1,true)); assert(output:find("Downloading package",1,true)); assert(output:find("Preparing rollback",1,true)); assert(output:find("Installing",1,true)); assert(output:find("Completed",1,true)); assert(output:find("1.2s",1,true))
@@ -204,7 +212,7 @@ test("startup update reuses its validated manifest without another manifest down
     h:done(h.downloads[1].path,"new-package"); eq(#h.downloads,2)
     assert(h.downloads[2].url:find("/releases/download/v0.2.83/manifest.json",1,true))
     h:done(h.downloads[2].path,"rollback"); h:done(h.downloads[3].path,"old-package")
-    assert(h:run(.10)); eq(h.result[1],true)
+    assert(h:run(.10)); assert(h:run(.25)); eq(h.result[1],true)
   end)
 end)
 test("startup check failure reports briefly and still allows startup commands",function()

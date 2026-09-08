@@ -472,6 +472,27 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     return manifest,raw
   end
   local function exactInstalled(manifest) return manifest and tostring(manifest.version)==tostring(settings.version) end
+  local function runtimeHealthy(version)
+    if not hasPackage("DragonsGateHUD") then return nil,"installed HUD package was not registered" end
+    local hud=rawget(_G,"DGHUD")
+    if type(hud)~="table" or type(hud.settings)~="table" or tostring(hud.settings.version)~=tostring(version) then return nil,"installed HUD version did not activate" end
+    if type(hud.healthCheck)~="function" then return nil,"installed HUD health check is unavailable" end
+    local ok,healthy,why=pcall(hud.healthCheck)
+    if not ok then return nil,"installed HUD health check failed" end
+    if not healthy then return nil,why or "installed HUD is not healthy" end
+    return true
+  end
+  local function awaitRuntime(version,attempts,done)
+    local remaining=tonumber(attempts) or 12
+    local function probe()
+      local healthy,why=runtimeHealthy(version)
+      if healthy then done(true); return end
+      remaining=remaining-1
+      if remaining<=0 then done(nil,why); return end
+      tempTimer(0.25,probe)
+    end
+    tempTimer(0.25,probe)
+  end
   local beginReplacement
   local function stageRollback(payload,preverified)
     if preverified~=true and not Adapter.verifyArchive(payload,rollbackManifest.sha256) then return fail("rollback package checksum mismatch") end
@@ -501,36 +522,12 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       schedule(0.10,function()
         local installed=installPackage(packagePath)
         if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-        -- Mudlet defers execution of scripts from a package installed by a
-        -- callback until the callback chain has unwound. Waiting for the new
-        -- DGHUD global here therefore deadlocks the self-updater: the new entry
-        -- script cannot run until replaceDone returns. The archive checksum and
-        -- canonical package registration are the synchronous transaction checks;
-        -- the package's normal startup performs its strict runtime health check.
-        -- This timer survives the retiring package callback.  If Mudlet fails
-        -- to retain the newly installed package, retry the verified archive
-        -- once under its canonical filename and then restore the verified
-        -- rollback rather than leaving the HUD absent.
-        tempTimer(0.75,function()
-          if hasPackage(name) then return end
-          cecho("\n<yellow>[DGHUD Update]<reset> Package registration was delayed; recovering automatically.\n")
-          local retried=installPackage(packagePath)
-          tempTimer(0.75,function()
-            if hasPackage(name) then return end
-            local rollbackPayload=readFile(previousPath)
-            if rollbackPayload and Adapter.verifyArchive(rollbackPayload,previousDigest) then
-              writeFile(rollbackInstallPath,rollbackPayload)
-              installPackage(rollbackInstallPath)
-            end
-          end)
-        end)
-        replaceDone(true)
+        -- Activation is deferred until this callback unwinds. Independent
+        -- timers verify the exact new runtime before the transaction succeeds.
+        awaitRuntime(targetManifest.version,12,replaceDone)
       end)
     end
-    -- During self-replacement the old package remains the executing callback.
-    -- A runtime probe here would inspect the shutting-down old controller. The
-    -- new package performs strict health checks once Mudlet activates its scripts.
-    self.healthCheck=function() return true end
+    self.healthCheck=nil
     self.rollbackAsync=function(_,name,rollbackDone)
       local rollbackPayload=readFile(previousPath)
       if name~="DragonsGateHUD" or not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
@@ -544,7 +541,8 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         -- canonical package filename before restoring.
         writeFile(rollbackInstallPath,rollbackPayload)
         local restored=installPackage(rollbackInstallPath)
-        schedule(0.50,function() rollbackDone(restored~=nil,restored==nil and "could not restore rollback package" or nil) end)
+        if restored==nil then rollbackDone(nil,"could not restore rollback package"); return end
+        awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,12,rollbackDone)
       end)
     end
     local completed=false
