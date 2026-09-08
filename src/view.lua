@@ -186,6 +186,7 @@ local help_entries={
   {command="dghud colors <feature> on|off|toggle|status",description="Toggle room, exits, currency, races, classes, travel, combat, spell, discovery, or illumination highlights."},
   {command="dghud check",description="Check GitHub for a newer HUD release."},
   {command="dghud update",description="Install the newest verified HUD release, then refresh character data."},
+  {command="dghud recover",description="Emergency clean reinstall using the independent recovery companion."},
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
   {command="rr start|stop|stats|last|reset|help",description="Control the built-in OG Dragons Gate stat autoroller."},
   {command="rr set total|hard|max|delay|STAT <value>",description="Adjust and persist autoroller targets without editing scripts."},
@@ -287,8 +288,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","auto_update","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",auto_update="AUTOMATIC UPDATES: OFF",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -869,6 +870,13 @@ function View:setMapCenterCallback(callback) self.map_center_callback=type(callb
 function View:setColorToggleCallback(callback) self.color_toggle_callback=type(callback)=="function" and callback or nil; return true end
 function View:setColorOptionsCallback(callback) self.color_options_callback=type(callback)=="function" and callback or nil; return true end
 function View:setOptionsActionCallback(callback) self.options_action_callback=type(callback)=="function" and callback or nil; return true end
+function View:setAutoUpdateEnabled(enabled)
+  self.auto_update_enabled=enabled==true
+  local button=self.option_action_buttons and self.option_action_buttons.auto_update
+  if button then button.option_text="AUTOMATIC UPDATES: "..(self.auto_update_enabled and "ON" or "OFF") end
+  if self.color_menu_visible then self:renderColorOptions() end
+  return self.auto_update_enabled
+end
 function View:setFeedbackCallback(callback) self.feedback_callback=type(callback)=="function" and callback or nil; return true end
 function View:setCopyTextCallback(callback) self.copy_text_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapLibraryActionCallback(callback) self.map_library_action_callback=type(callback)=="function" and callback or nil; return true end

@@ -12,6 +12,12 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             subprocess.run([sys.executable,str(ROOT/'scripts/build.py'),'--output',td,'--owner','ricwall','--repository','dragons-gate-hud'],check=True)
             package=Path(td)/'DragonsGateHUD.mpackage'; manifest=json.loads((Path(td)/'manifest.json').read_text())
+            recovery=Path(td)/'DGHUDRecovery.mpackage'; self.assertTrue(recovery.exists())
+            with zipfile.ZipFile(recovery) as z:
+                recovery_xml=z.read('DGHUDRecovery.xml').decode()
+                self.assertIn('<packageName>DGHUDRecovery</packageName>',recovery_xml)
+                self.assertIn('^dghud recover$',recovery_xml)
+                self.assertIn('https://github.com/ricwall/dragons-gate-hud/releases/latest/download/DragonsGateHUD.mpackage',recovery_xml)
             self.assertEqual(manifest['package'],'DragonsGateHUD')
             self.assertEqual(manifest['sha256'],hashlib.sha256(package.read_bytes()).hexdigest())
             with zipfile.ZipFile(package) as z:

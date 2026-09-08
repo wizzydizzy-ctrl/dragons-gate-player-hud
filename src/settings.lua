@@ -33,4 +33,8 @@ function Settings.setColorEnabled(userSettings,enabled)
   userSettings.colorization.enabled=enabled~=false
   return userSettings
 end
+function Settings.autoUpdateEnabled(settings)
+  local update=type(settings)=="table" and settings.update or nil
+  return type(update)=="table" and update.auto_apply==true
+end
 return Settings

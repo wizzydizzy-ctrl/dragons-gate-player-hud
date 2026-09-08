@@ -8,6 +8,7 @@ local function colorOptions(status)
   return result
 end
 function Main.new(adapter,settings)
+  adapter.settings=settings
   local colorSettings=settings and settings.colorization
   local self=setmetatable({adapter=adapter,settings=settings,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
@@ -274,8 +275,9 @@ function Main:onCharacterEntry(name)
     if collector then collector:refresh() end
   end
   if self.adapter.consumeUpdateReinstall and self.adapter:consumeUpdateReinstall() then refreshCommands(); return true end
-  if not self.updater or not self.updater.checkAtCharacterEntry then refreshCommands(); return true end
-  local ok,err=self.updater:checkAtCharacterEntry(function() refreshCommands() end)
+  if not (self.settings.update and self.settings.update.auto_apply==true) then refreshCommands(); return true end
+  if not self.updater or not self.updater.update then refreshCommands(); return true end
+  local ok,err=self.updater:update(function() refreshCommands() end)
   if not ok then refreshCommands() end
   return ok,err
 end
@@ -823,9 +825,16 @@ function Main:start()
     if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
+    if action=="auto_update" then
+      local enabled=not (self.settings.update and self.settings.update.auto_apply==true); self.settings.update=self.settings.update or {}; self.settings.update.auto_apply=enabled
+      local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.update=type(root.user_settings.update)=="table" and root.user_settings.update or {}; root.user_settings.update.auto_apply=enabled end
+      if self.adapter.saveUpdateSettings then local saved,saveErr=self.adapter:saveUpdateSettings({auto_apply=enabled}); if not saved then self.settings.update.auto_apply=not enabled; if root and root.user_settings and root.user_settings.update then root.user_settings.update.auto_apply=not enabled end; return nil,"Could not save automatic update setting: "..tostring(saveErr) end end
+      if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(enabled) end; return enabled
+    end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
+  if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end

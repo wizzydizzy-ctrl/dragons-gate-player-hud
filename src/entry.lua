@@ -17,6 +17,7 @@ local Main=require("main")
 local Updater=require("updater")
 local Storage=require("chat_storage")
 if type(userSettings)~="table" then userSettings={} end
+if userSettings.update==nil then local persisted=Adapter.loadUpdateSettings and Adapter.loadUpdateSettings(); if type(persisted)=="table" then userSettings.update=persisted end end
 if userSettings.roller==nil then local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end
 local persistedMapper=Adapter.loadMapperSettings and Adapter.loadMapperSettings()
 if type(persistedMapper)=="table" then userSettings.mapper=type(userSettings.mapper)=="table" and userSettings.mapper or {}; for key,value in pairs(persistedMapper) do if userSettings.mapper[key]==nil then userSettings.mapper[key]=value end end end
@@ -53,3 +54,4 @@ function DGHUD.healthCheck()
   return DGHUD.controller:healthCheck()
 end
 DGHUD.start()
+if DGHUD.controller and DGHUD.controller.adapter and DGHUD.controller.adapter.ensureRecoveryPackage then pcall(DGHUD.controller.adapter.ensureRecoveryPackage,DGHUD.controller.adapter) end

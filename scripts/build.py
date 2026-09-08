@@ -10,6 +10,27 @@ def source_version():
     return match.group(1)
 def script_node(name,code):
     return f'''<Script isActive="yes" isFolder="no"><name>{html.escape(name)}</name><packageName>DragonsGateHUD</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
+def recovery_alias_node(code):
+    return f'''<Alias isActive="yes" isFolder="no"><name>DGHUD Emergency Recovery</name><packageName>DGHUDRecovery</packageName><script>{html.escape(code)}</script><command></command><regex>^dghud recover$</regex></Alias>'''
+def recovery_code(owner,repository):
+    url=f'https://github.com/{owner}/{repository}/releases/latest/download/DragonsGateHUD.mpackage'
+    return f'''DGHUDRecovery = DGHUDRecovery or {{}}
+if DGHUDRecovery.running then cecho("\\n<yellow>[DGHUD Recovery]<reset> Recovery is already running.\\n"); return end
+DGHUDRecovery.running=true
+local url={url!r}
+local path=getMudletHomeDir().."/DGHUDRecovery-DragonsGateHUD.mpackage"
+local handlers={{}}; local timeout
+local function cleanup() for _,id in ipairs(handlers) do killAnonymousEventHandler(id) end; if timeout then killTimer(timeout) end; DGHUDRecovery.running=false end
+local function fail(message) cleanup(); cecho("\\n<red>[DGHUD Recovery]<reset> "..tostring(message).."\\n") end
+handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,failedUrl) if failedUrl==url then fail("Download failed: "..tostring(message)) end end)
+handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded)
+  if downloaded~=path then return end; cleanup(); cecho("\\n<gold>[DGHUD Recovery]<reset> Replacing only the DragonsGateHUD package…\\n")
+  local found=false; for _,name in ipairs(getPackages() or {{}}) do if name=="DragonsGateHUD" then found=true; break end end
+  if found then uninstallPackage("DragonsGateHUD") end
+  tempTimer(0.15,function() local installed=installPackage(path); if installed==nil then cecho("\\n<red>[DGHUD Recovery]<reset> Reinstall failed. Close and reopen this profile, then run dghud recover again.\\n") else cecho("\\n<green>[DGHUD Recovery]<reset> Reinstalled DragonsGateHUD. Your personal content and saved DGHUD settings were preserved.\\n") end end)
+end)
+timeout=tempTimer(45,function() fail("Download timed out. Check your connection and run dghud recover again.") end)
+cecho("\\n<gold>[DGHUD Recovery]<reset> Downloading a clean HUD package…\\n"); downloadFile(path,url)'''
 def build(output,owner,repository,version):
     expected=source_version()
     if version != expected: raise ValueError(f'build version {version} does not match defaults.version {expected}')
@@ -36,6 +57,9 @@ def build(output,owner,repository,version):
     digest=hashlib.sha256(package.read_bytes()).hexdigest()
     manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>1.0.0</version><author>Dragons Gate HUD contributors</author></PackageInfo><AliasPackage><AliasGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_alias_node(recovery_code(owner,repository))+'''</AliasGroup></AliasPackage></MudletPackage>''')
+    with zipfile.ZipFile(output/'DGHUDRecovery.mpackage','w',zipfile.ZIP_DEFLATED) as z:
+        info=zipfile.ZipInfo('DGHUDRecovery.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,recovery_xml)
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--output',type=Path,default=ROOT/'dist'); p.add_argument('--owner',default='GITHUB_OWNER'); p.add_argument('--repository',default='dragons-gate-hud'); p.add_argument('--version',default=source_version()); a=p.parse_args(); build(a.output,a.owner,a.repository,a.version)
 if __name__=='__main__': main()

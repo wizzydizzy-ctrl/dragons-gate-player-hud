@@ -351,6 +351,18 @@ end
 function Adapter.loadMapperSettings()
   local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return value end; return nil
 end
+local function updateSettingsPath() return getMudletHomeDir().."/DragonsGateHUD/update-settings.lua" end
+function Adapter:saveUpdateSettings(config)
+  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local destination=updateSettingsPath(); local temp=destination..".tmp"
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end
+  local wrote,writeErr=file:write("return { auto_apply="..tostring(type(config)=="table" and config.auto_apply==true).." }\n")
+  if not wrote then file:close(); os.remove(temp); return nil,writeErr end; local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
+  local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
+end
+function Adapter.loadUpdateSettings()
+  local loader=loadfile(updateSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.auto_apply)=="boolean" then return value end; return nil
+end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end
@@ -424,6 +436,16 @@ function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Settings: "..getMu
 local function readFile(path) local f=io.open(path,"rb"); if not f then return nil end; local data=f:read("*a"); f:close(); return data end
 local function writeFile(path,data) local f=assert(io.open(path,"wb")); f:write(data); f:close() end
 local function hasPackage(name) for _,value in ipairs(getPackages() or {}) do if value==name then return true end end return false end
+function Adapter:ensureRecoveryPackage()
+  if hasPackage("DGHUDRecovery") or self.recovery_installing then return true end
+  self.recovery_installing=true
+  local github=self.settings and self.settings.github or {}; local owner=github.owner or "wizzydizzy-ctrl"; local repository=github.repository or "dragons-gate-player-hud"
+  local url="https://github.com/"..owner.."/"..repository.."/releases/latest/download/DGHUDRecovery.mpackage"; local path=getMudletHomeDir().."/DGHUDRecovery.mpackage"; local doneId,errorId,timeoutId
+  local function cleanup() if doneId then killAnonymousEventHandler(doneId) end; if errorId then killAnonymousEventHandler(errorId) end; if timeoutId then killTimer(timeoutId) end; self.recovery_installing=false end
+  doneId=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded) if downloaded~=path then return end; cleanup(); local installed=installPackage(path); if installed==nil then cecho("\n<yellow>[DGHUD Recovery]<reset> Companion install failed. Manual updates remain available.\n") end end)
+  errorId=registerAnonymousEventHandler("sysDownloadError",function(_,_,failedUrl) if failedUrl==url then cleanup() end end)
+  timeoutId=tempTimer(45,cleanup); downloadFile(path,url); return true
+end
 function Adapter:checkLatestAsync(updater,done)
   local settings=updater.settings; local github=settings.github or {}; local policy=settings.update or {}
   if github.owner=="GITHUB_OWNER" or not tostring(github.owner):match("^[%w_.-]+$") or not tostring(github.repository):match("^[%w_.-]+$") then return nil,"configure the GitHub owner and repository first" end

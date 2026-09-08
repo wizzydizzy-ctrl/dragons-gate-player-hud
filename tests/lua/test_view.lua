@@ -256,7 +256,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,5); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,6); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)

@@ -499,33 +499,40 @@ test("controller status and storage use the effective bounded visible limit",fun
   local lowerHud=Main.new(lower,{layout={},chat={visible_limit=2,dedupe_seconds=3}}); assert(lowerHud:start())
   eq(lower.chatVisibleLimit,2); eq(lowerHud:chatStatus().visible_count,2); eq(lowerHud.chat:entries()[1].message,"two")
 end)
-test("startup checks for updates before refreshing command data at an in-game prompt",function()
+test("automatic updates are disabled by default and character data refreshes immediately",function()
   local f=fake(); f.character_active=true; local order={}
-  local hud=Main.new(f,{layout={}})
-  hud.updater={checkAtCharacterEntry=function(_,done) order[#order+1]="check"; eq(#(f.sentCommands or {}),0); done(false); return true end}
+  local hud=Main.new(f,{layout={},update={auto_apply=false}})
+  hud.updater={update=function() order[#order+1]="update"; return true end}
   assert(hud:start()); order[#order+1]=f.sent
-  eq(table.concat(order,","),"check,inventory")
+  eq(table.concat(order,","),"inventory")
+end)
+test("opted-in automatic update runs before refreshing command data",function()
+  local f=fake(); f.character_active=true; local order={}
+  local hud=Main.new(f,{layout={},update={auto_apply=true}})
+  hud.updater={update=function(_,done) order[#order+1]="update"; eq(#(f.sentCommands or {}),0); done(true); return true end}
+  assert(hud:start()); order[#order+1]=f.sent
+  eq(table.concat(order,","),"update,inventory")
 end)
 test("replacement package skips a redundant update check and refreshes immediately",function()
   local f=fake(); f.character_active=true; f.update_reinstall=true; local checks=0
   local hud=Main.new(f,{layout={}})
-  hud.updater={checkAtCharacterEntry=function() checks=checks+1; return true end}
+  hud.updater={update=function() checks=checks+1; return true end}
   assert(hud:start())
   eq(checks,0); eq(f.sent,"inventory"); eq(f.update_reinstall,false)
 end)
-test("welcome character entry checks only once and never refreshes before completion",function()
+test("welcome character entry auto-updates only once and never refreshes before completion",function()
   local f=fake(); local pending; local checks=0
-  local hud=Main.new(f,{layout={}})
-  hud.updater={checkAtCharacterEntry=function(_,done) checks=checks+1; pending=done; return true end}
+  local hud=Main.new(f,{layout={},update={auto_apply=true}})
+  hud.updater={update=function(_,done) checks=checks+1; pending=done; return true end}
   hud:start()
   for _,fn in pairs(f.triggers) do fn("Welcome to Dragon's Gate, Test!") end
   for _,fn in pairs(f.triggers) do fn("Welcome to Dragon's Gate, Test!") end
   eq(checks,1); eq(#(f.sentCommands or {}),0); pending(false); eq(f.sent,"inventory")
 end)
-test("a different character welcome performs another update check without disconnect",function()
+test("a different character welcome performs another opted-in update without disconnect",function()
   local f=fake(); local completions={}; local checks=0
-  local hud=Main.new(f,{layout={}})
-  hud.updater={checkAtCharacterEntry=function(_,done) checks=checks+1; completions[#completions+1]=done; return true end}
+  local hud=Main.new(f,{layout={},update={auto_apply=true}})
+  hud.updater={update=function(_,done) checks=checks+1; completions[#completions+1]=done; return true end}
   hud:start(); hud.collector:onLine("Welcome to Dragon's Gate, Muthulas!"); completions[1](false)
   hud.collector:cancelActive(); hud.collector.refreshed=true
   hud.collector:onLine("Welcome to Dragon's Gate, Dace!")

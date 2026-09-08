@@ -22,13 +22,14 @@ jobs:
         with:
           subject-path: |
             dist/DragonsGateHUD.mpackage
+            dist/DGHUDRecovery.mpackage
             dist/manifest.json
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/DragonsGateHUD.mpackage dist/manifest.json --clobber
+            gh release upload "$GITHUB_REF_NAME" dist/DragonsGateHUD.mpackage dist/DGHUDRecovery.mpackage dist/manifest.json --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/DragonsGateHUD.mpackage dist/manifest.json --generate-notes --verify-tag
+            gh release create "$GITHUB_REF_NAME" dist/DragonsGateHUD.mpackage dist/DGHUDRecovery.mpackage dist/manifest.json --generate-notes --verify-tag
           fi
