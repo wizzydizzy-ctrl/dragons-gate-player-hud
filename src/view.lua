@@ -75,7 +75,12 @@ function View.identityContent(character,t,layout,needs)
   local hungerText={unknown="—",satiated="OK",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
   local hungerColor={unknown=t.muted,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
   local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
-  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(character.class).."</b></span>"..detail..faith..favorsLine..standingLine..needsLine,layout.body_font)
+  local role=character.class
+  if tostring(character.race or ""):lower()=="dragon" then
+    local ordinal=tostring(physical.life_stage or ""):lower():match("^(%d+[a-z][a-z])%s+stage$")
+    if ordinal then role=ordinal.." Stage" end
+  end
+  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..favorsLine..standingLine..needsLine,layout.body_font)
 end
 function View.headerContent(layout,t,fullName)
   local detail=layout.mode=="compact" and " &nbsp; <span style='color:"..t.text.."'><b>"..esc(fullName).."</b></span>" or ""

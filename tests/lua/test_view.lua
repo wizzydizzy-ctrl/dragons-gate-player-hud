@@ -36,6 +36,14 @@ test("identity displays food and water while vital bars remain resource-only",fu
   eq(identity:find("Food:",1,true)~=nil,true); eq(identity:find("Ravenous",1,true)~=nil,true)
   eq(identity:find("Water:",1,true)~=nil,true); eq(identity:find("Parched",1,true)~=nil,true)
 end)
+test("dragon identity displays its lifecycle stage instead of an empty class",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  for _,stage in ipairs({"1st stage","2nd stage","3rd stage","4th stage"}) do
+    local identity=View.identityContent({full_name="Test",race="Dragon",class="None",physical={life_stage=stage}},theme,layout)
+    local expected=stage:gsub(" stage$"," Stage")
+    eq(identity:find("Dragon · "..expected,1,true)~=nil,true); eq(identity:find("Dragon · None",1,true),nil)
+  end
+end)
 test("equipment uses its smaller dedicated font",function()
   local html=View.equipmentContent({weapon_readied=true,shield_readied=false},{},{accent="#da5",jade="#7b8"},{body_font=20,equipment_font=15})
   eq(html:find("font%-size:15px")~=nil,true)
