@@ -62,6 +62,8 @@ test("parses Dragons Gate GM and staff voice channels",function()
   eq(question.category,"STAFF"); eq(question.speaker,"Nythriss'a"); eq(question.target,nil); eq(question.message,"hell no, this majestic beast?")
   local targeted=assert(Parser.parse('You hear the voice of Wizzy ask Tamalon, "you a sword?"'))
   eq(targeted.category,"STAFF"); eq(targeted.speaker,"Wizzy"); eq(targeted.target,"Tamalon"); eq(targeted.message,"you a sword?")
+  local sent=assert(Parser.parse("Nythriss'a sends: check check"))
+  eq(sent.category,"STAFF"); eq(sent.speaker,"Nythriss'a"); eq(sent.message,"check check")
   eq(Parser.parse('You hear the voice of the wind say, "nothing"'),nil)
 end)
 

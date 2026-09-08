@@ -52,6 +52,7 @@ local rules={
   {category="STAFF",pattern='^'..name..' %(ELDER%): "(.*)"$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GUIDE%] '..name..': (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..name..': (.+)$',speaker=1,message=2},
+  {category="STAFF",pattern='^'..name..' sends: (.+)$',speaker=1,message=2},
   {category="DRAGON",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
   {category="DRAGON",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},
   {category="DRAGON",pattern="^You pick up "..name.."'s Dragon link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
