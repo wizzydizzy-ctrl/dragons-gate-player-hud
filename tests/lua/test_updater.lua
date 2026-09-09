@@ -14,24 +14,49 @@ test("mutable HUD data lives outside the replaceable package directory",function
   eq(base:find("/DragonsGateHUD",1,true),nil)
 end)
 test("legacy mutable data migrates without moving package resources",function()
-  local oldLfs,oldRename=lfs,os.rename; local moved={}; local directories={['/profile/DragonsGateHUD']=true}
+  local oldLfs,oldOpen,oldRename,oldRemove=lfs,io.open,os.rename,os.remove
+  local directories={['/profile/DragonsGateHUD']=true,['/profile/DragonsGateHUD/map-collections']=true}
+  local files={['/profile/DragonsGateHUD/roller-settings.lua']='legacy roller',['/profile/DragonsGateHUD/map-collections/collections.json']='legacy index',['/profile/DGHUDData/mapper-settings.lua']='new mapper'}
+  local renames={}
   local ok,err=pcall(function()
     lfs={
-      attributes=function(path,field) local value=directories[path] and "directory" or nil; return field=="mode" and value or value end,
+      attributes=function(path,field) local value=directories[path] and "directory" or (files[path]~=nil and "file" or nil); return field=="mode" and value or value end,
       mkdir=function(path) directories[path]=true; return true end,
-      dir=function()
-        local names={".","..","DragonsGateHUD.xml","DGHUDRuntime.lua","config.lua","map-collections","chat"}; local index=0
+      dir=function(path)
+        local listed={['/profile/DragonsGateHUD']={".","..","DragonsGateHUD.xml","DGHUDRuntime.lua","config.lua","map-collections","roller-settings.lua","mapper-settings.lua"},['/profile/DragonsGateHUD/map-collections']={".","..","collections.json"}}
+        local names=listed[path] or {".",".."}; local index=0
         return function() index=index+1; return names[index] end
       end,
     }
-    os.rename=function(source,destination) moved[source]=destination; directories[destination]=true; return true end
+    io.open=function(path,mode)
+      if mode=="rb" then if files[path]==nil then return nil,"missing" end; return {read=function() return files[path] end,close=function() return true end} end
+      if mode=="wb" then return {write=function(_,value) files[path]=value; return true end,close=function() return true end} end
+    end
+    os.remove=function(path) files[path]=nil; return true end
+    os.rename=function(source,destination) renames[#renames+1]={source,destination}; if files[source]==nil then return nil,"missing" end; files[destination]=files[source]; files[source]=nil; return true end
     eq(Adapter.prepareDataDirectory("/profile"),true)
     eq(directories['/profile/DGHUDData'],true)
-    eq(moved['/profile/DragonsGateHUD/map-collections'],'/profile/DGHUDData/map-collections')
-    eq(moved['/profile/DragonsGateHUD/chat'],'/profile/DGHUDData/chat')
-    eq(moved['/profile/DragonsGateHUD/DGHUDRuntime.lua'],nil)
+    eq(files['/profile/DGHUDData/roller-settings.lua'],'legacy roller')
+    eq(files['/profile/DGHUDData/map-collections/collections.json'],'legacy index')
+    eq(files['/profile/DGHUDData/mapper-settings.lua'],'new mapper')
+    eq(files['/profile/DragonsGateHUD/roller-settings.lua'],'legacy roller')
+    for _,move in ipairs(renames) do eq(move[1]:find('/profile/DragonsGateHUD/',1,true),nil) end
   end)
-  lfs,os.rename=oldLfs,oldRename; if not ok then error(err,0) end
+  lfs,io.open,os.rename,os.remove=oldLfs,oldOpen,oldRename,oldRemove; if not ok then error(err,0) end
+end)
+test("failed migration returns a warning without destructively moving legacy data",function()
+  local oldLfs,oldOpen=lfs,io.open
+  local ok,err=pcall(function()
+    lfs={attributes=function(path) if path=='/profile/DragonsGateHUD' or path=='/profile/DGHUDData' then return 'directory' elseif path=='/profile/DragonsGateHUD/update-settings.lua' then return 'file' end end,mkdir=function() return true end,dir=function() local names={'.','..','update-settings.lua'}; local index=0; return function() index=index+1; return names[index] end end}
+    io.open=function(path,mode) if mode=='rb' then return {read=function() return 'legacy' end,close=function() return true end} end; return nil,'denied' end
+    local prepared,warning=Adapter.prepareDataDirectory('/profile'); eq(prepared,true); assert(warning:find('denied',1,true))
+  end)
+  lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
+end)
+test("rollback handoff retains a valid lease owned by a failed candidate",function()
+  local view={root={}}; local hud={settings={view_schema=1},controller={view=nil},_view_handoff={schema=1,view=view}}
+  local lease=Adapter.markUpdateHandoff(hud,1); eq(lease.view,view); eq(hud.controller.update_handoff,true)
+  eq(Adapter.markUpdateHandoff(hud,2),nil)
 end)
 test("verified update archive retains the Mudlet package name",function()
   eq(Adapter.updateArchivePath("/profile"),"/profile/DGHUDUpdater/staging/DragonsGateHUD.mpackage")

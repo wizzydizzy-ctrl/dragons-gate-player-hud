@@ -1029,7 +1029,8 @@ function Main:shutdown()
   -- collection snapshot during this exact updater handoff; normal shutdowns,
   -- reloads, map switches, backups, imports, and exports still save it.
   local updateHandoff=self.update_handoff==true
-  local preserveView=(updateHandoff and self.update_preserve_view==true and self.view~=nil) or self.view_lease_uncommitted==true
+  local pendingLease=type(self.view_handoff)=="table" and type(self.view_handoff.view)=="table" and self.view_handoff.view.root~=nil
+  local preserveView=(updateHandoff and self.update_preserve_view==true and self.view~=nil) or self.view_lease_uncommitted==true or pendingLease
   self.view_lease_uncommitted=nil
   self.update_handoff=nil; self.update_preserve_view=nil
   if not updateHandoff and self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end

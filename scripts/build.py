@@ -52,7 +52,7 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadError",function(
 handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded)
   if downloaded~=path then return end; stopWatchers(); cecho("\\n<gold>[DGHUD Recovery]<reset> Replacing only the DragonsGateHUD package…\\n")
   local retired=rawget(_G,"DGHUD")
-  local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; hud._view_handoff=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end end end
+  local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end end end
   local function awaitHealthy(remaining)
     local hud=rawget(_G,"DGHUD"); local healthy=false
     if hasHUDPackage() and type(hud)=="table" and hud~=retired and type(hud.healthCheck)=="function" then local ok,value=pcall(hud.healthCheck); healthy=ok and value==true end

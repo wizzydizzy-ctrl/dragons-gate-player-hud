@@ -476,6 +476,12 @@ test("failed replacement startup leaves an adopted HUD view visible for recovery
   eq(started,nil); assert(tostring(err):find("chat trigger registration failed",1,true)); eq(f.deleted,0); assert(view.root)
   eq(f.set_borders[1]~=0 or f.set_borders[2]~=0 or f.set_borders[3]~=0 or f.set_borders[4]~=0,true)
 end)
+test("early replacement startup failure does not reset a pending view lease",function()
+  local f=fake(); local view=f:createView()
+  function f:createMapAdapter() error("map preflight failed") end
+  local replacement=Main.new(f,{layout={},view_schema=1},{schema=1,view=view}); local started,err=replacement:start()
+  eq(started,nil); assert(tostring(err):find("map preflight failed",1,true)); eq(f.deleted,0); eq(#f.set_borders,0); assert(view.root)
+end)
 test("incompatible update handoff deletes the stale view and constructs a new one",function()
   local f=fake(); local stale=f:createView(); local replacement=Main.new(f,{layout={},view_schema=2},{schema=1,view=stale}); assert(replacement:start())
   eq(f.deleted,1); eq(f.viewCreates,2); eq(f.viewAdoptions,nil); assert(replacement:shutdown())

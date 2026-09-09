@@ -23,7 +23,10 @@ local Adapter=require("mudlet_adapter")
 local Main=require("main")
 local Updater=require("updater")
 local Storage=require("chat_storage")
-if Adapter.prepareDataDirectory then local prepared,prepareErr=Adapter.prepareDataDirectory(); if not prepared then error(prepareErr,0) end end
+if Adapter.prepareDataDirectory then
+  local called,prepared,prepareMessage=pcall(Adapter.prepareDataDirectory)
+  if not called or not prepared or prepareMessage then pcall(cecho,"\n<yellow>[DGHUD]<reset> Persistent data preparation warning: "..tostring((not called and prepared) or prepareMessage or "filesystem is unavailable").."\n") end
+end
 if type(userSettings)~="table" then userSettings={} end
 if userSettings.update==nil then local persisted=Adapter.loadUpdateSettings and Adapter.loadUpdateSettings(); if type(persisted)=="table" then userSettings.update=persisted end end
 if userSettings.roller==nil then local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end

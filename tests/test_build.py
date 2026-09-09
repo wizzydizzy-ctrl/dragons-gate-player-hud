@@ -28,6 +28,7 @@ class BuildTest(unittest.TestCase):
                 recovery_script=ElementTree.fromstring(recovery_xml).findtext('.//Script/script')
                 self.assertIn('hud._view_handoff={schema=schema,view=controller.view}',recovery_script)
                 self.assertIn('controller.update_preserve_view=true',recovery_script)
+                self.assertNotIn('hud._view_handoff=nil',recovery_script)
                 self.assertIn('recovery.."/DragonsGateHUD.mpackage"',recovery_script)
                 self.assertNotIn('tempTimer(0.15',recovery_script)
                 self.assertIn('hud~=retired',recovery_script)
@@ -49,7 +50,7 @@ class BuildTest(unittest.TestCase):
                 self.assertNotIn('&lt;/green&gt;',xml)
                 self.assertIn('[DGHUD Update]<reset> Installed version',runtime)
                 self.assertIn('if not SHA256 then SHA256=require("sha256") end',runtime)
-                self.assertIn('Adapter.prepareDataDirectory()',runtime)
+                self.assertIn('pcall(Adapter.prepareDataDirectory)',runtime)
                 self.assertIn('/DGHUDData',runtime)
                 root=ElementTree.fromstring(xml)
                 scripts={node.findtext('name'):node.findtext('script') for node in root.findall('.//Script')}

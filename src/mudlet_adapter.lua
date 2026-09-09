@@ -9,18 +9,73 @@ function Adapter.dataBase(home) return tostring(home or getMudletHomeDir()):gsub
 function Adapter.prepareDataDirectory(home)
   home=tostring(home or getMudletHomeDir()):gsub("/+$","")
   local target=Adapter.dataBase(home)
-  if lfs.attributes(target,"mode")~="directory" then local made,makeErr=lfs.mkdir(target); if not made and lfs.attributes(target,"mode")~="directory" then return nil,"could not create persistent HUD data directory: "..tostring(makeErr) end end
+  if not lfs or type(lfs.attributes)~="function" or type(lfs.mkdir)~="function" then return nil,"filesystem is unavailable" end
+  local function mode(path)
+    local inspect=type(lfs.symlinkattributes)=="function" and lfs.symlinkattributes or lfs.attributes
+    local ok,value=pcall(inspect,path,"mode"); return ok and value or nil
+  end
+  local function ensure(path)
+    if mode(path)=="directory" then return true end
+    local made,makeErr=lfs.mkdir(path); if made or mode(path)=="directory" then return true end
+    return nil,tostring(makeErr or "could not create directory")
+  end
+  local made,makeErr=ensure(target); if not made then return nil,"could not create persistent HUD data directory: "..tostring(makeErr) end
   local legacy=home.."/DragonsGateHUD"
-  if lfs.attributes(legacy,"mode")~="directory" then return true end
+  if mode(legacy)~="directory" then return true end
   local packageFiles={['DragonsGateHUD.xml']=true,['DGHUDRuntime.lua']=true,['config.lua']=true}
-  local opened,iterator,state=pcall(lfs.dir,legacy); if not opened or type(iterator)~="function" then return nil,"could not inspect legacy HUD data" end
+  local function copyFile(source,destination)
+    if mode(destination)~=nil then return true end
+    local input,inputErr=io.open(source,"rb"); if not input then return nil,tostring(inputErr) end
+    local payload,readErr=input:read("*a"); input:close(); if type(payload)~="string" then return nil,tostring(readErr or "could not read source data") end
+    local temporary=destination..".migrating"; os.remove(temporary)
+    local output,outputErr=io.open(temporary,"wb"); if not output then return nil,tostring(outputErr) end
+    local wrote,writeErr=output:write(payload); local closed,closeErr=output:close(); if not wrote or closed==nil then os.remove(temporary); return nil,tostring(writeErr or closeErr or "could not write copied data") end
+    local verify=io.open(temporary,"rb"); local copied=verify and verify:read("*a"); if verify then verify:close() end
+    if copied~=payload then os.remove(temporary); return nil,"copied data verification failed" end
+    local installed,installErr=os.rename(temporary,destination); if not installed then os.remove(temporary); return nil,tostring(installErr) end
+    return true
+  end
+  local function copyTree(source,destination,depth)
+    if depth>12 then return nil,"legacy data nesting exceeds the migration limit" end
+    local sourceMode=mode(source); if sourceMode==nil then return true end
+    if sourceMode=="file" then return copyFile(source,destination) end
+    if sourceMode~="directory" then return nil,"legacy data contains an unsupported filesystem entry" end
+    local ok,err=ensure(destination); if not ok then return nil,err end
+    local opened,iterator,state=pcall(lfs.dir,source); if not opened or type(iterator)~="function" then return nil,"could not inspect legacy HUD data" end
+    for name in iterator,state do
+      if name~="." and name~=".." then
+        if type(name)~="string" or name:find("[/\\]") then return nil,"legacy data contains an unsafe name" end
+        local copied,copyErr=copyTree(source.."/"..name,destination.."/"..name,depth+1); if not copied then return nil,copyErr end
+      end
+    end
+    return true
+  end
+  local warnings={}
+  local opened,iterator,state=pcall(lfs.dir,legacy); if not opened or type(iterator)~="function" then return true,"could not inspect legacy HUD data" end
   for name in iterator,state do
     if name~="." and name~=".." and not packageFiles[name] then
-      local source,destination=legacy.."/"..name,target.."/"..name
-      if lfs.attributes(destination)==nil then os.rename(source,destination) end
+      local copied,copyErr=copyTree(legacy.."/"..name,target.."/"..name,1)
+      if not copied then warnings[#warnings+1]=tostring(name)..": "..tostring(copyErr) end
     end
   end
-  return true
+  return true,#warnings>0 and table.concat(warnings,"; ") or nil
+end
+function Adapter.markUpdateHandoff(hud,destinationSchema)
+  if type(hud)~="table" then return nil end
+  hud._update_reinstall_pending=true
+  local destination=tonumber(destinationSchema); local controller=type(hud.controller)=="table" and hud.controller or nil
+  local existing=hud._view_handoff
+  local existingValid=type(existing)=="table" and tonumber(existing.schema)==destination and type(existing.view)=="table" and existing.view.root~=nil
+  if controller then
+    controller.update_handoff=true
+    local sourceSchema=hud.settings and tonumber(hud.settings.view_schema)
+    if sourceSchema and sourceSchema==destination and controller.view and controller.view.root then
+      hud._view_handoff={schema=sourceSchema,view=controller.view}; controller.update_preserve_view=true
+    elseif not existingValid then
+      hud._view_handoff=nil; controller.update_preserve_view=nil
+    end
+  end
+  return hud._view_handoff
 end
 function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
@@ -626,26 +681,12 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     return true
   end
   local function markUpdateHandoff(destinationSchema)
-    local hud=rawget(_G,"DGHUD")
-    if type(hud)~="table" then return end
-    hud._update_reinstall_pending=true
-    local controller=type(hud.controller)=="table" and hud.controller or nil
-    if controller then
-      controller.update_handoff=true
-      local sourceSchema=hud.settings and hud.settings.view_schema
-      if tonumber(sourceSchema) and tonumber(sourceSchema)==tonumber(destinationSchema) and controller.view and controller.view.root then
-        hud._view_handoff={schema=tonumber(sourceSchema),view=controller.view}
-        controller.update_preserve_view=true
-      else
-        hud._view_handoff=nil; controller.update_preserve_view=nil
-      end
-    end
+    Adapter.markUpdateHandoff(rawget(_G,"DGHUD"),destinationSchema)
   end
   local function clearUpdateHandoff()
     local hud=rawget(_G,"DGHUD")
     if type(hud)~="table" then return end
     hud._update_reinstall_pending=nil
-    hud._view_handoff=nil
     if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end
   end
   local function awaitRuntime(version,attempts,done,retiredRuntime)
