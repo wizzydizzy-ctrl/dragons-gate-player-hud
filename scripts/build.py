@@ -12,6 +12,8 @@ def script_node(name,code):
     return f'''<Script isActive="yes" isFolder="no"><name>{html.escape(name)}</name><packageName>DragonsGateHUD</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
 def recovery_alias_node(code):
     return f'''<Alias isActive="yes" isFolder="no"><name>DGHUD Emergency Recovery</name><packageName>DGHUDRecovery</packageName><script>{html.escape(code)}</script><command></command><regex>^dghud recover$</regex></Alias>'''
+def recovery_script_node(code):
+    return f'''<Script isActive="yes" isFolder="no"><name>DGHUD Recovery Runtime</name><packageName>DGHUDRecovery</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
 def recovery_code(owner,repository):
     url=f'https://github.com/{owner}/{repository}/releases/latest/download/DragonsGateHUD.mpackage'
     return f'''DGHUDRecovery = DGHUDRecovery or {{}}
@@ -77,7 +79,8 @@ def build(output,owner,repository,version):
     if not view_schema_match: raise ValueError('could not determine defaults.view_schema')
     manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','view_schema':int(view_schema_match.group(1)),'archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>1.1.0</version><author>Dragons Gate HUD contributors</author></PackageInfo><AliasPackage><AliasGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_alias_node(recovery_code(owner,repository))+'''</AliasGroup></AliasPackage></MudletPackage>''')
+    recovery_runtime='DGHUDRecovery = {version = "1.2.0"}'
+    recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>1.2.0</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_script_node(recovery_runtime)+'''</ScriptGroup></ScriptPackage><AliasPackage><AliasGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_alias_node(recovery_code(owner,repository))+'''</AliasGroup></AliasPackage></MudletPackage>''')
     with zipfile.ZipFile(output/'DGHUDRecovery.mpackage','w',zipfile.ZIP_DEFLATED) as z:
         info=zipfile.ZipInfo('DGHUDRecovery.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,recovery_xml)
 def main():

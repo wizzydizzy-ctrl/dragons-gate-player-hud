@@ -16,7 +16,8 @@ class BuildTest(unittest.TestCase):
             with zipfile.ZipFile(recovery) as z:
                 recovery_xml=z.read('DGHUDRecovery.xml').decode()
                 self.assertIn('<packageName>DGHUDRecovery</packageName>',recovery_xml)
-                self.assertIn('<version>1.1.0</version>',recovery_xml)
+                self.assertIn('<version>1.2.0</version>',recovery_xml)
+                self.assertIn('DGHUDRecovery = {version = &quot;1.2.0&quot;}',recovery_xml)
                 self.assertIn('^dghud recover$',recovery_xml)
                 self.assertIn('hud._update_reinstall_pending=true',recovery_xml)
                 self.assertIn('https://github.com/ricwall/dragons-gate-hud/releases/latest/download/DragonsGateHUD.mpackage',recovery_xml)

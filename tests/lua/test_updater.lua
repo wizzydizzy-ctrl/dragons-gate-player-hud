@@ -32,10 +32,11 @@ test("native checksum verification preserves exact SHA validation",function()
   eq(result[1],true); eq(result[2],nil); eq(closed,true)
 end)
 local function recoveryHarness(options,body)
-  options=options or {}; local names={"lfs","getMudletHomeDir","getPackages","getPackageInfo","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","uninstallPackage","installPackage","cecho"}; local saved={}
+  options=options or {}; local names={"DGHUDRecovery","lfs","getMudletHomeDir","getPackages","getPackageInfo","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","uninstallPackage","installPackage","cecho"}; local saved={}
   for _,name in ipairs(names) do saved[name]=_G[name] end
   local h={installed=options.installed~=false,version=options.version,busy=tonumber(options.busy) or 0,handlers={},timers={},downloads={},uninstalls=0,installs=0,nextID=0,messages={}}
   local ok,err=pcall(function()
+    DGHUDRecovery=options.runtimeVersion and {version=options.runtimeVersion} or nil
     lfs={mkdir=function() return true end}; getMudletHomeDir=function() return "/profile" end
     getPackages=function() return h.installed and {"DGHUDRecovery"} or {} end
     getPackageInfo=function(name,key) if name=="DGHUDRecovery" and key=="version" and h.installed then return h.version end end
@@ -45,23 +46,26 @@ local function recoveryHarness(options,body)
     killTimer=function(id) h.timers[id]=nil end
     downloadFile=function(path,url) h.downloads[#h.downloads+1]={path=path,url=url}; return true end
     uninstallPackage=function() h.uninstalls=h.uninstalls+1; if h.busy>0 then h.busy=h.busy-1; return nil end; h.installed=false; h.version=nil; return true end
-    installPackage=function() h.installs=h.installs+1; h.installed=true; if options.deferActivation then h.pendingVersion=Adapter.recovery_version else h.version=Adapter.recovery_version end; return true end
+    installPackage=function() h.installs=h.installs+1; h.installed=true; if options.deferActivation then h.pendingRuntime=true else DGHUDRecovery={version=Adapter.recovery_version} end; return true end
     cecho=function(message) h.messages[#h.messages+1]=message end
     function h:download() self.handlers.sysDownloadDone(nil,self.downloads[1].path) end
-    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingVersion then self.version=self.pendingVersion; self.pendingVersion=nil end; return true end end return false end
+    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingRuntime then DGHUDRecovery={version=Adapter.recovery_version}; self.pendingRuntime=nil end; return true end end return false end
     h.adapter=Adapter.new(); h.adapter.settings={github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"}}; body(h)
   end)
   for _,name in ipairs(names) do _G[name]=saved[name] end
   if not ok then error(err,0) end
 end
 test("current recovery companion is retained without a download",function()
-  recoveryHarness({version="1.1.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.2.0",runtimeVersion="1.2.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+end)
+test("package metadata alone cannot prove recovery runtime activation",function()
+  recoveryHarness({version="1.2.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
 end)
 test("outdated recovery companion waits out a save and verifies deferred activation",function()
-  recoveryHarness({version="1.0.0",busy=1,deferActivation=true},function(h)
+  recoveryHarness({version="1.0.0",runtimeVersion="1.0.0",busy=1,deferActivation=true},function(h)
     eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); h:download(); eq(h.uninstalls,1); eq(h.installs,0); eq(h.adapter.recovery_installing,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(h.installs,1); eq(h.adapter.recovery_installing,true)
-    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(h.version,"1.1.0"); eq(#h.messages,0)
+    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.2.0"); eq(#h.messages,0)
   end)
 end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()

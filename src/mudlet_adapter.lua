@@ -1,5 +1,5 @@
 local View=require("view"); local Storage=require("chat_storage"); local MapAdapter=require("map_adapter"); local SHA256=require("sha256")
-local Adapter={recovery_version="1.1.0"}; Adapter.__index=Adapter
+local Adapter={recovery_version="1.2.0"}; Adapter.__index=Adapter
 function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
 function Adapter.isCanonicalArchivePath(path)
@@ -473,9 +473,9 @@ function Adapter.versionAtLeast(actual,required)
   if aa~=ra then return aa>ra end; if ab~=rb then return ab>rb end; return ac>=rc
 end
 function Adapter:recoveryPackageCurrent()
-  if not hasPackage("DGHUDRecovery") or type(rawget(_G,"getPackageInfo"))~="function" then return false end
-  local ok,version=pcall(getPackageInfo,"DGHUDRecovery","version")
-  return ok and Adapter.versionAtLeast(version,Adapter.recovery_version)
+  if not hasPackage("DGHUDRecovery") then return false end
+  local runtime=rawget(_G,"DGHUDRecovery")
+  return type(runtime)=="table" and Adapter.versionAtLeast(runtime.version,Adapter.recovery_version)
 end
 function Adapter:verifyFileAsync(path,digest,done)
   done=done or function() end
@@ -517,13 +517,15 @@ end
 function Adapter:ensureRecoveryPackage()
   if self:recoveryPackageCurrent() or self.recovery_installing then return true end
   self.recovery_installing=true
+  local retiredRuntime=rawget(_G,"DGHUDRecovery")
   local github=self.settings and self.settings.github or {}; local owner=github.owner or "wizzydizzy-ctrl"; local repository=github.repository or "dragons-gate-player-hud"
   local url="https://github.com/"..owner.."/"..repository.."/releases/latest/download/DGHUDRecovery.mpackage"; local path=getMudletHomeDir().."/DGHUDRecovery.mpackage"; local doneId,errorId,timeoutId; local timers={}; local finished=false
   local function disarmDownload() if doneId then killAnonymousEventHandler(doneId); doneId=nil end; if errorId then killAnonymousEventHandler(errorId); errorId=nil end; if timeoutId then killTimer(timeoutId); timeoutId=nil end end
   local function finish(message) if finished then return end; finished=true; disarmDownload(); for _,id in ipairs(timers) do killTimer(id) end; timers={}; self.recovery_installing=false; if message then cecho("\n<yellow>[DGHUD Recovery]<reset> "..message.." Manual updates remain available.\n") end end
   local function scheduleRecovery(delay,fn) timers[#timers+1]=tempTimer(delay,fn) end
   local function awaitCurrent(remaining)
-    if self:recoveryPackageCurrent() then finish(); return end
+    local runtime=rawget(_G,"DGHUDRecovery")
+    if runtime~=retiredRuntime and self:recoveryPackageCurrent() then finish(); return end
     if remaining<=0 then finish("Companion install was accepted, but version "..Adapter.recovery_version.." did not activate."); return end
     scheduleRecovery(0.25,function() awaitCurrent(remaining-1) end)
   end
