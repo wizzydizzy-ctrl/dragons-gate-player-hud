@@ -58,4 +58,13 @@ end
 local started,startErr=DGHUD.start()
 if not started then error("DGHUD startup failed: "..tostring(startErr or "unknown error"),0) end
 DGHUD._view_handoff=nil
-if DGHUD.controller and DGHUD.controller.adapter and DGHUD.controller.adapter.ensureRecoveryPackage then pcall(DGHUD.controller.adapter.ensureRecoveryPackage,DGHUD.controller.adapter) end
+local installedController=DGHUD.controller
+local function maintainRecoveryCompanion()
+  local hud=rawget(_G,"DGHUD")
+  if type(hud)~="table" or hud.controller~=installedController then return end
+  local adapter=hud.controller and hud.controller.adapter
+  if adapter and adapter.ensureRecoveryPackage then pcall(adapter.ensureRecoveryPackage,adapter) end
+end
+-- Recovery maintenance is independent of HUD readiness. Let package import and
+-- Mudlet's mandatory profile save finish before doing any companion I/O.
+if type(rawget(_G,"tempTimer"))=="function" then tempTimer(0,maintainRecoveryCompanion) else maintainRecoveryCompanion() end

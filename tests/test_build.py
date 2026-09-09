@@ -14,14 +14,18 @@ class BuildTest(unittest.TestCase):
             package=Path(td)/'DragonsGateHUD.mpackage'; manifest=json.loads((Path(td)/'manifest.json').read_text())
             recovery=Path(td)/'DGHUDRecovery.mpackage'; self.assertTrue(recovery.exists())
             with zipfile.ZipFile(recovery) as z:
+                self.assertEqual(z.read('config.lua'),b'mpackage = "DGHUDRecovery"\n')
                 recovery_xml=z.read('DGHUDRecovery.xml').decode()
                 self.assertIn('<packageName>DGHUDRecovery</packageName>',recovery_xml)
-                self.assertIn('<version>1.2.0</version>',recovery_xml)
-                self.assertIn('DGHUDRecovery = {version = &quot;1.2.0&quot;}',recovery_xml)
+                self.assertIn('<version>1.3.0</version>',recovery_xml)
+                self.assertIn('local runtime={version=&#x27;1.3.0&#x27;}',recovery_xml)
                 self.assertIn('^dghud recover$',recovery_xml)
+                self.assertIn('pcall(tempAlias',recovery_xml)
+                self.assertIn('runtime.alias=alias',recovery_xml)
+                self.assertNotIn('<AliasPackage>',recovery_xml)
                 self.assertIn('hud._update_reinstall_pending=true',recovery_xml)
                 self.assertIn('https://github.com/ricwall/dragons-gate-hud/releases/latest/download/DragonsGateHUD.mpackage',recovery_xml)
-                recovery_script=ElementTree.fromstring(recovery_xml).findtext('.//Alias/script')
+                recovery_script=ElementTree.fromstring(recovery_xml).findtext('.//Script/script')
                 self.assertIn('recovery.."/DragonsGateHUD.mpackage"',recovery_script)
                 self.assertNotIn('tempTimer(0.15',recovery_script)
                 self.assertIn('hud~=retired',recovery_script)
@@ -32,16 +36,29 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(manifest['view_schema'],1)
             self.assertEqual(manifest['sha256'],hashlib.sha256(package.read_bytes()).hexdigest())
             with zipfile.ZipFile(package) as z:
-                names=z.namelist(); self.assertEqual(names,['DragonsGateHUD.xml'])
-                xml=z.read(names[0]).decode(); self.assertIn('<name>DragonsGateHUD</name>',xml); self.assertIn('DGHUD.start',xml)
-                self.assertIn('package.preload[&quot;layout&quot;]',xml)
-                self.assertIn('package.preload[&quot;chat_controller&quot;]',xml)
+                names=z.namelist(); self.assertEqual(names,['DragonsGateHUD.xml','DGHUDRuntime.lua','config.lua'])
+                self.assertEqual(z.read('config.lua'),b'mpackage = "DragonsGateHUD"\n')
+                xml=z.read(names[0]).decode(); self.assertIn('<name>DragonsGateHUD</name>',xml)
+                runtime=z.read('DGHUDRuntime.lua').decode()
+                self.assertIn('DGHUD.start',runtime)
+                self.assertNotIn('package.preload[&quot;layout&quot;]',xml)
+                self.assertIn('package.preload["layout"]',runtime)
+                self.assertIn('package.preload["chat_controller"]',runtime)
                 self.assertNotIn('&lt;/green&gt;',xml)
-                self.assertIn('[DGHUD Update]&lt;reset&gt; Installed version',xml)
+                self.assertIn('[DGHUD Update]<reset> Installed version',runtime)
                 root=ElementTree.fromstring(xml)
                 scripts={node.findtext('name'):node.findtext('script') for node in root.findall('.//Script')}
-                self.assertLessEqual(len(scripts),3)
-                module_bundle=scripts['DGHUD Modules']
+                self.assertEqual(list(scripts),['DGHUD Bootstrap'])
+                bootstrap=scripts['DGHUD Bootstrap']
+                self.assertIn('/DragonsGateHUD/DGHUDRuntime.lua',bootstrap)
+                self.assertIn('HUD startup is still loading',bootstrap)
+                self.assertLess(len(xml),20000)
+                probe_home=Path(td)/'bootstrap-probe'; probe_package=probe_home/'DragonsGateHUD'; probe_package.mkdir(parents=True)
+                (probe_package/'DGHUDRuntime.lua').write_text('DGHUD_BOOTSTRAP_PROBE=true\n')
+                self.run_lua('getMudletHomeDir=function() return '+json.dumps(str(probe_home))+' end\n'+bootstrap+'\nassert(DGHUD_BOOTSTRAP_PROBE)\n',td)
+                entry=(ROOT/'src/entry.lua').read_text()
+                self.assertTrue(runtime.endswith(entry))
+                module_bundle=runtime[:-len(entry)]
                 required=set()
                 for path in (ROOT/'src').glob('*.lua'):
                     required.update(re.findall(r'require\(["\']([^"\']+)["\']\)',path.read_text()))
@@ -49,9 +66,8 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(required-bundled,set())
                 self.run_lua('package.path=""; package.cpath=""\n'+module_bundle+'\nassert(require("main"))\n',td)
 
-                entry=scripts['DGHUD Start']
                 self.assertIn('DGHUD startup failed:',entry)
-                self.assertIn('HUD startup is still loading',scripts['DGHUD Install Readiness'])
+                self.assertIn('tempTimer(0,maintainRecoveryCompanion)',entry)
                 reload_probe='''
 package.path=""; package.cpath=""
 local generation=1

@@ -32,11 +32,11 @@ test("native checksum verification preserves exact SHA validation",function()
   eq(result[1],true); eq(result[2],nil); eq(closed,true)
 end)
 local function recoveryHarness(options,body)
-  options=options or {}; local names={"DGHUDRecovery","lfs","getMudletHomeDir","getPackages","getPackageInfo","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","uninstallPackage","installPackage","cecho"}; local saved={}
+  options=options or {}; local names={"DGHUDRecovery","lfs","getMudletHomeDir","getPackages","getPackageInfo","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","tempAlias","killAlias","downloadFile","uninstallPackage","installPackage","cecho"}; local saved={}
   for _,name in ipairs(names) do saved[name]=_G[name] end
   local h={installed=options.installed~=false,version=options.version,busy=tonumber(options.busy) or 0,handlers={},timers={},downloads={},uninstalls=0,installs=0,nextID=0,messages={}}
   local ok,err=pcall(function()
-    DGHUDRecovery=options.runtimeVersion and {version=options.runtimeVersion} or nil
+    DGHUDRecovery=options.runtimeVersion and {version=options.runtimeVersion,alias=options.runtimeAlias or 90,run=function() end} or nil
     lfs={mkdir=function() return true end}; getMudletHomeDir=function() return "/profile" end
     getPackages=function() return h.installed and {"DGHUDRecovery"} or {} end
     getPackageInfo=function(name,key) if name=="DGHUDRecovery" and key=="version" and h.installed then return h.version end end
@@ -44,28 +44,33 @@ local function recoveryHarness(options,body)
     killAnonymousEventHandler=function() end
     tempTimer=function(delay,fn) h.nextID=h.nextID+1; h.timers[h.nextID]={delay=delay,fn=fn}; return h.nextID end
     killTimer=function(id) h.timers[id]=nil end
+    tempAlias=function(_,fn) h.nextID=h.nextID+1; h.aliasFn=fn; return h.nextID end
+    killAlias=function() return true end
     downloadFile=function(path,url) h.downloads[#h.downloads+1]={path=path,url=url}; return true end
     uninstallPackage=function() h.uninstalls=h.uninstalls+1; if h.busy>0 then h.busy=h.busy-1; return nil end; h.installed=false; h.version=nil; return true end
-    installPackage=function() h.installs=h.installs+1; h.installed=true; if options.deferActivation then h.pendingRuntime=true else DGHUDRecovery={version=Adapter.recovery_version} end; return true end
+    installPackage=function() h.installs=h.installs+1; h.installed=true; if options.deferActivation then h.pendingRuntime=true else DGHUDRecovery={version=Adapter.recovery_version,alias=91,run=function() end} end; return true end
     cecho=function(message) h.messages[#h.messages+1]=message end
     function h:download() self.handlers.sysDownloadDone(nil,self.downloads[1].path) end
-    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingRuntime then DGHUDRecovery={version=Adapter.recovery_version}; self.pendingRuntime=nil end; return true end end return false end
+    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingRuntime then DGHUDRecovery={version=Adapter.recovery_version,alias=92,run=function() end}; self.pendingRuntime=nil end; return true end end return false end
     h.adapter=Adapter.new(); h.adapter.settings={github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"}}; body(h)
   end)
   for _,name in ipairs(names) do _G[name]=saved[name] end
   if not ok then error(err,0) end
 end
 test("current recovery companion is retained without a download",function()
-  recoveryHarness({version="1.2.0",runtimeVersion="1.2.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.3.0",runtimeVersion="1.3.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
 end)
 test("package metadata alone cannot prove recovery runtime activation",function()
-  recoveryHarness({version="1.2.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.3.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
+end)
+test("recovery runtime without a callable registered alias is replaced",function()
+  recoveryHarness({version="1.3.0",runtimeVersion="1.3.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
 end)
 test("outdated recovery companion waits out a save and verifies deferred activation",function()
   recoveryHarness({version="1.0.0",runtimeVersion="1.0.0",busy=1,deferActivation=true},function(h)
     eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); h:download(); eq(h.uninstalls,1); eq(h.installs,0); eq(h.adapter.recovery_installing,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(h.installs,1); eq(h.adapter.recovery_installing,true)
-    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.2.0"); eq(#h.messages,0)
+    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.3.0"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
   end)
 end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()
@@ -149,7 +154,7 @@ local function replacementHarness(options,body)
   options=options or {}; local globalNames={"lfs","yajl","getMudletHomeDir","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","getPackages","uninstallPackage","installPackage","cecho","DGHUD","getMudletVersion"}
   globalNames[#globalNames+1]="getEpoch"
   local saved={}; for _,name in ipairs(globalNames) do saved[name]=_G[name] end
-  local originalOpen=io.open; local h={files={},downloads={},handlers={},timers={},nextID=0,active=true,uninstalls=0,installs={},result=nil,rollbackUninstallBusy=tonumber(options.rollbackUninstallBusy) or 0}
+  local originalOpen=io.open; local h={files={},downloads={},handlers={},timers={},nextID=0,active=true,uninstalls=0,installs={},result=nil,targetUninstallBusy=tonumber(options.targetUninstallBusy) or 0,rollbackUninstallBusy=tonumber(options.rollbackUninstallBusy) or 0}
   local target=releaseManifest("0.2.84"); target.sha256=SHA.hex("new-package")
   local rollback=releaseManifest("0.2.83"); rollback.sha256=SHA.hex("old-package")
   h.manifests={latest={tag_name="v0.2.84"},target=target,rollback=rollback}
@@ -171,6 +176,7 @@ local function replacementHarness(options,body)
     getPackages=function() return h.active and {"DragonsGateHUD"} or {} end
     uninstallPackage=function()
       h.uninstalls=h.uninstalls+1
+      if h.targetUninstallBusy>0 then h.targetUninstallBusy=h.targetUninstallBusy-1; return false end
       if h.uninstalls>1 and h.rollbackUninstallBusy>0 then h.rollbackUninstallBusy=h.rollbackUninstallBusy-1; return nil end
       h.active=false
       return true
@@ -208,6 +214,13 @@ test("first updater-managed update bootstraps exact rollback before uninstall",f
     h:done(h.downloads[4].path,"rollback"); eq(h.uninstalls,0); eq(#h.downloads,5)
     h:done(h.downloads[5].path,"old-package"); eq(h.uninstalls,1); eq(h.handoffAtInstall.pending,true); eq(h.handoffAtInstall.controller,true); eq(h.files["/profile/DGHUDUpdater/previous.mpackage"],"old-package")
     eq(h.result[1],true); eq(h.active,true); eq(h.hashCalls,2); eq(h:run(.10),false)
+  end)
+end)
+test("target replacement waits when Mudlet returns false during a profile save",function()
+  replacementHarness({targetUninstallBusy=1},function(h)
+    deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
+    eq(h.uninstalls,1); eq(#h.installs,0); eq(h.result,nil); eq(h.active,true)
+    assert(h:run(.10)); eq(h.uninstalls,2); eq(#h.installs,1); eq(h.result[1],true); eq(DGHUD.settings.version,"0.2.84")
   end)
 end)
 test("rollback bootstrap timeout aborts before touching active package",function()

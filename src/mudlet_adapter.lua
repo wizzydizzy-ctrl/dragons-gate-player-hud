@@ -1,5 +1,5 @@
 local View=require("view"); local Storage=require("chat_storage"); local MapAdapter=require("map_adapter"); local SHA256=require("sha256")
-local Adapter={recovery_version="1.2.0"}; Adapter.__index=Adapter
+local Adapter={recovery_version="1.3.0"}; Adapter.__index=Adapter
 function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
 function Adapter.isCanonicalArchivePath(path)
@@ -475,7 +475,7 @@ end
 function Adapter:recoveryPackageCurrent()
   if not hasPackage("DGHUDRecovery") then return false end
   local runtime=rawget(_G,"DGHUDRecovery")
-  return type(runtime)=="table" and Adapter.versionAtLeast(runtime.version,Adapter.recovery_version)
+  return type(runtime)=="table" and Adapter.versionAtLeast(runtime.version,Adapter.recovery_version) and type(runtime.alias)=="number" and runtime.alias>0 and type(runtime.run)=="function"
 end
 function Adapter:verifyFileAsync(path,digest,done)
   done=done or function() end
@@ -639,13 +639,13 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     -- deferred Mudlet activation still receives the full three-second window.
     probe()
   end
-  local function removeForRollback(name,attempts,done)
+  local function removeWhenReady(name,attempts,message,done)
     local remaining=tonumber(attempts) or 1
     local function attempt()
       if not hasPackage(name) then done(true); return end
       local removed=uninstallPackage(name)
       if removed then done(true); return end
-      if remaining<=0 then done(nil,"could not remove failed HUD package while Mudlet was saving"); return end
+      if remaining<=0 then done(nil,message); return end
       remaining=remaining-1
       schedule(0.10,attempt)
     end
@@ -690,14 +690,16 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       writeFile(packagePath,data)
       local retiredRuntime=rawget(_G,"DGHUD")
       markUpdateHandoff(targetManifest.view_schema)
-      if hasPackage(name) then local removed=uninstallPackage(name); if removed==nil then clearUpdateHandoff(); replaceDone(nil,"could not remove existing HUD package"); return end end
-      -- Mudlet queues a full profile save on the next event-loop pass after an
-      -- uninstall. Install the verified replacement in this same callback so
-      -- the save contains the new package instead of making the install wait
-      -- behind a several-second save of a large profile.
-      local installed=installPackage(packagePath)
-      if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-      awaitRuntime(targetManifest.version,12,replaceDone,retiredRuntime)
+      local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
+      removeWhenReady(name,retryWindow,"could not remove existing HUD package while Mudlet was saving",function(removed,removeErr)
+        if not removed then clearUpdateHandoff(); replaceDone(nil,removeErr); return end
+        -- Mudlet queues a full profile save on the next event-loop pass after
+        -- an uninstall. Install in this same callback so that save contains the
+        -- replacement rather than forcing installation to wait behind it.
+        local installed=installPackage(packagePath)
+        if installed==nil then replaceDone(nil,"could not install HUD package"); return end
+        awaitRuntime(targetManifest.version,12,replaceDone,retiredRuntime)
+      end)
     end
     self.healthCheck=nil
     self.rollbackAsync=function(_,name,rollbackDone)
@@ -714,7 +716,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         local retiredRuntime=rawget(_G,"DGHUD")
         markUpdateHandoff(rollbackManifest and rollbackManifest.view_schema)
         local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
-        removeForRollback(name,retryWindow,function(removed,removeErr)
+        removeWhenReady(name,retryWindow,"could not remove failed HUD package while Mudlet was saving",function(removed,removeErr)
           if not removed then clearUpdateHandoff(); rollbackDone(nil,removeErr); return end
           -- A successful uninstall guarantees no profile save was active at that
           -- instant. Install in the same callback, before its deferred save runs.
