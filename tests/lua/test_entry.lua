@@ -4,6 +4,8 @@ local entryModules={"defaults","settings","mudlet_adapter","main","updater","cha
 
 local function withEntryStubs(fn)
   local savedGlobal=rawget(_G,"DGHUD")
+  local savedMudletHome=rawget(_G,"getMudletHomeDir")
+  getMudletHomeDir=function() return "/profile" end
   local savedPreload,savedLoaded={},{}
   for _,name in ipairs(entryModules) do
     savedPreload[name]=package.preload[name]
@@ -40,6 +42,7 @@ local function withEntryStubs(fn)
   local ok,result=xpcall(function() return fn({defaults=defaults,controllers=controllers,stubs=stubs,install=install,adapter=adapter}) end,debug.traceback)
   for _,name in ipairs(entryModules) do package.preload[name]=savedPreload[name]; package.loaded[name]=savedLoaded[name] end
   rawset(_G,"DGHUD",savedGlobal)
+  rawset(_G,"getMudletHomeDir",savedMudletHome)
   if not ok then error(result,0) end
   return result
 end

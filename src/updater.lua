@@ -1,4 +1,8 @@
-local SHA256=require("sha256"); local Release=require("release")
+local SHA256; local Release=require("release")
+local function sha256Hex(payload)
+  if not SHA256 then SHA256=require("sha256") end
+  return SHA256.hex(payload)
+end
 local Updater={}; Updater.__index=Updater
 local function errorMessage(value) local text=tostring(value or "unknown error"); return text:match(":%d+:%s*(.*)$") or text end
 function Updater.new(adapter,settings) return setmetatable({adapter=adapter,settings=settings or {},lock=nil,expected_path=nil},Updater) end
@@ -18,7 +22,7 @@ function Updater:acquire(operation) if self.lock then return nil,self.lock.." al
 function Updater:release() self.lock=nil; self.expected_path=nil; self.refresh_after_install=nil; self.update_started_at=nil end
 function Updater:acceptDownload(path) return type(path)=="string" and path==self.expected_path end
 function Updater:installVerified(payload,expected)
-  if type(payload)~="string" or SHA256.hex(payload)~=tostring(expected):lower() then return nil,"package checksum mismatch" end
+  if type(payload)~="string" or sha256Hex(payload)~=tostring(expected):lower() then return nil,"package checksum mismatch" end
   if not self.adapter.replacePackage then return nil,"package adapter unavailable" end
   local ok,err=self.adapter:replacePackage(payload,"DragonsGateHUD"); if not ok then return nil,err or "package installation failed" end
   if self.adapter.healthCheck then local healthy,healthErr=self.adapter:healthCheck(); if not healthy then if self.adapter.rollback then self.adapter:rollback("DragonsGateHUD") end; return nil,healthErr or "post-install health check failed" end end
@@ -26,7 +30,7 @@ function Updater:installVerified(payload,expected)
 end
 function Updater:installVerifiedAsync(payload,expected,done,preverified)
   done=done or function() end
-  if type(payload)~="string" or (preverified~=true and SHA256.hex(payload)~=tostring(expected):lower()) then done(nil,"package checksum mismatch"); return nil,"package checksum mismatch" end
+  if type(payload)~="string" or (preverified~=true and sha256Hex(payload)~=tostring(expected):lower()) then done(nil,"package checksum mismatch"); return nil,"package checksum mismatch" end
   if not self.adapter.replacePackageAsync then done(nil,"package adapter unavailable"); return nil,"package adapter unavailable" end
   self.adapter:replacePackageAsync(payload,"DragonsGateHUD",function(ok,err)
     if not ok then

@@ -52,7 +52,7 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadError",function(
 handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded)
   if downloaded~=path then return end; stopWatchers(); cecho("\\n<gold>[DGHUD Recovery]<reset> Replacing only the DragonsGateHUD package…\\n")
   local retired=rawget(_G,"DGHUD")
-  local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil end end end
+  local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; hud._view_handoff=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end end end
   local function awaitHealthy(remaining)
     local hud=rawget(_G,"DGHUD"); local healthy=false
     if hasHUDPackage() and type(hud)=="table" and hud~=retired and type(hud.healthCheck)=="function" then local ok,value=pcall(hud.healthCheck); healthy=ok and value==true end
@@ -63,7 +63,7 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_
   local function installClean() local installed=installPackage(path); if installed==nil then clearHandoff(); fail("Reinstall failed. Close and reopen this profile, then run dghud recover again."); return end; awaitHealthy(120) end
   local function removeThenInstall(remaining)
     if not hasHUDPackage() then installClean(); return end
-    local hud=rawget(_G,"DGHUD"); if type(hud)=="table" then hud._update_reinstall_pending=true; if type(hud.controller)=="table" then hud.controller.update_handoff=true end end
+    local hud=rawget(_G,"DGHUD"); if type(hud)=="table" then hud._update_reinstall_pending=true; if type(hud.controller)=="table" then local controller=hud.controller; controller.update_handoff=true; local schema=hud.settings and tonumber(hud.settings.view_schema); if schema and controller.view and controller.view.root then hud._view_handoff={{schema=schema,view=controller.view}}; controller.update_preserve_view=true end end end
     if uninstallPackage("DragonsGateHUD") then installClean(); return end
     if remaining<=0 then clearHandoff(); fail("Could not remove the broken HUD package after waiting for Mudlet to finish saving."); return end
     timers[#timers+1]=tempTimer(0.10,function() removeThenInstall(remaining-1) end)
@@ -104,7 +104,7 @@ def build(output,owner,repository,version):
     if not view_schema_match: raise ValueError('could not determine defaults.view_schema')
     manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','view_schema':int(view_schema_match.group(1)),'archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    recovery_version='1.3.0'
+    recovery_version='1.4.0'
     recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>'''+recovery_version+'''</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_script_node(recovery_code(owner,repository,recovery_version))+'''</ScriptGroup></ScriptPackage></MudletPackage>''')
     with zipfile.ZipFile(output/'DGHUDRecovery.mpackage','w',zipfile.ZIP_DEFLATED) as z:
         info=zipfile.ZipInfo('DGHUDRecovery.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,recovery_xml)

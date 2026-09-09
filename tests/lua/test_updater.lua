@@ -8,6 +8,31 @@ test("update staging lives outside the installed package directory",function()
   eq(base,"/profile/DGHUDUpdater")
   eq(base:find("/DragonsGateHUD",1,true),nil)
 end)
+test("mutable HUD data lives outside the replaceable package directory",function()
+  local base=Adapter.dataBase("/profile")
+  eq(base,"/profile/DGHUDData")
+  eq(base:find("/DragonsGateHUD",1,true),nil)
+end)
+test("legacy mutable data migrates without moving package resources",function()
+  local oldLfs,oldRename=lfs,os.rename; local moved={}; local directories={['/profile/DragonsGateHUD']=true}
+  local ok,err=pcall(function()
+    lfs={
+      attributes=function(path,field) local value=directories[path] and "directory" or nil; return field=="mode" and value or value end,
+      mkdir=function(path) directories[path]=true; return true end,
+      dir=function()
+        local names={".","..","DragonsGateHUD.xml","DGHUDRuntime.lua","config.lua","map-collections","chat"}; local index=0
+        return function() index=index+1; return names[index] end
+      end,
+    }
+    os.rename=function(source,destination) moved[source]=destination; directories[destination]=true; return true end
+    eq(Adapter.prepareDataDirectory("/profile"),true)
+    eq(directories['/profile/DGHUDData'],true)
+    eq(moved['/profile/DragonsGateHUD/map-collections'],'/profile/DGHUDData/map-collections')
+    eq(moved['/profile/DragonsGateHUD/chat'],'/profile/DGHUDData/chat')
+    eq(moved['/profile/DragonsGateHUD/DGHUDRuntime.lua'],nil)
+  end)
+  lfs,os.rename=oldLfs,oldRename; if not ok then error(err,0) end
+end)
 test("verified update archive retains the Mudlet package name",function()
   eq(Adapter.updateArchivePath("/profile"),"/profile/DGHUDUpdater/staging/DragonsGateHUD.mpackage")
   eq(Adapter.isCanonicalArchivePath("/profile/DGHUDUpdater/staging/DragonsGateHUD.mpackage"),true)
@@ -58,19 +83,19 @@ local function recoveryHarness(options,body)
   if not ok then error(err,0) end
 end
 test("current recovery companion is retained without a download",function()
-  recoveryHarness({version="1.3.0",runtimeVersion="1.3.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.4.0",runtimeVersion="1.4.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
 end)
 test("package metadata alone cannot prove recovery runtime activation",function()
-  recoveryHarness({version="1.3.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.4.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
 end)
 test("recovery runtime without a callable registered alias is replaced",function()
-  recoveryHarness({version="1.3.0",runtimeVersion="1.3.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
+  recoveryHarness({version="1.4.0",runtimeVersion="1.4.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
 end)
 test("outdated recovery companion waits out a save and verifies deferred activation",function()
   recoveryHarness({version="1.0.0",runtimeVersion="1.0.0",busy=1,deferActivation=true},function(h)
     eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); h:download(); eq(h.uninstalls,1); eq(h.installs,0); eq(h.adapter.recovery_installing,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(h.installs,1); eq(h.adapter.recovery_installing,true)
-    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.3.0"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
+    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.4.0"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
   end)
 end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()

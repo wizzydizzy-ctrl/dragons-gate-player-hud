@@ -17,8 +17,8 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(z.read('config.lua'),b'mpackage = "DGHUDRecovery"\n')
                 recovery_xml=z.read('DGHUDRecovery.xml').decode()
                 self.assertIn('<packageName>DGHUDRecovery</packageName>',recovery_xml)
-                self.assertIn('<version>1.3.0</version>',recovery_xml)
-                self.assertIn('local runtime={version=&#x27;1.3.0&#x27;}',recovery_xml)
+                self.assertIn('<version>1.4.0</version>',recovery_xml)
+                self.assertIn('local runtime={version=&#x27;1.4.0&#x27;}',recovery_xml)
                 self.assertIn('^dghud recover$',recovery_xml)
                 self.assertIn('pcall(tempAlias',recovery_xml)
                 self.assertIn('runtime.alias=alias',recovery_xml)
@@ -26,6 +26,8 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('hud._update_reinstall_pending=true',recovery_xml)
                 self.assertIn('https://github.com/ricwall/dragons-gate-hud/releases/latest/download/DragonsGateHUD.mpackage',recovery_xml)
                 recovery_script=ElementTree.fromstring(recovery_xml).findtext('.//Script/script')
+                self.assertIn('hud._view_handoff={schema=schema,view=controller.view}',recovery_script)
+                self.assertIn('controller.update_preserve_view=true',recovery_script)
                 self.assertIn('recovery.."/DragonsGateHUD.mpackage"',recovery_script)
                 self.assertNotIn('tempTimer(0.15',recovery_script)
                 self.assertIn('hud~=retired',recovery_script)
@@ -46,6 +48,9 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('package.preload["chat_controller"]',runtime)
                 self.assertNotIn('&lt;/green&gt;',xml)
                 self.assertIn('[DGHUD Update]<reset> Installed version',runtime)
+                self.assertIn('if not SHA256 then SHA256=require("sha256") end',runtime)
+                self.assertIn('Adapter.prepareDataDirectory()',runtime)
+                self.assertIn('/DGHUDData',runtime)
                 root=ElementTree.fromstring(xml)
                 scripts={node.findtext('name'):node.findtext('script') for node in root.findall('.//Script')}
                 self.assertEqual(list(scripts),['DGHUD Bootstrap'])
@@ -70,6 +75,7 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('tempTimer(0,maintainRecoveryCompanion)',entry)
                 reload_probe='''
 package.path=""; package.cpath=""
+getMudletHomeDir=function() return "/profile" end
 local generation=1
 package.loaded["special_transition"]={generation=0}
 package.preload["special_transition"]=function() return {generation=generation} end

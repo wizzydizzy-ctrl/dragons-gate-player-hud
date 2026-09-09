@@ -40,7 +40,10 @@ function Main:initializeMapCollections()
   self.map_collections=manager
   if #manager:list()==0 then
     local initial,createErr=manager:create("My Maps",{kind="local_map"},true); if not initial then return nil,createErr end; assert(manager:setActive(initial.id))
-    local metadata,saveErr=self.adapter:saveMapCollection(initial.id); if not metadata then return nil,saveErr end; assert(manager:updateSnapshot(initial.id,metadata)); return self:saveMapCollectionIndex()
+    -- The native Mudlet map already persists independently. Index the initial
+    -- collection now and create its potentially large snapshot only when a
+    -- switch, backup, share, import, or normal shutdown actually needs it.
+    return self:saveMapCollectionIndex()
   end
   if not manager:active() then manager:setActive(manager:list()[1].id); return self:saveMapCollectionIndex() end
   return true
@@ -786,7 +789,7 @@ function Main:start()
   local startupOk,startupErr=pcall(function()
   local handoff=self.view_handoff; self.view_handoff=nil
   if type(handoff)=="table" and tonumber(handoff.schema)==tonumber(self.settings.view_schema) and handoff.view and self.adapter.adoptView then
-    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted end
+    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted; self.view_lease_uncommitted=true end
   end
   if not self.view then
     if type(handoff)=="table" and handoff.view and type(handoff.view.delete)=="function" then pcall(handoff.view.delete,handoff.view) end
@@ -1016,6 +1019,7 @@ function Main:start()
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self.posture:onLine(line); self.needs:onLine(line,"output"); self.roller:onLine(line) end)
   end)
   if not startupOk then pcall(function() self:shutdown() end); return nil,startupErr end
+  self.view_lease_uncommitted=nil
   return true
 end
 function Main:shutdown()
@@ -1025,7 +1029,8 @@ function Main:shutdown()
   -- collection snapshot during this exact updater handoff; normal shutdowns,
   -- reloads, map switches, backups, imports, and exports still save it.
   local updateHandoff=self.update_handoff==true
-  local preserveView=updateHandoff and self.update_preserve_view==true and self.view~=nil
+  local preserveView=(updateHandoff and self.update_preserve_view==true and self.view~=nil) or self.view_lease_uncommitted==true
+  self.view_lease_uncommitted=nil
   self.update_handoff=nil; self.update_preserve_view=nil
   if not updateHandoff and self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
   if self.clock_timer then
@@ -1050,7 +1055,7 @@ function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
   local function validRegistrations(items) if type(items)~="table" or #items<1 then return false end; for _,id in ipairs(items) do if id==nil or id==false then return false end end; return true end
-  if not self.started or not self.runtime_registration_complete or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or not validRegistrations(self.runtime.events) or not validRegistrations(self.runtime.aliases) or not validRegistrations(self.runtime.triggers) then return nil,"HUD is not healthy" end
+  if not self.started or not self.runtime_registration_complete or not self.view or not self.view.root or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or not validRegistrations(self.runtime.events) or not validRegistrations(self.runtime.aliases) or not validRegistrations(self.runtime.triggers) then return nil,"HUD is not healthy" end
   -- start() has already rendered the complete HUD.  The updater needs a
   -- side-effect-free readiness gate here, not a second layout and repaint.
   return true

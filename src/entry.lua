@@ -23,6 +23,7 @@ local Adapter=require("mudlet_adapter")
 local Main=require("main")
 local Updater=require("updater")
 local Storage=require("chat_storage")
+if Adapter.prepareDataDirectory then local prepared,prepareErr=Adapter.prepareDataDirectory(); if not prepared then error(prepareErr,0) end end
 if type(userSettings)~="table" then userSettings={} end
 if userSettings.update==nil then local persisted=Adapter.loadUpdateSettings and Adapter.loadUpdateSettings(); if type(persisted)=="table" then userSettings.update=persisted end end
 if userSettings.roller==nil then local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end
@@ -40,7 +41,7 @@ local function applyUserSettings()
 end
 local applied,applyErr=applyUserSettings()
 if not applied then error(applyErr) end
-DGHUD.chatStorageApi=Storage.mudletApi()
+DGHUD.chatStorageApi=Storage.mudletApi(getMudletHomeDir(),"DGHUDData")
 DGHUD.controller=Main.new(Adapter.new(),DGHUD.settings,viewHandoff)
 DGHUD.updater=Updater.new(DGHUD.controller.adapter,DGHUD.settings)
 DGHUD.controller.updater=DGHUD.updater

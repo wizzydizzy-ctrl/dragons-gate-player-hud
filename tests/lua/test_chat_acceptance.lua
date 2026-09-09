@@ -5,7 +5,7 @@ local function fakeChatRuntimeWithPersonalTrigger()
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
   function f:setBorders() end
   function f:getWindowSize() return 1920,1080 end
-  function f:createView() return {update=function() end,applyLayout=function() end,renderChat=function() end,setChatFilterCallback=function() end,delete=function() end} end
+  function f:createView() return {root={},update=function() end,applyLayout=function() end,renderChat=function() end,setChatFilterCallback=function() end,delete=function() end} end
   function f:addEvent(name,fn) self.next=self.next+1; local id="event-"..self.next; self.events[id]={name=name,fn=fn}; return id end
   function f:killEvent(id) self.events[id]=nil end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end

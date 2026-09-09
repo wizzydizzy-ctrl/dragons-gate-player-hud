@@ -28,9 +28,9 @@ end
 
 test("sanitizes character paths and appends dated JSONL",function()
   local api=fakeStorageApi()
-  local storage=Storage.new(api,"/profile/DragonsGateHUD/chat",1000)
+  local storage=Storage.new(api,"/profile/DGHUDData/chat",1000)
   assert(storage:append({timestamp="2026-08-31T13:00:00-04:00",character="Dace/Alterac",category="ROOM",message="hello"}))
-  eq(api.lastPath,"/profile/DragonsGateHUD/chat/dace_alterac/2026-08-31.jsonl")
+  eq(api.lastPath,"/profile/DGHUDData/chat/dace_alterac/2026-08-31.jsonl")
   eq(api.appends[1].text,"hello\n")
   eq(Storage.safeCharacter("../../Dace"),"dace")
   eq(Storage.safeCharacter("/absolute"),"absolute")
@@ -148,7 +148,7 @@ test("Mudlet storage facade treats new character history as empty but reports re
   local originalLfs,originalIo=lfs,io
   local ok,err=pcall(function()
     lfs=nil
-    local unavailable=Storage.new(Storage.mudletApi("/profile"),"/profile/DragonsGateHUD/chat",1000)
+    local unavailable=Storage.new(Storage.mudletApi("/profile"),"/profile/DGHUDData/chat",1000)
     eq(#unavailable:loadRecent("Dace"),0)
     eq(unavailable:lastError(),"filesystem is unavailable")
     local controller=Controller.new({addLineTrigger=function() return "chat-trigger" end,killTrigger=function() end},nil,History.new(1000,3),unavailable,function() end,function() return "Dace" end)
@@ -162,14 +162,14 @@ test("Mudlet storage facade treats new character history as empty but reports re
         return function() return nil end
       end,
     }
-    local firstRun=Storage.new(Storage.mudletApi("/profile"),"/profile/DragonsGateHUD/chat",1000)
+    local firstRun=Storage.new(Storage.mudletApi("/profile"),"/profile/DGHUDData/chat",1000)
     eq(#firstRun:loadRecent("Brand New Character"),0)
     eq(firstRun:lastError(),nil)
     lfs={
       mkdir=function() return true end,
       dir=function() return nil,"permission denied" end,
     }
-    local deniedList=Storage.new(Storage.mudletApi("/profile"),"/profile/DragonsGateHUD/chat",1000)
+    local deniedList=Storage.new(Storage.mudletApi("/profile"),"/profile/DGHUDData/chat",1000)
     eq(#deniedList:loadRecent("Dace"),0)
     eq(deniedList:lastError(),"permission denied")
     lfs={
@@ -180,13 +180,13 @@ test("Mudlet storage facade treats new character history as empty but reports re
       end,
     }
     io={open=function(_,mode) if mode=="rb" then return nil,"permission denied" end end}
-    local unreadable=Storage.new(Storage.mudletApi("/profile"),"/profile/DragonsGateHUD/chat",1000)
+    local unreadable=Storage.new(Storage.mudletApi("/profile"),"/profile/DGHUDData/chat",1000)
     eq(#unreadable:loadRecent("Dace"),0)
     eq(unreadable:lastError(),"permission denied")
     io={open=function(_,mode)
       if mode=="rb" then return {read=function() return nil,"read denied" end,close=function() return true end} end
     end}
-    local readFailure=Storage.new(Storage.mudletApi("/profile"),"/profile/DragonsGateHUD/chat",1000)
+    local readFailure=Storage.new(Storage.mudletApi("/profile"),"/profile/DGHUDData/chat",1000)
     eq(#readFailure:loadRecent("Dace"),0)
     eq(readFailure:lastError(),"read denied")
   end)
@@ -201,13 +201,13 @@ test("Mudlet storage factory confines file access beneath its chat root",functio
   io={open=function() error("unexpected file access") end}
   yajl={to_string=function() return "{}" end,to_value=function() return {} end}
   local api=Storage.mudletApi("/profile")
-  assert(api.mkdir("/profile/DragonsGateHUD/chat/dace"))
-  eq(made[1],"/profile/DragonsGateHUD")
-  eq(made[2],"/profile/DragonsGateHUD/chat")
-  eq(made[3],"/profile/DragonsGateHUD/chat/dace")
+  assert(api.mkdir("/profile/DGHUDData/chat/dace"))
+  eq(made[1],"/profile/DGHUDData")
+  eq(made[2],"/profile/DGHUDData/chat")
+  eq(made[3],"/profile/DGHUDData/chat/dace")
   eq(api.mkdir("/tmp/escape"),nil)
   eq(api.append("/tmp/escape/log.jsonl","bad"),nil)
-  eq(api.append("/profile/DragonsGateHUD/chat/dace/../escape.jsonl","bad"),nil)
+  eq(api.append("/profile/DGHUDData/chat/dace/../escape.jsonl","bad"),nil)
   lfs,io,yajl=originalLfs,originalIo,originalYajl
 end)
 
@@ -221,8 +221,8 @@ test("Mudlet storage factory appends valid in-root JSONL paths",function()
   end}
   yajl={to_string=function() return "{}" end,to_value=function() return {} end}
   local api=Storage.mudletApi("/profile")
-  eq(api.append("/profile/DragonsGateHUD/chat/dace/2026-08-31.jsonl","entry\n"),true)
-  eq(opened.path,"/profile/DragonsGateHUD/chat/dace/2026-08-31.jsonl")
+  eq(api.append("/profile/DGHUDData/chat/dace/2026-08-31.jsonl","entry\n"),true)
+  eq(opened.path,"/profile/DGHUDData/chat/dace/2026-08-31.jsonl")
   eq(opened.mode,"ab")
   eq(opened.text,"entry\n")
   lfs,io,yajl=originalLfs,originalIo,originalYajl
@@ -234,6 +234,6 @@ test("Mudlet storage factory accepts existing owned directories",function()
   io={open=function() error("unexpected file access") end}
   yajl={to_string=function() return "{}" end,to_value=function() return {} end}
   local api=Storage.mudletApi("/profile")
-  eq(api.mkdir("/profile/DragonsGateHUD/chat/dace"),true)
+  eq(api.mkdir("/profile/DGHUDData/chat/dace"),true)
   lfs,io,yajl=originalLfs,originalIo,originalYajl
 end)

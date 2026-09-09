@@ -145,15 +145,17 @@ local function safeRelative(value,root,allowFile)
   return relative
 end
 
-function Storage.mudletApi(home)
+function Storage.mudletApi(home,dataFolder)
   home=tostring(home or getMudletHomeDir()):gsub("/+$","")
-  local root=home.."/DragonsGateHUD/chat"
+  dataFolder=tostring(dataFolder or "DGHUDData")
+  if not dataFolder:match("^[A-Za-z0-9_-]+$") then error("invalid chat data folder",0) end
+  local root=home.."/"..dataFolder.."/chat"
   local function ensure(directory)
     local relative=safeRelative(directory,root,false)
     if relative==nil then return nil,"unsafe chat storage path" end
     if not lfs or type(lfs.mkdir)~="function" then return nil,"filesystem is unavailable" end
     local current=home
-    for _,segment in ipairs({"DragonsGateHUD","chat"}) do
+    for _,segment in ipairs({dataFolder,"chat"}) do
       current=current.."/"..segment
       local ok,err=lfs.mkdir(current)
       if not ok and (type(lfs.attributes)~="function" or lfs.attributes(current,"mode")~="directory") then return nil,err or "could not create chat storage" end

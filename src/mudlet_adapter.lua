@@ -1,12 +1,34 @@
-local View=require("view"); local Storage=require("chat_storage"); local MapAdapter=require("map_adapter"); local SHA256=require("sha256")
-local Adapter={recovery_version="1.3.0"}; Adapter.__index=Adapter
+local View=require("view"); local Storage=require("chat_storage"); local MapAdapter=require("map_adapter")
+local SHA256
+local function sha256Hex(payload)
+  if not SHA256 then SHA256=require("sha256") end
+  return SHA256.hex(payload)
+end
+local Adapter={recovery_version="1.4.0"}; Adapter.__index=Adapter
+function Adapter.dataBase(home) return tostring(home or getMudletHomeDir()):gsub("/+$","").."/DGHUDData" end
+function Adapter.prepareDataDirectory(home)
+  home=tostring(home or getMudletHomeDir()):gsub("/+$","")
+  local target=Adapter.dataBase(home)
+  if lfs.attributes(target,"mode")~="directory" then local made,makeErr=lfs.mkdir(target); if not made and lfs.attributes(target,"mode")~="directory" then return nil,"could not create persistent HUD data directory: "..tostring(makeErr) end end
+  local legacy=home.."/DragonsGateHUD"
+  if lfs.attributes(legacy,"mode")~="directory" then return true end
+  local packageFiles={['DragonsGateHUD.xml']=true,['DGHUDRuntime.lua']=true,['config.lua']=true}
+  local opened,iterator,state=pcall(lfs.dir,legacy); if not opened or type(iterator)~="function" then return nil,"could not inspect legacy HUD data" end
+  for name in iterator,state do
+    if name~="." and name~=".." and not packageFiles[name] then
+      local source,destination=legacy.."/"..name,target.."/"..name
+      if lfs.attributes(destination)==nil then os.rename(source,destination) end
+    end
+  end
+  return true
+end
 function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
 function Adapter.isCanonicalArchivePath(path)
   local normalized=tostring(path or ""):gsub("\\","/")
   return normalized:match("([^/]+)$")=="DragonsGateHUD.mpackage"
 end
-function Adapter.verifyArchive(payload,digest) return type(payload)=="string" and type(digest)=="string" and SHA256.hex(payload)==digest end
+function Adapter.verifyArchive(payload,digest) return type(payload)=="string" and type(digest)=="string" and sha256Hex(payload)==digest end
 function Adapter.nativeHashSpec(osName,path)
   osName=tostring(osName or ""):lower()
   if osName=="mac" or osName=="macos" or osName=="osx" then return "/usr/bin/shasum",{"-a","256",path} end
@@ -76,15 +98,15 @@ function Adapter:createMapAdapter(api)
   end
   return map
 end
-function Adapter:createChatStorage(visibleLimit) return Storage.new(Storage.mudletApi(),getMudletHomeDir().."/DragonsGateHUD/chat",visibleLimit) end
+function Adapter:createChatStorage(visibleLimit) local home=getMudletHomeDir(); return Storage.new(Storage.mudletApi(home,"DGHUDData"),Adapter.dataBase(home).."/chat",visibleLimit) end
 function Adapter:saveMapDiagnostic(payload)
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
+  local base=Adapter.dataBase(); lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
   local path=directory.."/mapper-"..os.date("%Y%m%d-%H%M%S")..".txt"; local file,err=io.open(path,"wb"); if not file then return nil,err end
   local ok,writeErr=file:write(tostring(payload or "")); if not ok then file:close(); return nil,writeErr end; file:close(); return path
 end
 function Adapter:saveFailureReport(report)
   local ok,payload=pcall(yajl.to_string,report); if not ok or type(payload)~="string" then return nil,"could not encode failure report" end; if #payload>16000 then return nil,"failure report exceeds the safety limit" end
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory); local path=directory.."/failure-"..os.date("%Y%m%d-%H%M%S")..".json"; local file,err=io.open(path,"wb"); if not file then return nil,err end
+  local base=Adapter.dataBase(); lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory); local path=directory.."/failure-"..os.date("%Y%m%d-%H%M%S")..".json"; local file,err=io.open(path,"wb"); if not file then return nil,err end
   local wrote,writeErr=file:write(payload.."\n"); if not wrote then file:close(); return nil,writeErr end; file:close(); return path
 end
 function Adapter:submitFailureReport(report,done)
@@ -100,7 +122,7 @@ function Adapter:submitFailureReport(report,done)
   timer=tempTimer(30,function() timer=nil; finish(nil,"failure report upload timed out") end); local queued,err=postHTTP(payload,url,{["Content-Type"]="application/json",["Accept"]="application/json"}); if queued==false then cleanup(); return nil,err or "Mudlet could not start the report upload" end; return true
 end
 function Adapter:openMapDiagnosticsFolder()
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
+  local base=Adapter.dataBase(); lfs.mkdir(base); local directory=base.."/diagnostics"; lfs.mkdir(directory)
   if type(openUrl)=="function" then pcall(openUrl,"file://"..directory) end; return directory
 end
 function Adapter:addEvent(name,fn) return registerAnonymousEventHandler(name,fn) end
@@ -146,7 +168,7 @@ function Adapter:cleanupToken(source)
   if type(file.close)=="function" then pcall(file.close,file) end
   if not readOK then return nil,"secure random source read failed" end
   if type(bytes)~="string" or #bytes~=16 then return nil,"secure random source returned incomplete data" end
-  return SHA256.hex(bytes):sub(1,16)
+  return sha256Hex(bytes):sub(1,16)
 end
 function Adapter:refreshMap(api)
   api=api or _G
@@ -167,12 +189,12 @@ local function mapToken(value,kind)
   return value
 end
 function Adapter:mapTransferDirectory()
-  local base=getMudletHomeDir().."/DragonsGateHUD"; local directory=base.."/maps"
+  local base=Adapter.dataBase(); local directory=base.."/maps"
   for _,path in ipairs({base,directory}) do if lfs.attributes(path,"mode")~="directory" then local ok,err=lfs.mkdir(path); if not ok and lfs.attributes(path,"mode")~="directory" then return nil,"could not create map export directory "..path..": "..tostring(err) end end end
   return directory
 end
 function Adapter:mapCollectionDirectory()
-  local base=getMudletHomeDir().."/DragonsGateHUD"; local directory=base.."/map-collections"
+  local base=Adapter.dataBase(); local directory=base.."/map-collections"
   for _,path in ipairs({base,directory}) do if lfs.attributes(path,"mode")~="directory" then local ok,err=lfs.mkdir(path); if not ok and lfs.attributes(path,"mode")~="directory" then return nil,"could not create map collection directory "..path..": "..tostring(err) end end end
   return directory
 end
@@ -193,7 +215,7 @@ function Adapter:saveMapCollection(id)
   os.remove(backup)
   local file,openErr=io.open(path,"rb"); if not file then return nil,tostring(openErr) end; local payload=file:read("*a"); file:close()
   local rooms=type(getRooms)=="function" and getRooms() or {}; local roomCount=0; for _ in pairs(type(rooms)=="table" and rooms or {}) do roomCount=roomCount+1 end
-  return {path=path,sha256=SHA256.hex(payload),room_count=roomCount,bytes=#payload}
+  return {path=path,sha256=sha256Hex(payload),room_count=roomCount,bytes=#payload}
 end
 function Adapter:loadMapCollection(id)
   if type(loadMap)~="function" then return nil,"Mudlet loadMap support is unavailable" end
@@ -280,7 +302,7 @@ function Adapter:downloadCatalogMap(entry,done)
   local directory,dirErr=self:mapTransferDirectory(); if not directory then return nil,dirErr end; local path=directory.."/.map-download-"..entry.slug..".json"; local url=entry.download_url; local ids={}; local timer; local finished=false
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; if timer then killTimer(timer) end; os.remove(path) end
   local function finish(value,err) if finished then return end; finished=true; cleanup(); done(value,err) end
-  ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,actual) if actual~=path then return end; local raw,readErr=libraryRead(path,20000000); if not raw then return finish(nil,readErr) end; if #raw~=entry.bytes then return finish(nil,"downloaded map size does not match the catalog") end; if require("sha256").hex(raw)~=entry.sha256 then return finish(nil,"downloaded map checksum does not match the catalog") end; local ok,value=pcall(yajl.to_value,raw); if not ok then return finish(nil,"downloaded map JSON is invalid") end; finish(value) end)
+  ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,actual) if actual~=path then return end; local raw,readErr=libraryRead(path,20000000); if not raw then return finish(nil,readErr) end; if #raw~=entry.bytes then return finish(nil,"downloaded map size does not match the catalog") end; if sha256Hex(raw)~=entry.sha256 then return finish(nil,"downloaded map checksum does not match the catalog") end; local ok,value=pcall(yajl.to_value,raw); if not ok then return finish(nil,"downloaded map JSON is invalid") end; finish(value) end)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,actualUrl) if actualUrl==url then finish(nil,message or "map download failed") end end)
   timer=tempTimer(30,function() timer=nil; finish(nil,"map download timed out") end); downloadFile(path,url); return true
 end
@@ -336,7 +358,7 @@ function Adapter:reportRoller(message) cecho("\n<gold>[DGHUD Roller]<reset> "..t
 function Adapter:standaloneRollerPresent() return type(rawget(_G,"OGDGROLLER"))=="table" end
 function Adapter:startRollerLog(config)
   local function component(value,fallback) value=tostring(value or ""):gsub("[^%w%._%-]","_"); if value=="" or value=="." or value==".." then return fallback end; return value end
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base)
+  local base=Adapter.dataBase(); lfs.mkdir(base)
   local folder=base.."/"..component(config.log_folder,"og_dg_roller"); lfs.mkdir(folder)
   local stamp=os.date("%Y-%m-%d_%H-%M-%S")
   local log={session=folder.."/session_"..stamp..".txt",master=folder.."/"..component(config.master_file,"og_dg_rolls_master.txt")}
@@ -351,9 +373,9 @@ function Adapter:appendRollerLog(log,message)
   return true
 end
 function Adapter:closeRollerLog(log) if log.session_handle then log.session_handle:close(); log.session_handle=nil end; if log.master_handle then log.master_handle:close(); log.master_handle=nil end; return true end
-local function rollerSettingsPath() return getMudletHomeDir().."/DragonsGateHUD/roller-settings.lua" end
+local function rollerSettingsPath() return Adapter.dataBase().."/roller-settings.lua" end
 function Adapter:saveRollerSettings(config)
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local temp=rollerSettingsPath()..".tmp"
+  local base=Adapter.dataBase(); lfs.mkdir(base); local temp=rollerSettingsPath()..".tmp"
   local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
   local function literal(value) if type(value)=="string" then return string.format("%q",value) elseif value==nil then return "nil" else return tostring(value) end end
   local lines={"return {"}; for _,key in ipairs(fields) do lines[#lines+1]="  "..key.."="..literal(config[key]).."," end; lines[#lines+1]="  min_stats={"
@@ -366,9 +388,9 @@ end
 function Adapter.loadRollerSettings()
   local loader=loadfile(rollerSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" then return value end; return nil
 end
-local function mapperSettingsPath() return getMudletHomeDir().."/DragonsGateHUD/mapper-settings.lua" end
+local function mapperSettingsPath() return Adapter.dataBase().."/mapper-settings.lua" end
 function Adapter:saveMapperSettings(config)
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local destination=mapperSettingsPath(); local temp=destination..".tmp"
+  local base=Adapter.dataBase(); lfs.mkdir(base); local destination=mapperSettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
   local function n(key,default) return tonumber(config and config[key]) or default end; local transitions=config and config.transition_submaps or {}
   local body=string.format("return { enabled=%s, minimum_height=%g, height_percent=%g, maximum_height=%g, zoom_step=%g, zoom_min=%g, zoom_max=%g, walk_timeout=%g, special_timeout=%g, transition_submaps={gate=%s,portal=%s,door=%s,arch=%s,path=%s,other=%s} }\n",tostring(not (config and config.enabled==false)),n("minimum_height",90),n("height_percent",.4),n("maximum_height",380),n("zoom_step",2.5),n("zoom_min",3),n("zoom_max",60),n("walk_timeout",12),n("special_timeout",12),tostring(transitions.gate~=false),tostring(transitions.portal~=false),tostring(transitions.door~=false),tostring(transitions.arch~=false),tostring(transitions.path~=false),tostring(transitions.other~=false))
@@ -381,9 +403,9 @@ end
 function Adapter.loadMapperSettings()
   local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return value end; return nil
 end
-local function updateSettingsPath() return getMudletHomeDir().."/DragonsGateHUD/update-settings.lua" end
+local function updateSettingsPath() return Adapter.dataBase().."/update-settings.lua" end
 function Adapter:saveUpdateSettings(config)
-  local base=getMudletHomeDir().."/DragonsGateHUD"; lfs.mkdir(base); local destination=updateSettingsPath(); local temp=destination..".tmp"
+  local base=Adapter.dataBase(); lfs.mkdir(base); local destination=updateSettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
   local wrote,writeErr=file:write("return { auto_apply="..tostring(type(config)=="table" and config.auto_apply==true).." }\n")
   if not wrote then file:close(); os.remove(temp); return nil,writeErr end; local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
@@ -462,7 +484,7 @@ function Adapter:reportVersionStatus(installed,latest,current)
   if current then cecho(string.format("\n<green>[DGHUD]<reset> Version %s is already up to date.\n",tostring(installed)))
   else cecho(string.format("\n<gold>[DGHUD]<reset> Update available: %s (installed: %s). Run <white>dghud update<reset> when ready.\n",tostring(latest),tostring(installed))) end
 end
-function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Settings: "..getMudletHomeDir().."/DragonsGateHUD/settings.lua\n") end
+function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Persistent data: "..Adapter.dataBase().."\n") end
 local function readFile(path) local f=io.open(path,"rb"); if not f then return nil end; local data=f:read("*a"); f:close(); return data end
 local function fileSize(path) local f=io.open(path,"rb"); if not f then return nil end; local ok,size=pcall(function() return f:seek("end") end); if not ok then local data=f:read("*a"); size=type(data)=="string" and #data or nil end; f:close(); return tonumber(size) end
 local function writeFile(path,data) local f=assert(io.open(path,"wb")); f:write(data); f:close() end

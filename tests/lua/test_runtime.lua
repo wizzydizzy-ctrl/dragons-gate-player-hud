@@ -181,6 +181,19 @@ end)
 test("startup suppresses only Mudlet's duplicate default map information",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); eq(f.mapInfoSuppressions,1)
 end)
+test("first map collection startup defers the native map snapshot",function()
+  local f=fake(); local snapshots=0
+  function f:loadMapCollectionIndex() return nil,"map collection index was not found" end
+  function f:saveMapCollectionIndex(state) self.savedCollectionState=state; return true end
+  function f:saveMapCollection()
+    snapshots=snapshots+1
+    return {path="/profile/DGHUDData/map-collections/map.dat",sha256=string.rep("a",64),room_count=809,bytes=485101}
+  end
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  eq(snapshots,0); assert(f.savedCollectionState); eq(f.savedCollectionState.collections[1].snapshot,nil)
+  assert(hud:saveActiveMapCollection()); eq(snapshots,1)
+  hud.update_handoff=true; assert(hud:shutdown()); eq(snapshots,1)
+end)
 test("Mudlet adapter suppresses the Short and Full default map information",function()
   local disabled={}; local updates=0
   local adapter=MudletAdapter.new(); eq(adapter:suppressDefaultMapInfo({
@@ -456,6 +469,12 @@ test("compatible update handoff preserves and adopts one live HUD view",function
   retiring.update_handoff=true; retiring.update_preserve_view=true; assert(retiring:shutdown()); eq(f.deleted,0)
   local replacement=Main.new(f,settings,{schema=1,view=view}); assert(replacement:start()); eq(replacement.view,view); eq(f.viewCreates,1); eq(f.viewAdoptions,1)
   assert(replacement:shutdown()); eq(f.deleted,1)
+end)
+test("failed replacement startup leaves an adopted HUD view visible for recovery",function()
+  local f=fake(); local settings={layout={},view_schema=1}; local view=f:createView(); f.failChatTrigger=true
+  local replacement=Main.new(f,settings,{schema=1,view=view}); local started,err=replacement:start()
+  eq(started,nil); assert(tostring(err):find("chat trigger registration failed",1,true)); eq(f.deleted,0); assert(view.root)
+  eq(f.set_borders[1]~=0 or f.set_borders[2]~=0 or f.set_borders[3]~=0 or f.set_borders[4]~=0,true)
 end)
 test("incompatible update handoff deletes the stale view and constructs a new one",function()
   local f=fake(); local stale=f:createView(); local replacement=Main.new(f,{layout={},view_schema=2},{schema=1,view=stale}); assert(replacement:start())
