@@ -12,6 +12,22 @@ test("verified update archive retains the Mudlet package name",function()
   eq(Adapter.updateArchivePath("/profile"),"/profile/DGHUDUpdater/staging/DragonsGateHUD.mpackage")
   eq(Adapter.verifyArchive("prior",SHA.hex("prior")),true); eq(Adapter.verifyArchive("tampered",SHA.hex("prior")),false)
 end)
+test("native checksum helpers are cross-platform and parse common tool output",function()
+  local hash=string.rep("ab",32)
+  local program,args=Adapter.nativeHashSpec("mac","/tmp/HUD package.mpackage"); eq(program,"/usr/bin/shasum"); eq(args[1],"-a"); eq(args[3],"/tmp/HUD package.mpackage")
+  program,args=Adapter.nativeHashSpec("windows","C:/HUD package.mpackage"); assert(program:lower():find("certutil.exe",1,true)); eq(args[1],"-hashfile"); eq(args[3],"SHA256")
+  eq(Adapter.parseNativeHash(hash.."  /tmp/file"),hash)
+  eq(Adapter.parseNativeHash("SHA256 hash\n"..hash:gsub("(%x%x)","%1 ").."\nCertUtil: completed"),hash)
+end)
+test("native checksum verification preserves exact SHA validation",function()
+  local oldSpawn,oldGetOS,oldTimer=_G.spawn,_G.getOS,_G.tempTimer; local closed=false; local hash=string.rep("cd",32); local result
+  getOS=function() return "mac" end
+  spawn=function(read,program,a,b,path) eq(program,"/usr/bin/shasum"); eq(a,"-a"); eq(b,"256"); read(hash.."  "..path); return {isRunning=function() return false end,close=function() closed=true end} end
+  tempTimer=function(_,fn) fn(); return 1 end
+  local ok,err=pcall(function() Adapter.new():verifyFileAsync("/not/read/native.mpackage",hash,function(valid,message) result={valid,message} end) end)
+  _G.spawn,_G.getOS,_G.tempTimer=oldSpawn,oldGetOS,oldTimer; if not ok then error(err,0) end
+  eq(result[1],true); eq(result[2],nil); eq(closed,true)
+end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()
   local url=Adapter.manifestUrl({owner="wizzydizzy-ctrl",repository="dragons-gate-hud"},1788221000)
   eq(url,"https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/latest/download/manifest.json")

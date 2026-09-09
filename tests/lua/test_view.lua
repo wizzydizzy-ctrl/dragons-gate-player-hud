@@ -222,6 +222,13 @@ end
 test("view has no standalone wealth widget",function()
   local view=chatView(); eq(view.wealth,nil)
 end)
+test("preserved view reuse closes transient panels and drops controller callbacks",function()
+  local view=chatView(); view.options_action_callback=function() end; view.map_settings_action_callback=function() end; view.feedback_sending=true
+  view.color_menu_visible=true; view.color_menu:show(); view.support_visible=true; view.support_panel:show()
+  local settings={theme=view.settings.theme,chat=view.settings.chat}; eq(view:prepareForReuse(settings),true)
+  eq(view.settings,settings); eq(view.color_menu_visible,false); eq(view.color_menu.visible,false); eq(view.support_visible,false); eq(view.support_panel.visible,false)
+  eq(view.options_action_callback,nil); eq(view.map_settings_action_callback,nil); eq(view.feedback_sending,false)
+end)
 
 test("fatigue gauge uses its configured fill color without changing health",function()
   local view=chatView()

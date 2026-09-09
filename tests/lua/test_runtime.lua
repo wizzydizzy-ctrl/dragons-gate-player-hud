@@ -8,7 +8,7 @@ local function fake()
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
   function f:setBorders(a,b,c,d) self.set_borders={a,b,c,d} end
   function f:getWindowSize() return self.width or 1920,self.height or 1080 end
-  function f:createView() local view={
+  function f:createView() f.viewCreates=(f.viewCreates or 0)+1; local view={root={},
     update=function(self,state) self.state=state; f.viewUpdates=(f.viewUpdates or 0)+1 end,
     updateClock=function(self,clock) self.state.clock=clock; f.clockUpdates=(f.clockUpdates or 0)+1 end,
     applyLayout=function(self,layout) f.layouts[#f.layouts+1]=layout end,
@@ -32,6 +32,7 @@ local function fake()
     centerMap=function(self,roomID) f.centeredRooms=f.centeredRooms or {}; f.centeredRooms[#f.centeredRooms+1]=roomID; return true end,
     delete=function() f.deleted=f.deleted+1 end,
   }; view.map_library_actions={browse={click=function() return f.mapLibraryActionCallback("browse") end}}; return view end
+  function f:adoptView(view,settings) self.viewAdoptions=(self.viewAdoptions or 0)+1; view.adoptedSettings=settings; return view end
   function f:addEvent(name,fn) self.next=self.next+1; self.callbacks[name]=fn; local id="event-"..self.next; self.events[id]=name; return id end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end
   function f:killEvent(id) self.killed[id]=true; self.events[id]=nil end
@@ -449,6 +450,16 @@ test("update handoff skips only the redundant map snapshot",function()
     eq(shutdownWith(false,true),1)
   end)
   _G.DGHUD=previous; if not ok then error(err,0) end
+end)
+test("compatible update handoff preserves and adopts one live HUD view",function()
+  local f=fake(); local settings={layout={},view_schema=1}; local retiring=Main.new(f,settings); assert(retiring:start()); local view=retiring.view
+  retiring.update_handoff=true; retiring.update_preserve_view=true; assert(retiring:shutdown()); eq(f.deleted,0)
+  local replacement=Main.new(f,settings,{schema=1,view=view}); assert(replacement:start()); eq(replacement.view,view); eq(f.viewCreates,1); eq(f.viewAdoptions,1)
+  assert(replacement:shutdown()); eq(f.deleted,1)
+end)
+test("incompatible update handoff deletes the stale view and constructs a new one",function()
+  local f=fake(); local stale=f:createView(); local replacement=Main.new(f,{layout={},view_schema=2},{schema=1,view=stale}); assert(replacement:start())
+  eq(f.deleted,1); eq(f.viewCreates,2); eq(f.viewAdoptions,nil); assert(replacement:shutdown())
 end)
 test("health check requires root handlers and an owned chat trigger",function()
   local f=fake(); local hud=Main.new(f,{layout={left_width=190,right_width=270}}); eq(hud:healthCheck(),nil); hud:start(); local updates=f.viewUpdates; eq(hud:healthCheck(),true); eq(f.viewUpdates,updates); hud.runtime.aliases[#hud.runtime.aliases+1]=99999; eq(hud:healthCheck(),true); hud.chat.trigger=nil; eq(hud:healthCheck(),nil)

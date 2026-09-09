@@ -26,6 +26,7 @@ function Release.validateManifest(manifest,policy)
   if type(manifest)~="table" or type(policy)~="table" then return nil,"manifest and policy are required" end
   if manifest.package~="DragonsGateHUD" then return nil,"unexpected package identity" end
   if not versionParts(manifest.version) or not versionParts(manifest.minimum_mudlet) then return nil,"invalid version" end
+  if manifest.view_schema~=nil and (tonumber(manifest.view_schema)~=manifest.view_schema or manifest.view_schema<1 or manifest.view_schema%1~=0) then return nil,"invalid view schema" end
   if type(manifest.sha256)~="string" or not manifest.sha256:match("^[0-9a-fA-F]+$") or #manifest.sha256~=64 then return nil,"invalid SHA-256" end
   local size=tonumber(manifest.archive_size); if not size or size<1 or size>(policy.package_limit or 10485760) then return nil,"archive exceeds size policy" end
   local ok,err=Release.validateAssetUrl(manifest.archive_url,policy.owner,policy.repository,manifest.version); if not ok then return nil,err end

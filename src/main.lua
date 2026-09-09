@@ -7,10 +7,10 @@ local function colorOptions(status)
   for _,name in ipairs(colorFeatures) do result[name]=status[name] end
   return result
 end
-function Main.new(adapter,settings)
+function Main.new(adapter,settings,viewHandoff)
   adapter.settings=settings
   local colorSettings=settings and settings.colorization
-  local self=setmetatable({adapter=adapter,settings=settings,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
+  local self=setmetatable({adapter=adapter,settings=settings,view_handoff=viewHandoff,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
   self.map_diagnostics=MapDiagnostics.new(settings and settings.version,settings and settings.edition,function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end)
   self.failure_reports=FailureReport.new({version=settings and settings.version,edition=settings and settings.edition,clock=function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end,save=function(report) if adapter.saveFailureReport then return adapter:saveFailureReport(report) end end,submit=function(report,done) if not adapter.submitFailureReport then return nil,"anonymous failure reporting is unavailable" end; return adapter:submitFailureReport(report,done) end})
@@ -784,7 +784,14 @@ function Main:start()
   self.cleanup=Cleanup.new(self.map,cleanupRuntime,clock,tokenFactory,30)
   self:installMapClickHook()
   local startupOk,startupErr=pcall(function()
-  self.view=self.adapter:createView(self.settings)
+  local handoff=self.view_handoff; self.view_handoff=nil
+  if type(handoff)=="table" and tonumber(handoff.schema)==tonumber(self.settings.view_schema) and handoff.view and self.adapter.adoptView then
+    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted end
+  end
+  if not self.view then
+    if type(handoff)=="table" and handoff.view and type(handoff.view.delete)=="function" then pcall(handoff.view.delete,handoff.view) end
+    self.view=self.adapter:createView(self.settings)
+  end
   if self.view.setMapCollectionActionCallback then self.view:setMapCollectionActionCallback(function(action,item,name)
     local result,err
     if action=="use_collection" then result,err=self:switchMapCollection(item.id)
@@ -1018,7 +1025,8 @@ function Main:shutdown()
   -- collection snapshot during this exact updater handoff; normal shutdowns,
   -- reloads, map switches, backups, imports, and exports still save it.
   local updateHandoff=self.update_handoff==true
-  self.update_handoff=nil
+  local preserveView=updateHandoff and self.update_preserve_view==true and self.view~=nil
+  self.update_handoff=nil; self.update_preserve_view=nil
   if not updateHandoff and self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
   if self.clock_timer then
     if type(self.adapter.stopClockTimer)=="function" then self.adapter:stopClockTimer(self.clock_timer) else self.adapter:cancelTimer(self.clock_timer) end
@@ -1034,8 +1042,8 @@ function Main:shutdown()
   self.cleanup=nil
   if self.automapper then self.automapper:shutdown(); self.automapper=nil end; self.map=nil; self.map_collections=nil
   for _,id in ipairs(self.runtime.events) do self.adapter:killEvent(id) end; for _,id in ipairs(self.runtime.aliases) do self.adapter:killAlias(id) end; for _,id in ipairs(self.runtime.triggers or {}) do self.adapter:killTrigger(id) end
-  self.runtime={events={},aliases={},triggers={}}; if self.view then self.view:delete(); self.view=nil end
-  if self.original_borders then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]); self.original_borders=nil end
+  self.runtime={events={},aliases={},triggers={}}; if self.view and not preserveView then self.view:delete() end; self.view=nil
+  if self.original_borders and not preserveView then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]) end; self.original_borders=nil
   self.character_entry_started=false; self.character_entry_name=nil; self.runtime_registration_complete=false; self.started=false; return true
 end
 function Main:reload() self:shutdown(); return self:start() end

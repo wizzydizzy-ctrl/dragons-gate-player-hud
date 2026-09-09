@@ -14,8 +14,8 @@ local function withEntryStubs(fn)
   local defaults={schema=1,chat={enabled=true,height_percent=.21,target_height=240,min_height=160,max_height=320,visible_limit=1000,dedupe_seconds=3,timestamps=true}}
   local adapter={}
   local Main={}
-  function Main.new(_,settings)
-    local controller={adapter=adapter,settings=settings,reloads=0,starts=0,shutdowns=0}
+  function Main.new(_,settings,viewHandoff)
+    local controller={adapter=adapter,settings=settings,view_handoff=viewHandoff,reloads=0,starts=0,shutdowns=0}
     function controller:start() self.starts=self.starts+1; if adapter.failStart then return nil,adapter.failStart end; return true end
     function controller:shutdown() self.shutdowns=self.shutdowns+1; return true end
     function controller:reload() self.reloads=self.reloads+1; return true end
@@ -66,6 +66,14 @@ test("replacement handoff bypasses legacy map serialization before shutdown",fun
     dofile("src/entry.lua")
     eq(observed,nil)
     eq(retiring.update_handoff,true)
+  end)
+end)
+test("replacement entry carries a preserved compatible view into the new controller",function()
+  withEntryStubs(function(context)
+    local handoff={schema=1,view={root={}}}
+    DGHUD={user_settings={},_update_reinstall_pending=true,_view_handoff=handoff,controller={map_collections={}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.controller.view_handoff,handoff); eq(DGHUD._view_handoff,nil)
   end)
 end)
 

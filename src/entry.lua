@@ -1,6 +1,7 @@
 local previous=rawget(_G,"DGHUD")
 local userSettings=previous and previous.user_settings
 local updateReinstallPending=previous and previous._update_reinstall_pending
+local viewHandoff=previous and previous._view_handoff
 if updateReinstallPending and previous and type(previous.controller)=="table" then
   -- The replacement package owns this handoff. Detaching the retiring
   -- collection manager also gives pre-0.3.8 HUDs the fast path: their shutdown
@@ -13,7 +14,7 @@ local chat=previous and type(previous.chat)=="table" and previous.chat or {}
 chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
-DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending}
+DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending,_view_handoff=viewHandoff}
 local moduleNames={"defaults","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
@@ -40,7 +41,7 @@ end
 local applied,applyErr=applyUserSettings()
 if not applied then error(applyErr) end
 DGHUD.chatStorageApi=Storage.mudletApi()
-DGHUD.controller=Main.new(Adapter.new(),DGHUD.settings)
+DGHUD.controller=Main.new(Adapter.new(),DGHUD.settings,viewHandoff)
 DGHUD.updater=Updater.new(DGHUD.controller.adapter,DGHUD.settings)
 DGHUD.controller.updater=DGHUD.updater
 Main.installChatApi(DGHUD)
@@ -56,4 +57,5 @@ function DGHUD.healthCheck()
 end
 local started,startErr=DGHUD.start()
 if not started then error("DGHUD startup failed: "..tostring(startErr or "unknown error"),0) end
+DGHUD._view_handoff=nil
 if DGHUD.controller and DGHUD.controller.adapter and DGHUD.controller.adapter.ensureRecoveryPackage then pcall(DGHUD.controller.adapter.ensureRecoveryPackage,DGHUD.controller.adapter) end

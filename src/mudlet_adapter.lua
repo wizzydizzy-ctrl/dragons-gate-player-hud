@@ -3,6 +3,23 @@ local Adapter={}; Adapter.__index=Adapter
 function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
 function Adapter.verifyArchive(payload,digest) return type(payload)=="string" and type(digest)=="string" and SHA256.hex(payload)==digest end
+function Adapter.nativeHashSpec(osName,path)
+  osName=tostring(osName or ""):lower()
+  if osName=="mac" or osName=="macos" or osName=="osx" then return "/usr/bin/shasum",{"-a","256",path} end
+  if osName=="linux" or osName=="freebsd" or osName=="openbsd" or osName=="netbsd" then return "/usr/bin/sha256sum",{path} end
+  if osName=="windows" then
+    local root=os.getenv("SystemRoot") or os.getenv("WINDIR") or "C:\\Windows"
+    return root.."\\System32\\certutil.exe",{"-hashfile",path,"SHA256"}
+  end
+end
+function Adapter.parseNativeHash(output)
+  output=tostring(output or "")
+  for line in (output.."\n"):gmatch("([^\r\n]*)[\r\n]+") do
+    local compact=line:gsub("%s",""):lower()
+    if #compact==64 and compact:match("^[0-9a-f]+$") then return compact end
+  end
+  for token in output:gmatch("%x+") do if #token==64 then return token:lower() end end
+end
 function Adapter.manifestUrl(github,nonce)
   return "https://github.com/"..github.owner.."/"..github.repository.."/releases/latest/download/manifest.json"
 end
@@ -35,6 +52,15 @@ function Adapter:centerMap(roomID)
 end
 function Adapter:createView(settings)
   local view=View.new(settings)
+  if view.setMapCenterCallback then view:setMapCenterCallback(function(roomID) return self:centerMap(roomID) end) end
+  return view
+end
+function Adapter:adoptView(view,settings)
+  if type(view)~="table" or not view.root then return nil,"preserved HUD view is unavailable" end
+  setmetatable(view,View)
+  local ok,result,message=pcall(view.prepareForReuse,view,settings)
+  if not ok then return nil,result end
+  if not result then return nil,message or "preserved HUD view could not be prepared" end
   if view.setMapCenterCallback then view:setMapCenterCallback(function(roomID) return self:centerMap(roomID) end) end
   return view
 end
@@ -434,8 +460,46 @@ function Adapter:reportVersionStatus(installed,latest,current)
 end
 function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Settings: "..getMudletHomeDir().."/DragonsGateHUD/settings.lua\n") end
 local function readFile(path) local f=io.open(path,"rb"); if not f then return nil end; local data=f:read("*a"); f:close(); return data end
+local function fileSize(path) local f=io.open(path,"rb"); if not f then return nil end; local ok,size=pcall(function() return f:seek("end") end); if not ok then local data=f:read("*a"); size=type(data)=="string" and #data or nil end; f:close(); return tonumber(size) end
 local function writeFile(path,data) local f=assert(io.open(path,"wb")); f:write(data); f:close() end
 local function hasPackage(name) for _,value in ipairs(getPackages() or {}) do if value==name then return true end end return false end
+function Adapter:verifyFileAsync(path,digest,done)
+  done=done or function() end
+  local expected=type(digest)=="string" and digest:lower() or nil
+  local finished=false
+  local function finish(ok,message) if finished then return end; finished=true; done(ok,message) end
+  local function fallback()
+    local payload=readFile(path)
+    if not payload then finish(nil,"package is missing"); return end
+    local valid=Adapter.verifyArchive(payload,expected)
+    if valid then finish(true) else finish(false,"package checksum mismatch") end
+  end
+  if type(expected)~="string" or #expected~=64 or type(rawget(_G,"spawn"))~="function" or type(rawget(_G,"getOS"))~="function" then fallback(); return true end
+  local osOK,osName=pcall(getOS); if not osOK then fallback(); return true end
+  local program,args=Adapter.nativeHashSpec(osName,path); if not program then fallback(); return true end
+  local chunks={}; local process
+  local function receive(value) if value~=nil then chunks[#chunks+1]=tostring(value) end end
+  local unpackValues=table.unpack or unpack
+  local spawned,result=pcall(function() return spawn(receive,program,unpackValues(args)) end)
+  if not spawned or type(result)~="table" or type(result.isRunning)~="function" then fallback(); return true end
+  process=result
+  local attempts=0
+  local function closeProcess() if process and type(process.close)=="function" then pcall(process.close) end end
+  local function poll()
+    if finished then closeProcess(); return end
+    attempts=attempts+1
+    local runningOK,running=pcall(process.isRunning)
+    if runningOK and running and attempts<80 then tempTimer(0.025,poll); return end
+    closeProcess()
+    local actual=Adapter.parseNativeHash(table.concat(chunks))
+    if actual then
+      local valid=actual==expected
+      if valid then finish(true) else finish(false,"package checksum mismatch") end
+    else fallback() end
+  end
+  tempTimer(0,poll)
+  return true
+end
 function Adapter:ensureRecoveryPackage()
   if hasPackage("DGHUDRecovery") or self.recovery_installing then return true end
   self.recovery_installing=true
@@ -505,17 +569,28 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     if not healthy then return nil,why or "installed HUD is not healthy" end
     return true
   end
-  local function markUpdateHandoff()
+  local function markUpdateHandoff(destinationSchema)
     local hud=rawget(_G,"DGHUD")
     if type(hud)~="table" then return end
     hud._update_reinstall_pending=true
-    if type(hud.controller)=="table" then hud.controller.update_handoff=true end
+    local controller=type(hud.controller)=="table" and hud.controller or nil
+    if controller then
+      controller.update_handoff=true
+      local sourceSchema=hud.settings and hud.settings.view_schema
+      if tonumber(sourceSchema) and tonumber(sourceSchema)==tonumber(destinationSchema) and controller.view and controller.view.root then
+        hud._view_handoff={schema=tonumber(sourceSchema),view=controller.view}
+        controller.update_preserve_view=true
+      else
+        hud._view_handoff=nil; controller.update_preserve_view=nil
+      end
+    end
   end
   local function clearUpdateHandoff()
     local hud=rawget(_G,"DGHUD")
     if type(hud)~="table" then return end
     hud._update_reinstall_pending=nil
-    if type(hud.controller)=="table" then hud.controller.update_handoff=nil end
+    hud._view_handoff=nil
+    if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end
   end
   local function awaitRuntime(version,attempts,done,retiredRuntime)
     local remaining=tonumber(attempts) or 12
@@ -537,12 +612,24 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
   end
   local function bootstrapRollback()
     updater:stage("Preparing rollback")
-    local cached=readFile(currentPath); local cachedManifestRaw=readFile(currentManifestPath)
-    if cached and cachedManifestRaw then
+    local cachedManifestRaw=readFile(currentManifestPath)
+    if cachedManifestRaw then
       local ok,cachedManifest=pcall(yajl.to_value,cachedManifestRaw)
       if ok then
         local valid=updater:validateManifest(cachedManifest)
-        if valid and exactInstalled(cachedManifest) and #cached<=(policy.package_limit or 10485760) and Adapter.verifyArchive(cached,cachedManifest.sha256) then rollbackManifest=cachedManifest; return stageRollback(cached,true) end
+        local cachedSize=fileSize(currentPath)
+        if valid and exactInstalled(cachedManifest) and cachedSize and cachedSize<=(policy.package_limit or 10485760) then
+          self:verifyFileAsync(currentPath,cachedManifest.sha256,function(verified)
+            if finished then return end
+            if verified then
+              local cached=readFile(currentPath); if not cached then return fail("cached rollback package disappeared") end
+              rollbackManifest=cachedManifest; stageRollback(cached,true); return
+            end
+            updateNonce=updateNonce+1
+            request(rollbackManifestPath,Adapter.versionManifestUrl(github,settings.version,tostring(os.time()).."-"..tostring(updateNonce)))
+          end)
+          return
+        end
       end
     end
     updateNonce=updateNonce+1
@@ -555,7 +642,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch"); return end
       writeFile(packagePath,data)
       local retiredRuntime=rawget(_G,"DGHUD")
-      markUpdateHandoff()
+      markUpdateHandoff(targetManifest.view_schema)
       if hasPackage(name) then local removed=uninstallPackage(name); if removed==nil then clearUpdateHandoff(); replaceDone(nil,"could not remove existing HUD package"); return end end
       schedule(0.10,function()
         local installed=installPackage(packagePath)
@@ -567,21 +654,23 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     end
     self.healthCheck=nil
     self.rollbackAsync=function(_,name,rollbackDone)
-      local rollbackPayload=readFile(previousPath)
-      if name~="DragonsGateHUD" or not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
-      if not Adapter.verifyArchive(rollbackPayload,previousDigest) then rollbackDone(nil,"rollback package checksum mismatch"); return end
-      local retiredRuntime=rawget(_G,"DGHUD")
-      markUpdateHandoff()
-      if hasPackage(name) then uninstallPackage(name) end
-      schedule(0.10,function()
-        -- Mudlet derives the installed package identity from the archive filename.
-        -- Installing previous.mpackage registers a package named "previous" and
-        -- leaves DragonsGateHUD missing, so stage the verified bytes under the
-        -- canonical package filename before restoring.
-        writeFile(rollbackInstallPath,rollbackPayload)
-        local restored=installPackage(rollbackInstallPath)
-        if restored==nil then rollbackDone(nil,"could not restore rollback package"); return end
-        awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,12,rollbackDone,retiredRuntime)
+      if name~="DragonsGateHUD" or not fileSize(previousPath) then rollbackDone(nil,"no rollback package available"); return end
+      self:verifyFileAsync(previousPath,previousDigest,function(verified)
+        if not verified then rollbackDone(nil,"rollback package checksum mismatch"); return end
+        local rollbackPayload=readFile(previousPath); if not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
+        local retiredRuntime=rawget(_G,"DGHUD")
+        markUpdateHandoff(rollbackManifest and rollbackManifest.view_schema)
+        if hasPackage(name) then uninstallPackage(name) end
+        schedule(0.10,function()
+          -- Mudlet derives the installed package identity from the archive filename.
+          -- Installing previous.mpackage registers a package named "previous" and
+          -- leaves DragonsGateHUD missing, so stage the verified bytes under the
+          -- canonical package filename before restoring.
+          writeFile(rollbackInstallPath,rollbackPayload)
+          local restored=installPackage(rollbackInstallPath)
+          if restored==nil then rollbackDone(nil,"could not restore rollback package"); return end
+          awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,12,rollbackDone,retiredRuntime)
+        end)
       end)
     end
     local completed=false
@@ -601,21 +690,34 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       local manifest,raw,why=parseManifest(path); if not manifest then return fail(why) end
       targetManifest=manifest; targetManifestRaw=raw; updater:stage("Downloading package"); request(packagePath,manifest.archive_url)
     elseif path==packagePath then
-      local payload=readFile(path)
-      if not payload or #payload>(policy.package_limit or 10485760) then return fail("package is missing or too large") end
-      if not Adapter.verifyArchive(payload,targetManifest.sha256) then return fail("package checksum mismatch") end
-      bootstrapRollback()
+      local size=fileSize(path)
+      if not size or size>(policy.package_limit or 10485760) then return fail("package is missing or too large") end
+      self:verifyFileAsync(path,targetManifest.sha256,function(verified)
+        if finished then return end
+        if not verified then return fail("package checksum mismatch") end
+        bootstrapRollback()
+      end)
     elseif path==rollbackManifestPath then
       local manifest,_,why=parseManifest(path); if not manifest then return fail("rollback bootstrap failed: "..tostring(why)) end
       if not exactInstalled(manifest) then return fail("rollback bootstrap returned the wrong installed version") end
       rollbackManifest=manifest
-      local cached=readFile(currentPath)
-      if cached and #cached<=(policy.package_limit or 10485760) and Adapter.verifyArchive(cached,manifest.sha256) then stageRollback(cached,true)
+      local cachedSize=fileSize(currentPath)
+      if cachedSize and cachedSize<=(policy.package_limit or 10485760) then
+        self:verifyFileAsync(currentPath,manifest.sha256,function(verified)
+          if finished then return end
+          if verified then local cached=readFile(currentPath); if cached then stageRollback(cached,true); return end end
+          request(rollbackPackagePath,manifest.archive_url)
+        end)
       else request(rollbackPackagePath,manifest.archive_url) end
     elseif path==rollbackPackagePath then
-      local payload=readFile(path)
-      if not payload or #payload>(policy.package_limit or 10485760) then return fail("rollback package is missing or too large") end
-      stageRollback(payload,false)
+      local size=fileSize(path)
+      if not size or size>(policy.package_limit or 10485760) then return fail("rollback package is missing or too large") end
+      self:verifyFileAsync(path,rollbackManifest.sha256,function(verified)
+        if finished then return end
+        if not verified then return fail("rollback package checksum mismatch") end
+        local payload=readFile(path); if not payload then return fail("rollback package disappeared") end
+        stageRollback(payload,true)
+      end)
     end
   end)
   if validatedManifest then

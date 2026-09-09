@@ -1238,5 +1238,28 @@ function View:updateClock(clock)
   self.clock_header:echo(View.clockContent(layout,t,clock))
   return true
 end
+function View:prepareForReuse(settings)
+  if type(self.root)~="table" then return nil,"preserved HUD view is unavailable" end
+  self.settings=settings or self.settings
+  self.chat_filter_callback=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
+  self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
+  self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
+  self.map_zoom_callback=nil; self.map_clear_all_callback=nil
+  self.color_menu_visible=false; self.color_settings_visible=false; self.help_visible=false; self.roller_settings_visible=false
+  self.map_settings_visible=false; self.feedback_visible=false; self.feedback_sending=false; self.support_visible=false; self.map_library_visible=false
+  local methods={"setColorMenuVisible","hideColorSettings","hideHelp","hideRollerSettings","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
+  for _,name in ipairs(methods) do if type(self[name])=="function" then pcall(self[name],self) end end
+  local seen={}
+  local function hideNested(value)
+    if type(value)~="table" or seen[value] then return end; seen[value]=true
+    if type(value.hide)=="function" then pcall(value.hide,value); return end
+    for _,child in pairs(value) do hideNested(child) end
+  end
+  for key,value in pairs(self) do
+    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^help_") or key:match("^roller_") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) then hideNested(value) end
+  end
+  if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
+  return true
+end
 function View:delete() if self.root then self.root:delete(); self.root=nil end end
 return View

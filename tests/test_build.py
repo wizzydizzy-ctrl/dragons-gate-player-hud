@@ -20,6 +20,7 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('DGHUD._update_reinstall_pending=true',recovery_xml)
                 self.assertIn('https://github.com/ricwall/dragons-gate-hud/releases/latest/download/DragonsGateHUD.mpackage',recovery_xml)
             self.assertEqual(manifest['package'],'DragonsGateHUD')
+            self.assertEqual(manifest['view_schema'],1)
             self.assertEqual(manifest['sha256'],hashlib.sha256(package.read_bytes()).hexdigest())
             with zipfile.ZipFile(package) as z:
                 names=z.namelist(); self.assertEqual(names,['DragonsGateHUD.xml'])
