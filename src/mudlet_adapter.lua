@@ -1,7 +1,11 @@
 local View=require("view"); local Storage=require("chat_storage"); local MapAdapter=require("map_adapter"); local SHA256=require("sha256")
-local Adapter={}; Adapter.__index=Adapter
+local Adapter={recovery_version="1.1.0"}; Adapter.__index=Adapter
 function Adapter.updateBase(home) return home.."/DGHUDUpdater" end
 function Adapter.updateArchivePath(home) return Adapter.updateBase(home).."/staging/DragonsGateHUD.mpackage" end
+function Adapter.isCanonicalArchivePath(path)
+  local normalized=tostring(path or ""):gsub("\\","/")
+  return normalized:match("([^/]+)$")=="DragonsGateHUD.mpackage"
+end
 function Adapter.verifyArchive(payload,digest) return type(payload)=="string" and type(digest)=="string" and SHA256.hex(payload)==digest end
 function Adapter.nativeHashSpec(osName,path)
   osName=tostring(osName or ""):lower()
@@ -463,6 +467,16 @@ local function readFile(path) local f=io.open(path,"rb"); if not f then return n
 local function fileSize(path) local f=io.open(path,"rb"); if not f then return nil end; local ok,size=pcall(function() return f:seek("end") end); if not ok then local data=f:read("*a"); size=type(data)=="string" and #data or nil end; f:close(); return tonumber(size) end
 local function writeFile(path,data) local f=assert(io.open(path,"wb")); f:write(data); f:close() end
 local function hasPackage(name) for _,value in ipairs(getPackages() or {}) do if value==name then return true end end return false end
+function Adapter.versionAtLeast(actual,required)
+  local function tuple(value) local a,b,c=tostring(value or ""):match("^(%d+)%.(%d+)%.(%d+)$"); if not a then return nil end; return tonumber(a),tonumber(b),tonumber(c) end
+  local aa,ab,ac=tuple(actual); local ra,rb,rc=tuple(required); if not aa or not ra then return false end
+  if aa~=ra then return aa>ra end; if ab~=rb then return ab>rb end; return ac>=rc
+end
+function Adapter:recoveryPackageCurrent()
+  if not hasPackage("DGHUDRecovery") or type(rawget(_G,"getPackageInfo"))~="function" then return false end
+  local ok,version=pcall(getPackageInfo,"DGHUDRecovery","version")
+  return ok and Adapter.versionAtLeast(version,Adapter.recovery_version)
+end
 function Adapter:verifyFileAsync(path,digest,done)
   done=done or function() end
   local expected=type(digest)=="string" and digest:lower() or nil
@@ -501,14 +515,32 @@ function Adapter:verifyFileAsync(path,digest,done)
   return true
 end
 function Adapter:ensureRecoveryPackage()
-  if hasPackage("DGHUDRecovery") or self.recovery_installing then return true end
+  if self:recoveryPackageCurrent() or self.recovery_installing then return true end
   self.recovery_installing=true
   local github=self.settings and self.settings.github or {}; local owner=github.owner or "wizzydizzy-ctrl"; local repository=github.repository or "dragons-gate-player-hud"
-  local url="https://github.com/"..owner.."/"..repository.."/releases/latest/download/DGHUDRecovery.mpackage"; local path=getMudletHomeDir().."/DGHUDRecovery.mpackage"; local doneId,errorId,timeoutId
-  local function cleanup() if doneId then killAnonymousEventHandler(doneId) end; if errorId then killAnonymousEventHandler(errorId) end; if timeoutId then killTimer(timeoutId) end; self.recovery_installing=false end
-  doneId=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded) if downloaded~=path then return end; cleanup(); local installed=installPackage(path); if installed==nil then cecho("\n<yellow>[DGHUD Recovery]<reset> Companion install failed. Manual updates remain available.\n") end end)
-  errorId=registerAnonymousEventHandler("sysDownloadError",function(_,_,failedUrl) if failedUrl==url then cleanup() end end)
-  timeoutId=tempTimer(45,cleanup); downloadFile(path,url); return true
+  local url="https://github.com/"..owner.."/"..repository.."/releases/latest/download/DGHUDRecovery.mpackage"; local path=getMudletHomeDir().."/DGHUDRecovery.mpackage"; local doneId,errorId,timeoutId; local timers={}; local finished=false
+  local function disarmDownload() if doneId then killAnonymousEventHandler(doneId); doneId=nil end; if errorId then killAnonymousEventHandler(errorId); errorId=nil end; if timeoutId then killTimer(timeoutId); timeoutId=nil end end
+  local function finish(message) if finished then return end; finished=true; disarmDownload(); for _,id in ipairs(timers) do killTimer(id) end; timers={}; self.recovery_installing=false; if message then cecho("\n<yellow>[DGHUD Recovery]<reset> "..message.." Manual updates remain available.\n") end end
+  local function scheduleRecovery(delay,fn) timers[#timers+1]=tempTimer(delay,fn) end
+  local function awaitCurrent(remaining)
+    if self:recoveryPackageCurrent() then finish(); return end
+    if remaining<=0 then finish("Companion install was accepted, but version "..Adapter.recovery_version.." did not activate."); return end
+    scheduleRecovery(0.25,function() awaitCurrent(remaining-1) end)
+  end
+  local function installRecovery()
+    local installed=installPackage(path); if installed==nil then finish("Companion install failed."); return end
+    awaitCurrent(120)
+  end
+  local function replaceRecovery(remaining)
+    if not hasPackage("DGHUDRecovery") then installRecovery(); return end
+    if uninstallPackage("DGHUDRecovery") then installRecovery(); return end
+    if remaining<=0 then finish("Could not replace the outdated recovery companion after waiting for Mudlet to finish saving."); return end
+    scheduleRecovery(0.10,function() replaceRecovery(remaining-1) end)
+  end
+  doneId=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded) if downloaded~=path then return end; disarmDownload(); replaceRecovery(300) end)
+  errorId=registerAnonymousEventHandler("sysDownloadError",function(_,_,failedUrl) if failedUrl==url then finish("Companion download failed.") end end)
+  timeoutId=tempTimer(45,function() finish("Companion download timed out.") end)
+  local queued=downloadFile(path,url); if queued==false then finish("Companion download could not start."); return nil,"recovery companion download could not start" end; return true
 end
 function Adapter:checkLatestAsync(updater,done)
   local settings=updater.settings; local github=settings.github or {}; local policy=settings.update or {}
@@ -605,6 +637,18 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     -- deferred Mudlet activation still receives the full three-second window.
     probe()
   end
+  local function removeForRollback(name,attempts,done)
+    local remaining=tonumber(attempts) or 1
+    local function attempt()
+      if not hasPackage(name) then done(true); return end
+      local removed=uninstallPackage(name)
+      if removed then done(true); return end
+      if remaining<=0 then done(nil,"could not remove failed HUD package while Mudlet was saving"); return end
+      remaining=remaining-1
+      schedule(0.10,attempt)
+    end
+    attempt()
+  end
   local beginReplacement
   local function stageRollback(payload,preverified)
     if preverified~=true and not Adapter.verifyArchive(payload,rollbackManifest.sha256) then return fail("rollback package checksum mismatch") end
@@ -640,17 +684,18 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     disarmTimeout(); expectedPath=nil; expectedUrl=nil
     self.replacePackageAsync=function(_,data,name,replaceDone)
       if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch"); return end
+      if not Adapter.isCanonicalArchivePath(packagePath) then replaceDone(nil,"package archive filename is not canonical"); return end
       writeFile(packagePath,data)
       local retiredRuntime=rawget(_G,"DGHUD")
       markUpdateHandoff(targetManifest.view_schema)
       if hasPackage(name) then local removed=uninstallPackage(name); if removed==nil then clearUpdateHandoff(); replaceDone(nil,"could not remove existing HUD package"); return end end
-      schedule(0.10,function()
-        local installed=installPackage(packagePath)
-        if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-        -- Activation is deferred until this callback unwinds. Independent
-        -- timers verify the exact new runtime before the transaction succeeds.
-        awaitRuntime(targetManifest.version,12,replaceDone,retiredRuntime)
-      end)
+      -- Mudlet queues a full profile save on the next event-loop pass after an
+      -- uninstall. Install the verified replacement in this same callback so
+      -- the save contains the new package instead of making the install wait
+      -- behind a several-second save of a large profile.
+      local installed=installPackage(packagePath)
+      if installed==nil then replaceDone(nil,"could not install HUD package"); return end
+      awaitRuntime(targetManifest.version,12,replaceDone,retiredRuntime)
     end
     self.healthCheck=nil
     self.rollbackAsync=function(_,name,rollbackDone)
@@ -658,18 +703,23 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       self:verifyFileAsync(previousPath,previousDigest,function(verified)
         if not verified then rollbackDone(nil,"rollback package checksum mismatch"); return end
         local rollbackPayload=readFile(previousPath); if not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
+        -- Mudlet derives the installed package identity from the archive filename.
+        -- Installing previous.mpackage registers a package named "previous" and
+        -- leaves DragonsGateHUD missing, so stage the verified bytes under the
+        -- canonical package filename before restoring.
+        if not Adapter.isCanonicalArchivePath(rollbackInstallPath) then rollbackDone(nil,"rollback archive filename is not canonical"); return end
+        writeFile(rollbackInstallPath,rollbackPayload)
         local retiredRuntime=rawget(_G,"DGHUD")
         markUpdateHandoff(rollbackManifest and rollbackManifest.view_schema)
-        if hasPackage(name) then uninstallPackage(name) end
-        schedule(0.10,function()
-          -- Mudlet derives the installed package identity from the archive filename.
-          -- Installing previous.mpackage registers a package named "previous" and
-          -- leaves DragonsGateHUD missing, so stage the verified bytes under the
-          -- canonical package filename before restoring.
-          writeFile(rollbackInstallPath,rollbackPayload)
+        local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
+        removeForRollback(name,retryWindow,function(removed,removeErr)
+          if not removed then clearUpdateHandoff(); rollbackDone(nil,removeErr); return end
+          -- A successful uninstall guarantees no profile save was active at that
+          -- instant. Install in the same callback, before its deferred save runs.
           local restored=installPackage(rollbackInstallPath)
-          if restored==nil then rollbackDone(nil,"could not restore rollback package"); return end
-          awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,12,rollbackDone,retiredRuntime)
+          if restored==nil then clearUpdateHandoff(); rollbackDone(nil,"could not restore rollback package"); return end
+          local healthAttempts=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.25))
+          awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,healthAttempts,rollbackDone,retiredRuntime)
         end)
       end)
     end
