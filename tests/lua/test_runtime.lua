@@ -436,8 +436,22 @@ end)
 test("startup is idempotent and shutdown owns exact runtime IDs",function()
   local f=fake(); local hud=Main.new(f,{layout={left_width=190,right_width=270}}); eq(hud:start(),true); local first=f.next; eq(hud:start(),true); eq(f.next,first); eq(hud:shutdown(),true); eq(f.deleted,1); eq(f.set_borders[1],0); eq(f.set_borders[2],0); eq(f:count(f.events),0); eq(f:count(f.aliases),0); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
+test("update handoff skips only the redundant map snapshot",function()
+  local previous=rawget(_G,"DGHUD")
+  local ok,err=pcall(function()
+    local function shutdownWith(handoff,staleGlobal)
+      local f=fake(); local hud=Main.new(f,{layout={}}); local saves=0
+      hud.started=true; hud.map_collections={}; hud.saveActiveMapCollection=function() saves=saves+1; return true end
+      hud.update_handoff=handoff; _G.DGHUD={_update_reinstall_pending=staleGlobal}; assert(hud:shutdown()); return saves
+    end
+    eq(shutdownWith(true,true),0)
+    eq(shutdownWith(false,false),1)
+    eq(shutdownWith(false,true),1)
+  end)
+  _G.DGHUD=previous; if not ok then error(err,0) end
+end)
 test("health check requires root handlers and an owned chat trigger",function()
-  local hud=Main.new(fake(),{layout={left_width=190,right_width=270}}); eq(hud:healthCheck(),nil); hud:start(); eq(hud:healthCheck(),true); hud.runtime.aliases[#hud.runtime.aliases+1]=99999; eq(hud:healthCheck(),true); hud.chat.trigger=nil; eq(hud:healthCheck(),nil)
+  local f=fake(); local hud=Main.new(f,{layout={left_width=190,right_width=270}}); eq(hud:healthCheck(),nil); hud:start(); local updates=f.viewUpdates; eq(hud:healthCheck(),true); eq(f.viewUpdates,updates); hud.runtime.aliases[#hud.runtime.aliases+1]=99999; eq(hud:healthCheck(),true); hud.chat.trigger=nil; eq(hud:healthCheck(),nil)
 end)
 test("window resize recomputes absolute borders and view layout",function()
   local f=fake(); f.borders={1290,234,1610,120}; local hud=Main.new(f,{layout={}}); hud:start(); eq(f.layouts[#f.layouts].mode,"wide"); eq(f.set_borders[1],336); eq(f.set_borders[2],314); eq(f.set_borders[3],336); eq(f.set_borders[4],f.layouts[#f.layouts].bottom); f.width=760; f.height=700; f.callbacks["sysWindowResizeEvent"](); eq(f.layouts[#f.layouts].mode,"compact"); eq(f.set_borders[1],0); eq(f.set_borders[2],276); eq(f.set_borders[3],0); eq(f.set_borders[4],f.layouts[#f.layouts].bottom)

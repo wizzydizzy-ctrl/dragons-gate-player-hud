@@ -1012,7 +1012,14 @@ function Main:start()
   return true
 end
 function Main:shutdown()
-  if self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
+  -- Package replacement does not alter Mudlet's native map.  Serializing and
+  -- hashing that map here can take several seconds (or much longer for large
+  -- maps), while the newly installed HUD is waiting to activate.  Defer the
+  -- collection snapshot during this exact updater handoff; normal shutdowns,
+  -- reloads, map switches, backups, imports, and exports still save it.
+  local updateHandoff=self.update_handoff==true
+  self.update_handoff=nil
+  if not updateHandoff and self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
   if self.clock_timer then
     if type(self.adapter.stopClockTimer)=="function" then self.adapter:stopClockTimer(self.clock_timer) else self.adapter:cancelTimer(self.clock_timer) end
     self.clock_timer=nil
@@ -1036,6 +1043,8 @@ function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
   local function validRegistrations(items) if type(items)~="table" or #items<1 then return false end; for _,id in ipairs(items) do if id==nil or id==false then return false end end; return true end
   if not self.started or not self.runtime_registration_complete or not self.view or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or not validRegistrations(self.runtime.events) or not validRegistrations(self.runtime.aliases) or not validRegistrations(self.runtime.triggers) then return nil,"HUD is not healthy" end
-  local ok=pcall(function() self:refresh() end); if not ok then return nil,"state refresh failed" end; return true
+  -- start() has already rendered the complete HUD.  The updater needs a
+  -- side-effect-free readiness gate here, not a second layout and repaint.
+  return true
 end
 return Main

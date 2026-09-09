@@ -1,13 +1,19 @@
 local previous=rawget(_G,"DGHUD")
 local userSettings=previous and previous.user_settings
 local updateReinstallPending=previous and previous._update_reinstall_pending
+if updateReinstallPending and previous and type(previous.controller)=="table" then
+  -- The replacement package owns this handoff. Detaching the retiring
+  -- collection manager also gives pre-0.3.8 HUDs the fast path: their shutdown
+  -- cannot serialize the map, while Mudlet's native map remains untouched.
+  previous.controller.update_handoff=true
+  previous.controller.map_collections=nil
+end
 if previous and previous.shutdown then pcall(previous.shutdown) end
 local chat=previous and type(previous.chat)=="table" and previous.chat or {}
 chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
 DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending}
-local installGraceStarted=(type(getEpoch)=="function" and tonumber(getEpoch())) or os.time()
 local moduleNames={"defaults","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
@@ -46,12 +52,8 @@ function DGHUD.reload()
   return DGHUD.controller:reload()
 end
 function DGHUD.healthCheck()
-  -- Older HUD updaters probe only 0.5 seconds after installPackage(), while
-  -- Mudlet may still be registering this package. Let that verified migration
-  -- cross the short registration window; all later checks remain strict.
-  local now=(type(getEpoch)=="function" and tonumber(getEpoch())) or os.time()
-  if DGHUD._update_reinstall_pending==true and now-installGraceStarted<3 then return true end
   return DGHUD.controller:healthCheck()
 end
-DGHUD.start()
+local started,startErr=DGHUD.start()
+if not started then error("DGHUD startup failed: "..tostring(startErr or "unknown error"),0) end
 if DGHUD.controller and DGHUD.controller.adapter and DGHUD.controller.adapter.ensureRecoveryPackage then pcall(DGHUD.controller.adapter.ensureRecoveryPackage,DGHUD.controller.adapter) end

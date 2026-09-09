@@ -116,7 +116,7 @@ local function replacementHarness(options,body)
     uninstallPackage=function() h.uninstalls=h.uninstalls+1; h.active=false; return true end
     installPackage=function(path) h.installs[#h.installs+1]=path; if options.failTarget and path==Adapter.updateArchivePath("/profile") then return nil end; h.active=true; local version=path=="/profile/DGHUDUpdater/DragonsGateHUD.mpackage" and rollback.version or target.version; if not (options.suppressTargetActivation and version==target.version) then h.pendingVersion=version end; return true end
     h.messages={}; h.now=0; getEpoch=function() return h.now end
-    cecho=function(message) h.messages[#h.messages+1]=message end; DGHUD={settings={version=rollback.version},shutdown=function() end,healthCheck=function() return true end}
+    cecho=function(message) h.messages[#h.messages+1]=message end; DGHUD={settings={version=rollback.version},controller={},shutdown=function() end,healthCheck=function() return true end}
     function h:done(path,payload) self.files[path]=payload; self.handlers.sysDownloadDone(nil,path) end
     function h:error(url,message) self.handlers.sysDownloadError(nil,message or "download failed",url) end
     function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingVersion then DGHUD={settings={version=self.pendingVersion},healthCheck=function() return true end}; self.pendingVersion=nil end; return true end end return false end
@@ -135,7 +135,7 @@ test("first updater-managed update bootstraps exact rollback before uninstall",f
     deliverTarget(h); eq(h.uninstalls,0); eq(#h.downloads,4)
     assert(h.downloads[4].url:find("/releases/download/v0.2.83/manifest.json",1,true)); h.handlers.sysDownloadDone(nil,"/unowned/path"); h:error("https://unrelated.example/failure","ignore me"); eq(h.uninstalls,0)
     h:done(h.downloads[4].path,"rollback"); eq(h.uninstalls,0); eq(#h.downloads,5)
-    h:done(h.downloads[5].path,"old-package"); eq(h.uninstalls,1); eq(DGHUD._update_reinstall_pending,true); eq(h.files["/profile/DGHUDUpdater/previous.mpackage"],"old-package")
+    h:done(h.downloads[5].path,"old-package"); eq(h.uninstalls,1); eq(DGHUD._update_reinstall_pending,true); eq(DGHUD.controller.update_handoff,true); eq(h.files["/profile/DGHUDUpdater/previous.mpackage"],"old-package")
     assert(h:run(.10)); assert(h:run(.25)); eq(h.result[1],true); eq(h.active,true); eq(h.hashCalls,2)
   end)
 end)

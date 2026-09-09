@@ -494,26 +494,41 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     return manifest,raw
   end
   local function exactInstalled(manifest) return manifest and tostring(manifest.version)==tostring(settings.version) end
-  local function runtimeHealthy(version)
+  local function runtimeHealthy(version,retiredRuntime)
     if not hasPackage("DragonsGateHUD") then return nil,"installed HUD package was not registered" end
     local hud=rawget(_G,"DGHUD")
     if type(hud)~="table" or type(hud.settings)~="table" or tostring(hud.settings.version)~=tostring(version) then return nil,"installed HUD version did not activate" end
+    if retiredRuntime~=nil and hud==retiredRuntime then return nil,"installed HUD runtime did not restart" end
     if type(hud.healthCheck)~="function" then return nil,"installed HUD health check is unavailable" end
     local ok,healthy,why=pcall(hud.healthCheck)
     if not ok then return nil,"installed HUD health check failed" end
     if not healthy then return nil,why or "installed HUD is not healthy" end
     return true
   end
-  local function awaitRuntime(version,attempts,done)
+  local function markUpdateHandoff()
+    local hud=rawget(_G,"DGHUD")
+    if type(hud)~="table" then return end
+    hud._update_reinstall_pending=true
+    if type(hud.controller)=="table" then hud.controller.update_handoff=true end
+  end
+  local function clearUpdateHandoff()
+    local hud=rawget(_G,"DGHUD")
+    if type(hud)~="table" then return end
+    hud._update_reinstall_pending=nil
+    if type(hud.controller)=="table" then hud.controller.update_handoff=nil end
+  end
+  local function awaitRuntime(version,attempts,done,retiredRuntime)
     local remaining=tonumber(attempts) or 12
     local function probe()
-      local healthy,why=runtimeHealthy(version)
+      local healthy,why=runtimeHealthy(version,retiredRuntime)
       if healthy then done(true); return end
-      remaining=remaining-1
       if remaining<=0 then done(nil,why); return end
-      tempTimer(0.25,probe)
+      remaining=remaining-1
+      schedule(0.25,probe)
     end
-    tempTimer(0.25,probe)
+    -- Synchronous activation succeeds without paying a fixed quarter-second;
+    -- deferred Mudlet activation still receives the full three-second window.
+    probe()
   end
   local beginReplacement
   local function stageRollback(payload,preverified)
@@ -539,14 +554,15 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     self.replacePackageAsync=function(_,data,name,replaceDone)
       if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch"); return end
       writeFile(packagePath,data)
-      if DGHUD then DGHUD._update_reinstall_pending=true end
-      if hasPackage(name) then local removed=uninstallPackage(name); if removed==nil then replaceDone(nil,"could not remove existing HUD package"); return end end
+      local retiredRuntime=rawget(_G,"DGHUD")
+      markUpdateHandoff()
+      if hasPackage(name) then local removed=uninstallPackage(name); if removed==nil then clearUpdateHandoff(); replaceDone(nil,"could not remove existing HUD package"); return end end
       schedule(0.10,function()
         local installed=installPackage(packagePath)
         if installed==nil then replaceDone(nil,"could not install HUD package"); return end
         -- Activation is deferred until this callback unwinds. Independent
         -- timers verify the exact new runtime before the transaction succeeds.
-        awaitRuntime(targetManifest.version,12,replaceDone)
+        awaitRuntime(targetManifest.version,12,replaceDone,retiredRuntime)
       end)
     end
     self.healthCheck=nil
@@ -554,7 +570,8 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
       local rollbackPayload=readFile(previousPath)
       if name~="DragonsGateHUD" or not rollbackPayload then rollbackDone(nil,"no rollback package available"); return end
       if not Adapter.verifyArchive(rollbackPayload,previousDigest) then rollbackDone(nil,"rollback package checksum mismatch"); return end
-      if DGHUD then DGHUD._update_reinstall_pending=true end
+      local retiredRuntime=rawget(_G,"DGHUD")
+      markUpdateHandoff()
       if hasPackage(name) then uninstallPackage(name) end
       schedule(0.10,function()
         -- Mudlet derives the installed package identity from the archive filename.
@@ -564,7 +581,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         writeFile(rollbackInstallPath,rollbackPayload)
         local restored=installPackage(rollbackInstallPath)
         if restored==nil then rollbackDone(nil,"could not restore rollback package"); return end
-        awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,12,rollbackDone)
+        awaitRuntime(rollbackManifest and rollbackManifest.version or settings.version,12,rollbackDone,retiredRuntime)
       end)
     end
     local completed=false

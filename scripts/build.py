@@ -26,7 +26,11 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadError",function(
 handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded)
   if downloaded~=path then return end; cleanup(); cecho("\\n<gold>[DGHUD Recovery]<reset> Replacing only the DragonsGateHUD package…\\n")
   local found=false; for _,name in ipairs(getPackages() or {{}}) do if name=="DragonsGateHUD" then found=true; break end end
-  if found then uninstallPackage("DragonsGateHUD") end
+  if found then
+    if DGHUD then DGHUD._update_reinstall_pending=true; if DGHUD.controller then DGHUD.controller.update_handoff=true end end
+    local removed=uninstallPackage("DragonsGateHUD")
+    if removed==nil then if DGHUD then DGHUD._update_reinstall_pending=nil; if DGHUD.controller then DGHUD.controller.update_handoff=nil end end; fail("Could not remove the broken HUD package."); return end
+  end
   tempTimer(0.15,function() local installed=installPackage(path); if installed==nil then cecho("\\n<red>[DGHUD Recovery]<reset> Reinstall failed. Close and reopen this profile, then run dghud recover again.\\n") else cecho("\\n<green>[DGHUD Recovery]<reset> Reinstalled DragonsGateHUD. Your personal content and saved DGHUD settings were preserved.\\n") end end)
 end)
 timeout=tempTimer(45,function() fail("Download timed out. Check your connection and run dghud recover again.") end)
@@ -35,12 +39,10 @@ def build(output,owner,repository,version):
     expected=source_version()
     if version != expected: raise ValueError(f'build version {version} does not match defaults.version {expected}')
     output.mkdir(parents=True,exist_ok=True)
-    # Existing HUD versions perform their health probe shortly after
-    # installPackage() returns. Mudlet may still be registering the package's
-    # script nodes at that point, so expose a minimal readiness function first.
-    # The archive has already passed its signed-release checksum validation;
-    # DGHUD Start replaces this shim with the full controller health check.
-    readiness='DGHUD = DGHUD or {}\nDGHUD.healthCheck = function() return true end'
+    # Block updater success while Mudlet is between package registration and
+    # full runtime activation. DGHUD Start replaces this loading gate only
+    # after constructing the controller and then enforces start() success.
+    readiness='DGHUD = DGHUD or {}\nDGHUD.healthCheck = function() return nil, "HUD startup is still loading" end'
     nodes=[script_node('DGHUD Install Readiness',readiness)]
     module_loaders=[]
     for module in MODULES:

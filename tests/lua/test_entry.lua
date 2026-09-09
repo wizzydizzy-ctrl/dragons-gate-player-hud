@@ -16,7 +16,7 @@ local function withEntryStubs(fn)
   local Main={}
   function Main.new(_,settings)
     local controller={adapter=adapter,settings=settings,reloads=0,starts=0,shutdowns=0}
-    function controller:start() self.starts=self.starts+1; return true end
+    function controller:start() self.starts=self.starts+1; if adapter.failStart then return nil,adapter.failStart end; return true end
     function controller:shutdown() self.shutdowns=self.shutdowns+1; return true end
     function controller:reload() self.reloads=self.reloads+1; return true end
     function controller:healthCheck() return true end
@@ -37,7 +37,7 @@ local function withEntryStubs(fn)
   }
   local function install(name,loader) package.preload[name]=loader end
   for name,loader in pairs(stubs) do install(name,loader) end
-  local ok,result=xpcall(function() return fn({defaults=defaults,controllers=controllers,stubs=stubs,install=install}) end,debug.traceback)
+  local ok,result=xpcall(function() return fn({defaults=defaults,controllers=controllers,stubs=stubs,install=install,adapter=adapter}) end,debug.traceback)
   for _,name in ipairs(entryModules) do package.preload[name]=savedPreload[name]; package.loaded[name]=savedLoaded[name] end
   rawset(_G,"DGHUD",savedGlobal)
   if not ok then error(result,0) end
@@ -56,6 +56,26 @@ test("public reload re-resolves current nested user settings without replacing u
     eq(DGHUD.settings.personal,"untouched")
     eq(DGHUD.controller.settings.chat.height_percent,.30)
     eq(DGHUD.updater.settings.chat.height_percent,.30)
+  end)
+end)
+
+test("replacement handoff bypasses legacy map serialization before shutdown",function()
+  withEntryStubs(function()
+    local observed; local retiring={map_collections={large=true}}
+    DGHUD={user_settings={},_update_reinstall_pending=true,controller=retiring,shutdown=function() observed=retiring.map_collections; return true end}
+    dofile("src/entry.lua")
+    eq(observed,nil)
+    eq(retiring.update_handoff,true)
+  end)
+end)
+
+test("ordinary entry leaves map serialization available to shutdown",function()
+  withEntryStubs(function()
+    local collections={large=true}; local observed; local retiring={map_collections=collections}
+    DGHUD={user_settings={},controller=retiring,shutdown=function() observed=retiring.map_collections; return true end}
+    dofile("src/entry.lua")
+    eq(observed,collections)
+    eq(retiring.update_handoff,nil)
   end)
 end)
 
@@ -100,5 +120,15 @@ test("failed first entry load creates a fail-safe direct capture API",function()
     eq(pcall(dofile,"src/entry.lua"),false)
     local called,result,err=pcall(function() return DGHUD.chat.capture("QUEST","during failure") end)
     eq(called,true); eq(result,nil); eq(err,"chatbox is not running")
+  end)
+end)
+
+test("entry rejects a package whose HUD runtime does not start",function()
+  withEntryStubs(function(context)
+    DGHUD={user_settings={},shutdown=function() return true end}
+    context.adapter.failStart="view construction failed"
+    local loaded,message=pcall(dofile,"src/entry.lua")
+    eq(loaded,false)
+    assert(tostring(message):find("DGHUD startup failed: view construction failed",1,true))
   end)
 end)
