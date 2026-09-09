@@ -27,27 +27,37 @@ The HUD runs `info mag` during character startup and whenever the command is ent
 
 ## Local build and install
 
+### One-time safe upgrade from 0.3.15 or older
+
+Older HUD releases stored personal HUD files inside Mudlet's replaceable package directory. Before using `dghud update` from one of those releases, install the independent bridge once:
+
+```lua
+lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/latest/download/DGHUDMigration.mpackage")
+```
+
+The bridge copies and byte-verifies personal chat history, settings, map collections, exports, and diagnostics into `DGHUDData`, preserves differing files as conflict copies, and then starts the normal update. The bridge itself never deletes source data, and it blocks package removal if the final sync fails. Releases 0.3.16 and newer already write mutable data outside the replaceable package and can continue to use `dghud update` normally.
+
 ```bash
 python3 scripts/build.py --owner wizzydizzy-ctrl --repository dragons-gate-player-hud
 ```
 
-In the Dragons Gate Mudlet profile command line, replace the path and run:
+For a local development build, in the Dragons Gate Mudlet profile command line replace the path and run:
 
 ```lua
 lua installPackage("/absolute/path/to/dragons-gate-player-hud/dist/DragonsGateHUD.mpackage")
 ```
 
-After the first GitHub release, install directly with:
+For a fresh installation with no existing HUD, install the current release directly with:
 
 ```lua
-lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/download/v0.1.0/DragonsGateHUD.mpackage")
+lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/latest/download/DragonsGateHUD.mpackage")
 ```
 
 This executes code from that release inside the current Mudlet profile. Use only your own repository URL.
 
 ## Publishing
 
-Create an empty GitHub repository, set your owner in `src/defaults.lua`, commit this project, and push a semantic version tag such as `v0.1.0`. GitHub Actions tests and attaches `DragonsGateHUD.mpackage` and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for both artifacts. Verify a downloaded release with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
+Create an empty GitHub repository, set your owner in `src/defaults.lua`, commit this project, and push a semantic version tag such as `v0.1.0`. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
 
 The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, and files under the profile's `DGHUDData` directory. It does not alter unrelated profile triggers, aliases, scripts, timers, keys, packages, modules, maps, or settings.
 

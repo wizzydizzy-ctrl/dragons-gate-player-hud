@@ -4,40 +4,91 @@ local function sha256Hex(payload)
   if not SHA256 then SHA256=require("sha256") end
   return SHA256.hex(payload)
 end
-local Adapter={recovery_version="1.4.0"}; Adapter.__index=Adapter
-function Adapter.dataBase(home) return tostring(home or getMudletHomeDir()):gsub("/+$","").."/DGHUDData" end
+local Adapter={recovery_version="1.5.0"}; Adapter.__index=Adapter
+function Adapter.dataBase(home) return tostring(home or getMudletHomeDir()):gsub("[/\\]+$","").."/DGHUDData" end
 function Adapter.prepareDataDirectory(home)
-  home=tostring(home or getMudletHomeDir()):gsub("/+$","")
+  home=tostring(home or getMudletHomeDir()):gsub("[/\\]+$","")
   local target=Adapter.dataBase(home)
-  if not lfs or type(lfs.attributes)~="function" or type(lfs.mkdir)~="function" then return nil,"filesystem is unavailable" end
+  local inspect=lfs and lfs.symlinkattributes
+  if type(inspect)~="function" or type(lfs.mkdir)~="function" then return nil,"filesystem is unavailable" end
   local function mode(path)
-    local inspect=type(lfs.symlinkattributes)=="function" and lfs.symlinkattributes or lfs.attributes
-    local ok,value=pcall(inspect,path,"mode"); return ok and value or nil
+    local ok,value,message,code=pcall(inspect,path,"mode")
+    if not ok then return nil,tostring(value) end
+    if value==nil and message then
+      local lower=tostring(message):lower()
+      if tonumber(code)~=2 and not lower:find("no such file",1,true) and not lower:find("cannot find the file",1,true) then return nil,tostring(message) end
+    end
+    return value
   end
   local function ensure(path)
-    if mode(path)=="directory" then return true end
-    local made,makeErr=lfs.mkdir(path); if made or mode(path)=="directory" then return true end
-    return nil,tostring(makeErr or "could not create directory")
+    local current,currentErr=mode(path); if currentErr then return nil,currentErr end
+    if current=="directory" then return true end
+    if current~=nil then return nil,"path is not a directory" end
+    local called,made,makeErr=pcall(lfs.mkdir,path); if called and made then return true end
+    local retry,retryErr=mode(path); if retry=="directory" then return true end
+    return nil,tostring((not called and made) or makeErr or retryErr or "could not create directory")
   end
   local made,makeErr=ensure(target); if not made then return nil,"could not create persistent HUD data directory: "..tostring(makeErr) end
   local legacy=home.."/DragonsGateHUD"
-  if mode(legacy)~="directory" then return true end
+  local legacyMode,legacyErr=mode(legacy); if legacyErr then return nil,"could not inspect legacy HUD data: "..legacyErr end
+  if legacyMode==nil then return true end
+  if legacyMode~="directory" then return nil,"legacy HUD data path is not a directory" end
   local packageFiles={['DragonsGateHUD.xml']=true,['DGHUDRuntime.lua']=true,['config.lua']=true}
+  local function readChunk(file)
+    local ok,chunk,readErr=pcall(file.read,file,65536)
+    if not ok then return nil,tostring(chunk),false end
+    if chunk==nil and readErr then return nil,tostring(readErr),false end
+    return chunk,nil,true
+  end
+  local function filesEqual(first,second)
+    local left,leftErr=io.open(first,"rb"); if not left then return nil,tostring(leftErr) end
+    local right,rightErr=io.open(second,"rb"); if not right then left:close(); return nil,tostring(rightErr) end
+    while true do
+      local a,aErr,aOK=readChunk(left); local b,bErr,bOK=readChunk(right)
+      if not aOK or not bOK then left:close(); right:close(); return nil,aErr or bErr end
+      if a~=b then left:close(); right:close(); return false end
+      if a==nil then left:close(); right:close(); return true end
+    end
+  end
+  local temporaryCounter=0
+  local function temporaryPath(destination)
+    for _=1,1000 do
+      temporaryCounter=temporaryCounter+1
+      local candidate=destination..".dghud-tmp-"..temporaryCounter
+      local candidateMode,candidateErr=mode(candidate); if candidateErr then return nil,candidateErr end
+      if candidateMode==nil then return candidate end
+    end
+    return nil,"could not reserve a unique migration staging path"
+  end
   local function copyFile(source,destination)
-    if mode(destination)~=nil then return true end
+    local destinationMode,destinationErr=mode(destination); if destinationErr then return nil,destinationErr end
+    if destinationMode=="file" then
+      local same,sameErr=filesEqual(source,destination); if same==nil then return nil,sameErr end
+      if same then return true end
+      return nil,"persistent destination differs; run the DGHUD safe-upgrade bridge"
+    end
+    if destinationMode~=nil then return nil,"persistent destination has the wrong type" end
     local input,inputErr=io.open(source,"rb"); if not input then return nil,tostring(inputErr) end
-    local payload,readErr=input:read("*a"); input:close(); if type(payload)~="string" then return nil,tostring(readErr or "could not read source data") end
-    local temporary=destination..".migrating"; os.remove(temporary)
-    local output,outputErr=io.open(temporary,"wb"); if not output then return nil,tostring(outputErr) end
-    local wrote,writeErr=output:write(payload); local closed,closeErr=output:close(); if not wrote or closed==nil then os.remove(temporary); return nil,tostring(writeErr or closeErr or "could not write copied data") end
-    local verify=io.open(temporary,"rb"); local copied=verify and verify:read("*a"); if verify then verify:close() end
-    if copied~=payload then os.remove(temporary); return nil,"copied data verification failed" end
-    local installed,installErr=os.rename(temporary,destination); if not installed then os.remove(temporary); return nil,tostring(installErr) end
+    local temporary,tempErr=temporaryPath(destination); if not temporary then input:close(); return nil,tempErr end
+    local output,outputErr=io.open(temporary,"wb"); if not output then input:close(); return nil,tostring(outputErr) end
+    while true do
+      local chunk,readErr,readOK=readChunk(input)
+      if not readOK then input:close(); output:close(); os.remove(temporary); return nil,readErr end
+      if chunk==nil then break end
+      local writeOK,wrote,writeErr=pcall(output.write,output,chunk)
+      if not writeOK or not wrote then input:close(); output:close(); os.remove(temporary); return nil,tostring((not writeOK and wrote) or writeErr or "could not write copied data") end
+    end
+    input:close(); local closeOK,closed,closeErr=pcall(output.close,output)
+    if not closeOK or closed==nil then os.remove(temporary); return nil,tostring((not closeOK and closed) or closeErr or "could not close copied data") end
+    local same,verifyErr=filesEqual(source,temporary); if not same then os.remove(temporary); return nil,verifyErr or "copied data verification failed" end
+    local renameOK,installed,installErr=pcall(os.rename,temporary,destination)
+    if not renameOK or not installed then os.remove(temporary); return nil,tostring((not renameOK and installed) or installErr) end
     return true
   end
   local function copyTree(source,destination,depth)
     if depth>12 then return nil,"legacy data nesting exceeds the migration limit" end
-    local sourceMode=mode(source); if sourceMode==nil then return true end
+    local sourceMode,sourceErr=mode(source); if sourceErr then return nil,sourceErr end
+    if sourceMode==nil then return true end
     if sourceMode=="file" then return copyFile(source,destination) end
     if sourceMode~="directory" then return nil,"legacy data contains an unsupported filesystem entry" end
     local ok,err=ensure(destination); if not ok then return nil,err end
@@ -542,7 +593,18 @@ end
 function Adapter:openSettings() cecho("\n<gold>[DGHUD]<reset> Persistent data: "..Adapter.dataBase().."\n") end
 local function readFile(path) local f=io.open(path,"rb"); if not f then return nil end; local data=f:read("*a"); f:close(); return data end
 local function fileSize(path) local f=io.open(path,"rb"); if not f then return nil end; local ok,size=pcall(function() return f:seek("end") end); if not ok then local data=f:read("*a"); size=type(data)=="string" and #data or nil end; f:close(); return tonumber(size) end
-local function writeFile(path,data) local f=assert(io.open(path,"wb")); f:write(data); f:close() end
+local function writeFile(path,data)
+  if type(data)~="string" then return nil,"file payload is unavailable" end
+  local temporary=path..".writing"; os.remove(temporary)
+  local file,openErr=io.open(temporary,"wb"); if not file then return nil,tostring(openErr) end
+  local writeOK,wrote,writeErr=pcall(file.write,file,data); local closeOK,closed,closeErr=pcall(file.close,file)
+  if not writeOK or not wrote or not closeOK or closed==nil then os.remove(temporary); return nil,tostring((not writeOK and wrote) or writeErr or (not closeOK and closed) or closeErr or "file write failed") end
+  if readFile(temporary)~=data then os.remove(temporary); return nil,"written file verification failed" end
+  os.remove(path)
+  local renameOK,installed,renameErr=pcall(os.rename,temporary,path)
+  if not renameOK or not installed then os.remove(temporary); return nil,tostring((not renameOK and installed) or renameErr or "could not finalize file") end
+  return true
+end
 local function hasPackage(name) for _,value in ipairs(getPackages() or {}) do if value==name then return true end end return false end
 function Adapter.versionAtLeast(actual,required)
   local function tuple(value) local a,b,c=tostring(value or ""):match("^(%d+)%.(%d+)%.(%d+)$"); if not a then return nil end; return tonumber(a),tonumber(b),tonumber(c) end
@@ -635,7 +697,7 @@ function Adapter:checkLatestAsync(updater,done)
       local ok,release=pcall(yajl.to_value,raw); if not ok or type(release)~="table" then finish(nil,"release metadata JSON is invalid"); return end
       local version=type(release.tag_name)=="string" and release.tag_name:match("^v(%d+%.%d+%.%d+)$")
       if not version then finish(nil,"latest release has an invalid version tag"); return end
-      os.remove(manifestPath); downloadFile(manifestPath,Adapter.versionManifestUrl(github,version)); return
+      os.remove(manifestPath); local queued,queueErr=downloadFile(manifestPath,Adapter.versionManifestUrl(github,version)); if queued==false then finish(nil,queueErr or "manifest download could not start") end; return
     end
     if path~=manifestPath then return end
     local raw=readFile(path); if not raw or #raw>(policy.manifest_limit or 65536) then finish(nil,"manifest is missing or too large"); return end
@@ -644,7 +706,8 @@ function Adapter:checkLatestAsync(updater,done)
     finish(manifest,nil,raw)
   end)
   updateNonce=updateNonce+1; os.remove(releasePath)
-  downloadFile(releasePath,Adapter.latestReleaseUrl(github))
+  local queued,queueErr=downloadFile(releasePath,Adapter.latestReleaseUrl(github))
+  if queued==false then finish(nil,queueErr or "release metadata download could not start"); return nil,queueErr or "release metadata download could not start" end
   timeoutId=tempTimer(policy.timeout_seconds or 30,function() timeoutId=nil; finish(nil,"download timed out") end)
   return true
 end
@@ -661,7 +724,12 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; ids={}; for _,id in ipairs(timers) do killTimer(id) end; timers={}; disarmTimeout(); updater:release() end
   local function fail(message) if finished then return end; finished=true; cleanup(); cecho("\n<red>[DGHUD Update]<reset> "..tostring(message).."\n"); if done then done(nil,message) end end
   local function armTimeout() disarmTimeout(); timeoutId=tempTimer(policy.timeout_seconds or 30,function() timeoutId=nil; if updater.lock then fail("download timed out") end end) end
-  local function request(path,url) expectedPath=path; expectedUrl=url; updater.expected_path=path; armTimeout(); downloadFile(path,url) end
+  local function request(path,url)
+    expectedPath=path; expectedUrl=url; updater.expected_path=path; armTimeout()
+    local queued,queueErr=downloadFile(path,url)
+    if queued==false then fail(queueErr or "download could not start"); return nil end
+    return true
+  end
   local function parseManifest(path)
     local raw=readFile(path); if not raw or #raw>(policy.manifest_limit or 65536) then return nil,nil,"manifest is missing or too large" end
     local ok,manifest=pcall(yajl.to_value,raw); if not ok then return nil,nil,"manifest JSON is invalid" end
@@ -717,7 +785,8 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
   local beginReplacement
   local function stageRollback(payload,preverified)
     if preverified~=true and not Adapter.verifyArchive(payload,rollbackManifest.sha256) then return fail("rollback package checksum mismatch") end
-    writeFile(previousPath,payload); previousDigest=tostring(rollbackManifest.sha256):lower(); beginReplacement()
+    local written,writeErr=writeFile(previousPath,payload); if not written then return fail("could not stage rollback package: "..tostring(writeErr)) end
+    previousDigest=tostring(rollbackManifest.sha256):lower(); beginReplacement()
   end
   local function bootstrapRollback()
     updater:stage("Preparing rollback")
@@ -750,7 +819,8 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     self.replacePackageAsync=function(_,data,name,replaceDone)
       if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch"); return end
       if not Adapter.isCanonicalArchivePath(packagePath) then replaceDone(nil,"package archive filename is not canonical"); return end
-      writeFile(packagePath,data)
+      local prepareCalled,prepared,prepareWarning=pcall(Adapter.prepareDataDirectory,getMudletHomeDir())
+      if not prepareCalled or not prepared or prepareWarning then replaceDone(nil,"persistent data preflight failed; nothing was removed: "..tostring((not prepareCalled and prepared) or prepareWarning or "filesystem is unavailable")); return end
       local retiredRuntime=rawget(_G,"DGHUD")
       markUpdateHandoff(targetManifest.view_schema)
       local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
@@ -775,8 +845,10 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         -- leaves DragonsGateHUD missing, so stage the verified bytes under the
         -- canonical package filename before restoring.
         if not Adapter.isCanonicalArchivePath(rollbackInstallPath) then rollbackDone(nil,"rollback archive filename is not canonical"); return end
-        writeFile(rollbackInstallPath,rollbackPayload)
+        local staged,stageErr=writeFile(rollbackInstallPath,rollbackPayload); if not staged then rollbackDone(nil,"could not stage rollback install: "..tostring(stageErr)); return end
         local retiredRuntime=rawget(_G,"DGHUD")
+        local prepareCalled,prepared,prepareWarning=pcall(Adapter.prepareDataDirectory,getMudletHomeDir())
+        if not prepareCalled or not prepared or prepareWarning then rollbackDone(nil,"rollback data preflight failed; nothing was removed: "..tostring((not prepareCalled and prepared) or prepareWarning or "filesystem is unavailable")); return end
         markUpdateHandoff(rollbackManifest and rollbackManifest.view_schema)
         local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
         removeWhenReady(name,retryWindow,"could not remove failed HUD package while Mudlet was saving",function(removed,removeErr)
@@ -794,7 +866,8 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     local started,why=updater:installVerifiedAsync(readFile(packagePath),targetManifest.sha256,function(installed,message)
       completed=true
       if not installed then fail(message); return end
-      writeFile(currentPath,readFile(packagePath)); writeFile(currentManifestPath,targetManifestRaw)
+      local cachedPackage,cachePackageErr=writeFile(currentPath,readFile(packagePath)); local cachedManifest,cacheManifestErr=writeFile(currentManifestPath,targetManifestRaw)
+      if not cachedPackage or not cachedManifest then cecho("\n<yellow>[DGHUD Update]<reset> Update succeeded, but the rollback cache could not be refreshed: "..tostring(cachePackageErr or cacheManifestErr).."\n") end
       if finished then return end; updater:stage("Completed"); local elapsed=updater.update_started_at and math.max(0,updater.adapter:updateClock()-updater.update_started_at) or 0; finished=true; cleanup(); cecho(string.format("\n<green>[DGHUD Update]<reset> Installed version %s (%.1fs)\n",tostring(targetManifest.version),elapsed)); if done then done(true) end; local activated,activateErr=self:activateInstalledHUD(); if not activated then cecho("\n<yellow>[DGHUD Update]<reset> Installed successfully; automatic HUD reload was unavailable: "..tostring(activateErr).."\n") end
     end,true)
     if not started and not completed then fail(why) end

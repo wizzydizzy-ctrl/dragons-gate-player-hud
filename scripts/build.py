@@ -8,8 +8,12 @@ def source_version():
     match=re.search(r'\bversion\s*=\s*["\']([^"\']+)["\']',(ROOT/'src/defaults.lua').read_text())
     if not match: raise ValueError('could not determine defaults.version')
     return match.group(1)
-def script_node(name,code):
-    return f'''<Script isActive="yes" isFolder="no"><name>{html.escape(name)}</name><packageName>DragonsGateHUD</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
+def migration_source_version():
+    match=re.search(r'\bBridge\s*=\s*\{version\s*=\s*["\']([^"\']+)["\']',(ROOT/'src/migration_bridge.lua').read_text())
+    if not match: raise ValueError('could not determine migration bridge version')
+    return match.group(1)
+def script_node(name,code,package_name='DragonsGateHUD'):
+    return f'''<Script isActive="yes" isFolder="no"><name>{html.escape(name)}</name><packageName>{html.escape(package_name)}</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
 def recovery_script_node(code):
     return f'''<Script isActive="yes" isFolder="no"><name>DGHUD Recovery Runtime</name><packageName>DGHUDRecovery</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
 def runtime_source():
@@ -48,9 +52,30 @@ local function stopWatchers() for _,id in ipairs(handlers) do killAnonymousEvent
 local function finish() stopWatchers(); for _,id in ipairs(timers) do killTimer(id) end; timers={{}}; runtime.running=false end
 local function fail(message) finish(); cecho("\\n<red>[DGHUD Recovery]<reset> "..tostring(message).."\\n") end
 local function hasHUDPackage() for _,name in ipairs(getPackages() or {{}}) do if name=="DragonsGateHUD" then return true end end; return false end
+local function preserveData()
+  local bridge=rawget(_G,"DGHUDMigration")
+  if type(bridge)=="table" and type(bridge.migrate)=="function" then local ok,value,why=pcall(bridge.migrate,getMudletHomeDir()); if not ok or not value then return nil,tostring(ok and why or value) end; return true end
+  local hud=rawget(_G,"DGHUD"); local adapter=type(hud)=="table" and type(hud.controller)=="table" and hud.controller.adapter or nil
+  if type(adapter)=="table" and type(adapter.prepareDataDirectory)=="function" then local ok,value,warning=pcall(adapter.prepareDataDirectory,getMudletHomeDir()); if not ok or not value or warning then return nil,tostring((not ok and value) or warning or "persistent data preparation failed") end; return true end
+  local legacy=getMudletHomeDir().."/DragonsGateHUD"; local resources={{["DragonsGateHUD.xml"]=true,["DGHUDRuntime.lua"]=true,["config.lua"]=true}}
+  if not lfs or type(lfs.dir)~="function" or type(lfs.symlinkattributes)~="function" then return nil,"safe filesystem inspection is unavailable; install DGHUDMigration.mpackage before recovery" end
+  local inspected,mode,message,code=pcall(lfs.symlinkattributes,legacy,"mode")
+  if not inspected then return nil,"could not inspect legacy HUD data: "..tostring(mode) end
+  if mode==nil then
+    local lower=tostring(message or ""):lower()
+    if tonumber(code)==2 or lower:find("no such file",1,true) or lower:find("cannot find the file",1,true) then return true end
+    return nil,"could not prove the legacy HUD data directory is absent"
+  end
+  if mode~="directory" then return nil,"legacy HUD data path has an unsupported type; install DGHUDMigration.mpackage before recovery" end
+  local opened,iterator,state=pcall(lfs.dir,legacy)
+  if not opened or type(iterator)~="function" then return nil,"could not inspect legacy HUD data; install DGHUDMigration.mpackage before recovery" end
+  for name in iterator,state do if name~="." and name~=".." and not resources[name] then return nil,"legacy personal HUD data is still inside the replaceable package; install DGHUDMigration.mpackage before recovery" end end
+  return true
+end
 handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,failedUrl) if failedUrl==url then fail("Download failed: "..tostring(message)) end end)
 handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,downloaded)
   if downloaded~=path then return end; stopWatchers(); cecho("\\n<gold>[DGHUD Recovery]<reset> Replacing only the DragonsGateHUD package…\\n")
+  local preserved,preserveErr=preserveData(); if not preserved then fail("Personal data preflight failed; nothing was removed: "..tostring(preserveErr)); return end
   local retired=rawget(_G,"DGHUD")
   local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end end end
   local function awaitHealthy(remaining)
@@ -64,6 +89,7 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_
   local function removeThenInstall(remaining)
     if not hasHUDPackage() then installClean(); return end
     local hud=rawget(_G,"DGHUD"); if type(hud)=="table" then hud._update_reinstall_pending=true; if type(hud.controller)=="table" then local controller=hud.controller; controller.update_handoff=true; local schema=hud.settings and tonumber(hud.settings.view_schema); if schema and controller.view and controller.view.root then hud._view_handoff={{schema=schema,view=controller.view}}; controller.update_preserve_view=true end end end
+    local synced,syncErr=preserveData(); if not synced then clearHandoff(); fail("Final personal data sync failed; nothing was removed: "..tostring(syncErr)); return end
     if uninstallPackage("DragonsGateHUD") then installClean(); return end
     if remaining<=0 then clearHandoff(); fail("Could not remove the broken HUD package after waiting for Mudlet to finish saving."); return end
     timers[#timers+1]=tempTimer(0.10,function() removeThenInstall(remaining-1) end)
@@ -71,7 +97,7 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_
   removeThenInstall(300)
 end)
 timeout=tempTimer(45,function() fail("Download timed out. Check your connection and run dghud recover again.") end)
-cecho("\\n<gold>[DGHUD Recovery]<reset> Downloading a clean HUD package…\\n"); downloadFile(path,url)
+cecho("\\n<gold>[DGHUD Recovery]<reset> Downloading a clean HUD package…\\n"); local queued,queueErr=downloadFile(path,url); if queued==false then fail("Download could not start: "..tostring(queueErr or "unknown error")) end
 end
 runtime.run=recover
 local aliasOK,alias=pcall(tempAlias,"^dghud recover$",recover)
@@ -104,11 +130,17 @@ def build(output,owner,repository,version):
     if not view_schema_match: raise ValueError('could not determine defaults.view_schema')
     manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','view_schema':int(view_schema_match.group(1)),'archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    recovery_version='1.4.0'
+    recovery_version='1.5.0'
     recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>'''+recovery_version+'''</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_script_node(recovery_code(owner,repository,recovery_version))+'''</ScriptGroup></ScriptPackage></MudletPackage>''')
     with zipfile.ZipFile(output/'DGHUDRecovery.mpackage','w',zipfile.ZIP_DEFLATED) as z:
         info=zipfile.ZipInfo('DGHUDRecovery.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,recovery_xml)
         info=zipfile.ZipInfo('config.lua',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,'mpackage = "DGHUDRecovery"\n')
+    migration_version=migration_source_version()
+    migration_source=(ROOT/'src/migration_bridge.lua').read_text()
+    migration_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDMigration</packageName><title>DGHUD Safe Upgrade Bridge</title><version>'''+migration_version+'''</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DGHUDMigration</name><packageName>DGHUDMigration</packageName>'''+script_node('DGHUD Safe Upgrade Bridge',migration_source,'DGHUDMigration')+'''</ScriptGroup></ScriptPackage></MudletPackage>''')
+    with zipfile.ZipFile(output/'DGHUDMigration.mpackage','w',zipfile.ZIP_DEFLATED) as z:
+        info=zipfile.ZipInfo('DGHUDMigration.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,migration_xml)
+        info=zipfile.ZipInfo('config.lua',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,'mpackage = "DGHUDMigration"\n')
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--output',type=Path,default=ROOT/'dist'); p.add_argument('--owner',default='GITHUB_OWNER'); p.add_argument('--repository',default='dragons-gate-hud'); p.add_argument('--version',default=source_version()); a=p.parse_args(); build(a.output,a.owner,a.repository,a.version)
 if __name__=='__main__': main()

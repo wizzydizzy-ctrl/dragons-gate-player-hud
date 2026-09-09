@@ -12,6 +12,7 @@ test("mutable HUD data lives outside the replaceable package directory",function
   local base=Adapter.dataBase("/profile")
   eq(base,"/profile/DGHUDData")
   eq(base:find("/DragonsGateHUD",1,true),nil)
+  eq(Adapter.dataBase([[C:\profile\]]),[[C:\profile/DGHUDData]])
 end)
 test("legacy mutable data migrates without moving package resources",function()
   local oldLfs,oldOpen,oldRename,oldRemove=lfs,io.open,os.rename,os.remove
@@ -20,7 +21,7 @@ test("legacy mutable data migrates without moving package resources",function()
   local renames={}
   local ok,err=pcall(function()
     lfs={
-      attributes=function(path,field) local value=directories[path] and "directory" or (files[path]~=nil and "file" or nil); return field=="mode" and value or value end,
+      symlinkattributes=function(path,field) local value=directories[path] and "directory" or (files[path]~=nil and "file" or nil); return field=="mode" and value or value end,
       mkdir=function(path) directories[path]=true; return true end,
       dir=function(path)
         local listed={['/profile/DragonsGateHUD']={".","..","DragonsGateHUD.xml","DGHUDRuntime.lua","config.lua","map-collections","roller-settings.lua","mapper-settings.lua"},['/profile/DragonsGateHUD/map-collections']={".","..","collections.json"}}
@@ -29,7 +30,7 @@ test("legacy mutable data migrates without moving package resources",function()
       end,
     }
     io.open=function(path,mode)
-      if mode=="rb" then if files[path]==nil then return nil,"missing" end; return {read=function() return files[path] end,close=function() return true end} end
+      if mode=="rb" then if files[path]==nil then return nil,"missing" end; local finished=false; return {read=function(_,amount) if amount=="*a" then return files[path] end; if finished then return nil end; finished=true; return files[path] end,close=function() return true end} end
       if mode=="wb" then return {write=function(_,value) files[path]=value; return true end,close=function() return true end} end
     end
     os.remove=function(path) files[path]=nil; return true end
@@ -44,12 +45,51 @@ test("legacy mutable data migrates without moving package resources",function()
   end)
   lfs,io.open,os.rename,os.remove=oldLfs,oldOpen,oldRename,oldRemove; if not ok then error(err,0) end
 end)
+test("normal update preflight never reads persistent map data",function()
+  local oldLfs,oldOpen=lfs,io.open; local reads=0
+  local ok,err=pcall(function()
+    lfs={
+      symlinkattributes=function(path) if path=='/profile/DragonsGateHUD' or path=='/profile/DGHUDData' then return 'directory' elseif path=='/profile/DGHUDData/maps/huge.dat' then return 'file' end end,
+      mkdir=function() return true end,
+      dir=function(path) local names={'.','..','DragonsGateHUD.xml','DGHUDRuntime.lua','config.lua'}; local index=0; return function() index=index+1; return names[index] end end,
+    }
+    io.open=function() reads=reads+1; return nil,'persistent data must not be opened' end
+    eq(Adapter.prepareDataDirectory('/profile'),true); eq(reads,0)
+  end)
+  lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
+end)
 test("failed migration returns a warning without destructively moving legacy data",function()
   local oldLfs,oldOpen=lfs,io.open
   local ok,err=pcall(function()
-    lfs={attributes=function(path) if path=='/profile/DragonsGateHUD' or path=='/profile/DGHUDData' then return 'directory' elseif path=='/profile/DragonsGateHUD/update-settings.lua' then return 'file' end end,mkdir=function() return true end,dir=function() local names={'.','..','update-settings.lua'}; local index=0; return function() index=index+1; return names[index] end end}
+    lfs={symlinkattributes=function(path) if path=='/profile/DragonsGateHUD' or path=='/profile/DGHUDData' then return 'directory' elseif path=='/profile/DragonsGateHUD/update-settings.lua' then return 'file' end end,mkdir=function() return true end,dir=function() local names={'.','..','update-settings.lua'}; local index=0; return function() index=index+1; return names[index] end end}
     io.open=function(path,mode) if mode=='rb' then return {read=function() return 'legacy' end,close=function() return true end} end; return nil,'denied' end
     local prepared,warning=Adapter.prepareDataDirectory('/profile'); eq(prepared,true); assert(warning:find('denied',1,true))
+  end)
+  lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
+end)
+test("different legacy and persistent files abort migration without overwriting either",function()
+  local oldLfs,oldOpen=lfs,io.open
+  local files={['/profile/DragonsGateHUD/update-settings.lua']='legacy',['/profile/DGHUDData/update-settings.lua']='current'}
+  local ok,err=pcall(function()
+    lfs={symlinkattributes=function(path) if path=='/profile/DragonsGateHUD' or path=='/profile/DGHUDData' then return 'directory' elseif files[path]~=nil then return 'file' end end,mkdir=function() return true end,dir=function() local names={'.','..','update-settings.lua'}; local index=0; return function() index=index+1; return names[index] end end}
+    io.open=function(path,mode) if mode~='rb' or files[path]==nil then return nil,'missing' end; local finished=false; return {read=function(_,amount) if amount=='*a' then return files[path] end; if finished then return nil end; finished=true; return files[path] end,close=function() return true end} end
+    local prepared,warning=Adapter.prepareDataDirectory('/profile'); eq(prepared,true); assert(warning:find('destination differs',1,true)); eq(files['/profile/DragonsGateHUD/update-settings.lua'],'legacy'); eq(files['/profile/DGHUDData/update-settings.lua'],'current')
+  end)
+  lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
+end)
+test("filesystem inspection errors fail closed before migration",function()
+  local oldLfs=lfs; local ok,err=pcall(function()
+    lfs={symlinkattributes=function(path) if path=='/profile/DGHUDData' then return 'directory' end; error('permission denied') end,mkdir=function() return true end}
+    local prepared,why=Adapter.prepareDataDirectory('/profile'); eq(prepared,nil); assert(why:find('permission denied',1,true))
+  end)
+  lfs=oldLfs; if not ok then error(err,0) end
+end)
+test("explicit migration read errors fail closed instead of looking like EOF",function()
+  local oldLfs,oldOpen=lfs,io.open
+  local ok,err=pcall(function()
+    lfs={symlinkattributes=function(path) if path=='/profile/DragonsGateHUD' or path=='/profile/DGHUDData' then return 'directory' elseif path:find('settings.lua',1,true) then return 'file' end end,mkdir=function() return true end,dir=function() local names={'.','..','settings.lua'}; local index=0; return function() index=index+1; return names[index] end end}
+    io.open=function(path,mode) if mode~='rb' then return nil,'denied' end; return {read=function() return nil,'disk read failed' end,close=function() return true end} end
+    local prepared,warning=Adapter.prepareDataDirectory('/profile'); eq(prepared,true); assert(warning:find('disk read failed',1,true))
   end)
   lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
 end)
@@ -108,19 +148,19 @@ local function recoveryHarness(options,body)
   if not ok then error(err,0) end
 end
 test("current recovery companion is retained without a download",function()
-  recoveryHarness({version="1.4.0",runtimeVersion="1.4.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.5.0",runtimeVersion="1.5.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
 end)
 test("package metadata alone cannot prove recovery runtime activation",function()
-  recoveryHarness({version="1.4.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.5.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
 end)
 test("recovery runtime without a callable registered alias is replaced",function()
-  recoveryHarness({version="1.4.0",runtimeVersion="1.4.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
+  recoveryHarness({version="1.5.0",runtimeVersion="1.5.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
 end)
 test("outdated recovery companion waits out a save and verifies deferred activation",function()
   recoveryHarness({version="1.0.0",runtimeVersion="1.0.0",busy=1,deferActivation=true},function(h)
     eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); h:download(); eq(h.uninstalls,1); eq(h.installs,0); eq(h.adapter.recovery_installing,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(h.installs,1); eq(h.adapter.recovery_installing,true)
-    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.4.0"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
+    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.5.0"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
   end)
 end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()
@@ -204,25 +244,29 @@ local function replacementHarness(options,body)
   options=options or {}; local globalNames={"lfs","yajl","getMudletHomeDir","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","getPackages","uninstallPackage","installPackage","cecho","DGHUD","getMudletVersion"}
   globalNames[#globalNames+1]="getEpoch"
   local saved={}; for _,name in ipairs(globalNames) do saved[name]=_G[name] end
-  local originalOpen=io.open; local h={files={},downloads={},handlers={},timers={},nextID=0,active=true,uninstalls=0,installs={},result=nil,targetUninstallBusy=tonumber(options.targetUninstallBusy) or 0,rollbackUninstallBusy=tonumber(options.rollbackUninstallBusy) or 0}
+  local originalOpen,originalRename,originalRemove=io.open,os.rename,os.remove; local h={files={},downloads={},handlers={},timers={},nextID=0,active=true,uninstalls=0,installs={},result=nil,targetUninstallBusy=tonumber(options.targetUninstallBusy) or 0,rollbackUninstallBusy=tonumber(options.rollbackUninstallBusy) or 0}
   local target=releaseManifest("0.2.84"); target.sha256=SHA.hex("new-package")
   local rollback=releaseManifest("0.2.83"); rollback.sha256=SHA.hex("old-package")
   h.manifests={latest={tag_name="v0.2.84"},target=target,rollback=rollback}
-  local originalHex=SHA.hex
-  local function restore() SHA.hex=originalHex; io.open=originalOpen; for _,name in ipairs(globalNames) do _G[name]=saved[name] end end
+  local originalHex=SHA.hex; local originalPrepare=Adapter.prepareDataDirectory
+  local function restore() SHA.hex=originalHex; Adapter.prepareDataDirectory=originalPrepare; io.open=originalOpen; os.rename,os.remove=originalRename,originalRemove; for _,name in ipairs(globalNames) do _G[name]=saved[name] end end
   local ok,err=pcall(function()
     h.hashCalls=0; SHA.hex=function(payload) h.hashCalls=h.hashCalls+1; return originalHex(payload) end
+    if options.prepareWarning then Adapter.prepareDataDirectory=function() return true,options.prepareWarning end end
     io.open=function(path,mode)
+      if mode=="wb" and options.failRollbackStage and path=="/profile/DGHUDUpdater/previous.mpackage.writing" then return nil,"disk full" end
       if mode=="rb" and h.files[path]==nil then return nil end
-      return {read=function() return h.files[path] end,write=function(_,data) h.files[path]=data end,close=function() end}
+      return {read=function() return h.files[path] end,write=function(_,data) h.files[path]=data; return true end,close=function() return true end}
     end
-    lfs={mkdir=function() return true end}; getMudletHomeDir=function() return "/profile" end; getMudletVersion=nil
+    os.remove=function(path) h.files[path]=nil; return true end
+    os.rename=function(source,destination) if h.files[source]==nil then return nil,"missing" end; h.files[destination]=h.files[source]; h.files[source]=nil; return true end
+    lfs={mkdir=function() return true end,symlinkattributes=function() return nil end}; getMudletHomeDir=function() return "/profile" end; getMudletVersion=nil
     yajl={to_value=function(raw) return assert(h.manifests[raw],"unexpected manifest payload") end}
     registerAnonymousEventHandler=function(name,fn) h.nextID=h.nextID+1; h.handlers[name]=fn; return h.nextID end
     killAnonymousEventHandler=function() end
     tempTimer=function(delay,fn) h.nextID=h.nextID+1; h.timers[h.nextID]={delay=delay,fn=fn}; return h.nextID end
     killTimer=function(id) h.timers[id]=nil end
-    downloadFile=function(path,url) h.downloads[#h.downloads+1]={path=path,url=url}; return true end
+    downloadFile=function(path,url) h.downloads[#h.downloads+1]={path=path,url=url}; if options.initialDownloadFails and #h.downloads==1 then return false,"offline" end; return true end
     getPackages=function() return h.active and {"DragonsGateHUD"} or {} end
     uninstallPackage=function()
       h.uninstalls=h.uninstalls+1
@@ -271,6 +315,24 @@ test("target replacement waits when Mudlet returns false during a profile save",
     deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
     eq(h.uninstalls,1); eq(#h.installs,0); eq(h.result,nil); eq(h.active,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(#h.installs,1); eq(h.result[1],true); eq(DGHUD.settings.version,"0.2.84")
+  end)
+end)
+test("persistent data preflight aborts before removing the active package",function()
+  replacementHarness({prepareWarning="legacy map copy was denied"},function(h)
+    deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
+    eq(h.uninstalls,0); eq(#h.installs,0); eq(h.active,true); eq(h.result[1],nil)
+    assert(h.result[2]:find("persistent data preflight failed",1,true))
+  end)
+end)
+test("rollback staging write failure aborts before removing the active package",function()
+  replacementHarness({failRollbackStage=true},function(h)
+    deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
+    eq(h.uninstalls,0); eq(#h.installs,0); eq(h.active,true); eq(h.result[1],nil); assert(h.result[2]:find("could not stage rollback package",1,true))
+  end)
+end)
+test("a download that cannot start fails immediately and releases the updater",function()
+  replacementHarness({initialDownloadFails=true},function(h)
+    eq(#h.downloads,1); eq(h.result[1],false); assert(h.result[2]:find("offline",1,true)); eq(h.updater.lock,nil); eq(h.uninstalls,0)
   end)
 end)
 test("rollback bootstrap timeout aborts before touching active package",function()
