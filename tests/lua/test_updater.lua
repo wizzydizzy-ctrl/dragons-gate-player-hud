@@ -3,18 +3,27 @@ local function releaseManifest(version)
   return {package="DragonsGateHUD",version=version,minimum_mudlet="5.0.0",archive_url="https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/download/v"..version.."/DragonsGateHUD.mpackage",sha256=string.rep("a",64),archive_size=100}
 end
 local updateSettings={version="0.2.83",github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"},update={package_limit=1000}}
-test("roller settings serialization preserves disabled limits and MP across restart",function()
-  local source=Adapter.rollerSettingsSource({target_total=nil,hard_stop=nil,max_rolls=nil,reroll_delay=.1,reroll_command="reroll",auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=true,show_every_roll=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=6,MP=nil}})
+test("roller settings serialization preserves arrangement choices disabled limits and MP",function()
+  local source=Adapter.rollerSettingsSource({target_total=nil,hard_stop=nil,max_rolls=nil,reroll_delay=.1,reroll_command="reroll",arrange_mode="minimums",minimum_greats=2,minimum_good_plus=nil,auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=true,show_every_roll=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=6,MP=nil}})
   local compile=loadstring or load; local chunk,err=compile(source); assert(chunk,err); local saved=chunk()
-  eq(saved.schema,2); eq(saved.target_total,false); eq(saved.hard_stop,false); eq(saved.max_rolls,false); eq(saved.min_stats.STR,6); eq(saved.min_stats.MP,false)
-  local restored=Roller.new({},saved); eq(restored.cfg.target_total,nil); eq(restored.cfg.hard_stop,nil); eq(restored.cfg.max_rolls,nil); eq(restored.cfg.min_stats.STR,6); eq(restored.cfg.min_stats.MP,nil); eq(restored.cfg.reroll_command,"reroll")
+  eq(saved.schema,3); eq(saved.target_total,false); eq(saved.hard_stop,false); eq(saved.max_rolls,false); eq(saved.arrange_mode,"minimums"); eq(saved.minimum_greats,2); eq(saved.minimum_good_plus,false); eq(saved.min_stats.STR,6); eq(saved.min_stats.MP,false)
+  local restored=Roller.new({},saved); eq(restored.cfg.target_total,nil); eq(restored.cfg.hard_stop,nil); eq(restored.cfg.max_rolls,nil); eq(restored.cfg.arrange_mode,"minimums"); eq(restored.cfg.minimum_greats,2); eq(restored.cfg.minimum_good_plus,nil); eq(restored.cfg.min_stats.STR,6); eq(restored.cfg.min_stats.MP,nil); eq(restored.cfg.reroll_command,"reroll")
 end)
 test("legacy roller settings preserve nil limits and do not invent an MP minimum",function()
   local oldOpen,oldLoadfile,oldHome=io.open,loadfile,rawget(_G,"getMudletHomeDir"); getMudletHomeDir=function() return "/profile" end
   local ok,result=pcall(function()
     io.open=function() return {read=function() return "return { target_total=nil, hard_stop=62, max_rolls=nil, reroll_command='n', min_stats={STR=6, INT=nil} }" end,close=function() return true end} end
     loadfile=function() return function() return {target_total=nil,hard_stop=62,max_rolls=nil,reroll_command="n",min_stats={STR=6,INT=nil}} end end
-    local value=Adapter.loadRollerSettings(); eq(value.schema,2); eq(value.target_total,false); eq(value.hard_stop,62); eq(value.max_rolls,false); eq(value.reroll_command,"reroll"); eq(value.min_stats.STR,6); eq(value.min_stats.INT,false); eq(value.min_stats.MP,false)
+    local value=Adapter.loadRollerSettings(); eq(value.schema,3); eq(value.target_total,false); eq(value.hard_stop,62); eq(value.max_rolls,false); eq(value.reroll_command,"reroll"); eq(value.arrange_mode,"manual"); eq(value.minimum_greats,false); eq(value.minimum_good_plus,false); eq(value.min_stats.STR,6); eq(value.min_stats.INT,false); eq(value.min_stats.MP,false)
+  end)
+  io.open,loadfile=oldOpen,oldLoadfile; rawset(_G,"getMudletHomeDir",oldHome); if not ok then error(result,0) end
+end)
+test("schema two roller settings migrate to safe manual arrangement defaults",function()
+  local oldOpen,oldLoadfile,oldHome=io.open,loadfile,rawget(_G,"getMudletHomeDir"); getMudletHomeDir=function() return "/profile" end
+  local ok,result=pcall(function()
+    io.open=function() return {read=function() return "return { schema=2, target_total=60, min_stats={MP=false} }" end,close=function() return true end} end
+    loadfile=function() return function() return {schema=2,target_total=60,min_stats={MP=false}} end end
+    local value=Adapter.loadRollerSettings(); eq(value.schema,3); eq(value.target_total,60); eq(value.arrange_mode,"manual"); eq(value.minimum_greats,false); eq(value.minimum_good_plus,false); eq(value.min_stats.MP,false)
   end)
   io.open,loadfile=oldOpen,oldLoadfile; rawset(_G,"getMudletHomeDir",oldHome); if not ok then error(result,0) end
 end)

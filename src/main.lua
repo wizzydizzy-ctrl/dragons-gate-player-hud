@@ -960,6 +960,7 @@ function Main:start()
   end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.wrong,function(_,direction) self:callSpecialTransition("cancel","wrong_direction"); self.automapper:onWrongDirection(direction); self.walker:onWrongDirection(); self:refresh() end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.outgoing,function(_,command)
+    if self.roller and self.roller.onOutgoing then self.roller:onOutgoing(command) end
     local canonical=MapperModel.direction(command); local generated=command==self.generated_command
     if generated then self.generated_command=nil end
     self.walker:onManualMovement(command,generated)
@@ -968,7 +969,7 @@ function Main:start()
       if canonical then self:callSpecialTransition("cancel","direction") else self:callSpecialTransition("onOutgoing",command,self.automapper:currentRoom()) end
     else self:callSpecialTransition("cancel","disabled") end
   end)
-  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.disconnect,function() self.character_entry_started=false; self.character_entry_name=nil; self:callSpecialTransition("cancel","disconnect"); self.automapper:onDisconnect(); self.walker:stop("disconnected") end)
+  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.disconnect,function() self.character_entry_started=false; self.character_entry_name=nil; if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end; self:callSpecialTransition("cancel","disconnect"); self.automapper:onDisconnect(); self.walker:stop("disconnected") end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysWindowResizeEvent",function() self:applyResponsiveLayout() end)
   local function aliasArgument(value) if type(value)=="table" then return value[2] end; return value or (type(_G.matches)=="table" and _G.matches[2]) end
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}

@@ -523,16 +523,17 @@ end
 function Adapter:closeRollerLog(log) if log.session_handle then log.session_handle:close(); log.session_handle=nil end; if log.master_handle then log.master_handle:close(); log.master_handle=nil end; return true end
 local function rollerSettingsPath() return Adapter.dataBase().."/roller-settings.lua" end
 function Adapter.rollerSettingsSnapshot(config)
-  config=type(config)=="table" and config or {}; local optional={target_total=true,hard_stop=true,max_rolls=true}
-  local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
-  local result={schema=2,min_stats={}}
+  config=type(config)=="table" and config or {}; local optional={target_total=true,hard_stop=true,max_rolls=true,minimum_greats=true,minimum_good_plus=true}
+  local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","arrange_mode","minimum_greats","minimum_good_plus","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
+  local result={schema=3,min_stats={}}
   for _,key in ipairs(fields) do local value=config[key]; if optional[key] and value==nil then value=false end; result[key]=value end
+  if result.arrange_mode==nil then result.arrange_mode="manual" end
   for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}) do local value=(config.min_stats or {})[key]; if value==nil then value=false end; result.min_stats[key]=value end
   return result
 end
 function Adapter.rollerSettingsSource(config)
   local snapshot=Adapter.rollerSettingsSnapshot(config)
-  local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
+  local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","arrange_mode","minimum_greats","minimum_good_plus","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
   local function literal(value) if type(value)=="string" then return string.format("%q",value) elseif value==nil then return "nil" else return tostring(value) end end
   local lines={"return {","  schema="..snapshot.schema..","}
   for _,key in ipairs(fields) do lines[#lines+1]="  "..key.."="..literal(snapshot[key]).."," end
@@ -551,13 +552,19 @@ function Adapter.loadRollerSettings()
   local path=rollerSettingsPath(); local source=""; local file=io.open(path,"rb"); if file then source=file:read("*a") or ""; file:close() end
   local loader=loadfile(path); if not loader then return nil end; local ok,value=pcall(loader); if not ok or type(value)~="table" then return nil end
   if tostring(value.reroll_command or ""):lower()=="n" then value.reroll_command="reroll" end
-  if tonumber(value.schema)~=2 then
+  local schema=tonumber(value.schema) or 0
+  if schema<2 then
     value.min_stats=type(value.min_stats)=="table" and value.min_stats or {}
     if value.min_stats.MP==nil then value.min_stats.MP=false end
     for _,key in ipairs({"target_total","hard_stop","max_rolls"}) do if value[key]==nil and source:match("%f[%w_]"..key.."%f[^%w_]%s*=%s*nil%f[^%w_]") then value[key]=false end end
     for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}) do if value.min_stats[key]==nil and source:match("%f[%w_]"..key.."%f[^%w_]%s*=%s*nil%f[^%w_]") then value.min_stats[key]=false end end
   end
-  value.schema=2; return value
+  if schema<3 then
+    if value.arrange_mode==nil then value.arrange_mode="manual" end
+    if value.minimum_greats==nil then value.minimum_greats=false end
+    if value.minimum_good_plus==nil then value.minimum_good_plus=false end
+  end
+  value.schema=3; return value
 end
 local function mapperSettingsPath() return Adapter.dataBase().."/mapper-settings.lua" end
 function Adapter:saveMapperSettings(config)

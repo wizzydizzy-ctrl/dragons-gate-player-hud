@@ -3,6 +3,8 @@ from xml.etree import ElementTree
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
+EXPECTED_EDITION='player'
+EXPECTED_REPOSITORY='dragons-gate-player-hud'
 class BuildTest(unittest.TestCase):
     def run_lua(self, source, cwd):
         completed=subprocess.run(['lua','-'],input=source,text=True,cwd=cwd,capture_output=True)
@@ -11,8 +13,10 @@ class BuildTest(unittest.TestCase):
     def test_build_emits_verified_owned_package(self):
         with tempfile.TemporaryDirectory() as td:
             defaults=(ROOT/'src/defaults.lua').read_text()
+            self.assertEqual(re.search(r'edition\s*=\s*"([^"]+)"',defaults).group(1),EXPECTED_EDITION)
             owner=re.search(r'github\s*=\s*\{\s*owner="([^"]+)"',defaults).group(1)
             repository=re.search(r'github\s*=\s*\{[^}]*repository="([^"]+)"',defaults).group(1)
+            self.assertEqual(repository,EXPECTED_REPOSITORY)
             subprocess.run([sys.executable,str(ROOT/'scripts/build.py'),'--output',td,'--owner',owner,'--repository',repository],check=True)
             self.assertEqual({path.name for path in Path(td).iterdir()},{'DragonsGateHUD.mpackage','DGHUDRecovery.mpackage','DGHUDMigration.mpackage','manifest.json'})
             package=Path(td)/'DragonsGateHUD.mpackage'; manifest=json.loads((Path(td)/'manifest.json').read_text())
@@ -71,7 +75,7 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('tempTimer(0,Bridge.run)',migration_script)
             self.assertEqual(manifest['package'],'DragonsGateHUD')
             self.assertEqual(manifest['archive_url'],f'https://github.com/{owner}/{repository}/releases/download/v{manifest["version"]}/DragonsGateHUD.mpackage')
-            self.assertEqual(manifest['view_schema'],1)
+            self.assertEqual(manifest['view_schema'],2)
             self.assertEqual(manifest['sha256'],hashlib.sha256(package.read_bytes()).hexdigest())
             with zipfile.ZipFile(package) as z:
                 names=z.namelist(); self.assertEqual(names,['DragonsGateHUD.xml','DGHUDRuntime.lua','config.lua'])

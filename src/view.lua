@@ -188,8 +188,9 @@ local help_entries={
   {command="dghud update",description="Install the newest verified HUD release, then refresh character data."},
   {command="dghud recover",description="Emergency clean reinstall using the independent recovery companion."},
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
-  {command="rr start|stop|stats|last|reset|help",description="Control the 12-characteristic autoroller; target hits leave done for you."},
-  {command="rr set total|hard|max|delay|STAT <value>",description="Adjust totals or 1-7 minimums, including MP; rejected rolls use reroll."},
+  {command="rr start|stop|stats|last|reset|help",description="Control both 12-characteristic rolling methods; DGHUD always leaves done for you."},
+  {command="rr set total|hard|max|delay|greats|goodplus|STAT <value>",description="Adjust totals, arranged-pool counts, or 1-7 stat minimums including MP."},
+  {command="rr set arrange manual|auto|minimums",description="Choose whether a qualifying arranged pool waits, uses game auto, or places your raw pool-label minimums before auto."},
   {command="dghud config",description="Open the DGHUD settings location."},
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
   {command="dghud chatstatus",description="Show chat capture, filter, and storage status."},
@@ -380,12 +381,14 @@ function View.new(settings)
   self.roller_status=label("DGHUD.RollerSettings.Status",self.roller_panel,"background:transparent;color:"..t.muted..";")
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.roller_cancel=label("DGHUD.RollerSettings.Cancel",self.roller_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
-  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
-  local fieldLabels={target_total="Target total (1-84/off)",hard_stop="Hard stop (1-84/off; overrides minimums)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",log_folder="Log folder",master_file="Master log filename"}
+  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+  local fieldLabels={target_total="Target total (1-84/off)",hard_stop="Hard stop (1-84/off; overrides all normal filters)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",minimum_greats="Roll & arrange: minimum Great values (1-12/off)",minimum_good_plus="Roll & arrange: minimum Good-or-Great values (1-12/off)",log_folder="Log folder",master_file="Master log filename"}
   for _,key in ipairs(self.roller_field_order) do local caption=label("DGHUD.RollerSettings.Caption."..key,self.roller_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.RollerSettings.Input."..key,self.roller_content,self.geyser); self.roller_fields[key]={caption=caption,input=edit,label=fieldLabels[key] or (key.." minimum (1-7/off)")} end
   self.roller_toggle_order={"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}; self.roller_toggles={}
   local toggleLabels={auto_start_on_name="Auto-start when roll screen appears",use_min_stats="Enable stat minimums",require_min_stats_to_stop="Require minimums to stop",show_every_roll="Print every roll",logging_enabled="Enable roll logging"}
   for _,key in ipairs(self.roller_toggle_order) do local button=label("DGHUD.RollerSettings.Toggle."..key,self.roller_content); button.option_text=toggleLabels[key]; button:setClickCallback(function() self.roller_draft[key]=not self.roller_draft[key]; self:renderRollerSettings(false); return self.roller_draft[key] end); self.roller_toggles[key]=button end
+  self.roller_arrange_caption=label("DGHUD.RollerSettings.ArrangeCaption",self.roller_content,"background:transparent;color:"..t.muted..";"); self.roller_arrange_buttons={}; self.roller_arrange_order={"manual","game_auto","minimums"}; local arrangeLabels={manual="LET ME PLACE",game_auto="GAME AUTO",minimums="MY MINIMUMS + AUTO"}
+  for _,mode in ipairs(self.roller_arrange_order) do local button=label("DGHUD.RollerSettings.ArrangeMode."..mode,self.roller_content); button.option_text=arrangeLabels[mode]; button:setClickCallback(function() self.roller_draft.arrange_mode=mode; self:renderRollerSettings(false); return mode end); if button.setToolTip then button:setToolTip(mode=="manual" and "Stop on a qualifying pool so you can place every value." or mode=="game_auto" and "Ask Dragon's Gate to place the qualifying pool." or "Place your configured raw pool-label minimums first, then ask the game to fill the rest. Racial and profession modifiers may change final shown ranks.") end; self.roller_arrange_buttons[mode]=button end
   self.roller_action_order={"roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}; self.roller_action_buttons={}; local rollerActionLabels={roller_start="START ROLLER",roller_stop="STOP ROLLER",roller_stats="SESSION STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET SESSION",roller_help="ROLLER HELP"}
   for _,key in ipairs(self.roller_action_order) do local button=label("DGHUD.RollerSettings.Action."..key,self.roller_content); button.option_text=rollerActionLabels[key]; button:setClickCallback(function() if self.options_action_callback then return self.options_action_callback(key) end; return nil,"autoroller action is unavailable" end); self.roller_action_buttons[key]=button end
   self.roller_save:setClickCallback(function() return self:saveRollerSettings() end); self.roller_cancel:setClickCallback(function() return self:hideRollerSettings() end); self.roller_overlay:setClickCallback(function() return self:hideRollerSettings() end)
@@ -444,7 +447,7 @@ function View.new(settings)
   self.support_overlay=label("DGHUD.Support.Overlay",self.root,"background:rgba(0,0,0,0.72);"); self.support_panel=Geyser.Container:new({name="DGHUD.Support.Panel",x=0,y=0,width=520,height=330},self.root); self.support_bg=label("DGHUD.Support.Background",self.support_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;"); self.support_title=label("DGHUD.Support.Title",self.support_panel,"background:transparent;color:"..t.accent..";font-weight:700;"); self.support_text=label("DGHUD.Support.Text",self.support_panel,"background:transparent;color:"..t.text..";"); self.support_feedback=label("DGHUD.Support.Feedback",self.support_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;"); self.support_debug=label("DGHUD.Support.Debug",self.support_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.accent..";font-weight:700;"); self.support_close=label("DGHUD.Support.Close",self.support_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;"); self.support_status=label("DGHUD.Support.Status",self.support_panel,"background:transparent;color:"..t.muted..";")
   self.support_feedback:setClickCallback(function() self:hideSupport(); return self:showFeedback() end); self.support_debug:setClickCallback(function() if not self.options_action_callback then return nil,"debug submission is unavailable" end; self.support_status_text="Sending privacy-safe debug report…"; self:renderSupport(); local ok,err=self.options_action_callback("send_debug"); if not ok then self.support_status_text="Could not send: "..tostring(err); self:renderSupport() end; return ok,err end); self.support_close:setClickCallback(function() return self:hideSupport() end); self.support_overlay:setClickCallback(function() return self:hideSupport() end); self.support_visible=false
   for _,widget in ipairs({self.support_overlay,self.support_panel,self.support_bg,self.support_title,self.support_text,self.support_feedback,self.support_debug,self.support_close,self.support_status}) do widget:hide() end
-  local rollerWidgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel}; for _,entry in pairs(self.roller_fields) do rollerWidgets[#rollerWidgets+1]=entry.caption; rollerWidgets[#rollerWidgets+1]=entry.input end; for _,button in pairs(self.roller_toggles) do rollerWidgets[#rollerWidgets+1]=button end; for _,button in pairs(self.roller_action_buttons) do rollerWidgets[#rollerWidgets+1]=button end; for _,widget in ipairs(rollerWidgets) do widget:hide() end
+  local rollerWidgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel,self.roller_arrange_caption}; for _,button in pairs(self.roller_arrange_buttons) do rollerWidgets[#rollerWidgets+1]=button end; for _,entry in pairs(self.roller_fields) do rollerWidgets[#rollerWidgets+1]=entry.caption; rollerWidgets[#rollerWidgets+1]=entry.input end; for _,button in pairs(self.roller_toggles) do rollerWidgets[#rollerWidgets+1]=button end; for _,button in pairs(self.roller_action_buttons) do rollerWidgets[#rollerWidgets+1]=button end; for _,widget in ipairs(rollerWidgets) do widget:hide() end
   if self.help_close.setToolTip then pcall(self.help_close.setToolTip,self.help_close,"Close DGHUD command guide") end
   self.help_visible=false
   for _,widget in ipairs({self.help_overlay,self.help_panel,self.help_bg,self.help_title,self.help_copy,self.help_close,self.help_output,self.help_content}) do widget:hide() end
@@ -761,20 +764,32 @@ function View:layoutColorSettings(layout)
   for index,key in ipairs(self.color_option_order) do local column=(index-1)%columns; local line=math.floor((index-1)/columns); place(self.color_option_buttons[key],column*(cw+gap),line*row,cw,row-4) end; self:renderColorOptions(); View.raiseCards(widgets); return true
 end
 function View:layoutRollerSettings(layout)
-  local widgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel}; for _,entry in pairs(self.roller_fields or {}) do widgets[#widgets+1]=entry.caption; widgets[#widgets+1]=entry.input end; for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.roller_action_buttons or {}) do widgets[#widgets+1]=button end
+  local widgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel,self.roller_arrange_caption}; for _,button in pairs(self.roller_arrange_buttons or {}) do widgets[#widgets+1]=button end; for _,entry in pairs(self.roller_fields or {}) do widgets[#widgets+1]=entry.caption; widgets[#widgets+1]=entry.input end; for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.roller_action_buttons or {}) do widgets[#widgets+1]=button end
   if not self.roller_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width=math.max(1,tonumber(layout.window_width) or 1200); local height=math.max(1,tonumber(layout.window_height) or 800); local margin=math.min(18,math.max(6,math.floor(math.min(width,height)*.025)))
   local panelWidth=math.min(820,math.max(1,width-margin*2)); local panelHeight=math.min(650,math.max(1,height-margin*2)); local x=math.floor((width-panelWidth)/2); local y=math.floor((height-panelHeight)/2)
   place(self.roller_overlay,0,0,"100%","100%"); place(self.roller_panel,x,y,panelWidth,panelHeight); place(self.roller_bg,0,0,"100%","100%")
   local font=math.max(10,math.min(14,(layout.body_font or 14)-3)); local header=math.min(math.max(30,font+20),math.max(30,panelHeight*.28)); local buttonHeight=math.max(24,font+14); local footer=panelHeight<220 and buttonHeight+14 or math.max(76,font*4+20)
   place(self.roller_title,14,9,panelWidth-28,header-10); self.roller_title:echo(View.withFont("<b>AUTOROLLER SETTINGS</b>",font+2))
-  local gap=10; local contentWidth=math.max(1,panelWidth-28); local columns=layout.mode~="compact" and panelWidth>=400 and 2 or 1; local columnWidth=columns==2 and (contentWidth-gap)/2 or contentWidth; local contentTop=header; local viewportHeight=math.max(1,panelHeight-header-footer); local rowHeight=42
+  local gap=10; local contentWidth=math.max(1,panelWidth-28); local compact=layout.mode=="compact"; local columns=not compact and panelWidth>=400 and 2 or 1; local columnWidth=columns==2 and (contentWidth-gap)/2 or contentWidth; local contentTop=header; local viewportHeight=math.max(1,panelHeight-header-footer); local rowHeight=42; local modeSectionHeight=compact and 110 or 64
   place(self.roller_content,14,contentTop,contentWidth,viewportHeight)
+  local modeGap=6
+  if compact then
+    local halfWidth=(contentWidth-modeGap)/2
+    place(self.roller_arrange_caption,0,0,contentWidth,28)
+    place(self.roller_arrange_buttons.manual,0,30,halfWidth,34)
+    place(self.roller_arrange_buttons.game_auto,halfWidth+modeGap,30,halfWidth,34)
+    place(self.roller_arrange_buttons.minimums,0,70,contentWidth,34)
+  else
+    place(self.roller_arrange_caption,0,0,contentWidth,22)
+    local modeWidth=(contentWidth-modeGap*2)/3
+    for index,mode in ipairs(self.roller_arrange_order) do place(self.roller_arrange_buttons[mode],(index-1)*(modeWidth+modeGap),24,modeWidth,34) end
+  end
   local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local right={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+  local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
   local function layoutColumn(items,column)
     local cx=(column-1)*(columnWidth+gap)
-    for index,key in ipairs(items) do local ry=(index-1)*rowHeight; local field=self.roller_fields[key]
+    for index,key in ipairs(items) do local ry=modeSectionHeight+(index-1)*rowHeight; local field=self.roller_fields[key]
       if field then local captionHeight=math.max(10,math.min(font+5,rowHeight*.42)); place(field.caption,cx,ry,columnWidth,captionHeight); place(field.input,cx,ry+captionHeight,columnWidth,math.max(12,rowHeight-captionHeight-2)); field.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;")
       else local button=self.roller_toggles[key] or self.roller_action_buttons[key]; place(button,cx,ry+2,columnWidth,math.max(16,rowHeight-4)) end
     end
@@ -782,7 +797,7 @@ function View:layoutRollerSettings(layout)
   local contentRows
   if columns==2 then layoutColumn(left,1); layoutColumn(right,2); contentRows=math.max(#left,#right)
   else local combined={}; for _,key in ipairs(left) do combined[#combined+1]=key end; for _,key in ipairs(right) do combined[#combined+1]=key end; layoutColumn(combined,1); contentRows=#combined end
-  self.roller_content.content_height=contentRows*rowHeight
+  self.roller_content.content_height=modeSectionHeight+contentRows*rowHeight
   local statusY=panelHeight-footer+5; if panelHeight>=220 then place(self.roller_status,14,statusY,panelWidth-28,math.max(24,font*2+4)) else self.roller_status:hide() end
   local buttonY=panelHeight-buttonHeight-8; local buttonWidth=math.min(130,(panelWidth-38)/2); place(self.roller_cancel,panelWidth-14-buttonWidth*2-10,buttonY,buttonWidth,buttonHeight); place(self.roller_save,panelWidth-14-buttonWidth,buttonY,buttonWidth,buttonHeight); self.roller_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.roller_save:echo(View.withFont("<center><b>SAVE</b></center>",font))
   self:renderRollerSettings(false); View.raiseCards(widgets); return true
@@ -1011,7 +1026,7 @@ function View:renderColorOptions()
 end
 local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 function View:showRollerSettings(config)
-  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
   self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
@@ -1048,12 +1063,14 @@ function View:renderRollerSettings(populate)
   if not self.roller_draft then return true end; local t=self.settings.theme; local font=self.layout and math.max(10,(self.layout.body_font or 14)-3) or 11
   for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=key:match("^[A-Z]+$") and (self.roller_draft.min_stats or {})[key] or self.roller_draft[key]; if value==nil then value="off" end; field.caption:echo(View.withFont(field.label,font)); if populate and field.input.print then field.input:print(tostring(value)) end end
   for _,key in ipairs(self.roller_toggle_order) do local enabled=self.roller_draft[key]==true; local button=self.roller_toggles[key]; button:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
+  local mode=self.roller_draft.arrange_mode or "manual"; self.roller_arrange_caption:echo(View.withFont("<b>WHEN A ROLL-AND-ARRANGE POOL QUALIFIES</b> &nbsp; (DGHUD never sends done)",font)); for _,key in ipairs(self.roller_arrange_order) do local selected=key==mode; local button=self.roller_arrange_buttons[key]; button:setStyleSheet("background:"..(selected and "#193024" or "#111512")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
   for _,key in ipairs(self.roller_action_order or {}) do local button=self.roller_action_buttons[key]; button:setStyleSheet("background:#151d18;border:1px solid "..t.border..";border-radius:4px;color:"..t.accent..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
-  self.roller_status:echo(View.withFont(self.roller_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.roller_error).."</b></span>") or "Ranks: 1 Awful · 2 Poor · 3 Low · 4 Aver · 5 Fair · 6 Good · 7 Great",font))
+  local note=mode=="minimums" and self.roller_draft.use_min_stats~=true and "Minimums are disabled; this choice will behave like Game Auto." or "Ranks: 1 Awful · 2 Poor · 3 Low · 4 Aver · 5 Fair · 6 Good · 7 Great"
+  self.roller_status:echo(View.withFont(self.roller_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.roller_error).."</b></span>") or note,font))
   return true
 end
 function View:rollerSettingsValues()
-  local values={min_stats={}}; for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=field.input.getText and field.input:getText() or ""; if key:match("^[A-Z]+$") then values.min_stats[key]=value else values[key]=value end end
+  local values={min_stats={},arrange_mode=self.roller_draft.arrange_mode or "manual"}; for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=field.input.getText and field.input:getText() or ""; if key:match("^[A-Z]+$") then values.min_stats[key]=value else values[key]=value end end
   for _,key in ipairs(self.roller_toggle_order) do values[key]=self.roller_draft[key]==true end; return values
 end
 function View:saveRollerSettings()

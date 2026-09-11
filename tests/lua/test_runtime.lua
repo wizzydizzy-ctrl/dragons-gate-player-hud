@@ -644,6 +644,15 @@ test("runtime wires one automapper handler per event and cleans it exactly",func
   hud:shutdown(); eq(f.events[personal],"gmcp.Room.Info"); eq(count("gmcp.Room.Info"),1); eq(count("gmcp.Room.WrongDir"),0); eq(count("sysDataSendRequest"),0)
 end)
 
+test("runtime forwards outgoing commands and disconnects to autoroller safety",function()
+  local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local outgoing,disconnected
+  hud.roller.onOutgoing=function(_,command) outgoing=command; return true end
+  hud.roller.onDisconnect=function() disconnected=true; return true end
+  f.callbacks["sysDataSendRequest"](nil,"auto"); eq(outgoing,"auto")
+  f.callbacks["sysDisconnectionEvent"](); eq(disconnected,true)
+end)
+
 test("mapper toggle hides and pauses mapping without deleting saved rooms",function()
   local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={},mapper={enabled=true}}); assert(hud:start())
   DGHUD={controller=hud,user_settings={}}
@@ -851,11 +860,11 @@ test("map debug alias submits a sanitized diagnostic anonymously",function()
   local f=fake(); local hud=Main.new(f,{layout={},edition="player",version="test",mapper={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud map debug$")()); eq(f.submittedFeedback.kind,"feedback"); eq(f.submittedFeedback.summary,"Automatic mapper diagnostic"); eq(f.submittedFeedback.details:find("DGHUD mapper diagnostic",1,true)~=nil,true); eq(f.cleanupReports[#f.cleanupReports].message:find("DG%-MAP")~=nil,true); hud:shutdown()
 end)
 test("autoroller options commands and atomic settings use the active roller",function()
-  local f=fake(); f.rollerSettingsSnapshot=function(config) return {schema=2,target_total=config.target_total or false,hard_stop=config.hard_stop or false,max_rolls=config.max_rolls or false,auto_start_on_name=config.auto_start_on_name~=false,min_stats={STR=(config.min_stats or {}).STR or false,MP=(config.min_stats or {}).MP or false}} end
+  local f=fake(); f.rollerSettingsSnapshot=function(config) return {schema=3,target_total=config.target_total or false,hard_stop=config.hard_stop or false,max_rolls=config.max_rolls or false,arrange_mode=config.arrange_mode or "manual",minimum_greats=config.minimum_greats or false,minimum_good_plus=config.minimum_good_plus or false,auto_start_on_name=config.auto_start_on_name~=false,min_stats={STR=(config.min_stats or {}).STR or false,MP=(config.min_stats or {}).MP or false}} end
   DGHUD={user_settings={}}; local hud=Main.new(f,{layout={},roller={target_total=53,hard_stop=62,reroll_delay=.1,reroll_command="reroll",use_min_stats=true,min_stats={STR=5}}}); assert(hud:start())
   local config=f.optionsActionCallback("roller_settings"); eq(config.target_total,53); assert(f.optionsActionCallback("roller_start")); eq(hud.roller.state.active,true); assert(f.optionsActionCallback("roller_stop")); eq(hud.roller.state.active,false)
-  local ok,err=f.rollerSettingsCallback({target_total="60",hard_stop="off",max_rolls="500",reroll_delay="0.2",reroll_command="reroll",auto_start_on_name=false,use_min_stats=true,min_stats={STR="6",MP="off"}}); assert(ok,err); eq(hud.roller.cfg.target_total,60); eq(hud.roller.cfg.hard_stop,nil); eq(hud.roller.cfg.min_stats.MP,nil); eq(f.savedRollerSettings.target_total,60)
-  eq(DGHUD.user_settings.roller.schema,2); eq(DGHUD.user_settings.roller.hard_stop,false); eq(DGHUD.user_settings.roller.min_stats.MP,false); eq(DGHUD.user_settings.roller.auto_start_on_name,false)
+  local ok,err=f.rollerSettingsCallback({target_total="60",hard_stop="off",max_rolls="500",reroll_delay="0.2",reroll_command="reroll",arrange_mode="minimums",minimum_greats="2",minimum_good_plus="5",auto_start_on_name=false,use_min_stats=true,min_stats={STR="6",MP="off"}}); assert(ok,err); eq(hud.roller.cfg.target_total,60); eq(hud.roller.cfg.hard_stop,nil); eq(hud.roller.cfg.arrange_mode,"minimums"); eq(hud.roller.cfg.minimum_greats,2); eq(hud.roller.cfg.minimum_good_plus,5); eq(hud.roller.cfg.min_stats.MP,nil); eq(f.savedRollerSettings.target_total,60)
+  eq(DGHUD.user_settings.roller.schema,3); eq(DGHUD.user_settings.roller.hard_stop,false); eq(DGHUD.user_settings.roller.arrange_mode,"minimums"); eq(DGHUD.user_settings.roller.min_stats.MP,false); eq(DGHUD.user_settings.roller.auto_start_on_name,false)
   hud:shutdown(); DGHUD=nil
 end)
 test("public autoroller status returns defensive configuration copies",function()
