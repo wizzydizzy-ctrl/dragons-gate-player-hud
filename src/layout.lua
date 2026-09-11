@@ -80,6 +80,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   layout.console_left=layout.left+layout.console_gutter
   layout.console_right=layout.right+layout.console_gutter
   layout.console_width=width-layout.console_left-layout.console_right
+  -- Leave room for Mudlet's main-console scrollbar and inner frame when
+  -- translating the live pixel width into a character wrap width.
+  layout.main_wrap_scrollbar_allowance=24
   layout.body_font=clamp(width/100,16,22); layout.small_font=clamp((layout.body_font-2)*2,28,40); layout.heading_font=clamp(layout.body_font+5,21,27)
   layout.equipment_font=clamp(layout.body_font-3,13,18)
   layout.equipment_line_height=layout.equipment_font+4

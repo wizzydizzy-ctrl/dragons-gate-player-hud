@@ -327,6 +327,16 @@ function Main:applyResponsiveLayout(state)
   local width,height=self.adapter:getWindowSize(); local layout=Layout.compute(width,height,self.settings.chat,self.settings.mapper,vitals); self.current_layout=layout
   self.layout_vitals_signature=((vitals and vitals.psi and vitals.psi.visible) and "1" or "0")..((vitals and vitals.web and vitals.web.visible) and "1" or "0")
   self.adapter:setBorders(layout.console_left or layout.left,layout.top,layout.console_right or layout.right,layout.bottom)
+  -- Mudlet stores main-console wrapping as a fixed profile column count.
+  -- Recompute it from the actual center display on every responsive layout
+  -- pass so profiles with different legacy wrapAt values behave identically.
+  if self.adapter.mainConsoleWrapColumns and self.adapter.setMainConsoleWrap then
+    local measured,columns=pcall(self.adapter.mainConsoleWrapColumns,self.adapter,layout.console_width,layout.main_wrap_scrollbar_allowance)
+    if measured and columns then
+      local applied,result=pcall(self.adapter.setMainConsoleWrap,self.adapter,columns)
+      if applied and result then self.main_console_wrap_columns=columns end
+    end
+  end
   if self.view and self.view.applyLayout then self.view:applyLayout(layout) end; return layout
 end
 function Main:mapperEnabled() return not (self.settings.mapper and self.settings.mapper.enabled==false) end
@@ -729,6 +739,10 @@ function Main:removeMapClickHook()
 end
 function Main:start()
   if self.started then return true end
+  if self.original_main_console_wrap==nil and self.adapter.getMainConsoleWrap then
+    local read,current=pcall(self.adapter.getMainConsoleWrap,self.adapter)
+    if read and tonumber(current) and tonumber(current)>=1 then self.original_main_console_wrap=math.floor(tonumber(current)) end
+  end
   self.original_borders={0,0,0,0}
   local mapOk,map,mapErr=pcall(function() if self.adapter.createMapAdapter then return self.adapter:createMapAdapter() end; return MapAdapter.new(MapAdapter.mudletApi(_G)) end)
   if not mapOk then self:shutdown(); return nil,map end
@@ -1050,7 +1064,8 @@ function Main:shutdown()
   for _,id in ipairs(self.runtime.events) do self.adapter:killEvent(id) end; for _,id in ipairs(self.runtime.aliases) do self.adapter:killAlias(id) end; for _,id in ipairs(self.runtime.triggers or {}) do self.adapter:killTrigger(id) end
   self.runtime={events={},aliases={},triggers={}}; if self.view and not preserveView then self.view:delete() end; self.view=nil
   if self.original_borders and not preserveView then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]) end; self.original_borders=nil
-  self.character_entry_started=false; self.character_entry_name=nil; self.runtime_registration_complete=false; self.started=false; return true
+  if not updateHandoff and self.original_main_console_wrap and self.adapter.setMainConsoleWrap then pcall(self.adapter.setMainConsoleWrap,self.adapter,self.original_main_console_wrap) end
+  self.character_entry_started=false; self.character_entry_name=nil; self.original_main_console_wrap=nil; self.main_console_wrap_columns=nil; self.runtime_registration_complete=false; self.started=false; return true
 end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()

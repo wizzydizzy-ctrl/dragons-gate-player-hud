@@ -166,6 +166,48 @@ function Adapter.new() return setmetatable({},Adapter) end
 function Adapter:getBorders() return getBorderLeft(),getBorderTop(),getBorderRight(),getBorderBottom() end
 function Adapter:getWindowSize() return getMainWindowSize() end
 function Adapter:setBorders(l,t,r,b) setBorderLeft(l);setBorderTop(t);setBorderRight(r);setBorderBottom(b) end
+function Adapter:getMainConsoleWrap(api)
+  api=api or _G
+  if type(api.getWindowWrap)~="function" then return nil end
+  local ok,value=pcall(api.getWindowWrap,"main")
+  value=ok and tonumber(value) or nil
+  return value and value>=1 and math.floor(value) or nil
+end
+function Adapter:mainConsoleWrapColumns(pixelWidth,allowance,api)
+  api=api or _G
+  pixelWidth=math.max(1,tonumber(pixelWidth) or 1)
+  allowance=math.max(0,tonumber(allowance) or 0)
+  -- When Mudlet has already committed the new border geometry, its native
+  -- column count accounts for platform DPI, frame styling, and scrollbars
+  -- more accurately than any fixed pixel estimate. Reject stale geometry
+  -- after a large resize and fall back to the known responsive width below.
+  if type(api.getMainConsoleWidth)=="function" and type(api.getColumnCount)=="function" then
+    local widthOK,liveWidth=pcall(api.getMainConsoleWidth)
+    local columnsOK,liveColumns=pcall(api.getColumnCount,"main")
+    liveWidth=widthOK and tonumber(liveWidth) or nil; liveColumns=columnsOK and tonumber(liveColumns) or nil
+    local tolerance=math.max(32,pixelWidth*.04)
+    if liveWidth and liveWidth>0 and liveColumns and liveColumns>0 and math.abs(liveWidth-pixelWidth)<=tolerance then
+      return math.max(1,math.min(1000,math.floor(liveColumns)-1))
+    end
+  end
+  local cellWidth
+  if type(api.calcFontSize)=="function" then
+    local ok,value=pcall(api.calcFontSize,"main")
+    if ok and tonumber(value) and tonumber(value)>0 then cellWidth=tonumber(value) end
+  end
+  -- calcFontSize(window) is available in Mudlet 5.x. Keep a conservative
+  -- fallback so a missing font metric never prevents the HUD from loading.
+  cellWidth=cellWidth or 8
+  return math.max(1,math.min(1000,math.floor(math.max(1,pixelWidth-allowance)/cellWidth)))
+end
+function Adapter:setMainConsoleWrap(columns,api)
+  api=api or _G; columns=math.max(1,math.floor(tonumber(columns) or 1))
+  if type(api.setWindowWrap)~="function" then return nil,"main-console wrapping is unavailable" end
+  if self:getMainConsoleWrap(api)==columns then return columns end
+  local ok,result=pcall(api.setWindowWrap,"main",columns)
+  if not ok or result==false then return nil,ok and "main-console wrap was rejected" or tostring(result) end
+  return columns
+end
 function Adapter:suppressDefaultMapInfo(api)
   api=api or _G
   if type(api.disableMapInfo)~="function" then return true end

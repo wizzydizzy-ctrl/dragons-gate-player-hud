@@ -8,6 +8,12 @@ local function fake()
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
   function f:setBorders(a,b,c,d) self.set_borders={a,b,c,d} end
   function f:getWindowSize() return self.width or 1920,self.height or 1080 end
+  function f:getMainConsoleWrap() return self.main_wrap_columns or self.profile_main_wrap or 100 end
+  function f:mainConsoleWrapColumns(pixelWidth,allowance)
+    self.main_wrap_measurements=self.main_wrap_measurements or {}; self.main_wrap_measurements[#self.main_wrap_measurements+1]={pixelWidth,allowance}
+    return math.max(1,math.floor((pixelWidth-(allowance or 0))/10))
+  end
+  function f:setMainConsoleWrap(columns) if self.main_wrap_columns~=columns then self.main_wrap_columns=columns; self.main_wrap_sets=(self.main_wrap_sets or 0)+1 end; return columns end
   function f:createView() f.viewCreates=(f.viewCreates or 0)+1; local view={root={},
     update=function(self,state) self.state=state; f.viewUpdates=(f.viewUpdates or 0)+1 end,
     updateClock=function(self,clock) self.state.clock=clock; f.clockUpdates=(f.clockUpdates or 0)+1 end,
@@ -201,6 +207,21 @@ test("Mudlet adapter suppresses the Short and Full default map information",func
     updateMap=function() updates=updates+1 end,
   }),true)
   eq(disabled[1],"Short"); eq(disabled[2],"Full"); eq(#disabled,2); eq(updates,1)
+end)
+test("Mudlet adapter derives and applies main-console wrap from live font metrics",function()
+  local applied={}; local current=77
+  local api={
+    calcFontSize=function(window) eq(window,"main"); return 10,18 end,
+    getWindowWrap=function(window) eq(window,"main"); return current end,
+    setWindowWrap=function(window,columns) eq(window,"main"); applied[#applied+1]=columns; current=columns; return true end,
+  }
+  local adapter=MudletAdapter.new(); local columns=adapter:mainConsoleWrapColumns(1024,24,api); eq(columns,100)
+  eq(adapter:getMainConsoleWrap(api),77)
+  eq(adapter:setMainConsoleWrap(columns,api),100); eq(applied[1],100)
+  eq(adapter:setMainConsoleWrap(columns,api),100); eq(#applied,1)
+  eq(adapter:mainConsoleWrapColumns(40,24,{calcFontSize=function() return nil end}),2)
+  local live={getMainConsoleWidth=function() return 1008 end,getColumnCount=function(window) eq(window,"main"); return 99 end}
+  eq(adapter:mainConsoleWrapColumns(1024,24,live),98)
 end)
 
 local function gmcpRoom(id)
@@ -491,6 +512,21 @@ test("health check requires root handlers and an owned chat trigger",function()
 end)
 test("window resize recomputes absolute borders and view layout",function()
   local f=fake(); f.borders={1290,234,1610,120}; local hud=Main.new(f,{layout={}}); hud:start(); eq(f.layouts[#f.layouts].mode,"wide"); eq(f.set_borders[1],336); eq(f.set_borders[2],314); eq(f.set_borders[3],336); eq(f.set_borders[4],f.layouts[#f.layouts].bottom); f.width=760; f.height=700; f.callbacks["sysWindowResizeEvent"](); eq(f.layouts[#f.layouts].mode,"compact"); eq(f.set_borders[1],0); eq(f.set_borders[2],276); eq(f.set_borders[3],0); eq(f.set_borders[4],f.layouts[#f.layouts].bottom)
+  local latest=f.main_wrap_measurements[#f.main_wrap_measurements]; eq(latest[1],760); eq(latest[2],24); eq(f.main_wrap_columns,73)
+  local sets=f.main_wrap_sets; f.callbacks["sysWindowResizeEvent"](); eq(f.main_wrap_sets,sets)
+  f.main_wrap_columns=150; f.callbacks["sysWindowResizeEvent"](); eq(f.main_wrap_columns,73); eq(f.main_wrap_sets,sets+1)
+end)
+test("normal shutdown restores the profile wrap while update handoff keeps the responsive wrap",function()
+  local f=fake(); f.profile_main_wrap=150; local hud=Main.new(f,{layout={}}); assert(hud:start()); assert(f.main_wrap_columns~=150); assert(hud:shutdown()); eq(f.main_wrap_columns,150)
+  local g=fake(); g.profile_main_wrap=150; local replacement=Main.new(g,{layout={}}); assert(replacement:start()); local responsive=g.main_wrap_columns; replacement.update_handoff=true; assert(replacement:shutdown()); eq(g.main_wrap_columns,responsive)
+end)
+test("main-console wrap follows the usable center width across responsive breakpoints",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local sizes={{2560,1400},{1920,1080},{1200,800},{1000,650},{800,700},{799,700}}
+  for _,size in ipairs(sizes) do
+    f.width,f.height=size[1],size[2]; f.callbacks["sysWindowResizeEvent"]()
+    local layout=f.layouts[#f.layouts]; eq(f.main_wrap_columns,math.max(1,math.floor((layout.console_width-24)/10)))
+  end
 end)
 test("runtime wires one mapper toolbar callback across resize and reports zoom outcomes",function()
   local f=fake(); f.gmcp=gmcpRoom(175); f.zoomResult=17.5
