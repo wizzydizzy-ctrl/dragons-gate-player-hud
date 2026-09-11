@@ -203,12 +203,12 @@ local function observeCommand(f,command)
   fire(f,"sysDataSendRequest",command)
 end
 
-test("HUD release defaults are ready for version 0.3.22",function()
-  eq(Defaults.version,"0.3.22"); eq(Defaults.view_schema,2); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
+test("HUD release defaults are ready for version 0.3.23",function()
+  eq(Defaults.version,"0.3.23"); eq(Defaults.view_schema,2); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
   eq(Defaults.theme.hp,"#ba5147"); eq(Defaults.theme.fatigue,"#b08f18")
   eq(Defaults.time.speed,2); eq(Defaults.time.sunrise_hour,6); eq(Defaults.time.sunset_hour,18)
   eq(Defaults.mapper.minimum_height,90); eq(Defaults.mapper.schema,1)
-  eq(Defaults.roller.schema,3); eq(Defaults.roller.target_total,53); eq(Defaults.roller.hard_stop,62); eq(Defaults.roller.reroll_delay,.1); eq(Defaults.roller.arrange_mode,"manual"); eq(Defaults.roller.minimum_greats,nil); eq(Defaults.roller.minimum_good_plus,nil); eq(Defaults.roller.min_stats.APP,5); eq(Defaults.roller.min_stats.MP,5)
+  eq(Defaults.roller.schema,3); eq(Defaults.roller.target_total,53); eq(Defaults.roller.hard_stop,62); eq(Defaults.roller.reroll_delay,.1); eq(Defaults.roller.arrange_mode,"manual"); eq(Defaults.roller.minimum_greats,nil); eq(Defaults.roller.minimum_good_plus,nil); eq(Defaults.roller.min_stats.APP,5)
 end)
 
 test("special submaps persist canonical rooms zoom and mixed walking end to end",function()
