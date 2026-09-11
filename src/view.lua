@@ -381,7 +381,7 @@ function View.new(settings)
   self.roller_status=label("DGHUD.RollerSettings.Status",self.roller_panel,"background:transparent;color:"..t.muted..";")
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.roller_cancel=label("DGHUD.RollerSettings.Cancel",self.roller_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
-  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
   local fieldLabels={target_total="Target total (1-84/off)",hard_stop="Hard stop (1-84/off; overrides all normal filters)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",minimum_greats="Roll & arrange: minimum Great values (1-12/off)",minimum_good_plus="Roll & arrange: minimum Good-or-Great values (1-12/off)",log_folder="Log folder",master_file="Master log filename"}
   for _,key in ipairs(self.roller_field_order) do local caption=label("DGHUD.RollerSettings.Caption."..key,self.roller_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.RollerSettings.Input."..key,self.roller_content,self.geyser); self.roller_fields[key]={caption=caption,input=edit,label=fieldLabels[key] or (key.." minimum (1-7/off)")} end
   self.roller_toggle_order={"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}; self.roller_toggles={}
@@ -786,7 +786,7 @@ function View:layoutRollerSettings(layout)
     for index,mode in ipairs(self.roller_arrange_order) do place(self.roller_arrange_buttons[mode],(index-1)*(modeWidth+modeGap),24,modeWidth,34) end
   end
   local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+  local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
   local function layoutColumn(items,column)
     local cx=(column-1)*(columnWidth+gap)
     for index,key in ipairs(items) do local ry=modeSectionHeight+(index-1)*rowHeight; local field=self.roller_fields[key]

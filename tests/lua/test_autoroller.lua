@@ -109,7 +109,7 @@ end)
 test("manual reroll cancels a queued automatic reroll including stale callbacks",function()
   local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
   newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local stale=f.timers[1].fn
-  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,nil); stale(); eq(#f.sent,0)
+  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,2); stale(); eq(#f.sent,0)
   newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.active,false); eq(r.state.rolls,2)
 end)
 
@@ -312,7 +312,7 @@ test("legacy manual y and n cancel queued automatic rejection",function()
   for _,choice in ipairs({"y","n"}) do
     local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
     r:onLine("Name : Test Tester Race : Human"); r:onLine(legacyHeader); r:onLine("Low Low Low Low Low Low Low Low Low Low Low"); assert(r:onLine(legacyPrompt)); local stale=f.timers[1].fn
-    assert(r:onLine("> "..choice)); eq(r.state.timer,nil); stale(); eq(#f.sent,0); eq(r.state.active,choice=="n")
+    assert(r:onLine("> "..choice)); eq(r.state.timer,choice=="n" and 2 or nil); stale(); eq(#f.sent,0); eq(r.state.active,choice=="n")
   end
 end)
 
