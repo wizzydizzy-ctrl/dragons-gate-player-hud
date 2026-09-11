@@ -79,7 +79,7 @@ test("malformed or incomplete new rows never reuse a previous roll",function()
   local f=fake(); local r=Roller.new(f,{target_total=84,reroll_delay=0,auto_start_on_name=true})
   newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.rolls,1)
   assert(r:onLine("> reroll"))
-  assert(r:onLine(firstHeader)); eq(r:onLine("Low Low Low"),false); eq(r:onLine(secondHeader),false); eq(r:onLine("Low Low Low Low Low Low"),false); eq(r:onLine(creatorPrompt),false); eq(r.state.rolls,1); eq(#f.sent,0)
+  assert(r:onLine(firstHeader)); eq(r:onLine("Low Low Low"),false); eq(r:onLine(secondHeader),false); eq(r:onLine("Low Low Low Low Low Low"),false); eq(r:onLine(creatorPrompt),false); eq(r.state.rolls,1); eq(#f.sent,1)
   r:onLine("That set was too weak to offer -- rolling again."); r:onLine("Fit for a RuneMage: Poor primes: INT WIL MP"); eq(r.state.rolls,1)
 end)
 
@@ -109,7 +109,7 @@ end)
 test("manual reroll cancels a queued automatic reroll including stale callbacks",function()
   local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
   newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local stale=f.timers[1].fn
-  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,nil); stale(); eq(#f.sent,0)
+  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,nil); eq(f.sent[1],"reroll"); stale(); eq(#f.sent,1)
   newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.active,false); eq(r.state.rolls,2)
 end)
 
@@ -235,7 +235,7 @@ test("manual result remains held through clear redraws until an explicit reroll"
   local f=fake(); local r=Roller.new(f,{target_total=60,auto_start_on_name=true,use_min_stats=false,arrange_mode="manual"})
   assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(r.state.rolls,1); eq(r.state.result_held,true)
   eq(r:onLine("> clear"),false); eq(r:onLine(offered),false); eq(r:onLine(arrangePrompt),false); eq(r.state.rolls,1); eq(#f.sent,0)
-  assert(r:onOutgoing("reroll")); assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(r.state.rolls,2); eq(#f.sent,0)
+  assert(r:onOutgoing("reroll")); assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(r.state.rolls,2); eq(#f.sent,1)
 end)
 
 test("any player command cancels a queued reroll and invalidates its callback",function()
@@ -312,7 +312,7 @@ test("legacy manual y and n cancel queued automatic rejection",function()
   for _,choice in ipairs({"y","n"}) do
     local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
     r:onLine("Name : Test Tester Race : Human"); r:onLine(legacyHeader); r:onLine("Low Low Low Low Low Low Low Low Low Low Low"); assert(r:onLine(legacyPrompt)); local stale=f.timers[1].fn
-    assert(r:onLine("> "..choice)); eq(r.state.timer,nil); stale(); eq(#f.sent,0); eq(r.state.active,choice=="n")
+    assert(r:onLine("> "..choice)); eq(r.state.timer,nil); stale(); eq(#f.sent,choice=="n" and 1 or 0); eq(r.state.active,choice=="n")
   end
 end)
 

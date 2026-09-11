@@ -1,11 +1,14 @@
 local Roller={}; Roller.__index=Roller
 local order={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
 local legacyOrder={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
+local oldOrder=order
 local creatorFirst={"STR","INT","WIS","DEX","AGI","CON"}
 local creatorSecond={"CHA","WIL","VOI","PER","APP","MP"}
+local currentCreatorSecond={"CHA","WIL","VOI","PER","APP"}
 local ranks={awful=1,poor=2,low=3,aver=4,average=4,fair=5,good=6,great=7}
 local rankLabels={[1]="Awful",[2]="Poor",[3]="Low",[4]="Aver",[5]="Fair",[6]="Good",[7]="Great"}
 local maximumTotal=#order*7
+local arrangeOrders={[11]=legacyOrder,[12]=order}
 local captureLineLimit=8
 local arrangeModes={manual=true,game_auto=true,minimums=true}
 
@@ -33,9 +36,9 @@ local function parsePool(line)
   local body=trim(cleanLine(line)):match("^[Pp][Oo][Oo][Ll]%s*:%s*(.-)%s*$")
   if not body then return nil end
   if body:lower()=="(empty)" then return "empty",{} end
-  local found=words(body); if #found<1 or #found>#order then return "malformed" end
+  local found=words(body); if #found<1 or #found>12 then return "malformed" end
   local out={}; for index,word in ipairs(found) do local value=ranks[word:lower()]; if not value then return "malformed" end; out[index]=value end
-  return #out==#order and "full" or "partial",out
+  return (#out==11 or #out==12) and "full" or "partial",out
 end
 local function samePool(left,right)
   if type(left)~="table" or type(right)~="table" or #left~=#right then return false end
@@ -112,10 +115,11 @@ function Roller:minimumFailures(stats)
   return out
 end
 function Roller:assignmentPlan(pool)
-  if type(pool)~="table" or #pool~=#order then return nil,"the pool is incomplete" end
+  local activeOrder=arrangeOrders[#pool]
+  if type(pool)~="table" or not activeOrder then return nil,"the pool is incomplete" end
   local wanted={}
   if self.cfg.use_min_stats==true then
-    for index,name in ipairs(order) do local needed=tonumber((self.cfg.min_stats or {})[name]); if needed then wanted[#wanted+1]={name=name,needed=needed,index=index} end end
+    for index,name in ipairs(activeOrder) do local needed=tonumber((self.cfg.min_stats or {})[name]); if needed then wanted[#wanted+1]={name=name,needed=needed,index=index} end end
   end
   table.sort(wanted,function(a,b) if a.needed~=b.needed then return a.needed>b.needed end; return a.index<b.index end)
   local available=copy(pool); table.sort(available,function(a,b) return a>b end); local plan={}
@@ -150,7 +154,7 @@ function Roller:start()
   self:reset(); self.state.active=true; self.state.phase="observing"
   if self.cfg.logging_enabled~=false and self.adapter.startRollerLog then local ok,log,err=pcall(self.adapter.startRollerLog,self.adapter,self.cfg); if ok then self.state.log=log; if not log then self:echo("Logging unavailable: "..tostring(err or "unknown error")) end else self:echo("Logging unavailable: "..tostring(log)) end end
   self:log("Started")
-  self:echo("Started — target "..tostring(limit(self.cfg.target_total) or "disabled").." / "..maximumTotal.." (12 characteristics including MP)."); return true
+  self:echo("Started — target "..tostring(limit(self.cfg.target_total) or "disabled").." / "..maximumTotal.." (11 characteristics)."); return true
 end
 function Roller:stop(reason,holdResult)
   local heldProtocol=self.state.protocol or self.state.held_protocol
@@ -175,9 +179,10 @@ function Roller:record(stats,protocol,names)
   s.protocol=protocol; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
 end
 function Roller:recordPool(pool)
-  local total=0; for _,value in ipairs(pool or {}) do if not rankLabels[value] then return false end; total=total+value end; if #pool~=#order then return false end
+  local activeOrder=arrangeOrders[#pool]; if not activeOrder then return false end
+  local total=0; for _,value in ipairs(pool or {}) do if not rankLabels[value] then return false end; total=total+value end
   local s=self.state; s.rolls=s.rolls+1; s.sum=s.sum+total
-  local roll={roll=s.rolls,total=total,maximum=maximumTotal,pool=copy(pool),protocol="arrange"}; s.last=roll
+  local roll={roll=s.rolls,total=total,maximum=#activeOrder*7,pool=copy(pool),protocol="arrange"}; s.last=roll
   if not s.best or total>s.best.total then s.best=roll end; if not s.worst or total<s.worst.total then s.worst=roll end
   s.protocol="arrange"; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.pending_pool=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
 end
@@ -213,7 +218,10 @@ function Roller:rearmForManualReroll(protocol)
   if not controlled then return false end
   local previous=protocol or s.protocol or s.held_protocol or "arrange"
   if not s.active then s.active=true; s.result_held=false; s.phase="observing" end
-  return self:prepareForReroll(previous)
+  self:prepareForReroll(previous)
+  local command=rerollCommand(previous); self.state.awaiting_new_roll=true; self.state.phase="waiting_new_roll"
+  local sent,err=self:sendOwnedCommand(command); if not sent then return self:stop("Could not send manual reroll: "..tostring(err),true) end
+  return true
 end
 function Roller:sendOwnedCommand(command)
   local s=self.state; local normalized=trim(command):lower(); s.owned_outgoing=normalized; s.expected_echo=normalized
@@ -289,7 +297,7 @@ function Roller:beginArrangement(roll,reason)
     end
     if #remaining>0 then commands[#commands+1]={command="auto",auto=true} end
   else commands[1]={command="auto",auto=true} end
-  self.state.fresh_roll=false; self.state.phase="assigning"; self.state.arrangement={mode=mode,commands=commands,index=0,awaiting=nil,display_expected=nil,display_stats={},auto_board_complete=false}
+  self.state.fresh_roll=false; self.state.phase="assigning"; self.state.arrangement={mode=mode,commands=commands,index=0,awaiting=nil,display_expected=nil,display_stats={},auto_board_complete=false,order=arrangeOrders[#roll.pool] or order}
   self:echo("TARGET HIT — "..(mode=="minimums" and "placing configured minimums, then using game auto" or "using game auto").."; done remains manual.\n"..self:rollText(roll))
   return self:advanceArrangement()
 end
@@ -300,6 +308,7 @@ function Roller:onLine(line)
     local suppressed=s.auto_suppressed; self:reset(); self.state.auto_suppressed=suppressed; return false
   end
   if s.expected_echo and bare==s.expected_echo then s.expected_echo=nil; return true end
+  if bare=="reroll" and s.awaiting_new_roll then return true end
   if bare=="reroll" and (s.active or s.result_held or s.held_protocol~=nil) then return self:rearmForManualReroll() end
   if s.active then
     local protocol=s.protocol
@@ -316,12 +325,12 @@ function Roller:onLine(line)
     local stat,label=trim(cleanLine(line)):match("^([A-Za-z]+)%s+placed:%s*([A-Za-z]+)%.?$")
     if stat and awaiting and awaiting.stat and stat:upper()==awaiting.stat and ranks[label:lower()]==awaiting.value then awaiting.confirmed=true; return true end
     if headerMatches(line,creatorFirst) then sequence.display_expected=creatorFirst; sequence.display_stats={}; return true end
-    if headerMatches(line,creatorSecond) then sequence.display_expected=creatorSecond; return true end
+    if headerMatches(line,currentCreatorSecond) or headerMatches(line,creatorSecond) then sequence.display_expected=headerMatches(line,creatorSecond) and creatorSecond or currentCreatorSecond; return true end
     if sequence.display_expected then
       local names=sequence.display_expected; local values=assignmentValues(line,names); sequence.display_expected=nil
       if values then
         for index,name in ipairs(names) do sequence.display_stats[name]=values[index] end
-        local complete=true; for _,name in ipairs(order) do if type(sequence.display_stats[name])~="number" then complete=false; break end end
+        local activeOrder=sequence.order or order; local complete=true; for _,name in ipairs(activeOrder) do if type(sequence.display_stats[name])~="number" then complete=false; break end end
         if complete then sequence.auto_board_complete=true end
         return true
       end
@@ -329,7 +338,7 @@ function Roller:onLine(line)
     if poolKind then
       if awaiting then
         if awaiting.auto then awaiting.pool_empty=poolKind=="empty"
-        elseif (poolKind=="partial" or poolKind=="empty") and samePool(pool,awaiting.expected_pool) then awaiting.pool_confirmed=true end
+        elseif (poolKind=="full" or poolKind=="partial" or poolKind=="empty") and samePool(pool,awaiting.expected_pool) then awaiting.pool_confirmed=true end
       end
       return true
     end
@@ -356,12 +365,13 @@ function Roller:onLine(line)
     if not s.active then s.protocol="creator"; s.fresh_roll=false; s.expected=creatorFirst; s.partial={}; s.pending_stats=nil; s.passive_lines=0; return true end
     return self:beginBlock("creator",creatorFirst,true)
   end
-  if headerMatches(line,creatorSecond) then
+  if headerMatches(line,currentCreatorSecond) or headerMatches(line,creatorSecond) then
+    local second=headerMatches(line,creatorSecond) and creatorSecond or currentCreatorSecond
     if s.active and s.protocol=="arrange" then return false end
     if s.active and s.protocol=="creator" and type(s.partial)~="table" then return false end
     if not s.active and not (autoStartEnabled(self.cfg) and s.protocol=="creator" and type(s.partial)=="table") then return false end
-    if not s.active then s.expected=creatorSecond; return true end
-    return self:beginBlock("creator",creatorSecond,false)
+    if not s.active then s.expected=second; return true end
+    return self:beginBlock("creator",second,false)
   end
   if (self.state.active or (autoStartEnabled(self.cfg) and self.state.protocol=="creator")) and self:captureExpected(line) then return true end
 
