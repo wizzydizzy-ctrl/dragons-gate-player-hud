@@ -68,6 +68,7 @@ function Collector:finish(lines)
     local spec=SPECS[active.command]; local fn=spec and self.parser[spec.parser]
     local ok,result=pcall(fn,lines)
     if ok and result then
+      local parsed=result
       if spec.snapshot=="info" and type(self.snapshot.info)=="table" then
         local previous=self.snapshot.info
         for key,value in pairs(result) do
@@ -75,7 +76,7 @@ function Collector:finish(lines)
         end
         result=previous
       end
-      self.snapshot[spec.snapshot]=result; self.onChange(self.snapshot,spec.snapshot)
+      self.snapshot[spec.snapshot]=result; self.onChange(self.snapshot,spec.snapshot,parsed)
     end
   end
   if self.retry_startup and self.sequence_index then

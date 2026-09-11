@@ -1,15 +1,34 @@
 local Parser={}
 local ATTRS={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
-local RANKS={awful="Awful",poor="Poor",low="Low",aver="Aver",fair="Fair",good="Good",great="Great"}
+local RANKS={awful="Awful",poor="Poor",low="Low",aver="Aver",fair="Fair",good="Good",great="Great",excel="Excel",super="Super",godly="Godly"}
 local function clean(value)
   return tostring(value or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("%s+$","")
 end
+local function trim(value) return clean(value):match("^%s*(.-)%s*$") end
 local function isPrompt(value)
   local line=clean(value)
   return line:match("^>%s*$")~=nil or line:match("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>%s*$")~=nil
 end
 local function hasPrompt(lines) for _,raw in ipairs(lines or {}) do if isPrompt(raw) then return true end end return false end
 Parser.isPrompt=isPrompt
+local function infoBoundary(line)
+  line=trim(line)
+  local lower=line:lower()
+  return line=="" or isPrompt(line) or lower:match("^hp:%s*") or lower:match("^str%s*$") or lower:match("^str%s+int%s+wis") or lower:match("^use:%s+info")
+end
+local function infoBlock(lines,startPattern,limit)
+  for start=1,#lines do
+    local first=trim(lines[start])
+    if first:match(startPattern) then
+      local parts={first}
+      for index=start+1,math.min(#lines,start+(limit or 6)) do
+        local line=trim(lines[index]); if infoBoundary(line) then break end; parts[#parts+1]=line
+      end
+      return table.concat(parts," ")
+    end
+  end
+  return ""
+end
 
 function Parser.parseInventory(lines)
   local result={items={}}
@@ -42,23 +61,59 @@ function Parser.parseStat(lines)
 end
 
 function Parser.parseInfo(lines)
+  lines=lines or {}
   local result={physical={},attributes={}}
-  for i,raw in ipairs(lines or {}) do
-    local line=clean(raw)
-    local full,description,age,alignment,sex,stageAndRace,height,weight=line:match("^You are (.-), (.-) (%d+) year old (%S+) (%S+) (.-)%.%s+You are (.-) and weigh (%d+) lbs%.")
-    if full then
-      local stage,race=stageAndRace:match("^(.-)%s+(%S+)$")
-      if stage and race then result.character={full_name=full,alignment=alignment,race=race}; result.physical={description=description,age=tonumber(age),sex=sex,life_stage=stage,height=height,weight=tonumber(weight)} end
-    end
-    if line:match("^%s*Str%s+Int%s+Wis%s+Dex%s+Agi%s+Con%s+Cha%s+Wil%s+Voi%s+Per%s+App%s+MP%s*$") or line:match("^%s*Str%s+Int%s+Wis%s+Dex%s+Agi%s+Con%s+Cha%s+Wil%s+Voi%s+Per%s+App%s*$") then
-      for offset=1,8 do
-        local values={}; local valid=true
-        for value in clean(lines[i+offset] or ""):gmatch("[%a]+") do local rank=RANKS[value:lower()]; if not rank then valid=false; break end; values[#values+1]=rank end
-        if valid and #values>=11 then for n,key in ipairs(ATTRS) do result.attributes[key]=values[n] end; break end
-      end
+  local biography=infoBlock(lines,"^You are .-,",64)
+  local _,last,full,description,age,alignment,sex,stageAndRace,height,weight=biography:find("You are (.-), (.-) (%d+) year old (%S+) (%S+) (.-)%.%s+You are (.-) and weigh (%d+%.?%d*) lbs%.")
+  if full then
+    stageAndRace=trim(stageAndRace); local race=stageAndRace:match("(%S+)$"); local stage=trim(stageAndRace:sub(1,#stageAndRace-#tostring(race or "")))
+    if race then
+      result.character={full_name=full,alignment=alignment,race=race}
+      result.physical={description=description,age=tonumber(age),sex=sex,life_stage=stage~="" and stage or nil,height=height,weight=tonumber(weight)}
+      local tail=trim(biography:sub(last+1)):gsub("%s+"," "); local lower=tail:lower(); local stop
+      for _,needle in ipairs({" hp:"," str int wis"," use: info"}) do local at=lower:find(needle,1,true); if at and (not stop or at<stop) then stop=at end end
+      if stop then tail=trim(tail:sub(1,stop-1)) end; if tail~="" then result.condition_text=tail end
     end
   end
-  if not result.physical.age and not result.attributes.STR then return nil,"unrecognized info response" end
+  local vitals=infoBlock(lines,"^HP:%s*",3)
+  local hp,hpMax=vitals:match("HP:%s*(%d+%.?%d*)%s+of%s+(%d+%.?%d*)")
+  local fatigue,fatigueMax=vitals:match("Ftg:%s*(%d+%.?%d*)%s+of%s+(%d+%.?%d*)")
+  local carry,carryMax=vitals:match("Carry:%s*(%d+%.?%d*)%s+of%s+(%d+%.?%d*)%s+lbs?%.")
+  if hp or fatigue or carry then result.vitals={hp=tonumber(hp),hp_max=tonumber(hpMax),fatigue=tonumber(fatigue),fatigue_max=tonumber(fatigueMax),carry=tonumber(carry),carry_max=tonumber(carryMax)} end
+
+  local headerEnd
+  for start=1,#lines do
+    local expected=1
+    for index=start,math.min(#lines,start+#ATTRS+1) do
+      local words={}; for word in trim(lines[index]):gmatch("[%a]+") do words[#words+1]=word:lower() end
+      if index==start and words[1]~="str" then break end
+      for _,word in ipairs(words) do
+        if expected<=#ATTRS then
+          if word~=ATTRS[expected]:lower() then expected=0; break end
+          expected=expected+1
+        end
+      end
+      if expected==#ATTRS+1 then headerEnd=index; break end
+      if expected==0 then break end
+    end
+    if headerEnd then break end
+  end
+  if headerEnd then
+    for start=headerEnd+1,math.min(#lines,headerEnd+#ATTRS+2) do
+      local values={}; local index=start; local valid=true
+      while #values<#ATTRS and index<=math.min(#lines,headerEnd+#ATTRS+2) do
+        local found=0
+        for word in trim(lines[index]):gmatch("[%a]+") do
+          local rank=RANKS[word:lower()]; if not rank then valid=false; break end
+          values[#values+1]=rank; found=found+1
+        end
+        if not valid or found==0 then break end
+        index=index+1
+      end
+      if valid and #values>=#ATTRS then for n,key in ipairs(ATTRS) do result.attributes[key]=values[n] end; break end
+    end
+  end
+  if not result.physical.age and not result.attributes.STR and not result.vitals then return nil,"unrecognized info response" end
   return result
 end
 
@@ -137,6 +192,7 @@ end
 
 function Parser.isComplete(command,lines)
   local fn={inventory=Parser.parseInventory,stat=Parser.parseStat,info=Parser.parseInfo,["info religion"]=Parser.parseReligion,["info mag"]=Parser.parseRunes,skill=Parser.parseSkills,time=Parser.parseTime}
-  return fn[command] and hasPrompt(lines) and fn[command](lines)~=nil or false
+  if not fn[command] or type(lines)~="table" or #lines==0 or not isPrompt(lines[#lines]) then return false end
+  return fn[command](lines)~=nil
 end
 return Parser

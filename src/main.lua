@@ -935,7 +935,11 @@ function Main:start()
   end) end
   if self.view.setCopyTextCallback then self.view:setCopyTextCallback(function(text) return self.adapter:copyText(text) end) end
   self:applyResponsiveLayout()
-  self.collector=Collector.new(self.adapter,Parser,function(snapshot,key) if key=="time" then self:onClockSync(snapshot.time) else self:refresh() end end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
+  self.collector=Collector.new(self.adapter,Parser,function(snapshot,key,parsed)
+    if key=="time" then self:onClockSync(snapshot.time); return end
+    if key=="info" and parsed and parsed.condition_text and self.needs and self.needs:onLine(parsed.condition_text,"info") then return end
+    self:refresh()
+  end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end
   if self.adapter.isCharacterActive and self.adapter:isCharacterActive() then self:onCharacterEntry() end
   for _,name in ipairs(Events.gmcp) do local eventName=name; self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(eventName,function()

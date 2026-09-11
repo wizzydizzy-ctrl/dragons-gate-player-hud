@@ -35,9 +35,47 @@ test("info parses multiword Dragon stage and all attributes",function()
   local lines={"You are Deklan Marrowen, a average boned and wiry-tough bodied 21 year old Entropic Male 1st stage Dragon.  You are 7'1\" and weigh 312 lbs."," Str Int Wis Dex Agi Con Cha Wil Voi Per App","Good Good Great Good Good Good Good Good Good Great Good",">"}
   local r=assert(Parser.parseInfo(lines)); eq(r.character.race,"Dragon"); eq(r.physical.life_stage,"1st stage"); eq(r.attributes.APP,"Good")
 end)
+test("info reconstructs wrapped Dragon details conditions vitals and expanded ranks",function()
+  local lines={
+    "You are Deklan Marrowen, a delicate boned and skinny bodied 21 year old Entropic Male 1st stage Dragon.  You are 7'6\" and weigh 292 lbs.  You are hungry.  You are",
+    "thirsty.",
+    "HP: 213 of 213  Ftg:  81 of  81  Carry: 174.4 of 354.0 lbs.",
+    " Str   Int   Wis   Dex   Agi   Con   Cha   Wil   Voi   Per   App",
+    "Godly Super Excel Super Super Super Super Super Super Super Super",
+    "Use: INFO <subject> for more info.",
+    ">",
+  }
+  local r=assert(Parser.parseInfo(lines)); eq(r.character.full_name,"Deklan Marrowen"); eq(r.character.race,"Dragon"); eq(r.physical.life_stage,"1st stage"); eq(r.physical.weight,292)
+  eq(r.condition_text,"You are hungry. You are thirsty."); eq(r.vitals.hp,213); eq(r.vitals.fatigue_max,81); eq(r.vitals.carry,174.4); eq(r.vitals.carry_max,354)
+  eq(r.attributes.STR,"Godly"); eq(r.attributes.INT,"Super"); eq(r.attributes.WIS,"Excel"); eq(r.attributes.APP,"Super")
+end)
+test("info accepts wrapped attribute headers and value rows",function()
+  local lines={"Str Int Wis Dex Agi Con","Cha Wil Voi Per App","Godly Super Excel Super Super","Super Super Super Super Super Super",">"}
+  local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Godly"); eq(r.attributes.WIS,"Excel"); eq(r.attributes.APP,"Super")
+end)
+test("info accepts one attribute header and rank per physical line",function()
+  local lines={"Str","Int","Wis","Dex","Agi","Con","Cha","Wil","Voi","Per","App","Awful","Poor","Low","Aver","Fair","Good","Great","Excel","Super","Godly","Fair",">"}
+  local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Awful"); eq(r.attributes.CON,"Good"); eq(r.attributes.PER,"Godly"); eq(r.attributes.APP,"Fair")
+end)
+test("info keeps uppercase attribute headings out of condition text",function()
+  local lines={"You are Deklan Marrowen, a skinny bodied 21 year old Entropic Male 1st stage Dragon. You are 7'6\" and weigh 292 lbs. You are hungry.","STR INT WIS DEX AGI CON CHA WIL VOI PER APP","Godly Super Excel Super Super Super Super Super Super Super Super",">"}
+  local r=assert(Parser.parseInfo(lines)); eq(r.condition_text,"You are hungry."); eq(r.attributes.STR,"Godly")
+end)
+test("info requires its terminal prompt after parsed data",function()
+  local lines={">","You are Deklan Marrowen, a skinny bodied 21 year old Entropic Male 1st stage Dragon. You are 7'6\" and weigh 292 lbs."}
+  eq(Parser.isComplete("info",lines),false); lines[#lines+1]="Str Int Wis Dex Agi Con Cha Wil Voi Per App"; lines[#lines+1]="Godly Super Excel Super Super Super Super Super Super Super Super"; eq(Parser.isComplete("info",lines),false)
+  lines[#lines+1]=">"; eq(Parser.isComplete("info",lines),true)
+end)
+test("info rejects malformed numeric-only output",function()
+  eq(Parser.parseInfo({"HP: 1..2 of 213 Ftg: 8..1 of 81 Carry: 17..4 of 354.0 lbs.",">"}),nil)
+end)
 test("info ignores the staff-only MP column and accepts the staff prompt",function()
   local lines={" Str Int Wis Dex Agi Con Cha Wil Voi Per App MP","Great Great Great Great Great Great Great Great Great Great Great Great"," 18 18 18 18 18 18 18 18 18 18 18 18","[199] 301/301 hp, 173/173 ftg >"}
   local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Great"); eq(r.attributes.APP,"Great"); eq(Parser.isComplete("info",lines),true)
+end)
+test("info keeps distinct staff ranks aligned while ignoring MP",function()
+  local lines={"Str Int Wis Dex Agi Con Cha Wil Voi Per App MP","Awful Poor Low Aver Fair Good Great Excel Super Godly Aver Fair","11 12 13 14 15 16 17 18 19 20 21 22","[199] 301/301 hp, 173/173 ftg >"}
+  local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Awful"); eq(r.attributes.CON,"Good"); eq(r.attributes.WIL,"Excel"); eq(r.attributes.PER,"Godly"); eq(r.attributes.APP,"Aver")
 end)
 test("info locates a valid rank row through harmless interleaved lines",function()
   local lines={" Str Int Wis Dex Agi Con Cha Wil Voi Per App","",">","info","great GOOD fair Aver low Poor awful Good Fair Aver Great",">"}

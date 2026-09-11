@@ -8,19 +8,21 @@ local function percent(current, maximum)
   if value<0 then value=0 elseif value>100 then value=100 end
   return math.floor(value*10+0.5)/10
 end
-local function resource(vitals,key)
-  local current,maximum=number(vitals[key]),number(vitals[key.."_max"])
+local function preferred(primary,fallback) if primary~=nil then return primary end; return fallback end
+local function resource(vitals,key,fallback)
+  fallback=tableAt(fallback); local current,maximum=number(preferred(vitals[key],fallback[key])),number(preferred(vitals[key.."_max"],fallback[key.."_max"]))
   return {current=current,maximum=maximum,percent=percent(current,maximum),visible=maximum>0}
 end
 function State.normalize(source,command_snapshot)
   source=tableAt(source); local char=tableAt(source.Char); local status=tableAt(char.Status); local vitals=tableAt(char.Vitals)
   local roomRoot=tableAt(source.Room); local room=tableAt(roomRoot.Info)
-  local parsed=tableAt(command_snapshot); local info=tableAt(parsed.info); local religion=tableAt(parsed.religion); local runes=tableAt(parsed.runes); local parsedCharacter=tableAt(info.character); local stat=tableAt(parsed.stat); local inventory=tableAt(parsed.inventory); local skills=tableAt(parsed.skills)
+  local parsed=tableAt(command_snapshot); local info=tableAt(parsed.info); local infoVitals=tableAt(info.vitals); local religion=tableAt(parsed.religion); local runes=tableAt(parsed.runes); local parsedCharacter=tableAt(info.character); local stat=tableAt(parsed.stat); local inventory=tableAt(parsed.inventory); local skills=tableAt(parsed.skills)
   local name=tostring(status.name or parsedCharacter.name or ""); local surname=tostring(status.surname or parsedCharacter.surname or "")
-  local full=(name.." "..surname):match("^%s*(.-)%s*$"); if full=="" then full=parsedCharacter.full_name or "Unknown" end
+  local full=(name.." "..surname):match("^%s*(.-)%s*$")
+  if surname=="" and parsedCharacter.full_name then full=parsedCharacter.full_name elseif full=="" then full=parsedCharacter.full_name or "Unknown" end
   local characterClass=tostring(status.class or parsedCharacter.class or "Unknown"):match("^%s*(.-)%s*$")
   local characterRace=tostring(status.race or parsedCharacter.race or "Unknown"):match("^%s*(.-)%s*$")
-  local psi=resource(vitals,"psi"); local web=resource(vitals,"web")
+  local psi=resource(vitals,"psi",infoVitals); local web=resource(vitals,"web",infoVitals)
   local classKey=characterClass:lower(); local raceKey=characterRace:lower()
   if classKey=="psion" or classKey=="psycian" then psi.visible=true end
   if raceKey=="arachnian" then web.visible=true end
@@ -32,7 +34,7 @@ function State.normalize(source,command_snapshot)
     inventory={items=tableAt(inventory.items),total_weight=inventory.total_weight},
     skills={items=tableAt(skills.items)},
     runes={items=tableAt(runes.items)},
-    vitals={hp=resource(vitals,"hp"),fatigue=resource(vitals,"fatigue"),psi=psi,web=web,carry=resource(vitals,"carry"),gold=number(vitals.gold),silver=number(vitals.silver),position=number(vitals.position),roundtime=number(vitals.roundtime),weapon_readied=vitals.weapon_readied==true,shield_readied=vitals.shield_readied==true},
+    vitals={hp=resource(vitals,"hp",infoVitals),fatigue=resource(vitals,"fatigue",infoVitals),psi=psi,web=web,carry=resource(vitals,"carry",infoVitals),gold=number(vitals.gold),silver=number(vitals.silver),position=number(vitals.position),roundtime=number(vitals.roundtime),weapon_readied=vitals.weapon_readied==true,shield_readied=vitals.shield_readied==true},
     room={name=room.name or "Unknown room",num=room.num,area=room.area,environment=room.environment or "Unknown",exits=tableAt(room.exits),flags=tableAt(room.flags),players=tableAt(roomRoot.Players),wrong_direction=roomRoot.WrongDir}
   }
 end

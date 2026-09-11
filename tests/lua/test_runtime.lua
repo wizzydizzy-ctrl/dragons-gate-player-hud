@@ -556,6 +556,12 @@ end)
 test("controller merges collector snapshots and removes owned trigger runtime",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),5); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
+test("wrapped INFO output updates identity needs vitals and expanded attributes",function()
+  local f=fake(); f.gmcp={Char={Status={},Vitals={}}}; local hud=Main.new(f,{layout={}}); assert(hud:start()); hud.collector:onOutgoing("info")
+  for _,line in ipairs({"You are Deklan Marrowen, a delicate boned and skinny bodied 21 year old Entropic Male 1st stage Dragon. You are 7'6\" and weigh 292 lbs. You are hungry. You are","thirsty.","HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.","Str Int Wis Dex Agi Con Cha Wil Voi Per App","Godly Super Excel Super Super Super Super Super Super Super Super",">"}) do hud.collector:onLine(line) end
+  eq(hud.last_state.character.full_name,"Deklan Marrowen"); eq(hud.last_state.character.physical.life_stage,"1st stage"); eq(hud.last_state.needs.hunger.status,"hungry"); eq(hud.last_state.needs.thirst.status,"thirsty")
+  eq(hud.last_state.vitals.hp.current,213); eq(hud.last_state.vitals.carry.maximum,354); eq(hud.last_state.attributes.STR,"Godly"); eq(hud.last_state.attributes.WIS,"Excel")
+end)
 test("GMCP identity arrival hydrates persisted character history without appending it",function()
   local f=fake()
   f.chatEntriesByKey={
