@@ -62,6 +62,18 @@ test("public reload re-resolves current nested user settings without replacing u
   end)
 end)
 
+test("persisted roller settings override stale live values during package replacement",function()
+  withEntryStubs(function(context)
+    context.defaults.roller={schema=2,target_total=53,hard_stop=62,max_rolls=false,auto_start_on_name=true,min_stats={STR=5,MP=5}}
+    local persisted={schema=2,target_total=false,hard_stop=70,max_rolls=500,auto_start_on_name=false,min_stats={STR=6,MP=false}}
+    context.install("mudlet_adapter",function() return {loadRollerSettings=function() return persisted end,new=function() return context.adapter end} end)
+    DGHUD={user_settings={roller={target_total=80,hard_stop=80,auto_start_on_name=true,min_stats={MP=7}}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.user_settings.roller.target_total,false); eq(DGHUD.user_settings.roller.auto_start_on_name,false); eq(DGHUD.user_settings.roller.min_stats.MP,false)
+    eq(DGHUD.settings.roller.target_total,false); eq(DGHUD.settings.roller.hard_stop,70); eq(DGHUD.settings.roller.max_rolls,500)
+  end)
+end)
+
 test("replacement handoff bypasses legacy map serialization before shutdown",function()
   withEntryStubs(function()
     local observed; local retiring={map_collections={large=true}}

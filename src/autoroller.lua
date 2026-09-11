@@ -5,6 +5,7 @@ local creatorFirst={"STR","INT","WIS","DEX","AGI","CON"}
 local creatorSecond={"CHA","WIL","VOI","PER","APP","MP"}
 local ranks={awful=1,poor=2,low=3,aver=4,average=4,fair=5,good=6,great=7}
 local maximumTotal=#order*7
+local captureLineLimit=8
 
 local function copy(value)
   if type(value)~="table" then return value end; local out={}; for k,v in pairs(value) do out[k]=copy(v) end; return out
@@ -50,9 +51,21 @@ function Roller.new(adapter,settings,onConfig)
   local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig},Roller); self:reset(); return self
 end
 function Roller:echo(message) if self.adapter.reportRoller then self.adapter:reportRoller(message) end end
+function Roller:cancelReroll()
+  local s=self.state; if not s then return true end
+  s.timer_generation=(tonumber(s.timer_generation) or 0)+1
+  if s.timer then pcall(self.adapter.cancelTimer,self.adapter,s.timer) end
+  s.timer=nil; return true
+end
+function Roller:clearCapture()
+  local s=self.state; if not s then return true end
+  s.expected=nil; s.partial=nil; s.pending_stats=nil; s.passive_lines=0; s.capture_lines=0; s.protocol=nil; s.fresh_roll=false; return true
+end
 function Roller:reset()
+  local timerGeneration=0
+  if self.state then self:cancelReroll(); timerGeneration=tonumber(self.state.timer_generation) or 0 end
   if self.state and self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log) end
-  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,expected=nil,partial=nil,pending_stats=nil,passive_lines=0,protocol=nil,fresh_roll=false,timer=nil,log=nil}; return true
+  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,expected=nil,partial=nil,pending_stats=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil}; return true
 end
 function Roller:log(message)
   if not self.state.log or not self.adapter.appendRollerLog then return end
@@ -79,7 +92,7 @@ function Roller:start()
   self:echo("Started — target "..tostring(limit(self.cfg.target_total) or "disabled").." / "..maximumTotal.." (12 characteristics including MP)."); return true
 end
 function Roller:stop(reason)
-  self.state.active=false; if self.state.timer then pcall(self.adapter.cancelTimer,self.adapter,self.state.timer); self.state.timer=nil end
+  self.state.active=false; self:cancelReroll(); self:clearCapture()
   self:report(reason or "Stopped"); self:log(reason or "Stopped")
   if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end
   return true
@@ -94,12 +107,12 @@ function Roller:record(stats,protocol,names)
   local s=self.state; s.rolls=s.rolls+1; s.sum=s.sum+total
   local roll={roll=s.rolls,total=total,maximum=#names*7,stats=copy(stats),protocol=protocol}; s.last=roll
   if not s.best or total>s.best.total then s.best=roll end; if not s.worst or total<s.worst.total then s.worst=roll end
-  s.fresh_roll=true; s.expected=nil; s.partial=nil; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
+  s.protocol=protocol; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.capture_lines=0; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
 end
 function Roller:beginBlock(protocol,names,resetPartial)
   if not self.state.active then return false end
-  local s=self.state; s.protocol=protocol; s.fresh_roll=false; s.expected=names
-  if resetPartial then if s.timer then pcall(self.adapter.cancelTimer,self.adapter,s.timer); s.timer=nil end; s.partial={}
+  local s=self.state; s.protocol=protocol; s.fresh_roll=false; s.expected=names; s.capture_lines=0
+  if resetPartial then self:cancelReroll(); s.partial={}
   elseif type(s.partial)~="table" then s.partial={} end
   return true
 end
@@ -107,10 +120,10 @@ function Roller:captureExpected(line)
   local s=self.state; if type(s.expected)~="table" then return false end
   local values=rankValues(line,#s.expected)
   if not values then
-    if trim(line)~="" then s.expected=nil; s.partial=nil; s.fresh_roll=false end
+    if trim(line)~="" then s.expected=nil; s.partial=nil; s.fresh_roll=false; s.capture_lines=0 end
     return false
   end
-  for index,name in ipairs(s.expected) do s.partial[name]=values[index] end
+  for index,name in ipairs(s.expected) do s.partial[name]=values[index] end; s.capture_lines=0
   local protocol=s.protocol; s.expected=nil
   if protocol=="legacy" then return self:record(s.partial,protocol,legacyOrder) end
   local complete=true; for _,name in ipairs(order) do if s.partial[name]==nil then complete=false; break end end
@@ -123,7 +136,9 @@ end
 function Roller:reroll(protocol)
   if self.state.timer then return true end
   local delay=math.max(0,tonumber(self.cfg.reroll_delay) or 0); local command=rerollCommand(protocol)
+  self.state.timer_generation=(tonumber(self.state.timer_generation) or 0)+1; local generation=self.state.timer_generation
   local called,id,err=pcall(self.adapter.schedule,self.adapter,delay,function()
+    if self.state.timer_generation~=generation then return end
     self.state.timer=nil
     if self.state.active then local sentCall,sent,sendErr=pcall(self.adapter.sendCommand,self.adapter,command); if not sentCall or sent==false or (sent==nil and sendErr~=nil) then self:stop("Could not send reroll: "..tostring((not sentCall and sent) or sendErr or "send failed")) end end
   end)
@@ -132,13 +147,19 @@ function Roller:reroll(protocol)
 end
 function Roller:onLine(line)
   line=tostring(line or "")
-  if line:match("Name%s*:%s*.-%s+Race%s*:%s*%S+") then if autoStartEnabled(self.cfg) and not self.state.active then return self:start() end; return self.state.active end
+  local lower=trim(cleanLine(line)):lower(); local bare=lower:gsub("^>%s*","")
+  if self.state.active then
+    local protocol=self.state.protocol
+    if (protocol=="creator" and (bare=="done" or lower:match("step%s+8%s+of%s+10"))) or (protocol=="legacy" and bare=="y") then return self:stop("Character creation continued") end
+    if (protocol=="creator" and bare=="reroll") or (protocol=="legacy" and bare=="n") then self:cancelReroll(); self.state.expected=nil; self.state.partial=nil; self.state.pending_stats=nil; self.state.capture_lines=0; self.state.fresh_roll=false; return true end
+  end
+  if line:match("Name%s*:%s*.-%s+Race%s*:%s*%S+") then if autoStartEnabled(self.cfg) and not self.state.auto_suppressed and not self.state.active then return self:start() end; return self.state.active end
 
   -- Passively collect the new split layout, then auto-start only after its
   -- unique decision prompt confirms Roll in place. This avoids taking over
   -- INFO output or another characteristic-assignment method.
   if headerMatches(line,creatorFirst) then
-    if not self.state.active and not autoStartEnabled(self.cfg) then return false end
+    if not self.state.active and (not autoStartEnabled(self.cfg) or self.state.auto_suppressed) then return false end
     if not self.state.active then self.state.protocol="creator"; self.state.fresh_roll=false; self.state.expected=creatorFirst; self.state.partial={}; self.state.pending_stats=nil; self.state.passive_lines=0; return true end
     return self:beginBlock("creator",creatorFirst,true)
   end
@@ -155,19 +176,24 @@ function Roller:onLine(line)
     self:record(pending,"creator",order)
   end
   if not self.state.active and self.state.pending_stats then
-    local lower=trim(cleanLine(line)):lower(); self.state.passive_lines=(self.state.passive_lines or 0)+1
+    self.state.passive_lines=(self.state.passive_lines or 0)+1
     if self.state.passive_lines>8 or lower:match("step%s+8%s+of%s+10") or lower:find("dragon's gate menu",1,true) then self.state.pending_stats=nil; self.state.protocol=nil; self.state.passive_lines=0 end
+  end
+  if self.state.protocol=="creator" and self.state.partial and not self.state.expected and not self.state.fresh_roll and trim(cleanLine(line))~="" then
+    self.state.capture_lines=(self.state.capture_lines or 0)+1
+    if self.state.capture_lines>captureLineLimit then self.state.partial=nil; self.state.capture_lines=0 end
   end
   if not self.state.active then return false end
   if headerMatches(line,legacyOrder) then return self:beginBlock("legacy",legacyOrder,true) end
   if protocol then
+    if self.state.partial and not self.state.fresh_roll then self.state.expected=nil; self.state.partial=nil; self.state.capture_lines=0; return false end
     local roll=self.state.last; if not roll or not self.state.fresh_roll or roll.protocol~=protocol then return false end
     self.state.fresh_roll=false; local cap=limit(self.cfg.max_rolls); if cap and self.state.rolls>=cap then return self:stop("Reached max rolls "..cap) end
+    local target,hard=limit(self.cfg.target_total),limit(self.cfg.hard_stop)
+    if not cap and not ((target and target<=roll.maximum) or (hard and hard<=roll.maximum)) then return self:stop("Configured total cannot be reached by this "..roll.maximum.."-point roll format") end
     local ok,reason=self:qualified(roll); if ok then self:echo("TARGET HIT — prompt left waiting for manual "..acceptanceCommand(protocol)..".\n"..self:rollText(roll)); return self:stop(reason) end
     return self:reroll(protocol)
   end
-  local lower=trim(line):lower()
-  if self.state.protocol=="creator" and (lower=="done" or lower=="> done" or lower:match("step%s+8%s+of%s+10")) then return self:stop("Character creation continued") end
   return false
 end
 function Roller:set(key,value)
@@ -209,10 +235,10 @@ function Roller:configure(values,silent)
 end
 function Roller:command(action)
   action=trim(action); local lower=action:lower()
-  if lower=="start" then return self:start() elseif lower=="stop" then return self:stop("Manual stop") elseif lower=="stats" then return self:report("Roller statistics") elseif lower=="last" then if self.state.last then self:echo(self:rollText(self.state.last)) else self:echo("No roll captured yet.") end; return true elseif lower=="reset" then self:reset(); self:echo("Reset complete."); return true end
+  if lower=="start" then return self:start() elseif lower=="stop" then self.state.auto_suppressed=true; return self:stop("Manual stop") elseif lower=="stats" then return self:report("Roller statistics") elseif lower=="last" then if self.state.last then self:echo(self:rollText(self.state.last)) else self:echo("No roll captured yet.") end; return true elseif lower=="reset" then self:reset(); self:echo("Reset complete."); return true end
   local key,value=action:match("^[Ss][Ee][Tt]%s+(%S+)%s+(%S+)%s*$"); if key then local ok,err=self:set(key,value); if not ok then self:echo(err) end; return ok,err end
   self:echo("Commands: rr start|stop|stats|last|reset|help; rr set total|hard|max|delay|STAT <value>. New creation rolls all 12 characteristics including MP; rejected rolls send reroll and a target hit leaves done waiting for you."); return true
 end
-function Roller:shutdown() if self.state.timer then pcall(self.adapter.cancelTimer,self.adapter,self.state.timer) end; self.state.timer=nil; self.state.active=false; if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end; return true end
+function Roller:shutdown() self:cancelReroll(); self.state.active=false; self:clearCapture(); if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end; return true end
 Roller.order=order; Roller.ranks=ranks; Roller.maximumTotal=maximumTotal
 return Roller

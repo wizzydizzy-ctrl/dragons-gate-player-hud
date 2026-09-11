@@ -522,14 +522,22 @@ function Adapter:appendRollerLog(log,message)
 end
 function Adapter:closeRollerLog(log) if log.session_handle then log.session_handle:close(); log.session_handle=nil end; if log.master_handle then log.master_handle:close(); log.master_handle=nil end; return true end
 local function rollerSettingsPath() return Adapter.dataBase().."/roller-settings.lua" end
-function Adapter.rollerSettingsSource(config)
+function Adapter.rollerSettingsSnapshot(config)
   config=type(config)=="table" and config or {}; local optional={target_total=true,hard_stop=true,max_rolls=true}
   local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
+  local result={schema=2,min_stats={}}
+  for _,key in ipairs(fields) do local value=config[key]; if optional[key] and value==nil then value=false end; result[key]=value end
+  for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}) do local value=(config.min_stats or {})[key]; if value==nil then value=false end; result.min_stats[key]=value end
+  return result
+end
+function Adapter.rollerSettingsSource(config)
+  local snapshot=Adapter.rollerSettingsSnapshot(config)
+  local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
   local function literal(value) if type(value)=="string" then return string.format("%q",value) elseif value==nil then return "nil" else return tostring(value) end end
-  local lines={"return {"}
-  for _,key in ipairs(fields) do local value=config[key]; if optional[key] and value==nil then value=false end; lines[#lines+1]="  "..key.."="..literal(value).."," end
+  local lines={"return {","  schema="..snapshot.schema..","}
+  for _,key in ipairs(fields) do lines[#lines+1]="  "..key.."="..literal(snapshot[key]).."," end
   lines[#lines+1]="  min_stats={"
-  for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}) do local value=(config.min_stats or {})[key]; if value==nil then value=false end; lines[#lines+1]="    "..key.."="..literal(value).."," end
+  for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}) do lines[#lines+1]="    "..key.."="..literal(snapshot.min_stats[key]).."," end
   lines[#lines+1]="  },"; lines[#lines+1]="}"; return table.concat(lines,"\n")
 end
 function Adapter:saveRollerSettings(config)
@@ -540,7 +548,16 @@ function Adapter:saveRollerSettings(config)
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
 end
 function Adapter.loadRollerSettings()
-  local loader=loadfile(rollerSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" then if tostring(value.reroll_command or ""):lower()=="n" then value.reroll_command="reroll" end; return value end; return nil
+  local path=rollerSettingsPath(); local source=""; local file=io.open(path,"rb"); if file then source=file:read("*a") or ""; file:close() end
+  local loader=loadfile(path); if not loader then return nil end; local ok,value=pcall(loader); if not ok or type(value)~="table" then return nil end
+  if tostring(value.reroll_command or ""):lower()=="n" then value.reroll_command="reroll" end
+  if tonumber(value.schema)~=2 then
+    value.min_stats=type(value.min_stats)=="table" and value.min_stats or {}
+    if value.min_stats.MP==nil then value.min_stats.MP=false end
+    for _,key in ipairs({"target_total","hard_stop","max_rolls"}) do if value[key]==nil and source:match("%f[%w_]"..key.."%f[^%w_]%s*=%s*nil%f[^%w_]") then value[key]=false end end
+    for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}) do if value.min_stats[key]==nil and source:match("%f[%w_]"..key.."%f[^%w_]%s*=%s*nil%f[^%w_]") then value.min_stats[key]=false end end
+  end
+  value.schema=2; return value
 end
 local function mapperSettingsPath() return Adapter.dataBase().."/mapper-settings.lua" end
 function Adapter:saveMapperSettings(config)

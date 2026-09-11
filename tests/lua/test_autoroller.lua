@@ -93,6 +93,43 @@ test("a manually requested next roll cancels a stale scheduled reroll",function(
   assert(r:onLine(firstHeader)); eq(f.timers[1],nil); eq(r.state.timer,nil)
 end)
 
+test("manual done cancels the first auto-started reroll including stale callbacks",function()
+  local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
+  newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local stale=f.timers[1].fn
+  assert(r:onLine("> done")); eq(r.state.active,false); eq(r.state.timer,nil); stale(); eq(#f.sent,0)
+end)
+
+test("manual reroll cancels a queued automatic reroll including stale callbacks",function()
+  local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
+  newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local stale=f.timers[1].fn
+  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,nil); stale(); eq(#f.sent,0)
+  newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.active,false); eq(r.state.rolls,2)
+end)
+
+test("stale timer generations remain invalid after stopping and restarting",function()
+  local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=false}); assert(r:start())
+  newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local stale=f.timers[1].fn
+  assert(r:command("stop")); assert(r:command("start")); newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local current
+  for _,timer in pairs(f.timers) do current=timer.fn end
+  stale(); eq(#f.sent,0); current(); eq(#f.sent,1); eq(f.sent[1],"reroll")
+end)
+
+test("manual stop clears a partial roll and suppresses automatic restart",function()
+  local f=fake(); local r=Roller.new(f,{target_total=70,auto_start_on_name=true}); assert(r:start())
+  assert(r:onLine(firstHeader)); assert(r:onLine("Great Great Great Great Great Great")); assert(r:command("stop"))
+  eq(r.state.partial,nil); eq(r.state.protocol,nil); eq(r:onLine(secondHeader),false); eq(r:onLine("Great Great Great Great Great Great"),false); eq(r:onLine(creatorPrompt),false); eq(r.state.rolls,0)
+  eq(r:onLine(firstHeader),false); eq(r:onLine("Great Great Great Great Great Great"),false); eq(r:onLine(secondHeader),false); eq(r:onLine("Great Great Great Great Great Great"),false); eq(r:onLine(creatorPrompt),false); eq(r.state.active,false)
+  assert(r:command("start")); eq(r.state.active,true)
+end)
+
+test("an active or passive first-half capture expires instead of combining later rows",function()
+  for _,autoStart in ipairs({false,true}) do
+    local f=fake(); local r=Roller.new(f,{target_total=84,auto_start_on_name=autoStart}); if not autoStart then assert(r:start()) end
+    assert(r:onLine(firstHeader)); assert(r:onLine("Great Great Great Great Great Great")); for index=1,9 do r:onLine("unrelated line "..index) end
+    eq(r.state.partial,nil); r:onLine(secondHeader); r:onLine("Great Great Great Great Great Great"); eq(r:onLine(creatorPrompt),false); eq(r.state.rolls,0)
+  end
+end)
+
 test("manual start captures the new split layout immediately",function()
   local f=fake(); local r=Roller.new(f,{target_total=60,reroll_delay=0,auto_start_on_name=false}); assert(r:start())
   newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); eq(r.state.rolls,1); assert(r:onLine(creatorPrompt)); f.timers[1].fn(); eq(f.sent[1],"reroll")
@@ -108,6 +145,20 @@ test("legacy body roller still sends n after a failed prompt",function()
   local f=fake(); local r=Roller.new(f,{target_total=60,reroll_delay=.25,auto_start_on_name=true})
   r:onLine("Name : Test Tester Race : Human"); r:onLine(legacyHeader); r:onLine("Low Low Low Low Low Low Low Low Low Low Low"); assert(r:onLine(legacyPrompt))
   eq(#f.sent,0); eq(f.timers[1].delay,.25); f.timers[1].fn(); eq(f.sent[1],"n"); eq(r.state.active,true)
+end)
+
+test("legacy manual y and n cancel queued automatic rejection",function()
+  for _,choice in ipairs({"y","n"}) do
+    local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
+    r:onLine("Name : Test Tester Race : Human"); r:onLine(legacyHeader); r:onLine("Low Low Low Low Low Low Low Low Low Low Low"); assert(r:onLine(legacyPrompt)); local stale=f.timers[1].fn
+    assert(r:onLine("> "..choice)); eq(r.state.timer,nil); stale(); eq(#f.sent,0); eq(r.state.active,choice=="n")
+  end
+end)
+
+test("legacy mode stops instead of looping forever on an impossible uncapped target",function()
+  local f=fake(); local r=Roller.new(f,{target_total=84,hard_stop=nil,max_rolls=nil,reroll_delay=0,auto_start_on_name=true})
+  r:onLine("Name : Test Tester Race : Human"); r:onLine(legacyHeader); r:onLine("Great Great Great Great Great Great Great Great Great Great Great"); assert(r:onLine(legacyPrompt))
+  eq(r.state.active,false); eq(r.state.last.maximum,77); eq(#f.sent,0); eq(next(f.timers),nil); assert(f.messages[#f.messages]:find("cannot be reached",1,true))
 end)
 
 test("roller settings and per-stat minimums persist through callback",function()
