@@ -522,19 +522,25 @@ function Adapter:appendRollerLog(log,message)
 end
 function Adapter:closeRollerLog(log) if log.session_handle then log.session_handle:close(); log.session_handle=nil end; if log.master_handle then log.master_handle:close(); log.master_handle=nil end; return true end
 local function rollerSettingsPath() return Adapter.dataBase().."/roller-settings.lua" end
-function Adapter:saveRollerSettings(config)
-  local base=Adapter.dataBase(); lfs.mkdir(base); local temp=rollerSettingsPath()..".tmp"
+function Adapter.rollerSettingsSource(config)
+  config=type(config)=="table" and config or {}; local optional={target_total=true,hard_stop=true,max_rolls=true}
   local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
   local function literal(value) if type(value)=="string" then return string.format("%q",value) elseif value==nil then return "nil" else return tostring(value) end end
-  local lines={"return {"}; for _,key in ipairs(fields) do lines[#lines+1]="  "..key.."="..literal(config[key]).."," end; lines[#lines+1]="  min_stats={"
-  for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}) do lines[#lines+1]="    "..key.."="..literal((config.min_stats or {})[key]).."," end; lines[#lines+1]="  },"; lines[#lines+1]="}"
-  local file,err=io.open(temp,"wb"); if not file then return nil,err end; local wrote,writeErr=file:write(table.concat(lines,"\n")); if not wrote then file:close(); os.remove(temp); return nil,writeErr end; local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local lines={"return {"}
+  for _,key in ipairs(fields) do local value=config[key]; if optional[key] and value==nil then value=false end; lines[#lines+1]="  "..key.."="..literal(value).."," end
+  lines[#lines+1]="  min_stats={"
+  for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}) do local value=(config.min_stats or {})[key]; if value==nil then value=false end; lines[#lines+1]="    "..key.."="..literal(value).."," end
+  lines[#lines+1]="  },"; lines[#lines+1]="}"; return table.concat(lines,"\n")
+end
+function Adapter:saveRollerSettings(config)
+  local base=Adapter.dataBase(); lfs.mkdir(base); local temp=rollerSettingsPath()..".tmp"
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end; local wrote,writeErr=file:write(Adapter.rollerSettingsSource(config)); if not wrote then file:close(); os.remove(temp); return nil,writeErr end; local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local destination=rollerSettingsPath(); local backup=destination..".bak"; os.remove(backup)
   local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
 end
 function Adapter.loadRollerSettings()
-  local loader=loadfile(rollerSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" then return value end; return nil
+  local loader=loadfile(rollerSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" then if tostring(value.reroll_command or ""):lower()=="n" then value.reroll_command="reroll" end; return value end; return nil
 end
 local function mapperSettingsPath() return Adapter.dataBase().."/mapper-settings.lua" end
 function Adapter:saveMapperSettings(config)

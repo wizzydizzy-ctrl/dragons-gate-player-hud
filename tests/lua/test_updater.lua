@@ -1,8 +1,14 @@
-local Updater=require("updater"); local SHA=require("sha256"); local Adapter=require("mudlet_adapter")
+local Updater=require("updater"); local SHA=require("sha256"); local Adapter=require("mudlet_adapter"); local Roller=require("autoroller")
 local function releaseManifest(version)
   return {package="DragonsGateHUD",version=version,minimum_mudlet="5.0.0",archive_url="https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/download/v"..version.."/DragonsGateHUD.mpackage",sha256=string.rep("a",64),archive_size=100}
 end
 local updateSettings={version="0.2.83",github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"},update={package_limit=1000}}
+test("roller settings serialization preserves disabled limits and MP across restart",function()
+  local source=Adapter.rollerSettingsSource({target_total=nil,hard_stop=nil,max_rolls=nil,reroll_delay=.1,reroll_command="reroll",auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=true,show_every_roll=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=6,MP=nil}})
+  local compile=loadstring or load; local chunk,err=compile(source); assert(chunk,err); local saved=chunk()
+  eq(saved.target_total,false); eq(saved.hard_stop,false); eq(saved.max_rolls,false); eq(saved.min_stats.STR,6); eq(saved.min_stats.MP,false)
+  local restored=Roller.new({},saved); eq(restored.cfg.target_total,nil); eq(restored.cfg.hard_stop,nil); eq(restored.cfg.max_rolls,nil); eq(restored.cfg.min_stats.STR,6); eq(restored.cfg.min_stats.MP,nil); eq(restored.cfg.reroll_command,"reroll")
+end)
 test("update staging lives outside the installed package directory",function()
   local base=Adapter.updateBase("/profile")
   eq(base,"/profile/DGHUDUpdater")

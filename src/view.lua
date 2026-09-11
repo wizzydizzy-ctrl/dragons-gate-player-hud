@@ -188,8 +188,8 @@ local help_entries={
   {command="dghud update",description="Install the newest verified HUD release, then refresh character data."},
   {command="dghud recover",description="Emergency clean reinstall using the independent recovery companion."},
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
-  {command="rr start|stop|stats|last|reset|help",description="Control the built-in OG Dragons Gate stat autoroller."},
-  {command="rr set total|hard|max|delay|STAT <value>",description="Adjust and persist autoroller targets without editing scripts."},
+  {command="rr start|stop|stats|last|reset|help",description="Control the 12-characteristic autoroller; target hits leave done for you."},
+  {command="rr set total|hard|max|delay|STAT <value>",description="Adjust totals or 1-7 minimums, including MP; rejected rolls use reroll."},
   {command="dghud config",description="Open the DGHUD settings location."},
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
   {command="dghud chatstatus",description="Show chat capture, filter, and storage status."},
@@ -380,11 +380,11 @@ function View.new(settings)
   self.roller_status=label("DGHUD.RollerSettings.Status",self.roller_panel,"background:transparent;color:"..t.muted..";")
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.roller_cancel=label("DGHUD.RollerSettings.Cancel",self.roller_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
-  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
-  local fieldLabels={target_total="Target total (1-77/off)",hard_stop="Hard stop (1-77/off)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",reroll_command="Rejected-roll response (must be n)",log_folder="Log folder",master_file="Master log filename"}
+  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+  local fieldLabels={target_total="Target total (1-84/off)",hard_stop="Hard stop (1-84/off; overrides minimums)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",log_folder="Log folder",master_file="Master log filename"}
   for _,key in ipairs(self.roller_field_order) do local caption=label("DGHUD.RollerSettings.Caption."..key,self.roller_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.RollerSettings.Input."..key,self.roller_content,self.geyser); self.roller_fields[key]={caption=caption,input=edit,label=fieldLabels[key] or (key.." minimum (1-7/off)")} end
   self.roller_toggle_order={"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}; self.roller_toggles={}
-  local toggleLabels={auto_start_on_name="Auto-start on Name/Race",use_min_stats="Enable stat minimums",require_min_stats_to_stop="Require minimums to stop",show_every_roll="Print every roll",logging_enabled="Enable roll logging"}
+  local toggleLabels={auto_start_on_name="Auto-start when roll screen appears",use_min_stats="Enable stat minimums",require_min_stats_to_stop="Require minimums to stop",show_every_roll="Print every roll",logging_enabled="Enable roll logging"}
   for _,key in ipairs(self.roller_toggle_order) do local button=label("DGHUD.RollerSettings.Toggle."..key,self.roller_content); button.option_text=toggleLabels[key]; button:setClickCallback(function() self.roller_draft[key]=not self.roller_draft[key]; self:renderRollerSettings(false); return self.roller_draft[key] end); self.roller_toggles[key]=button end
   self.roller_action_order={"roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}; self.roller_action_buttons={}; local rollerActionLabels={roller_start="START ROLLER",roller_stop="STOP ROLLER",roller_stats="SESSION STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET SESSION",roller_help="ROLLER HELP"}
   for _,key in ipairs(self.roller_action_order) do local button=label("DGHUD.RollerSettings.Action."..key,self.roller_content); button.option_text=rollerActionLabels[key]; button:setClickCallback(function() if self.options_action_callback then return self.options_action_callback(key) end; return nil,"autoroller action is unavailable" end); self.roller_action_buttons[key]=button end
@@ -770,8 +770,8 @@ function View:layoutRollerSettings(layout)
   place(self.roller_title,14,9,panelWidth-28,header-10); self.roller_title:echo(View.withFont("<b>AUTOROLLER SETTINGS</b>",font+2))
   local gap=10; local contentWidth=math.max(1,panelWidth-28); local columns=layout.mode~="compact" and panelWidth>=400 and 2 or 1; local columnWidth=columns==2 and (contentWidth-gap)/2 or contentWidth; local contentTop=header; local viewportHeight=math.max(1,panelHeight-header-footer); local rowHeight=42
   place(self.roller_content,14,contentTop,contentWidth,viewportHeight)
-  local left={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
-  local right={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
+  local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local right={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
   local function layoutColumn(items,column)
     local cx=(column-1)*(columnWidth+gap)
     for index,key in ipairs(items) do local ry=(index-1)*rowHeight; local field=self.roller_fields[key]

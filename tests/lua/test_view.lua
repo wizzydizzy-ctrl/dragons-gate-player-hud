@@ -429,10 +429,11 @@ end)
 
 test("autoroller settings modal validates through one save callback and remains bounded",function()
   local view=chatView(); local received; view:setRollerSettingsCallback(function(values) received=values; if values.target_total=="bad" then return nil,"bad target" end; return true end)
-  view:showRollerSettings({target_total=53,hard_stop=62,max_rolls=nil,reroll_delay=.1,reroll_command="n",auto_start_on_name=true,use_min_stats=true,require_min_stats_to_stop=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=5,INT=5,WIS=5,DEX=5,AGI=5,CON=5,CHA=5,WIL=5,VOI=5,PER=5,APP=5}})
-  for _,size in ipairs({{420,280},{420,500},{760,700},{1200,800},{1920,1080}}) do local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); eq(view.roller_panel.x>=0,true); eq(view.roller_panel.y>=0,true); eq(view.roller_panel.x+view.roller_panel.width<=size[1],true); eq(view.roller_panel.y+view.roller_panel.height<=size[2],true); eq(view.roller_content.parent,view.roller_panel); eq(view.roller_fields.STR.input.parent,view.roller_content); eq(view.roller_fields.INT.caption.y>=view.roller_fields.STR.input.y+view.roller_fields.STR.input.height,true); if layout.mode=="compact" then eq(view.roller_fields.STR.caption.x,view.roller_fields.target_total.caption.x); eq(view.roller_fields.STR.caption.y>view.roller_toggles.logging_enabled.y,true) end end
+  view:showRollerSettings({target_total=53,hard_stop=62,max_rolls=nil,reroll_delay=.1,reroll_command="reroll",auto_start_on_name=true,use_min_stats=true,require_min_stats_to_stop=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=5,INT=5,WIS=5,DEX=5,AGI=5,CON=5,CHA=5,WIL=5,VOI=5,PER=5,APP=5,MP=5}})
+  eq(view.roller_fields.reroll_command,nil)
+  for _,size in ipairs({{420,280},{420,500},{760,700},{1200,800},{1920,1080}}) do local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); eq(view.roller_panel.x>=0,true); eq(view.roller_panel.y>=0,true); eq(view.roller_panel.x+view.roller_panel.width<=size[1],true); eq(view.roller_panel.y+view.roller_panel.height<=size[2],true); eq(view.roller_content.parent,view.roller_panel); eq(view.roller_fields.STR.input.parent,view.roller_content); eq(view.roller_fields.MP.input.parent,view.roller_content); eq(view.roller_fields.INT.caption.y>=view.roller_fields.STR.input.y+view.roller_fields.STR.input.height,true); eq(view.roller_fields.MP.caption.y>=view.roller_fields.APP.input.y+view.roller_fields.APP.input.height,true); if layout.mode=="compact" then eq(view.roller_fields.STR.caption.x,view.roller_fields.target_total.caption.x); eq(view.roller_fields.STR.caption.y>view.roller_toggles.logging_enabled.y,true) end end
   view.roller_fields.target_total.input.text="bad"; local ok,err=view:saveRollerSettings(); eq(ok,nil); eq(err,"bad target"); eq(view.roller_settings_visible,true)
-  view.roller_fields.target_total.input.text="60"; assert(view:saveRollerSettings()); eq(received.target_total,"60"); eq(received.min_stats.APP,"5"); eq(view.roller_settings_visible,false)
+  view.roller_fields.target_total.input.text="60"; assert(view:saveRollerSettings()); eq(received.target_total,"60"); eq(received.min_stats.APP,"5"); eq(received.min_stats.MP,"5"); eq(view.roller_settings_visible,false)
 end)
 
 test("help and autoroller settings overlays are mutually exclusive",function()
@@ -446,6 +447,8 @@ test("help overlay distinguishes commands descriptions and warnings",function()
   view:showHelp()
   eq(view.help_visible,true); eq(view.help_overlay.visible,true); eq(view.help_panel.visible,true); eq(view.help_output.visible,true)
   eq(view.help_content.message:find("dghud update",1,true)~=nil,true)
+  eq(view.help_content.message:find("12-characteristic autoroller",1,true)~=nil,true)
+  eq(view.help_content.message:find("rejected rolls use reroll",1,true)~=nil,true)
   eq(view.help_content.message:find(view.settings.theme.jade,1,true)~=nil,true)
   eq(view.help_content.message:find(view.settings.theme.text,1,true)~=nil,true)
   eq(view.help_content.message:find(view.settings.theme.hp,1,true)~=nil,true)
