@@ -63,7 +63,7 @@ The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, an
 
 ## Persistent top chatbox
 
-The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its built-in filters are `ALL`, `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `CONTACT`, and `STAFF`; `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
+The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its built-in filters are `ALL`, `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `CONTACT`, and `STAFF`; `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
 
 The default chat settings are:
 
@@ -112,14 +112,14 @@ Valid new categories automatically become available as filters. Calls made while
 Captured entries are append-only JSON Lines stored permanently under the active Mudlet profile data directory:
 
 ```text
-<Mudlet home>/DGHUDData/chat/<safe-character-name>/YYYY-MM-DD.jsonl
+<Mudlet home>/DGHUDData/chat/profile/YYYY-MM-DD.jsonl
 ```
 
-The HUD reads at most the newest 1,000 valid entries into memory, but leaves older dated logs intact. Reloading, updating, rolling back, or uninstalling the HUD does not delete these files. Delete the relevant files yourself if you want to remove retained history.
+The HUD reads at most the newest 1,000 valid entries into memory, but leaves older dated logs intact. On the first profile-wide load it also reads prior character-named chat directories, combines their newest entries chronologically, and removes exact duplicates in memory; future entries are written to `chat/profile`. Reloading, updating, rolling back, or uninstalling the HUD does not delete these files. Delete the relevant files yourself if you want to remove retained history.
 
 Private communications such as whispers, ESP, Dragon, and Contact traffic are saved locally in these plain JSONL files. Anyone with access to your Mudlet profile, computer account, backups, or copied profile data may be able to read them. The HUD does not transmit chat logs, but you should treat the directory as sensitive local data.
 
-Run `dghud chatstatus` to print the active filter, the current visible-entry count, the sanitized current-character storage key, and the most recent storage error (`none` when no storage error has occurred in the running chat session).
+Run `dghud chatstatus` to print the active filter, the current visible-entry count, the `profile` storage key, and the most recent storage error (`none` when no storage error has occurred in the running chat session).
 
 Options → Support → Feedback & Requests opens an in-game form for anonymous feedback or feature requests. Support also provides one-click submission of the latest privacy-safe debug report. Neither action opens a browser or requires a GitHub account. The player chooses the feedback type, enters a short summary and detailed description, and receives a reference after submission. The form warns players not to include passwords or private account information; submissions are rate-limited and published to the DGHUD GitHub project for review.
 

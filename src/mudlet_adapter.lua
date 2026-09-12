@@ -119,6 +119,10 @@ function Adapter.markUpdateHandoff(hud,destinationSchema)
   local existingValid=type(existing)=="table" and tonumber(existing.schema)==destination and type(existing.view)=="table" and existing.view.root~=nil
   if controller then
     controller.update_handoff=true
+    if type(controller.chat)=="table" and type(controller.chat.handoff)=="function" then
+      local captured,snapshot=pcall(controller.chat.handoff,controller.chat)
+      if captured and type(snapshot)=="table" then hud._chat_handoff=snapshot end
+    end
     local sourceSchema=hud.settings and tonumber(hud.settings.view_schema)
     if sourceSchema and sourceSchema==destination and controller.view and controller.view.root then
       hud._view_handoff={schema=sourceSchema,view=controller.view}; controller.update_preserve_view=true

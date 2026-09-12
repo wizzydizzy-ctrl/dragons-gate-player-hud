@@ -16,8 +16,8 @@ local function withEntryStubs(fn)
   local defaults={schema=1,chat={enabled=true,height_percent=.21,target_height=240,min_height=160,max_height=320,visible_limit=1000,dedupe_seconds=3,timestamps=true}}
   local adapter={}
   local Main={}
-  function Main.new(_,settings,viewHandoff)
-    local controller={adapter=adapter,settings=settings,view_handoff=viewHandoff,reloads=0,starts=0,shutdowns=0}
+  function Main.new(_,settings,viewHandoff,chatHandoff)
+    local controller={adapter=adapter,settings=settings,view_handoff=viewHandoff,chat_handoff=chatHandoff,reloads=0,starts=0,shutdowns=0}
     function controller:start() self.starts=self.starts+1; if adapter.failStart then return nil,adapter.failStart end; return true end
     function controller:shutdown() self.shutdowns=self.shutdowns+1; return true end
     function controller:reload() self.reloads=self.reloads+1; return true end
@@ -89,6 +89,17 @@ test("replacement entry carries a preserved compatible view into the new control
     DGHUD={user_settings={},_update_reinstall_pending=true,_view_handoff=handoff,controller={map_collections={}},shutdown=function() return true end}
     dofile("src/entry.lua")
     eq(DGHUD.controller.view_handoff,handoff); eq(DGHUD._view_handoff,nil)
+  end)
+end)
+test("replacement entry carries live chat history and filter into the new controller",function()
+  withEntryStubs(function()
+    local history={lastKey="dedupe",lastEpoch=100}
+    function history:entries() return {{category="DRAGON",message="still visible",timestamp="2026-09-11T21:00:00-04:00"}} end
+    local retiring={map_collections={},chat={history=history,currentCharacterKey="wizzy",filter="DRAGON"}}
+    DGHUD={user_settings={},_update_reinstall_pending=true,controller=retiring,shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.controller.chat_handoff.character_key,"wizzy"); eq(DGHUD.controller.chat_handoff.filter,"DRAGON")
+    eq(DGHUD.controller.chat_handoff.entries[1].message,"still visible"); eq(DGHUD._chat_handoff,nil)
   end)
 end)
 

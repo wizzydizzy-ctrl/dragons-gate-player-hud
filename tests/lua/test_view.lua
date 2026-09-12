@@ -214,7 +214,7 @@ end
 
 local function chatView(glyphWidth,scrollbarWidth,measureFails)
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
-  local view=View.new({theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true}})
+  local view=View.new({version="0.3.30",theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true}})
   Geyser=original
   return view
 end
@@ -246,8 +246,21 @@ test("header owns a responsive top-left options button above the brand",function
     eq(view.color_toggle.x,0)
     eq(view.color_toggle.y,4)
     eq(view.color_toggle.y+view.color_toggle.height<layout.header_height,true)
+    eq(view.version_label.visible,true); eq(view.version_label.message:find("v0.3.30",1,true)~=nil,true)
+    eq(view.version_label.x>=view.color_toggle.x+view.color_toggle.width,true)
+    eq(view.version_label.x+view.version_label.width<=size[1],true)
+    eq(view.version_label.y+view.version_label.height<=layout.header_height,true)
   end
   eq(view.color_toggle.tooltip,"Open DGHUD options")
+  eq(view.version_label.tooltip,"Installed DGHUD version")
+end)
+
+test("preserved pre-version view creates and repaints the installed version label",function()
+  local view=chatView(); view.version_label=nil
+  local settings={version="0.3.31",theme=view.settings.theme,chat=view.settings.chat}
+  assert(view:prepareForReuse(settings)); view:applyLayout(require("layout").compute(760,700))
+  eq(view.version_label.message:find("v0.3.31",1,true)~=nil,true)
+  local versionText=view.version_label.message; view:setColorEnabled(false); eq(view.version_label.message,versionText)
 end)
 
 test("color options button renders overall enabled and disabled states",function()

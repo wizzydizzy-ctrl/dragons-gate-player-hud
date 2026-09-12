@@ -12,13 +12,10 @@ local function fake(entries)
   function f:timestamp() return self.timestampValue end
   function f:reportChatErrorOnce() self.errors=self.errors+1 end
   f.storage={}
-  function f.storage:characterKey(character)
-    local key=tostring(character or ""):lower():gsub("[^a-z0-9_-]+","_"):gsub("_+","_"):gsub("^_+",""):gsub("_+$","")
-    return key~="" and key or "unknown"
-  end
-  function f.storage:loadRecent(character)
+  function f.storage:characterKey() return "profile" end
+  function f.storage:loadRecent()
     f.loadRecentCalls=f.loadRecentCalls+1
-    local key=self:characterKey(character); f.loadedCharacterKeys[#f.loadedCharacterKeys+1]=key
+    local key="profile"; f.loadedCharacterKeys[#f.loadedCharacterKeys+1]=key
     if f.loadFailure then error(f.loadFailure) end
     if f.storageEntriesByKey then return f.storageEntriesByKey[key] or {} end
     return f.storageEntries
@@ -76,26 +73,40 @@ test("loads recent entries once and rotates later captures to the active charact
   eq(f.storedCharacters[1],"Dace Alterac"); eq(f.storedCharacters[2],"Gia")
 end)
 
-test("character transition isolates visible history and restores it without re-persisting",function()
+test("character transitions retain one profile-wide history without reloading or re-persisting",function()
   local f=fake(); f.character=nil
-  f.storageEntriesByKey={
-    unknown={{schema=1,timestamp="2026-08-31T12:00:00-04:00",character="Unknown",category="ROOM",message="unknown recent",line="unknown recent",source="builtin"}},
-    dace_alterac={{schema=1,timestamp="2026-08-31T11:00:00-04:00",character="Dace Alterac",category="ESP",message="persisted Dace",line="persisted Dace",source="builtin"}},
-  }
+  f.storageEntriesByKey={profile={{schema=1,timestamp="2026-08-31T12:00:00-04:00",character="Earlier",category="ROOM",message="profile recent",line="profile recent",source="builtin"}}}
   local controller=makeController(f); controller:start(); assert(controller:capture("QUEST","live unknown"))
-  eq(f.storageAppends,1); eq(table.concat(f.loadedCharacterKeys,","),"unknown")
+  eq(f.storageAppends,1); eq(table.concat(f.loadedCharacterKeys,","),"profile")
   f.character="Dace/Alterac"; assert(controller:syncCharacter())
-  local entries=controller:entries()
-  eq(table.concat(f.loadedCharacterKeys,","),"unknown,dace_alterac")
-  eq(#entries,1); eq(entries[1].message,"persisted Dace")
-  eq(f.storageAppends,1)
-  f.character="Dace Alterac"; assert(controller:syncCharacter())
-  eq(table.concat(f.loadedCharacterKeys,","),"unknown,dace_alterac")
-  f.character=nil; assert(controller:syncCharacter()); entries=controller:entries(); eq(#entries,2); eq(entries[1].message,"unknown recent"); eq(entries[2].message,"live unknown"); eq(f.loadRecentCalls,2)
+  assert(controller:capture("QUEST","live Dace")); f.character="Gia"; assert(controller:syncCharacter()); assert(controller:capture("QUEST","live Gia"))
+  local entries=controller:entries(); eq(#entries,4); eq(entries[1].message,"profile recent"); eq(entries[4].message,"live Gia")
+  eq(table.concat(f.loadedCharacterKeys,","),"profile"); eq(f.loadRecentCalls,1); eq(f.storageAppends,3)
 end)
 
 test("filter changes notify with only matching entries and shutdown removes its trigger",function()
   local f=fake(); local calls={}; local controller=makeController(f,function(entries,_,filter) calls[#calls+1]={entries=entries,filter=filter} end)
   controller:start(); assert(controller:capture("QUEST","quest")); f.epochValue=104; assert(controller:capture("EVENTS","event")); controller:setFilter("QUEST")
   eq(calls[#calls].filter,"QUEST"); eq(calls[#calls].entries[1].message,"quest"); controller:shutdown(); eq(f:count(f.triggers),0); eq(controller:capture("QUEST","late"),nil)
+end)
+
+test("chat handoff preserves bounded history filter dedupe and transient identity gaps",function()
+  local first=fake(); local original=makeController(first); assert(original:start())
+  assert(original:capture("EVENTS","earlier")); first.epochValue=104; assert(original:capture("QUEST","keep me")); assert(original:setFilter("QUEST"))
+  local handoff=original:handoff(); eq(handoff.schema,1); eq(handoff.character_key,"profile"); eq(handoff.filter,"QUEST"); eq(#handoff.entries,2)
+
+  local second=fake(); second.character=nil; second.epochValue=104; local notifications=0
+  local restored=makeController(second,function() notifications=notifications+1 end)
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(notifications,0); eq(second.loadRecentCalls,0); eq(restored.filter,"QUEST"); eq(restored:entries()[1].message,"keep me")
+  eq(#restored.history:entries("ALL"),2)
+  assert(restored:capture("QUEST","keep me")); eq(second.storageAppends,0); eq(#restored.history:entries("ALL"),2)
+  second.character="Dace Alterac"; assert(restored:syncCharacter()); eq(second.loadRecentCalls,0)
+end)
+
+test("chat handoff remains profile-wide when the replacement has another character",function()
+  local first=fake(); local original=makeController(first); assert(original:start()); assert(original:capture("QUEST","Dace only"))
+  local handoff=original:handoff(); local second=fake(); second.character="Gia"; second.storageEntriesByKey={profile={{category="ESP",message="older disk line"}}}
+  local restored=makeController(second); assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(second.loadRecentCalls,0); eq(restored.currentCharacterKey,"profile"); eq(restored:entries()[1].message,"Dace only")
 end)

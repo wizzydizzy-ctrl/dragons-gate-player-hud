@@ -36,6 +36,12 @@ local function lines(text)
   return result
 end
 
+local function entryIdentity(entry)
+  local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source"}; local values={}
+  for index,name in ipairs(fields) do values[index]=tostring(entry[name] or "") end
+  return table.concat(values,"\0")
+end
+
 local function call(api,name,...)
   local ok,result,err=pcall(api[name],...)
   if not ok then return nil,tostring(result) end
@@ -48,8 +54,8 @@ function Storage.new(api,basePath,visibleLimit)
   return setmetatable({api=api,basePath=tostring(basePath or ""),visibleLimit=visibleLimit,reportedMalformed=false},Storage)
 end
 
-function Storage:characterKey(character)
-  return Storage.safeCharacter(character)
+function Storage:characterKey()
+  return "profile"
 end
 
 function Storage:recordError(message)
@@ -63,8 +69,7 @@ end
 
 function Storage:append(entry)
   if type(entry)~="table" then return nil,self:recordError("chat entry is required") end
-  local character=Storage.safeCharacter(entry.character)
-  local directory=path(self.basePath,character)
+  local directory=path(self.basePath,self:characterKey())
   local ok,err=call(self.api,"mkdir",self.basePath)
   if not ok then return nil,self:recordError(err or "could not create chat storage") end
   ok,err=call(self.api,"mkdir",directory)
@@ -89,8 +94,8 @@ function Storage:reportFailure(message)
   if type(self.api.report)=="function" then pcall(self.api.report,self.lastStorageError) end
 end
 
-function Storage:loadRecent(character)
-  local directory=path(self.basePath,Storage.safeCharacter(character))
+function Storage:loadRecent()
+  local directory=path(self.basePath,self:characterKey())
   local created,createErr=call(self.api,"mkdir",self.basePath)
   if not created then
     self:reportFailure(createErr or "could not create chat storage")
@@ -101,29 +106,45 @@ function Storage:loadRecent(character)
     self:reportFailure(createErr or "could not create character storage")
     return {}
   end
-  local files,listErr=call(self.api,"list",directory)
-  if type(files)~="table" then
-    if listErr then self:reportFailure(listErr) end
-    return {}
+  local directories={directory}; local rootEntries,rootErr=call(self.api,"list",self.basePath)
+  if type(rootEntries)~="table" then if rootErr then self:reportFailure(rootErr) end else
+    for _,name in ipairs(rootEntries) do
+      if type(name)=="string" and name~="profile" and name:match("^[a-z0-9_-]+$") then directories[#directories+1]=path(self.basePath,name) end
+    end
   end
-  local newestFirst={}
-  for _,file in ipairs(datedFiles(files)) do
-    local content,readErr=call(self.api,"read",path(directory,file))
-    if readErr then self:reportFailure(readErr) end
-    local fileLines=lines(content)
-    for index=#fileLines,1,-1 do
-      local ok,entry=pcall(self.api.decode,fileLines[index])
-      if ok and type(entry)=="table" then
-        newestFirst[#newestFirst+1]=entry
-        if #newestFirst>=self.visibleLimit then break end
-      else
-        self:reportMalformed()
+  table.sort(directories)
+  local byDate,dateSet={},{}
+  for _,candidate in ipairs(directories) do
+    local files,listErr=call(self.api,"list",candidate)
+    if type(files)=="table" then
+      for _,file in ipairs(datedFiles(files)) do
+        byDate[file]=byDate[file] or {}; byDate[file][#byDate[file]+1]=candidate; dateSet[file]=true
+      end
+    elseif candidate==directory and listErr then self:reportFailure(listErr) end
+  end
+  local dates={}; for file in pairs(dateSet) do dates[#dates+1]=file end; table.sort(dates,function(a,b) return a>b end)
+  local records,seen={},{}; local sequence=0
+  for _,file in ipairs(dates) do
+    for _,candidate in ipairs(byDate[file]) do
+      local content,readErr=call(self.api,"read",path(candidate,file)); if readErr then self:reportFailure(readErr) end
+      for lineIndex,line in ipairs(lines(content)) do
+        local ok,entry=pcall(self.api.decode,line)
+        if ok and type(entry)=="table" then
+          local identity=entryIdentity(entry)
+          if not seen[identity] then
+            seen[identity]=true; sequence=sequence+1
+            records[#records+1]={entry=entry,order=tostring(entry.timestamp or file).."\0"..string.format("%08d",lineIndex).."\0"..candidate,sequence=sequence}
+          end
+        else self:reportMalformed() end
       end
     end
-    if #newestFirst>=self.visibleLimit then break end
+    if #records>=self.visibleLimit then break end
   end
-  local chronological={}
-  for index=#newestFirst,1,-1 do chronological[#chronological+1]=newestFirst[index] end
+  table.sort(records,function(a,b) if a.order==b.order then return a.sequence<b.sequence end; return a.order<b.order end)
+  local unique={}
+  for _,record in ipairs(records) do unique[#unique+1]=record.entry end
+  local chronological={}; local first=math.max(1,#unique-self.visibleLimit+1)
+  for index=first,#unique do chronological[#chronological+1]=unique[index] end
   return chronological
 end
 

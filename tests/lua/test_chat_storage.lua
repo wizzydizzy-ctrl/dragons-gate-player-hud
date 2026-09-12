@@ -11,7 +11,7 @@ local function fakeStorageApi()
     api.files[path]=(api.files[path] or "")..text
     return true
   end
-  function api.list(path) return api.listed or {} end
+  function api.list(path) if api.listings then return api.listings[path] or {} end; return api.listed or {} end
   function api.read(path) return api.files[path] end
   function api.encode(entry) return entry.message end
   function api.decode(line) return api.decoded and api.decoded[line] or nil,"invalid json" end
@@ -21,16 +21,16 @@ end
 local function fakeStorageApiWithLines(lines)
   local api=fakeStorageApi()
   api.listed={"2026-08-30.jsonl"}
-  api.files["/chat/dace_alterac/2026-08-30.jsonl"]=table.concat(lines,"\n").."\n"
+  api.files["/chat/profile/2026-08-30.jsonl"]=table.concat(lines,"\n").."\n"
   api.decoded={['{"category":"ESP","message":"valid"}']={category="ESP",message="valid"}}
   return api
 end
 
-test("sanitizes character paths and appends dated JSONL",function()
+test("appends profile-wide dated JSONL while retaining character metadata",function()
   local api=fakeStorageApi()
   local storage=Storage.new(api,"/profile/DGHUDData/chat",1000)
   assert(storage:append({timestamp="2026-08-31T13:00:00-04:00",character="Dace/Alterac",category="ROOM",message="hello"}))
-  eq(api.lastPath,"/profile/DGHUDData/chat/dace_alterac/2026-08-31.jsonl")
+  eq(api.lastPath,"/profile/DGHUDData/chat/profile/2026-08-31.jsonl")
   eq(api.appends[1].text,"hello\n")
   eq(Storage.safeCharacter("../../Dace"),"dace")
   eq(Storage.safeCharacter("/absolute"),"absolute")
@@ -42,7 +42,47 @@ test("retains successive append-only entries in one dated log",function()
   local storage=Storage.new(api,"/chat",1000)
   assert(storage:append({timestamp="2026-08-31T13:00:00-04:00",character="Dace",message="first"}))
   assert(storage:append({timestamp="2026-08-31T13:01:00-04:00",character="Dace",message="second"}))
-  eq(api.files["/chat/dace/2026-08-31.jsonl"],"first\nsecond\n")
+  eq(api.files["/chat/profile/2026-08-31.jsonl"],"first\nsecond\n")
+end)
+
+test("profile history recovers and combines legacy character directories",function()
+  local api=fakeStorageApi()
+  api.listings={
+    ["/chat"]={"profile","dace","gia","notes.txt"},
+    ["/chat/profile"]={"2026-09-11.jsonl"},
+    ["/chat/dace"]={"2026-09-11.jsonl"},
+    ["/chat/gia"]={"2026-09-11.jsonl"},
+  }
+  api.files["/chat/profile/2026-09-11.jsonl"]="shared\n"
+  api.files["/chat/dace/2026-09-11.jsonl"]="dace\nshared\n"
+  api.files["/chat/gia/2026-09-11.jsonl"]="gia\n"
+  api.decoded={
+    shared={schema=1,timestamp="2026-09-11T18:01:00-04:00",character="Dace",category="ROOM",message="shared"},
+    dace={schema=1,timestamp="2026-09-11T18:00:00-04:00",character="Dace",category="ROOM",message="dace"},
+    gia={schema=1,timestamp="2026-09-11T18:02:00-04:00",character="Gia",category="ROOM",message="gia"},
+  }
+  local entries=Storage.new(api,"/chat",1000):loadRecent()
+  eq(#entries,3); eq(entries[1].message,"dace"); eq(entries[2].message,"shared"); eq(entries[3].message,"gia")
+end)
+
+test("legacy duplicates do not hide older unique profile history",function()
+  local api=fakeStorageApi()
+  api.listings={
+    ["/chat"]={"profile","dace","gia"},
+    ["/chat/profile"]={"2026-09-11.jsonl","2026-09-10.jsonl"},
+    ["/chat/dace"]={"2026-09-11.jsonl"},
+    ["/chat/gia"]={"2026-09-11.jsonl"},
+  }
+  api.files["/chat/profile/2026-09-11.jsonl"]="shared\n"
+  api.files["/chat/dace/2026-09-11.jsonl"]="shared\n"
+  api.files["/chat/gia/2026-09-11.jsonl"]="shared\n"
+  api.files["/chat/profile/2026-09-10.jsonl"]="older\n"
+  api.decoded={
+    shared={schema=1,timestamp="2026-09-11T18:01:00-04:00",character="Dace",category="ROOM",message="shared"},
+    older={schema=1,timestamp="2026-09-10T18:00:00-04:00",character="Gia",category="ROOM",message="older"},
+  }
+  local entries=Storage.new(api,"/chat",2):loadRecent()
+  eq(#entries,2); eq(entries[1].message,"older"); eq(entries[2].message,"shared")
 end)
 
 test("contains mkdir encode and append exceptions",function()
@@ -77,8 +117,8 @@ end)
 test("loads newest dated files first without deleting older logs",function()
   local api=fakeStorageApi()
   api.listed={"2026-08-30.jsonl","2026-08-31.jsonl","notes.txt"}
-  api.files["/chat/dace/2026-08-31.jsonl"]="newest\n"
-  api.files["/chat/dace/2026-08-30.jsonl"]="older\n"
+  api.files["/chat/profile/2026-08-31.jsonl"]="newest\n"
+  api.files["/chat/profile/2026-08-30.jsonl"]="older\n"
   api.decoded={newest={message="newest"},older={message="older"}}
   local storage=Storage.new(api,"/chat",1)
   local entries=storage:loadRecent("Dace")
@@ -90,8 +130,8 @@ end)
 test("returns the newest N entries in chronological order across dated files",function()
   local api=fakeStorageApi()
   api.listed={"2026-08-30.jsonl","2026-08-31.jsonl"}
-  api.files["/chat/dace/2026-08-30.jsonl"]="old-one\nold-two\n"
-  api.files["/chat/dace/2026-08-31.jsonl"]="new-one\nnew-two\nnew-three\n"
+  api.files["/chat/profile/2026-08-30.jsonl"]="old-one\nold-two\n"
+  api.files["/chat/profile/2026-08-31.jsonl"]="new-one\nnew-two\nnew-three\n"
   api.decoded={
     ["old-one"]={message="old-one"},["old-two"]={message="old-two"},
     ["new-one"]={message="new-one"},["new-two"]={message="new-two"},["new-three"]={message="new-three"},
@@ -110,7 +150,7 @@ test("hard caps oversized storage reads at the newest thousand",function()
   for index=1,1501 do
     local line="line-"..index; source[index]=line; api.decoded[line]={message=line}
   end
-  api.files["/chat/dace/2026-08-31.jsonl"]=table.concat(source,"\n").."\n"
+  api.files["/chat/profile/2026-08-31.jsonl"]=table.concat(source,"\n").."\n"
   local entries=Storage.new(api,"/chat",1500):loadRecent("Dace")
   eq(#entries,1000)
   eq(entries[1].message,"line-502")
@@ -126,7 +166,7 @@ test("contains list errors and recovers after a read error",function()
   local api=fakeStorageApi()
   api.listed={"2026-08-30.jsonl","2026-08-31.jsonl"}
   api.read=function(path)
-    if path=="/chat/dace/2026-08-31.jsonl" then error("read failure") end
+    if path=="/chat/profile/2026-08-31.jsonl" then error("read failure") end
     return "older\n"
   end
   api.decoded={older={message="older"}}

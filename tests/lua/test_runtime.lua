@@ -74,13 +74,10 @@ local function fake()
   function f:createChatStorage(visibleLimit)
     f.chatVisibleLimit=visibleLimit
     f.chatEntries=f.chatEntries or {}; local storage={entries=f.chatEntries}
-    function storage:characterKey(character)
-      local key=tostring(character or ""):lower():gsub("[^a-z0-9_-]+","_"):gsub("_+","_"):gsub("^_+",""):gsub("_+$","")
-      return key~="" and key or "unknown"
-    end
-    function storage:loadRecent(character)
+    function storage:characterKey() return "profile" end
+    function storage:loadRecent()
       f.loadRecentCalls=(f.loadRecentCalls or 0)+1
-      local key=self:characterKey(character); f.loadedCharacterKeys=f.loadedCharacterKeys or {}; f.loadedCharacterKeys[#f.loadedCharacterKeys+1]=key
+      local key="profile"; f.loadedCharacterKeys=f.loadedCharacterKeys or {}; f.loadedCharacterKeys[#f.loadedCharacterKeys+1]=key
       if f.chatEntriesByKey then return f.chatEntriesByKey[key] or {} end
       return self.entries
     end
@@ -487,8 +484,10 @@ test("update handoff skips only the redundant map snapshot",function()
 end)
 test("compatible update handoff preserves and adopts one live HUD view",function()
   local f=fake(); local settings={layout={},view_schema=1}; local retiring=Main.new(f,settings); assert(retiring:start()); local view=retiring.view
+  assert(retiring.chat:capture("QUEST","visible through update")); assert(retiring.chat:setFilter("QUEST")); local chatHandoff=retiring.chat:handoff(); local renders=f.chatRenders; local appends=f.chatStorageAppends
   retiring.update_handoff=true; retiring.update_preserve_view=true; assert(retiring:shutdown()); eq(f.deleted,0)
-  local replacement=Main.new(f,settings,{schema=1,view=view}); assert(replacement:start()); eq(replacement.view,view); eq(f.viewCreates,1); eq(f.viewAdoptions,1)
+  local replacement=Main.new(f,settings,{schema=1,view=view},chatHandoff); assert(replacement:start()); eq(replacement.view,view); eq(f.viewCreates,1); eq(f.viewAdoptions,1)
+  eq(replacement.chat.filter,"QUEST"); eq(replacement.chat:entries()[1].message,"visible through update"); eq(f.chatRenders,renders); eq(f.chatStorageAppends,appends)
   assert(replacement:shutdown()); eq(f.deleted,1)
 end)
 test("failed replacement startup leaves an adopted HUD view visible for recovery",function()
@@ -562,23 +561,20 @@ test("wrapped INFO output updates identity needs vitals and expanded attributes"
   eq(hud.last_state.character.full_name,"Deklan Marrowen"); eq(hud.last_state.character.physical.life_stage,"1st stage"); eq(hud.last_state.needs.hunger.status,"hungry"); eq(hud.last_state.needs.thirst.status,"thirsty")
   eq(hud.last_state.vitals.hp.current,213); eq(hud.last_state.vitals.carry.maximum,354); eq(hud.last_state.attributes.STR,"Godly"); eq(hud.last_state.attributes.WIS,"Excel")
 end)
-test("GMCP identity arrival hydrates persisted character history without appending it",function()
+test("GMCP identity arrival retains the profile-wide history without reloading it",function()
   local f=fake()
-  f.chatEntriesByKey={
-    unknown={},
-    dace_alterac={{schema=1,timestamp="2026-08-31T12:00:00-04:00",character="Dace Alterac",category="ESP",message="persisted after login",line="persisted after login",source="builtin"}},
-  }
+  f.chatEntriesByKey={profile={{schema=1,timestamp="2026-08-31T12:00:00-04:00",character="Dace Alterac",category="ESP",message="persisted profile chat",line="persisted profile chat",source="builtin"}}}
   local hud=Main.new(f,{layout={},chat={visible_limit=1000,dedupe_seconds=3}}); assert(hud:start())
-  eq(table.concat(f.loadedCharacterKeys,","),"unknown"); eq(#hud.chat:entries(),0)
+  eq(table.concat(f.loadedCharacterKeys,","),"profile"); eq(hud.chat:entries()[1].message,"persisted profile chat")
   f.gmcp={Char={Status={name="Dace",surname="Alterac"},Vitals={hp=1,hp_max=1}}}; hud:refresh()
-  eq(table.concat(f.loadedCharacterKeys,","),"unknown,dace_alterac")
-  eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"persisted after login"); eq(f.chatStorageAppends or 0,0)
+  eq(table.concat(f.loadedCharacterKeys,","),"profile")
+  eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"persisted profile chat"); eq(f.chatStorageAppends or 0,0)
 end)
-test("welcome identity switches chat history before delayed GMCP status changes",function()
-  local f=fake(); f.chatEntriesByKey={unknown={{category="ROOM",message="old"}},dace={{category="ESP",message="new"}}}
-  local hud=Main.new(f,{layout={},chat={visible_limit=1000,dedupe_seconds=3}}); assert(hud:start()); eq(hud.chat:entries()[1].message,"old")
+test("welcome identity never clears or switches profile-wide chat history",function()
+  local f=fake(); f.chatEntriesByKey={profile={{category="ROOM",message="kept across characters"}}}
+  local hud=Main.new(f,{layout={},chat={visible_limit=1000,dedupe_seconds=3}}); assert(hud:start()); eq(hud.chat:entries()[1].message,"kept across characters")
   hud.collector:onLine("Welcome to Dragon's Gate, Dace!")
-  eq(hud:characterName(),"Dace"); eq(hud.chat:entries()[1].message,"new"); eq(table.concat(f.loadedCharacterKeys,","),"unknown,dace")
+  eq(hud:characterName(),"Dace"); eq(hud.chat:entries()[1].message,"kept across characters"); eq(table.concat(f.loadedCharacterKeys,","),"profile")
 end)
 test("controller status and storage use the effective bounded visible limit",function()
   local oversized=fake(); oversized.chatEntries={}

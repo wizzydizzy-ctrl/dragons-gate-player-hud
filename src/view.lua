@@ -263,6 +263,21 @@ local function listViewportWidth(output,plannedWidth,override)
   if not scrollbar then scrollbar=math.max(40,math.min(48,math.ceil(outer*.16))) end
   return math.max(1,outer-math.max(0,math.min(scrollbar,outer-1))),scrollbar
 end
+function View:ensureVersionLabel()
+  if type(self.version_label)=="table" and self.version_label.deleted~=true then return self.version_label end
+  if not self.root then return nil end
+  local t=self.settings and self.settings.theme or {muted="#75857c"}
+  self.version_label=label("DGHUD.Header.Version",self.root,"background:transparent;color:"..(t.muted or "#75857c")..";font-weight:700;",self.geyser)
+  if self.version_label.setToolTip then pcall(self.version_label.setToolTip,self.version_label,"Installed DGHUD version") end
+  return self.version_label
+end
+function View:renderVersion()
+  local versionLabel=self:ensureVersionLabel(); if not versionLabel then return nil end
+  local version=tostring(self.settings and self.settings.version or "—"):gsub("^[vV]","")
+  local font=self.version_font or (self.layout and math.max(8,(self.layout.color_toggle_font or 11)-1)) or 10
+  versionLabel:echo(View.withFont("<center><b>v"..safeText(version).."</b></center>",font))
+  return true
+end
 function View.new(settings)
   local self=setmetatable({settings=settings,geyser=Geyser,direction_buttons={},utility_buttons={},exit_available={}},View); local t=settings.theme
   local available={}; if type(rawget(_G,"getAvailableFonts"))=="function" then local ok,value=pcall(getAvailableFonts); if ok and type(value)=="table" then available=value end end
@@ -270,6 +285,7 @@ function View.new(settings)
   self.root=Geyser.Container:new({name="DGHUD.Root",x=0,y=0,width="100%",height="100%"})
   self.header=label("DGHUD.Header",self.root,"background:"..t.background..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:10px 18px;")
   self.color_toggle=label("DGHUD.Header.ColorToggle",self.root,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
+  self:ensureVersionLabel(); self:renderVersion()
   if self.color_toggle.setToolTip then pcall(self.color_toggle.setToolTip,self.color_toggle,"Open DGHUD options") end
   self.color_menu_scrim=label("DGHUD.Header.ColorMenuScrim",self.root,"background:transparent;")
   self.color_menu=Geyser.Container:new({name="DGHUD.Header.ColorMenu",x=0,y=0,width=220,height=164},self.root)
@@ -600,10 +616,16 @@ function View:applyLayout(layout)
   self.carry:hide()
   place(self.header,0,0,"100%",top)
   local windowWidth=tonumber(layout.window_width) or 1200; local clock_x=layout.mode=="compact" and math.floor(windowWidth*.5) or windowWidth-layout.right
-  local toggle_width=math.max(72,math.min(92,math.floor(windowWidth*.10))); local toggle_x=0; local toggle_y=4
+  local toggle_x=0; local toggle_y=4; local version_gap=4
+  local version_boundary=layout.mode=="compact" and clock_x-4 or (tonumber(layout.console_left or layout.left) or 0)-4
+  if version_boundary<96 then version_boundary=math.min(clock_x-4,164) end
+  local toggle_width=math.max(48,math.min(92,math.floor(windowWidth*.10),version_boundary-version_gap-40))
+  local version_x=toggle_x+toggle_width+version_gap; local version_width=math.max(1,math.min(72,version_boundary-version_x))
+  self.version_font=math.max(7,math.min((layout.color_toggle_font or 11)-1,math.floor(math.max(1,version_width-4)/4.5)))
   local attributeWidth=math.max(1,clock_x-(layout.console_left or layout.left)-6)
   place(self.attribute_strip,layout.console_left or layout.left,0,attributeWidth,top); self.attribute_strip:raise()
   place(self.color_toggle,toggle_x,toggle_y,toggle_width,layout.color_toggle_height); self.options_anchor={x=toggle_x,y=toggle_y,width=toggle_width,height=layout.color_toggle_height}; self:setColorEnabled(self.color_enabled~=false); self.color_toggle:raise()
+  local versionLabel=self:ensureVersionLabel(); versionLabel:setStyleSheet("background:transparent;color:"..t.muted..";font-weight:700;"); place(versionLabel,version_x,toggle_y,version_width,layout.color_toggle_height); self:renderVersion(); versionLabel:raise()
   if layout.mode=="compact" then place(self.clock_header,"50%",0,"50%",top) else place(self.clock_header,"100%-"..layout.right,0,layout.right,top) end
   self.clock_header:raise(); self.bottom:hide()
   place(self.chat_container,layout.chat_x or layout.left,top,layout.chat_width or layout.console_width,layout.chat_height or 240)
@@ -1258,6 +1280,7 @@ end
 function View:prepareForReuse(settings)
   if type(self.root)~="table" then return nil,"preserved HUD view is unavailable" end
   self.settings=settings or self.settings
+  self:ensureVersionLabel(); self:renderVersion()
   self.chat_filter_callback=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
   self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil

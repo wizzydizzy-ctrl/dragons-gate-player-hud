@@ -7,10 +7,10 @@ local function colorOptions(status)
   for _,name in ipairs(colorFeatures) do result[name]=status[name] end
   return result
 end
-function Main.new(adapter,settings,viewHandoff)
+function Main.new(adapter,settings,viewHandoff,chatHandoff)
   adapter.settings=settings
   local colorSettings=settings and settings.colorization
-  local self=setmetatable({adapter=adapter,settings=settings,view_handoff=viewHandoff,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
+  local self=setmetatable({adapter=adapter,settings=settings,view_handoff=viewHandoff,chat_handoff=chatHandoff,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
   self.map_diagnostics=MapDiagnostics.new(settings and settings.version,settings and settings.edition,function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end)
   self.failure_reports=FailureReport.new({version=settings and settings.version,edition=settings and settings.edition,clock=function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end,save=function(report) if adapter.saveFailureReport then return adapter:saveFailureReport(report) end end,submit=function(report,done) if not adapter.submitFailureReport then return nil,"anonymous failure reporting is unavailable" end; return adapter:submitFailureReport(report,done) end})
@@ -292,6 +292,8 @@ function Main:startChat()
   self.chat=ChatController.new(self.adapter,ChatParser,ChatHistory.new(visibleLimit,settings.dedupe_seconds or 3),storage,function(entries,categories,filter)
     if self.view and self.view.renderChat then self.view:renderChat(entries,categories,filter) end
   end,function() return self:characterName() end)
+  local restored=false
+  if type(self.chat_handoff)=="table" then restored=self.chat:restoreHandoff(self.chat_handoff)==true end
   if self.view and self.view.setChatFilterCallback then
     self.view:setChatFilterCallback(function(category)
       local chat=self.chat
@@ -299,7 +301,9 @@ function Main:startChat()
       return chat:setFilter(category)
     end)
   end
-  return self.chat:start()
+  local started,err=self.chat:start(restored and self.view_adopted==true)
+  if started then self.chat_handoff=nil end
+  return started,err
 end
 function Main:chatStatus()
   if not self.chat then return {active_filter="OFF",visible_count=0,storage_key=nil,last_storage_error=nil} end
@@ -803,7 +807,7 @@ function Main:start()
   local startupOk,startupErr=pcall(function()
   local handoff=self.view_handoff; self.view_handoff=nil
   if type(handoff)=="table" and tonumber(handoff.schema)==tonumber(self.settings.view_schema) and handoff.view and self.adapter.adoptView then
-    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted; self.view_lease_uncommitted=true end
+    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted; self.view_adopted=true; self.view_lease_uncommitted=true end
   end
   if not self.view then
     if type(handoff)=="table" and handoff.view and type(handoff.view.delete)=="function" then pcall(handoff.view.delete,handoff.view) end
@@ -1070,7 +1074,7 @@ function Main:shutdown()
   self.runtime={events={},aliases={},triggers={}}; if self.view and not preserveView then self.view:delete() end; self.view=nil
   if self.original_borders and not preserveView then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]) end; self.original_borders=nil
   if not updateHandoff and self.original_main_console_wrap and self.adapter.setMainConsoleWrap then pcall(self.adapter.setMainConsoleWrap,self.adapter,self.original_main_console_wrap) end
-  self.character_entry_started=false; self.character_entry_name=nil; self.original_main_console_wrap=nil; self.main_console_wrap_columns=nil; self.runtime_registration_complete=false; self.started=false; return true
+  self.character_entry_started=false; self.character_entry_name=nil; self.original_main_console_wrap=nil; self.main_console_wrap_columns=nil; self.runtime_registration_complete=false; self.view_adopted=nil; self.started=false; return true
 end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()

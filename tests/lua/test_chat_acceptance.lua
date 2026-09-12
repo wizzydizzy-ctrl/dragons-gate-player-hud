@@ -34,7 +34,7 @@ local function fakeChatRuntimeWithPersonalTrigger()
       return true
     end
     function storage:close() return true end
-    function storage:characterKey(name) return tostring(name or "unknown"):lower():gsub(" ","_") end
+    function storage:characterKey() return "profile" end
     return storage
   end
   return f
@@ -57,7 +57,7 @@ test("capture reload shutdown and chat status preserve personal runtime",functio
   runtime.storageFailure="disk full"; runtime.epochValue=104; assert(DGHUD.chat.capture("QUEST","still visible"))
   assert(DGHUD.chat.setFilter("QUEST"))
   local status=findAlias(runtime,"^dghud chatstatus$")(); eq(status.active_filter,"QUEST"); eq(status.visible_count,2)
-  eq(status.storage_key,"dace_alterac"); eq(status.last_storage_error,"disk full"); eq(runtime.reportedChatStatus,status)
+  eq(status.storage_key,"profile"); eq(status.last_storage_error,"disk full"); eq(runtime.reportedChatStatus,status)
   hud:reload(); eq(runtime.triggers[personal]~=nil,true); eq(runtime.personalTrigger,true); eq(hud.chat:entries()[1].message,"hello")
   hud:shutdown(); eq(runtime.triggers[personal]~=nil,true); DGHUD=nil
 end)

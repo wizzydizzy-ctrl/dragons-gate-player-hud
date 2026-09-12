@@ -118,8 +118,10 @@ test("explicit migration read errors fail closed instead of looking like EOF",fu
   lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
 end)
 test("rollback handoff retains a valid lease owned by a failed candidate",function()
-  local view={root={}}; local hud={settings={view_schema=1},controller={view=nil},_view_handoff={schema=1,view=view}}
+  local view={root={}}; local snapshot={schema=1,character_key="dace",filter="ALL",entries={{message="kept"}}}
+  local hud={settings={view_schema=1},controller={view=nil,chat={handoff=function() return snapshot end}},_view_handoff={schema=1,view=view}}
   local lease=Adapter.markUpdateHandoff(hud,1); eq(lease.view,view); eq(hud.controller.update_handoff,true)
+  eq(hud._chat_handoff,snapshot)
   eq(Adapter.markUpdateHandoff(hud,2),nil)
 end)
 test("verified update archive retains the Mudlet package name",function()
