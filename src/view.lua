@@ -188,8 +188,8 @@ local help_entries={
   {command="dghud update",description="Install the newest verified HUD release, then refresh character data."},
   {command="dghud recover",description="Emergency clean reinstall using the independent recovery companion."},
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
-  {command="rr start|stop|stats|last|reset|help",description="Control both 12-characteristic rolling methods; DGHUD always leaves done for you."},
-  {command="rr set total|hard|max|delay|greats|goodplus|STAT <value>",description="Adjust totals, arranged-pool counts, or 1-7 stat minimums including MP."},
+  {command="rr start|stop|stats|last|reset|help",description="Control both 11-characteristic rolling methods; DGHUD always leaves done for you."},
+  {command="rr set total|hard|max|delay|greats|goodplus|STAT <value>",description="Adjust totals, arranged-pool counts, or 1-7 minimums for the 11 current stats."},
   {command="rr set arrange manual|auto|minimums",description="Choose whether a qualifying arranged pool waits, uses game auto, or places your raw pool-label minimums before auto."},
   {command="dghud config",description="Open the DGHUD settings location."},
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
@@ -382,7 +382,7 @@ function View.new(settings)
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.roller_cancel=label("DGHUD.RollerSettings.Cancel",self.roller_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
   self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
-  local fieldLabels={target_total="Target total (1-84/off)",hard_stop="Hard stop (1-84/off; overrides all normal filters)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",minimum_greats="Roll & arrange: minimum Great values (1-12/off)",minimum_good_plus="Roll & arrange: minimum Good-or-Great values (1-12/off)",log_folder="Log folder",master_file="Master log filename"}
+  local fieldLabels={target_total="Target total (1-77/off)",hard_stop="Hard stop (1-77/off; overrides all normal filters)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",minimum_greats="Roll & arrange: minimum Great values (1-11/off)",minimum_good_plus="Roll & arrange: minimum Good-or-Great values (1-11/off)",log_folder="Log folder",master_file="Master log filename"}
   for _,key in ipairs(self.roller_field_order) do local caption=label("DGHUD.RollerSettings.Caption."..key,self.roller_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.RollerSettings.Input."..key,self.roller_content,self.geyser); self.roller_fields[key]={caption=caption,input=edit,label=fieldLabels[key] or (key.." minimum (1-7/off)")} end
   self.roller_toggle_order={"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}; self.roller_toggles={}
   local toggleLabels={auto_start_on_name="Auto-start when roll screen appears",use_min_stats="Enable stat minimums",require_min_stats_to_stop="Require minimums to stop",show_every_roll="Print every roll",logging_enabled="Enable roll logging"}

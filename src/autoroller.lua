@@ -7,7 +7,10 @@ local creatorSecond={"CHA","WIL","VOI","PER","APP","MP"}
 local currentCreatorSecond={"CHA","WIL","VOI","PER","APP"}
 local ranks={awful=1,poor=2,low=3,aver=4,average=4,fair=5,good=6,great=7,excel=7,superb=7}
 local rankLabels={[1]="Awful",[2]="Poor",[3]="Low",[4]="Aver",[5]="Fair",[6]="Good",[7]="Great"}
-local maximumTotal=#order*7
+-- MP was removed from the live creator. Keep the old 12-value tables only so
+-- archived/partially-updated screens cannot confuse capture, but all current
+-- limits and defaults are based on the eleven live characteristics.
+local maximumTotal=#legacyOrder*7
 local arrangeOrders={[11]=legacyOrder,[12]=order}
 local captureLineLimit=8
 local arrangeModes={manual=true,game_auto=true,minimums=true}
@@ -68,7 +71,8 @@ end
 local function autoStartEnabled(config) return config.auto_start_on_name~=false end
 local function promptProtocol(line)
   local lower=trim(cleanLine(line)):lower():gsub("^>%s*","")
-  if lower:match("^<stat>%s+<label>%s+auto%s+clear%s+reroll%s+done%s+%?%s*help%s*$") then return "arrange" end
+  if lower:match("^<stat>%s+<label>%s+auto%s+clear%s+reroll%s+done%s+%?%s*help%s*$")
+    or lower:match("^<stat>%s+<label>%s+auto%s+reset%s+reroll%s+done%s+%?%s*help%s*$") then return "arrange" end
   if lower:match("^reroll%s+done%s+%?%s*help%s*$") then return "creator" end
   if lower:match("use%s+this%s+body%s*%?%s*y%s*,%s*n") then return "legacy" end
   return nil
@@ -96,7 +100,7 @@ function Roller:cancelReroll()
 end
 function Roller:clearCapture()
   local s=self.state; if not s then return true end
-  s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.passive_lines=0; s.capture_lines=0; s.protocol=nil; s.fresh_roll=false; s.awaiting_new_roll=false; s.expected_echo=nil; s.owned_outgoing=nil; return true
+  s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.passive_lines=0; s.capture_lines=0; s.protocol=nil; s.characteristic_order=nil; s.fresh_roll=false; s.awaiting_new_roll=false; s.expected_echo=nil; s.owned_outgoing=nil; return true
 end
 function Roller:reset()
   local timerGeneration=0
@@ -211,7 +215,7 @@ function Roller:captureExpected(line)
   return true
 end
 function Roller:prepareForReroll(protocol)
-  local s=self.state; self:cancelReroll(); s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.capture_lines=0; s.passive_lines=0; s.fresh_roll=false; s.result_held=false; s.held_protocol=nil; s.protocol=protocol or s.protocol; s.awaiting_new_roll=true; s.phase="waiting_new_roll"; return true
+  local s=self.state; self:cancelReroll(); s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.characteristic_order=nil; s.capture_lines=0; s.passive_lines=0; s.fresh_roll=false; s.result_held=false; s.held_protocol=nil; s.protocol=protocol or s.protocol; s.awaiting_new_roll=true; s.phase="waiting_new_roll"; return true
 end
 function Roller:rearmForManualReroll(protocol)
   local s=self.state; local controlled=s.active or s.result_held or s.held_protocol~=nil
@@ -219,8 +223,10 @@ function Roller:rearmForManualReroll(protocol)
   local previous=protocol or s.protocol or s.held_protocol or "arrange"
   if not s.active then s.active=true; s.result_held=false; s.phase="observing" end
   self:prepareForReroll(previous)
-  local command=rerollCommand(previous); self.state.awaiting_new_roll=true; self.state.phase="waiting_new_roll"
-  local sent,err=self:sendOwnedCommand(command); if not sent then return self:stop("Could not send manual reroll: "..tostring(err),true) end
+  -- sysDataSendRequest observes the player's command immediately before Mudlet
+  -- transmits it. Sending here duplicates that command on the wire. Manual
+  -- rerolls only re-arm capture; sendOwnedCommand is reserved for HUD timers.
+  self.state.awaiting_new_roll=true; self.state.phase="waiting_new_roll"
   return true
 end
 function Roller:sendOwnedCommand(command)
@@ -316,7 +322,7 @@ function Roller:onLine(line)
     if protocol=="legacy" and bare=="n" then return self:rearmForManualReroll("legacy") end
     local stat,label=bare:match("^([a-z]+)%s+([a-z]+)$"); local assignment=false
     if stat and ranks[label] then for _,name in ipairs(order) do if stat==name:lower() then assignment=true; break end end end
-    if protocol=="arrange" and (bare=="auto" or bare=="clear" or bare=="?" or bare=="help" or bare=="<" or bare=="back" or bare=="q" or bare=="quit" or assignment) then return self:stop("Player took control of roll placement",true) end
+    if protocol=="arrange" and (bare=="auto" or bare=="clear" or bare=="reset" or bare=="?" or bare=="help" or bare=="<" or bare=="back" or bare=="q" or bare=="quit" or assignment) then return self:stop("Player took control of roll placement",true) end
   end
 
   local poolKind,pool=parsePool(line)
@@ -362,15 +368,18 @@ function Roller:onLine(line)
   if headerMatches(line,creatorFirst) then
     if s.active and (s.protocol=="arrange" or s.fresh_roll or (s.phase=="reroll_delay" and not s.awaiting_new_roll)) then return false end
     if not s.active and (not autoStartEnabled(self.cfg) or s.auto_suppressed) then return false end
+    s.characteristic_order=nil
     if not s.active then s.protocol="creator"; s.fresh_roll=false; s.expected=creatorFirst; s.partial={}; s.pending_stats=nil; s.passive_lines=0; return true end
     return self:beginBlock("creator",creatorFirst,true)
   end
   if headerMatches(line,currentCreatorSecond) or headerMatches(line,creatorSecond) then
     local second=headerMatches(line,creatorSecond) and creatorSecond or currentCreatorSecond
+    local activeOrder=second==creatorSecond and order or legacyOrder
     if s.active and s.protocol=="arrange" then return false end
     if s.active and s.protocol=="creator" and type(s.partial)~="table" then return false end
     if not s.active and not (autoStartEnabled(self.cfg) and s.protocol=="creator" and type(s.partial)=="table") then return false end
-    if not s.active then s.characteristic_order=second; s.expected=second; return true end
+    s.characteristic_order=activeOrder
+    if not s.active then s.expected=second; return true end
     return self:beginBlock("creator",second,false)
   end
   if (self.state.active or (autoStartEnabled(self.cfg) and self.state.protocol=="creator")) and self:captureExpected(line) then return true end
@@ -382,7 +391,7 @@ function Roller:onLine(line)
   end
   if protocol=="creator" and not self.state.active and autoStartEnabled(self.cfg) and self.state.pending_stats then
     local pending=copy(self.state.pending_stats); local started,err=self:start(); if not started then return started,err end
-    self:record(pending,"creator",order)
+    self:record(pending,"creator",pending.MP~=nil and order or legacyOrder)
   end
   if not self.state.active and (self.state.pending_stats or self.state.pending_pool) then
     self.state.passive_lines=(self.state.passive_lines or 0)+1
@@ -427,7 +436,7 @@ function Roller:set(key,value)
 end
 function Roller:configure(values,silent)
   values=type(values)=="table" and values or {}; local candidate=copy(self.cfg); candidate.reroll_command="reroll"
-  local numeric={{"target_total",1,maximumTotal,true},{"hard_stop",1,maximumTotal,true},{"max_rolls",1,nil,true},{"reroll_delay",0,nil,false},{"minimum_greats",1,#order,true},{"minimum_good_plus",1,#order,true}}
+  local numeric={{"target_total",1,maximumTotal,true},{"hard_stop",1,maximumTotal,true},{"max_rolls",1,nil,true},{"reroll_delay",0,nil,false},{"minimum_greats",1,#legacyOrder,true},{"minimum_good_plus",1,#legacyOrder,true}}
   for _,spec in ipairs(numeric) do
     local key,min,max,optional=spec[1],spec[2],spec[3],spec[4]; local raw=values[key]
     if raw~=nil then

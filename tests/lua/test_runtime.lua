@@ -653,6 +653,13 @@ test("runtime forwards outgoing commands and disconnects to autoroller safety",f
   f.callbacks["sysDisconnectionEvent"](); eq(disconnected,true)
 end)
 
+test("runtime observes a player's reroll without transmitting a duplicate",function()
+  local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=77,reroll_delay=1,auto_start_on_name=false,min_stats={}}}); assert(hud:start()); assert(hud.roller:start())
+  f.callbacks["sysDataSendRequest"](nil,"reroll")
+  eq(f.sentCommands,nil); eq(hud.roller.state.active,true); eq(hud.roller.state.awaiting_new_roll,true); eq(hud.roller.state.phase,"waiting_new_roll")
+  assert(hud.roller:onLine("> reroll")); eq(f.sentCommands,nil); hud:shutdown()
+end)
+
 test("mapper toggle hides and pauses mapping without deleting saved rooms",function()
   local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={},mapper={enabled=true}}); assert(hud:start())
   DGHUD={controller=hud,user_settings={}}

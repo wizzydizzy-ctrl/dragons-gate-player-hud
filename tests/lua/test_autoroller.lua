@@ -11,8 +11,10 @@ local legacyHeader=" Str   Int   Wis   Dex   Agi   Con   Cha   Wil   Voi   Per  
 local legacyPrompt="Use this body ? Y,n"
 local firstHeader="  STR         INT         WIS         DEX         AGI         CON"
 local secondHeader="  CHA         WIL         VOI         PER         APP         MP"
+local currentSecondHeader="  CHA         WIL         VOI         PER         APP"
 local creatorPrompt="reroll  done  ? help"
 local arrangePrompt="<stat> <label>  auto  clear  reroll  done  ? help"
+local arrangeResetPrompt="<stat> <label>  auto  reset  reroll  done  ? help"
 local function poolLine(labels) return #labels==0 and "Pool: (empty)" or "Pool: "..table.concat(labels," ") end
 local function removeLabel(labels,label)
   for index,value in ipairs(labels) do if value:lower()==label:lower() then table.remove(labels,index); return true end end
@@ -21,6 +23,47 @@ end
 local function newRoll(r,first,second)
   assert(r:onLine(firstHeader)); assert(r:onLine(first)); r:onLine(""); assert(r:onLine(secondHeader)); assert(r:onLine(second))
 end
+local function currentRoll(r,first,second)
+  assert(r:onLine(firstHeader)); assert(r:onLine(first)); r:onLine(""); assert(r:onLine(currentSecondHeader)); assert(r:onLine(second))
+end
+
+test("current eleven-stat roll in place auto-starts and scores 77",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,auto_start_on_name=true})
+  currentRoll(r,"Great Great Excel Superb Great Great","Great Great Great Great Great")
+  assert(r:onLine(creatorPrompt)); eq(r.state.rolls,1); eq(r.state.last.total,77); eq(r.state.last.maximum,77); eq(r.state.last.stats.APP,7); eq(r.state.last.stats.MP,nil); eq(r.state.active,false); eq(#f.sent,0)
+end)
+
+test("manual start captures the current eleven-stat roll in place",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=false}); assert(r:start())
+  currentRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low"); eq(r.state.rolls,1); assert(r:onLine(creatorPrompt)); f.timers[1].fn(); eq(#f.sent,1); eq(f.sent[1],"reroll")
+end)
+
+test("current roll in place continues for fifty rejected rolls without duplicates",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=true})
+  for index=1,50 do
+    currentRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low")
+    assert(r:onLine(creatorPrompt)); eq(r.state.rolls,index)
+    local timer=r.state.timer; local pending=timer and f.timers[timer]; assert(pending); f.timers[timer]=nil; pending.fn(); eq(#f.sent,index); eq(f.sent[index],"reroll")
+    assert(r:onLine("> reroll")); assert(r:onLine("reroll")); r:onLine(">"); if index%3==0 then r:onLine("That set was too weak to offer -- rolling again.") end; eq(#f.sent,index)
+  end
+end)
+
+test("current roll and arrange accepts reset prompt and continues for fifty rejected pools",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=true,use_min_stats=false,arrange_mode="manual"})
+  local pool="Pool: Good Good Fair Fair Fair Aver Aver Aver Low Low Poor"
+  for index=1,50 do
+    assert(r:onLine(pool)); assert(r:onLine(arrangeResetPrompt)); eq(r.state.rolls,index)
+    local timer=r.state.timer; local pending=timer and f.timers[timer]; assert(pending); f.timers[timer]=nil; pending.fn(); eq(#f.sent,index); eq(f.sent[index],"reroll")
+    assert(r:onLine("> reroll")); assert(r:onLine("reroll")); r:onLine(">"); if index%3==0 then r:onLine("That set was too weak to offer -- rolling again.") end; eq(#f.sent,index)
+  end
+end)
+
+test("current pool capture ignores the placeholder assignment board",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=true,use_min_stats=false,arrange_mode="manual"})
+  assert(r:onLine(firstHeader)); eq(r:onLine("-- -- -- -- -- --"),false); r:onLine(""); eq(r:onLine(currentSecondHeader),false); eq(r:onLine("-- -- -- -- --"),false)
+  assert(r:onLine("Pool: Superb Excel Good Fair Aver Low Poor Good Fair Aver Low")); r:onLine("Fit for a Fighter: Awful    primes: STR DEX")
+  assert(r:onLine(arrangeResetPrompt)); eq(r.state.rolls,1); eq(r.state.last.maximum,77); eq(r.state.last.total,52); eq(r.state.active,true); eq(r.state.timer~=nil,true)
+end)
 
 test("new creator buffers twelve ranks and auto-starts only at its decision prompt",function()
   local f=fake(); local r=Roller.new(f,{target_total=84,reroll_delay=.5,auto_start_on_name=true})
@@ -67,19 +110,17 @@ test("new prompt honors MP minimum and leaves done waiting",function()
   assert(r:onLine(creatorPrompt)); eq(r.state.active,false); eq(#f.sent,1); eq(r.state.last.stats.MP,5)
 end)
 
-test("new totals validate through 84 and include MP settings",function()
+test("current totals validate through 77",function()
   local r=Roller.new(fake(),{target_total=53,min_stats={}})
-  assert(r:command("set total 84")); eq(r.cfg.target_total,84)
-  local ok,err=r:command("set total 85"); eq(ok,nil); assert(err:find("invalid",1,true)); eq(r.cfg.target_total,84)
-  assert(r:command("set MP 7")); eq(r.cfg.min_stats.MP,7); eq(r.cfg.use_min_stats,true)
-  ok,err=r:command("set MP 8"); eq(ok,nil); assert(err:find("1%-7"))
+  assert(r:command("set total 77")); eq(r.cfg.target_total,77)
+  local ok,err=r:command("set total 78"); eq(ok,nil); assert(err:find("invalid",1,true)); eq(r.cfg.target_total,77)
 end)
 
 test("malformed or incomplete new rows never reuse a previous roll",function()
   local f=fake(); local r=Roller.new(f,{target_total=84,reroll_delay=0,auto_start_on_name=true})
   newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.rolls,1)
   assert(r:onLine("> reroll"))
-  assert(r:onLine(firstHeader)); eq(r:onLine("Low Low Low"),false); eq(r:onLine(secondHeader),false); eq(r:onLine("Low Low Low Low Low Low"),false); eq(r:onLine(creatorPrompt),false); eq(r.state.rolls,1); eq(#f.sent,1)
+  assert(r:onLine(firstHeader)); eq(r:onLine("Low Low Low"),false); eq(r:onLine(secondHeader),false); eq(r:onLine("Low Low Low Low Low Low"),false); eq(r:onLine(creatorPrompt),false); eq(r.state.rolls,1); eq(#f.sent,0)
   r:onLine("That set was too weak to offer -- rolling again."); r:onLine("Fit for a RuneMage: Poor primes: INT WIL MP"); eq(r.state.rolls,1)
 end)
 
@@ -109,7 +150,7 @@ end)
 test("manual reroll cancels a queued automatic reroll including stale callbacks",function()
   local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
   newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); assert(r:onLine(creatorPrompt)); local stale=f.timers[1].fn
-  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,nil); eq(f.sent[1],"reroll"); stale(); eq(#f.sent,1)
+  assert(r:onLine("> reroll")); eq(r.state.active,true); eq(r.state.timer,nil); stale(); eq(#f.sent,0)
   newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.active,false); eq(r.state.rolls,2)
 end)
 
@@ -235,7 +276,7 @@ test("manual result remains held through clear redraws until an explicit reroll"
   local f=fake(); local r=Roller.new(f,{target_total=60,auto_start_on_name=true,use_min_stats=false,arrange_mode="manual"})
   assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(r.state.rolls,1); eq(r.state.result_held,true)
   eq(r:onLine("> clear"),false); eq(r:onLine(offered),false); eq(r:onLine(arrangePrompt),false); eq(r.state.rolls,1); eq(#f.sent,0)
-  assert(r:onOutgoing("reroll")); assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(r.state.rolls,2); eq(#f.sent,1)
+  assert(r:onOutgoing("reroll")); assert(r:onLine("> reroll")); eq(#f.sent,0); assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(r.state.rolls,2); eq(#f.sent,0)
 end)
 
 test("any player command cancels a queued reroll and invalidates its callback",function()
@@ -312,7 +353,7 @@ test("legacy manual y and n cancel queued automatic rejection",function()
   for _,choice in ipairs({"y","n"}) do
     local f=fake(); local r=Roller.new(f,{target_total=70,reroll_delay=1,auto_start_on_name=true})
     r:onLine("Name : Test Tester Race : Human"); r:onLine(legacyHeader); r:onLine("Low Low Low Low Low Low Low Low Low Low Low"); assert(r:onLine(legacyPrompt)); local stale=f.timers[1].fn
-    assert(r:onLine("> "..choice)); eq(r.state.timer,nil); stale(); eq(#f.sent,choice=="n" and 1 or 0); eq(r.state.active,choice=="n")
+    assert(r:onLine("> "..choice)); eq(r.state.timer,nil); stale(); eq(#f.sent,0); eq(r.state.active,choice=="n")
   end
 end)
 
@@ -360,9 +401,9 @@ test("bulk settings validate and persist atomically while migrating old command"
   local f=fake(); local saves=0; local saved
   local r=Roller.new(f,{target_total=53,hard_stop=62,reroll_delay=.1,reroll_command="n",use_min_stats=true,min_stats={STR=5}},function(value) saves=saves+1; saved=value; return true end)
   eq(r.cfg.reroll_command,"reroll")
-  local ok,err=r:configure({target_total="80",hard_stop="off",max_rolls="1000",reroll_delay="0.2",reroll_command="reroll",auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR="6",INT="off",MP="5"}})
-  assert(ok,err); eq(saves,1); eq(r.cfg.target_total,80); eq(r.cfg.hard_stop,nil); eq(r.cfg.min_stats.MP,5); eq(saved.max_rolls,1000)
-  ok,err=r:configure({target_total="banana"}); eq(ok,nil); eq(r.cfg.target_total,80); eq(saves,1)
+  local ok,err=r:configure({target_total="70",hard_stop="off",max_rolls="1000",reroll_delay="0.2",reroll_command="reroll",auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR="6",INT="off",MP="5"}})
+  assert(ok,err); eq(saves,1); eq(r.cfg.target_total,70); eq(r.cfg.hard_stop,nil); eq(r.cfg.min_stats.MP,5); eq(saved.max_rolls,1000)
+  ok,err=r:configure({target_total="banana"}); eq(ok,nil); eq(r.cfg.target_total,70); eq(saves,1)
   ok,err=r:configure({reroll_command="n"}); eq(ok,nil); assert(err:find("must remain reroll",1,true)); eq(r.cfg.reroll_command,"reroll")
 end)
 
