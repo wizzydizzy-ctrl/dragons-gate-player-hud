@@ -203,10 +203,10 @@ function Roller:captureExpected(line)
   for index,name in ipairs(s.expected) do s.partial[name]=values[index] end; s.capture_lines=0
   local protocol=s.protocol; s.expected=nil
   if protocol=="legacy" then return self:record(s.partial,protocol,legacyOrder) end
-  local complete=true; for _,name in ipairs(order) do if s.partial[name]==nil then complete=false; break end end
+  local activeOrder=s.characteristic_order or order; local complete=true; for _,name in ipairs(activeOrder) do if s.partial[name]==nil then complete=false; break end end
   if complete then
     if not s.active then s.pending_stats=copy(s.partial); s.passive_lines=0; s.expected=nil; s.partial=nil; return true end
-    return self:record(s.partial,protocol,order)
+    return self:record(s.partial,protocol,activeOrder)
   end
   return true
 end
@@ -370,7 +370,7 @@ function Roller:onLine(line)
     if s.active and s.protocol=="arrange" then return false end
     if s.active and s.protocol=="creator" and type(s.partial)~="table" then return false end
     if not s.active and not (autoStartEnabled(self.cfg) and s.protocol=="creator" and type(s.partial)=="table") then return false end
-    if not s.active then s.expected=second; return true end
+    if not s.active then s.characteristic_order=second; s.expected=second; return true end
     return self:beginBlock("creator",second,false)
   end
   if (self.state.active or (autoStartEnabled(self.cfg) and self.state.protocol=="creator")) and self:captureExpected(line) then return true end
