@@ -1,5 +1,7 @@
 # DGHUD Automapper and Map Library Guide
 
+[Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
+
 Make sure you are using DGHUD v0.3.32 or newer:
 
 ```text
@@ -236,3 +238,5 @@ dghud map debug
 ```
 
 This sends a sanitized mapper report and gives you a reference number.
+
+[Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)

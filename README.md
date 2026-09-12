@@ -2,9 +2,11 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-## Player guide
+## Guides
 
-- [How to use the DGHUD Automapper and Map Library](docs/AUTOMAPPER_AND_MAP_LIBRARY.md)
+- [Complete DGHUD Guide — start here](docs/DGHUD_GUIDE.md)
+- [Autoroller Guide](docs/AUTOROLLER.md)
+- [Automapper and Map Library Guide](docs/AUTOMAPPER_AND_MAP_LIBRARY.md)
 
 The header shows the player's local computer time and a synchronized Dragons Gate clock. Game time advances at the configurable 2× default, labels 6:00 AM–5:59 PM as `Daytime` and 6:00 PM–5:59 AM as `Night`, and resynchronizes from startup or manually entered `time` output.
 
