@@ -38,6 +38,14 @@ test("one owned line trigger captures and persists recognized chat",function()
   eq(controller:entries()[1].category,"ESP"); eq(f.storageAppends,1); eq(f:count(f.triggers),1)
 end)
 
+test("Secian links flow through the owned trigger private filter and dedupe",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start())
+  local line='You pick up Marcelline\'s Secian link, "Hello?" [r-1]'
+  f:line(line); f.epochValue=101; f:line(line)
+  eq(#controller:entries(),1); eq(controller:entries()[1].category,"SECIAN"); eq(controller:entries()[1].speaker,"Marcelline")
+  eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),1)
+end)
+
 test("does not start when owned trigger registration fails",function()
   local f=fake(); f.triggerFailure="chat trigger registration failed"; local controller=makeController(f)
   local started,err=controller:start(); eq(started,nil); eq(tostring(err):find("chat trigger registration failed",1,true)~=nil,true); eq(controller.started,false); eq(controller.trigger,nil); eq(f:count(f.triggers),0)

@@ -56,6 +56,8 @@ local rules={
   {category="DRAGON",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
   {category="DRAGON",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},
   {category="DRAGON",pattern="^You pick up "..name.."'s Dragon link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="SECIAN",pattern="^You pick up "..name.."'s Secian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="SECIAN",pattern="^You pick up "..name.."'s Secian link, \"(.*)\"$",speaker=1,message=2},
   {category="CONTACT",pattern="^You pick up "..name.."'s thoughts echoing through the area, \"(.*)\"$",speaker=1,message=2},
 }
 

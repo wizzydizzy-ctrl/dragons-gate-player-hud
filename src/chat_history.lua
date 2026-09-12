@@ -2,7 +2,7 @@ local History={}
 History.__index=History
 History.MAX_ENTRIES=1000
 
-local private={WHISPER=true,ESP=true,DRAGON=true,CONTACT=true}
+local private={WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true}
 
 local function normalized(value)
   return tostring(value or ""):lower():match("^%s*(.-)%s*$"):gsub("%s+"," ")

@@ -851,6 +851,13 @@ test("chat output colors its trusted prefix without printing HTML markup literal
   eq(view.chat_output.echoes[1]:find('Gia says, "hey"',1,true)~=nil,true)
 end)
 
+test("Secian chat entries receive their own readable category color",function()
+  local view=chatView()
+  view:renderChat({{category="SECIAN",timestamp="2026-08-31T20:12:00-04:00",line='You pick up Shayla\'s Secian link, "hello!" [r-1]'}},{"SECIAN"},"ALL")
+  eq(view.chat_output.hechoes[1],"#75857c[20:12]#r #8fcbd4SECIAN#r")
+  eq(view.chat_filter_order[#view.chat_filter_order],"SECIAN")
+end)
+
 test("view owns a scrollable chat panel above the main console",function()
   local view=chatView()
   eq(view.chat_container~=nil,true); eq(view.chat_tabs~=nil,true); eq(view.chat_output~=nil,true)

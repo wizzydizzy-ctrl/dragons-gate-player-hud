@@ -22,7 +22,7 @@ local function alignmentLabel(value)
   if key=="order" then return "Orderly" elseif key=="entropy" then return "Entropic" elseif key=="chaos" then return "Chaotic" end
   return raw
 end
-local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",CONTACT="#8bc6b0",STAFF="#e09672"}
+local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672"}
 local function chatScroll(output,ranges)
   local okCurrent,current=pcall(function() return output:getScroll() end)
   local okLast,last=pcall(function() return output:getLastLineNumber() end)

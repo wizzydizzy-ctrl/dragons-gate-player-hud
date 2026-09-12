@@ -63,7 +63,7 @@ The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, an
 
 ## Persistent top chatbox
 
-The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its built-in filters are `ALL`, `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `CONTACT`, and `STAFF`; `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
+The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, `CONTACT`, and `STAFF`; `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
 
 The default chat settings are:
 
@@ -117,7 +117,7 @@ Captured entries are append-only JSON Lines stored permanently under the active 
 
 The HUD reads at most the newest 1,000 valid entries into memory, but leaves older dated logs intact. On the first profile-wide load it also reads prior character-named chat directories, combines their newest entries chronologically, and removes exact duplicates in memory; future entries are written to `chat/profile`. Reloading, updating, rolling back, or uninstalling the HUD does not delete these files. Delete the relevant files yourself if you want to remove retained history.
 
-Private communications such as whispers, ESP, Dragon, and Contact traffic are saved locally in these plain JSONL files. Anyone with access to your Mudlet profile, computer account, backups, or copied profile data may be able to read them. The HUD does not transmit chat logs, but you should treat the directory as sensitive local data.
+Private communications such as whispers, ESP, Dragon, Secian, and Contact traffic are saved locally in these plain JSONL files. Anyone with access to your Mudlet profile, computer account, backups, or copied profile data may be able to read them. The HUD does not transmit chat logs, but you should treat the directory as sensitive local data.
 
 Run `dghud chatstatus` to print the active filter, the current visible-entry count, the `profile` storage key, and the most recent storage error (`none` when no storage error has occurred in the running chat session).
 
