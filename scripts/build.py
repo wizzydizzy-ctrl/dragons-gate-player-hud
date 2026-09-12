@@ -39,7 +39,7 @@ if not ok then error("DGHUD runtime failed: "..tostring(runErr),0) end'''
 def recovery_code(owner,repository,version):
     url=f'https://github.com/{owner}/{repository}/releases/latest/download/DragonsGateHUD.mpackage'
     return f'''local previous=rawget(_G,"DGHUDRecovery")
-local runtime={{version={version!r}}}
+local runtime={{version={version!r},owner={owner!r},repository={repository!r}}}
 local function recover()
 if runtime.running then cecho("\\n<yellow>[DGHUD Recovery]<reset> Recovery is already running.\\n"); return end
 runtime.running=true
@@ -130,7 +130,7 @@ def build(output,owner,repository,version):
     if not view_schema_match: raise ValueError('could not determine defaults.view_schema')
     manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','view_schema':int(view_schema_match.group(1)),'archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    recovery_version='1.5.0'
+    recovery_version='1.6.0'
     recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>'''+recovery_version+'''</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_script_node(recovery_code(owner,repository,recovery_version))+'''</ScriptGroup></ScriptPackage></MudletPackage>''')
     with zipfile.ZipFile(output/'DGHUDRecovery.mpackage','w',zipfile.ZIP_DEFLATED) as z:
         info=zipfile.ZipInfo('DGHUDRecovery.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,recovery_xml)
@@ -142,5 +142,5 @@ def build(output,owner,repository,version):
         info=zipfile.ZipInfo('DGHUDMigration.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,migration_xml)
         info=zipfile.ZipInfo('config.lua',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,'mpackage = "DGHUDMigration"\n')
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('--output',type=Path,default=ROOT/'dist'); p.add_argument('--owner',default='GITHUB_OWNER'); p.add_argument('--repository',default='dragons-gate-hud'); p.add_argument('--version',default=source_version()); a=p.parse_args(); build(a.output,a.owner,a.repository,a.version)
+    p=argparse.ArgumentParser(); p.add_argument('--output',type=Path,default=ROOT/'dist'); p.add_argument('--owner',default='wizzydizzy-ctrl'); p.add_argument('--repository',default='dragons-gate-player-hud'); p.add_argument('--version',default=source_version()); a=p.parse_args(); build(a.output,a.owner,a.repository,a.version)
 if __name__=='__main__': main()

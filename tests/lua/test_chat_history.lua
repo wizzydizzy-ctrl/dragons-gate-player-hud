@@ -84,3 +84,13 @@ test("filters private categories and preserves category insertion order",functio
   eq(categories[1],"ROOM")
   eq(categories[7],"STAFF")
 end)
+
+test("room filter includes both nearby speakers and the active character",function()
+  local history=History.new(10,3)
+  history:append({category="ROOM",message="Gia asks Dace"},1)
+  history:append({category="OWN",message="Dace answers Gia"},2)
+  history:append({category="ESP",message="remote"},3)
+  local entries=history:entries("ROOM")
+  eq(#entries,2); eq(entries[1].category,"ROOM"); eq(entries[2].category,"OWN")
+  eq(#history:entries("PRIVATE"),1)
+end)

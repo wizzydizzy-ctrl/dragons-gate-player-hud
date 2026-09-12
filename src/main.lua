@@ -2,6 +2,7 @@ package.loaded["output_colorizer"]=nil
 local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local NeedsTracker=require("needs_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
   local result={enabled=status.enabled}
   for _,name in ipairs(colorFeatures) do result[name]=status[name] end
@@ -62,10 +63,12 @@ function Main:switchMapCollection(id)
   local saved,saveErr=self:saveActiveMapCollection(); if not saved then return nil,"current map could not be saved: "..tostring(saveErr) end
   local function restore(message)
     local restored,restoreErr=current and self.adapter:loadMapCollection(current.id); self.map_collections:setActive(current and current.id or nil)
+    if restored and self.map and self.map.resetMapContext then self.map:resetMapContext() end
     if current and not restored then self.map_collection_unsafe=true; message=tostring(message).."; CRITICAL: previous map restore failed: "..tostring(restoreErr) end
     return nil,message
   end
   local loaded,loadErr=self.adapter:loadMapCollection(target.id); if not loaded then self:captureFailure("map_collection",loadErr,{operation="switch",collection=target.id}); return restore(loadErr) end
+  if self.map and self.map.resetMapContext then self.map:resetMapContext() end
   self.map_collections:setActive(target.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then return restore(indexErr) end
   if self.automapper then self.automapper:onDisconnect(); local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info; if info then self.automapper:onRoom(info) end end
   self:refresh(); return self.map_collections:active()
@@ -106,12 +109,14 @@ function Main:installDownloadedCollection(entry,model,name)
   local before=self.map_collections:exportState()
   local function rollback(message)
     self:restoreMapCollectionState(before); local restored,restoreErr=current and self.adapter:loadMapCollection(current.id)
+    if restored and self.map and self.map.resetMapContext then self.map:resetMapContext() end
     if current and not restored then message=tostring(message).."; CRITICAL: previous map restore failed: "..tostring(restoreErr) end
     return nil,message
   end
   local source={kind="library",artifact_id=model.provenance.artifact_id,publisher=model.provenance.publisher,slug=model.provenance.slug}
   local item,createErr=self.map_collections:create(name or entry.name,source,true); if not item then return nil,createErr end
   local cleared,clearErr=self.adapter:clearCurrentMap(); if not cleared then self.map_collections:remove(item.id); return nil,clearErr end
+  if self.map and self.map.resetMapContext then self.map:resetMapContext() end
   local policies={default="use_imported",rooms={}}; local plan,previewErr=self.map_transfer:preview(model,policies); local result,applyErr=plan and self.map_transfer:apply(plan,self:mapTransferCreator())
   if not result then return rollback(previewErr or applyErr) end
   local metadata,snapshotErr=self.adapter:saveMapCollection(item.id); if not metadata then return rollback(snapshotErr) end
@@ -255,6 +260,38 @@ function Main:refresh()
   if signature~=self.layout_vitals_signature then self:applyResponsiveLayout(normalized) end
   self.view:update(normalized); Main.syncRunesApi(normalized); if self.chat then self.chat:syncCharacter() end; return true
 end
+function Main:refreshCharacterData()
+  local function failed(message) if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end; return nil,message end
+  if not self.collector or type(self.collector.restartRefresh)~="function" then return failed("HUD command collector is unavailable") end
+  local active=self.character_entry_started==true
+  if self.adapter.isCharacterActive then local ok,value=pcall(self.adapter.isCharacterActive,self.adapter); active=active and ok and value==true end
+  if not active then return failed("Log into a character before refreshing HUD data.") end
+  local started=self.collector:restartRefresh()
+  if not started then return failed("Character refresh could not start.") end
+  if self.adapter.reportCharacterRefresh then self.adapter:reportCharacterRefresh() end
+  return true
+end
+local function displayTextPresetName(scale)
+  scale=tonumber(scale) or 1
+  local selected,difference="normal",math.huge
+  for name,value in pairs(displayTextPresets) do local distance=math.abs(scale-value); if distance<difference then selected,difference=name,distance end end
+  return selected
+end
+function Main:setDisplayTextSize(action)
+  local function failed(message) if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end; return nil,message end
+  action=tostring(action or "status"):lower():match("^%s*(.-)%s*$")
+  local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
+  if action=="status" or action=="" then if self.view and self.view.setDisplayTextSize then self.view:setDisplayTextSize(current) end; if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(current:gsub("^%l",string.upper)) end; return current end
+  local scale=displayTextPresets[action]; if not scale then return failed("Usage: dghud text [small|normal|large|status]") end
+  local candidate={side_text_scale=scale}
+  if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return failed("Could not save HUD text size: "..tostring(err)) end end
+  self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}; self.settings.display.side_text_scale=scale
+  local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.side_text_scale=scale end
+  if self.view and self.view.setDisplayTextSize then self.view:setDisplayTextSize(action) end
+  self:applyResponsiveLayout(self.last_state); self:refresh()
+  if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(action:gsub("^%l",string.upper)) end
+  return action
+end
 function Main:onClockSync(value) local ok,err=self.clock:sync(value,self.adapter:epoch()); if not ok then return nil,err end; self:refreshClock(); return true end
 function Main:scheduleClockTick()
   if self.clock_timer then return true end
@@ -283,6 +320,10 @@ function Main:onCharacterEntry(name)
   local ok,err=self.updater:update(function() refreshCommands() end)
   if not ok then refreshCommands() end
   return ok,err
+end
+function Main:onCharacterExit()
+  self.character_entry_started=false; self.character_entry_name=nil
+  return true
 end
 function Main:startChat()
   local settings=self.settings.chat or {}
@@ -328,7 +369,7 @@ function Main:onRoundtime(value)
 end
 function Main:applyResponsiveLayout(state)
   local vitals=(state or self.last_state or {}).vitals
-  local width,height=self.adapter:getWindowSize(); local layout=Layout.compute(width,height,self.settings.chat,self.settings.mapper,vitals); self.current_layout=layout
+  local width,height=self.adapter:getWindowSize(); local layout=Layout.compute(width,height,self.settings.chat,self.settings.mapper,vitals,self.settings.display); self.current_layout=layout
   self.layout_vitals_signature=((vitals and vitals.psi and vitals.psi.visible) and "1" or "0")..((vitals and vitals.web and vitals.web.visible) and "1" or "0")
   self.adapter:setBorders(layout.console_left or layout.left,layout.top,layout.console_right or layout.right,layout.bottom)
   -- Mudlet stores main-console wrapping as a fixed profile column count.
@@ -852,6 +893,7 @@ function Main:start()
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
     if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
+    if action=="refresh_data" then return self:refreshCharacterData() end
     if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
     if action=="auto_update" then
       local enabled=not (self.settings.update and self.settings.update.auto_apply==true); self.settings.update=self.settings.update or {}; self.settings.update.auto_apply=enabled
@@ -859,10 +901,15 @@ function Main:start()
       if self.adapter.saveUpdateSettings then local saved,saveErr=self.adapter:saveUpdateSettings({auto_apply=enabled}); if not saved then self.settings.update.auto_apply=not enabled; if root and root.user_settings and root.user_settings.update then root.user_settings.update.auto_apply=not enabled end; return nil,"Could not save automatic update setting: "..tostring(saveErr) end end
       if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(enabled) end; return enabled
     end
+    if action=="text_size" then
+      local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
+      return self:setDisplayTextSize(({small="normal",normal="large",large="small"})[current])
+    end
     local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
+  if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
@@ -943,7 +990,7 @@ function Main:start()
     if key=="time" then self:onClockSync(snapshot.time); return end
     if key=="info" and parsed and parsed.condition_text and self.needs and self.needs:onLine(parsed.condition_text,"info") then return end
     self:refresh()
-  end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
+  end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end
   if self.adapter.isCharacterActive and self.adapter:isCharacterActive() then self:onCharacterEntry() end
   for _,name in ipairs(Events.gmcp) do local eventName=name; self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(eventName,function()
@@ -1035,6 +1082,8 @@ function Main:start()
     if not self.view or not self.view.showHelp then return nil,"help panel is unavailable" end
     return self.view:showHelp()
   end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud refresh$",function() return self:refreshCharacterData() end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud text(?:\\s+(.*))?$",function(value) return self:setDisplayTextSize(aliasArgument(value) or "status") end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^rr(?:\\s+(.*))?$",function(value) return self.roller:command(aliasArgument(value) or "help") end)
   self.runtime_registration_complete=true; self.started=true; local data=self.adapter:getGMCP(); if self:mapperEnabled() and data and data.Room and data.Room.Info then local mapped=self.automapper:onRoom(data.Room.Info); if mapped and tonumber(data.Room.Info.num) then self.managed_rooms[tonumber(data.Room.Info.num)]=true end end; self:refresh(); self:scheduleRoundtimeTick(); self:scheduleClockTick()
   local chatStarted,chatErr=self:startChat(); if not chatStarted then error(chatErr,0) end

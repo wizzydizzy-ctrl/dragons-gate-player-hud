@@ -74,6 +74,16 @@ test("persisted roller settings override stale live values during package replac
   end)
 end)
 
+test("persisted display text size overrides a stale live preference",function()
+  withEntryStubs(function(context)
+    context.defaults.display={side_text_scale=1}
+    context.install("mudlet_adapter",function() return {loadDisplaySettings=function() return {side_text_scale=.9} end,new=function() return context.adapter end} end)
+    DGHUD={user_settings={display={side_text_scale=1.1}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.user_settings.display.side_text_scale,.9); eq(DGHUD.settings.display.side_text_scale,.9)
+  end)
+end)
+
 test("replacement handoff bypasses legacy map serialization before shutdown",function()
   withEntryStubs(function()
     local observed; local retiring={map_collections={large=true}}

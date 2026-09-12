@@ -81,7 +81,7 @@ function History:entries(filter)
   local entries={}
   for _,entry in ipairs(self.items) do
     local category=tostring(entry.category or ""):upper()
-    if filter=="ALL" or category==filter or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=entry end
+    if filter=="ALL" or category==filter or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=entry end
   end
   return entries
 end

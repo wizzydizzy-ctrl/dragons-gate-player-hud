@@ -38,6 +38,15 @@ test("one owned line trigger captures and persists recognized chat",function()
   eq(controller:entries()[1].category,"ESP"); eq(f.storageAppends,1); eq(f:count(f.triggers),1)
 end)
 
+test("targeted asks are captured and visible in the room tab",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("ROOM"))
+  f:line('Eilan asks Atrax, "You asked two already, didn\'t you?"')
+  f.epochValue=104; f:line('Dace Alterac asks Atrax, "Ready?"')
+  local entries=controller:entries()
+  eq(#entries,2); eq(entries[1].target,"Atrax"); eq(entries[1].category,"ROOM")
+  eq(entries[2].target,"Atrax"); eq(entries[2].category,"OWN"); eq(f.storageAppends,2)
+end)
+
 test("Secian links flow through the owned trigger private filter and dedupe",function()
   local f=fake(); local controller=makeController(f); assert(controller:start())
   local line='You pick up Marcelline\'s Secian link, "Hello?" [r-1]'

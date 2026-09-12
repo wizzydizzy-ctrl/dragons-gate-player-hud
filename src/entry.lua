@@ -60,6 +60,8 @@ if userSettings.update==nil then local persisted=Adapter.loadUpdateSettings and 
 do local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end
 local persistedMapper=Adapter.loadMapperSettings and Adapter.loadMapperSettings()
 if type(persistedMapper)=="table" then userSettings.mapper=type(userSettings.mapper)=="table" and userSettings.mapper or {}; for key,value in pairs(persistedMapper) do if userSettings.mapper[key]==nil then userSettings.mapper[key]=value end end end
+local persistedDisplay=Adapter.loadDisplaySettings and Adapter.loadDisplaySettings()
+if type(persistedDisplay)=="table" then userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}; for key,value in pairs(persistedDisplay) do userSettings.display[key]=value end end
 DGHUD.user_settings=userSettings
 local function applyUserSettings()
   local ok,resolvedSettings,migratedSettings=pcall(Settings.resolve,defaults,DGHUD.user_settings or {})

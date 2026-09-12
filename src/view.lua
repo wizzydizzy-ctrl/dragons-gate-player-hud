@@ -164,8 +164,44 @@ function View.inventoryContent(inventory,vitals,t,layout,capacity)
   local rows=View.inventoryRows(inventory.items,capacity); local lines={"<span style='color:"..t.accent.."'><b>INVENTORY</b></span>"}
   for _,item in ipairs(rows) do if item.overflow then lines[#lines+1]="<span style='color:"..t.muted.."'>"..item.label.."</span>" else lines[#lines+1]=esc(item.name).." <span style='color:"..t.muted.."'>"..esc(item.weight or "").." lb</span>" end end
   lines[#lines+1]="<span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(vitals.gold or 0).."gp</b></span> &nbsp; <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(vitals.silver or 0).."sp</b></span>"
-  local carry=vitals.carry or {}; lines[#lines+1]="Carry <b>"..esc(carry.current or 0).." / "..esc(carry.maximum or 0).." / </b><span style='color:"..t.muted.."'><b>"..esc(carry.percent or 0).."%</b></span>"
+  local carry=vitals.carry or {}; lines[#lines+1]="Carry <b>"..esc(carry.current or 0).."/"..esc(carry.maximum or 0).."</b> <span style='color:"..t.muted.."'><b>"..esc(carry.percent or 0).."%</b></span>"
   return View.withFont(table.concat(lines,"<br>"),layout.inventory_font)
+end
+function View.inventoryRequiredColumns(items)
+  local columns=36
+  for _,item in ipairs(type(items)=="table" and items or {}) do
+    local text=tostring(item.name or "").."  "..tostring(item.weight or "").." lb"
+    columns=math.max(columns,math.min(160,#text))
+  end
+  return columns
+end
+function View.inventoryFooterLines(vitals,t,capacity)
+  vitals=type(vitals)=="table" and vitals or {}; t=type(t)=="table" and t or {}
+  capacity=math.max(4,math.floor(tonumber(capacity) or 40))
+  local gold,silver=tostring(vitals.gold or 0),tostring(vitals.silver or 0)
+  local goldHTML="<span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(gold).."gp</b></span>"
+  local silverHTML="<span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(silver).."sp</b></span>"
+  local lines={}
+  if #(gold.."gp  "..silver.."sp")<=capacity then lines[1]=goldHTML.." &nbsp; "..silverHTML else lines[1]=goldHTML; lines[2]=silverHTML end
+  local carry=vitals.carry or {}; local current,maximum,percent=tostring(carry.current or 0),tostring(carry.maximum or 0),tostring(carry.percent or 0)
+  local values=current.."/"..maximum; local percentText=percent.."%"; local full="Carry "..values.." "..percentText
+  local muted="<span style='color:"..(t.muted or "#75857c").."'><b>"..esc(percentText).."</b></span>"
+  if #full<=capacity then
+    lines[#lines+1]="Carry <b>"..esc(values).."</b> "..muted
+  elseif #("Carry "..percentText)<=capacity and #values<=capacity then
+    lines[#lines+1]="Carry "..muted; lines[#lines+1]="<b>"..esc(values).."</b>"
+  else
+    lines[#lines+1]="Carry"
+    if #values<=capacity then lines[#lines+1]="<b>"..esc(values).."</b>" else lines[#lines+1]="<b>"..esc(current).."/</b>"; lines[#lines+1]="<b>"..esc(maximum).."</b>" end
+    lines[#lines+1]=muted
+  end
+  return lines,"Carry: "..current.." / "..maximum.." / "..percentText
+end
+function View:renderInventoryFooter(vitals)
+  local lines,tooltip=View.inventoryFooterLines(vitals,self.settings.theme,self.inventory_footer_capacity)
+  self.inventory_footer_rows=#lines; self.inventory_footer:echo(table.concat(lines,"<br>"))
+  if self.inventory_footer.setToolTip then pcall(self.inventory_footer.setToolTip,self.inventory_footer,tooltip) end
+  return lines
 end
 local function label(name,parent,style,geyser)
   local item=(geyser or Geyser).Label:new({name=name,x=0,y=0,width=10,height=10},parent); item:setStyleSheet(style or "background:transparent;"); return item
@@ -188,6 +224,8 @@ local help_entries={
   {command="dghud update",description="Install the newest verified HUD release, then refresh character data."},
   {command="dghud recover",description="Emergency clean reinstall using the independent recovery companion."},
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
+  {command="dghud refresh",description="Refresh inventory, combat, character, religion, runes, skills, and time without reinstalling."},
+  {command="dghud text small|normal|large|status",description="Adjust persistent HUD text sizing while leaving the main game-console font unchanged."},
   {command="rr start|stop|stats|last|reset|help",description="Control both 11-characteristic rolling methods; DGHUD always leaves done for you."},
   {command="rr set total|hard|max|delay|greats|goodplus|STAT <value>",description="Adjust totals, arranged-pool counts, or 1-7 minimums for the 11 current stats."},
   {command="rr set arrange manual|auto|minimums",description="Choose whether a qualifying arranged pool waits, uses game auto, or places your raw pool-label minimums before auto."},
@@ -305,8 +343,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","auto_update","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",auto_update="AUTOMATIC UPDATES: OFF",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","refresh_data","auto_update","text_size","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -651,9 +689,13 @@ function View:applyLayout(layout)
     self.list_viewport_width,self.list_resolved_scrollbar_width=listViewportWidth(self.skills_output,self.list_outer_width,self.list_scrollbar_width)
     self.skills_content_width=math.max(self.list_viewport_width,29*self.list_character_width)
     self.runes_content_width=math.max(self.list_viewport_width,28*self.list_character_width)
-    self.inventory_content_width=math.max(self.list_viewport_width,36*self.list_character_width)
+    local inventoryItems=self.last_state and self.last_state.inventory and self.last_state.inventory.items or {}
+    self.inventory_content_width=math.max(self.list_viewport_width,View.inventoryRequiredColumns(inventoryItems)*self.list_character_width)
     self.list_content_width=self.skills_content_width
-    self.list_horizontal_overflow=self.skills_content_width>self.list_outer_width or self.runes_content_width>self.list_outer_width or self.inventory_content_width>self.list_outer_width
+    self.inventory_horizontal_overflow=self.inventory_content_width>self.list_viewport_width
+    self.runes_horizontal_overflow=self.runes_content_width>self.list_viewport_width
+    self.skills_horizontal_overflow=self.skills_content_width>self.list_viewport_width
+    self.list_horizontal_overflow=self.skills_horizontal_overflow or self.runes_horizontal_overflow or self.inventory_horizontal_overflow
     self.skill_character_capacity=math.max(1,math.floor(self.skills_content_width/self.list_character_width))
     self.skill_level_width=self.skill_character_capacity>=8 and 3 or 2
     self.skill_use_width=self.skill_character_capacity>=8 and 4 or 3
@@ -678,23 +720,36 @@ function View:applyLayout(layout)
     local combat_y=top+p
     place(self.details,card_x,combat_y,card_w,right_details_h)
     local inventory_y=combat_y+right_details_h+10; local rail_bottom=(layout.window_height or 800)-side_bottom-12
-    local title_h=layout.list_row_height+4; local footer_h=layout.list_row_height*2+6
+    local title_h=layout.list_row_height+4
+    local footer_character_width=self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font)); local footer_capacity=math.max(4,math.floor(list_w/math.max(1,footer_character_width)))
+    local footer_lines=View.inventoryFooterLines(self.last_state and self.last_state.vitals or {},t,footer_capacity); self.inventory_footer_rows=#footer_lines; self.inventory_footer_capacity=footer_capacity
+    local footer_line_height=math.max(layout.list_row_height,math.ceil((layout.list_font+2)*1.3)); local footer_h=footer_line_height*self.inventory_footer_rows+6
+    local inventory_scroll_h=self.inventory_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
+    local runes_scroll_h=self.runes_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
+    local skills_scroll_h=self.skills_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
     local remaining=math.max(0,rail_bottom-inventory_y); local gap=8
-    local minimum_inventory=rp*2+title_h+layout.list_row_height+footer_h+4
-    local minimum_runes=rp*2+title_h+layout.list_row_height+4
-    local minimum_skills=rp*2+title_h+layout.list_row_height+4
+    local minimum_inventory=rp*2+title_h+layout.list_row_height+inventory_scroll_h+footer_h+4
+    local minimum_runes=rp*2+title_h+layout.list_row_height+runes_scroll_h+4
+    local minimum_skills=rp*2+title_h+layout.list_row_height+skills_scroll_h+4
     if remaining>=minimum_inventory+gap+minimum_runes+gap+minimum_skills then
-      local usable=remaining-gap*2; local inventory_h=math.floor(usable/3); local runes_h=math.floor((usable-inventory_h)/2); local skills_h=usable-inventory_h-runes_h
+      local usable=remaining-gap*2; local equal=math.floor(usable/3); local inventory_h,runes_h,skills_h
+      if equal>=math.max(minimum_inventory,minimum_runes,minimum_skills) then
+        inventory_h=equal; runes_h=math.floor((usable-inventory_h)/2); skills_h=usable-inventory_h-runes_h
+      else
+        local extra=usable-minimum_inventory-minimum_runes-minimum_skills; local share=math.floor(extra/3)
+        inventory_h=minimum_inventory+share; runes_h=minimum_runes+math.floor((extra-share)/2); skills_h=usable-inventory_h-runes_h
+      end
       local runes_y=inventory_y+inventory_h+gap; local skills_y=runes_y+runes_h+gap
-      local inventory_view_h=math.max(layout.list_row_height,inventory_h-rp*2-title_h-footer_h-4)
-      local runes_view_h=math.max(layout.list_row_height,runes_h-rp*2-title_h-4)
-      local skills_view_h=math.max(layout.list_row_height,skills_h-rp*2-title_h-4)
+      local inventory_view_h=math.max(layout.list_row_height+inventory_scroll_h,inventory_h-rp*2-title_h-footer_h-4)
+      local runes_view_h=math.max(layout.list_row_height+runes_scroll_h,runes_h-rp*2-title_h-4)
+      local skills_view_h=math.max(layout.list_row_height+skills_scroll_h,skills_h-rp*2-title_h-4)
       place(self.inventory,card_x,inventory_y,card_w,inventory_h); place(self.inventory_title,list_x,inventory_y+rp,list_w,title_h); place(self.inventory_output,list_x,inventory_y+rp+title_h,list_w,inventory_view_h); place(self.inventory_footer,list_x,inventory_y+inventory_h-rp-footer_h,list_w,footer_h)
       place(self.runes,card_x,runes_y,card_w,runes_h); place(self.runes_title,list_x,runes_y+rp,list_w,title_h); place(self.runes_output,list_x,runes_y+rp+title_h,list_w,runes_view_h)
       place(self.skills,card_x,skills_y,card_w,skills_h); place(self.skills_title,list_x,skills_y+rp,list_w,title_h); place(self.skills_output,list_x,skills_y+rp+title_h,list_w,skills_view_h)
       self.inventory_content:resize(self.inventory_content_width,math.max(inventory_view_h,inventory_rows*layout.list_row_height))
       self.runes_content:resize(self.runes_content_width,math.max(runes_view_h,rune_rows*layout.list_row_height))
       self.skills_content:resize(self.skills_content_width,math.max(skills_view_h,skill_rows*layout.list_row_height))
+      self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
     else
         self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide()
     end
@@ -703,7 +758,7 @@ function View:applyLayout(layout)
     if self.skills_output.visible then self.skills_content:show() end
     View.raiseCards({self.equipment,self.inventory,self.details,self.runes,self.skills,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes_title,self.runes_output,self.runes_content,self.skills_title,self.skills_output,self.skills_content})
   else
-    self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.roundtime_bar:hide(); self.right:hide(); self.attribute_strip:hide(); place(self.compact,0,62,"100%",top-62)
+    self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.roundtime_bar:hide(); self.right:hide(); self.attribute_strip:hide(); if top>62 then place(self.compact,0,62,"100%",top-62) else self.compact:hide() end
   end
   do
     local vitals=self.last_state and self.last_state.vitals or {}; local bars={self.hp,self.fatigue}
@@ -913,6 +968,15 @@ function View:setAutoUpdateEnabled(enabled)
   if button then button.option_text="AUTOMATIC UPDATES: "..(self.auto_update_enabled and "ON" or "OFF") end
   if self.color_menu_visible then self:renderColorOptions() end
   return self.auto_update_enabled
+end
+function View:setDisplayTextSize(name)
+  name=tostring(name or "normal"):lower()
+  if not ({small=true,normal=true,large=true})[name] then name="normal" end
+  self.display_text_size=name
+  local button=self.option_action_buttons and self.option_action_buttons.text_size
+  if button then button.option_text="HUD TEXT: "..name:upper() end
+  if self.color_menu_visible then self:renderColorOptions() end
+  return name
 end
 function View:setFeedbackCallback(callback) self.feedback_callback=type(callback)=="function" and callback or nil; return true end
 function View:setCopyTextCallback(callback) self.copy_text_callback=type(callback)=="function" and callback or nil; return true end
@@ -1165,7 +1229,7 @@ function View:renderInventory(s)
   self.inventory_title:echo("<b>INVENTORY</b>")
   local lines={}; for _,item in ipairs(inventory.items or {}) do lines[#lines+1]=esc(item.name or "").."  <span style='color:"..t.muted.."'>"..esc(item.weight or "").." lb</span>" end
   self.inventory_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.inventory_content:move(0,0); self.inventory_content:resize(self.inventory_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height)); self.inventory_content:show()
-  self.inventory_footer:echo("<span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(v.gold or 0).."gp</b></span> &nbsp; <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(v.silver or 0).."sp</b></span><br>Carry <b>"..esc(carry.current or 0).." / "..esc(carry.maximum or 0).." / </b><span style='color:"..t.muted.."'><b>"..esc(carry.percent or 0).."%</b></span>")
+  self:renderInventoryFooter(v)
 end
 function View:renderRunes(s)
   local layout=self.layout; if not layout or layout.mode=="compact" then return end

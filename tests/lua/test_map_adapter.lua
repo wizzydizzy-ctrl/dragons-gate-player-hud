@@ -517,8 +517,24 @@ end)
 test("legacy DGHUD areas tolerate Mudlet missing-key errors when every room is owned",function()
   local api=fakeMapApi({[100]={area=1,user={['dghud.owner']='DragonsGateHUD'},exits={},stubs={}}})
   api.areas['Dragons Gate - 1']=1; api.areaUser[1]={}
-  function api.getAreaUserData(id,key) return nil,"no user data with key '"..key.."' in areaID "..id end
-  local record=assert(Adapter.new(api):areaRecord(1)); eq(record.owned,true); eq(record.owner,'DragonsGateHUD')
+  local nativeGet=api.getAreaUserData
+  function api.getAreaUserData(id,key) local value=nativeGet(id,key); if value~=nil then return value end; return nil,"no user data with key '"..key.."' in areaID "..id end
+  local record=assert(Adapter.new(api):areaRecord(1)); eq(record.owned,true); eq(record.owner,'DragonsGateHUD'); eq(api.areaUser[1]['dghud.owner'],'DragonsGateHUD')
+end)
+
+test("legacy area ownership persists before its final room is deleted and survives restart",function()
+  local api=fakeMapApi({[100]={area=1,user={['dghud.owner']='DragonsGateHUD'},exits={},stubs={}}})
+  api.areas['Dragons Gate - 1']=1; api.areaUser[1]={}
+  local nativeGet=api.getAreaUserData
+  function api.getAreaUserData(id,key) local value=nativeGet(id,key); if value~=nil then return value end; return nil,"no user data with key '"..key.."' in areaID "..id end
+  local map=Adapter.new(api); eq(map:deleteOwnedRoom(100),true); eq(api.areaUser[1]['dghud.owner'],'DragonsGateHUD')
+  map=Adapter.new(api); eq(assert(map:areaRecord(1)).owned,true); eq(map:deleteEmptyOwnedArea(1),true)
+  eq(api.areas['Dragons Gate - 1'],nil); eq(api.deletedAreas[1],1)
+end)
+
+test("map context reset drops every numeric-ID cache before another collection loads",function()
+  local map=Adapter.new(fakeMapApi()); map.areas.old=7; map.createdAreas[7]=true; map.createdRooms[100]=true
+  assert(map:resetMapContext()); eq(next(map.areas),nil); eq(next(map.createdAreas),nil); eq(next(map.createdRooms),nil)
 end)
 
 test("individual deletion rechecks persisted ownership immediately before mutation",function()

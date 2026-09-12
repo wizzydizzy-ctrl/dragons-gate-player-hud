@@ -3,8 +3,8 @@ local SPECS={inventory={parser="parseInventory",snapshot="inventory"},stat={pars
 local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info mag"]=true,skill=true,time=true}
 local RESPONSE_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info mag"]=2.5,skill=3,time=2}
 local RECOVERY_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info mag"]=2.5,skill=3,time=2}
-function Collector.new(adapter,parser,onChange,onRoundtime,onCharacterEntry)
-  return setmetatable({adapter=adapter,parser=parser,onChange=onChange,onRoundtime=onRoundtime,onCharacterEntry=onCharacterEntry,snapshot={},sequence={"inventory","stat","info","info religion","info mag","skill","time"},runtime={triggers={},events={}},started=false,refreshed=false,prompt_nudge_delay=.15,drain_delay=.5},Collector)
+function Collector.new(adapter,parser,onChange,onRoundtime,onCharacterEntry,onCharacterExit)
+  return setmetatable({adapter=adapter,parser=parser,onChange=onChange,onRoundtime=onRoundtime,onCharacterEntry=onCharacterEntry,onCharacterExit=onCharacterExit,snapshot={},sequence={"inventory","stat","info","info religion","info mag","skill","time"},runtime={triggers={},events={}},started=false,refreshed=false,prompt_nudge_delay=.15,drain_delay=.5},Collector)
 end
 function Collector:cancelActive()
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
@@ -88,6 +88,12 @@ function Collector:finish(lines)
 end
 function Collector:onLine(value)
   value=tostring(value or "")
+  local plain=value:gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%s*(.-)%s*$")
+  if plain=="Dragon's Gate Menu" or plain:find("Dragon's Gate Character Creator",1,true) then
+    self:cancelActive(); self.refreshed=false; self.active_character=nil
+    if self.onCharacterExit then self.onCharacterExit() end
+    return
+  end
   local delay=tonumber(value:match("%[(%d+)%s+sec%.%s+delay%]")); if delay and self.onRoundtime then self.onRoundtime(delay) end
   local character=value:match("^Welcome to Dragon's Gate, (.+)!%s*$")
   if character then

@@ -159,3 +159,8 @@ test("switching characters without disconnect starts a fresh character entry",fu
   f:line("Welcome to Dragon's Gate, Muthulas!"); f:line("Welcome to Dragon's Gate, Muthulas!"); f:line("Welcome to Dragon's Gate, Dace!")
   eq(table.concat(names,","),"Muthulas,Dace")
 end)
+test("returning to the account menu ends character activity and cancels collection",function()
+  local f=fake(); local exits=0; local c=Collector.new(f,Parser,function() end,nil,function() end,function() exits=exits+1 end); c:start()
+  f:line("Welcome to Dragon's Gate, Test!"); eq(c.active_character,"Test"); assert(c:refresh()); eq(c.active.command,"inventory")
+  f:line("    Dragon's Gate Menu"); eq(c.active_character,nil); eq(c.active,nil); eq(c.refreshed,false); eq(exits,1)
+end)

@@ -128,6 +128,11 @@ function MapAdapter.new(api)
   return setmetatable({api=api or {},owner="DragonsGateHUD",schema="1",areas={},createdAreas={},createdRooms={}},MapAdapter)
 end
 
+function MapAdapter:resetMapContext()
+  self.areas={}; self.createdAreas={}; self.createdRooms={}
+  return true
+end
+
 function MapAdapter:isOwned(id)
   if type(self.api.getRoomUserData)~="function" then return false end
   local owner=read(self.api,"getRoomUserData",id,"dghud.owner")
@@ -409,7 +414,11 @@ function MapAdapter:areaRecord(areaID)
       local rooms,roomsErr=self:roomsInArea(area); if rooms==nil then return nil,roomsErr end
       local allOwned=#rooms>0
       for _,roomID in ipairs(rooms) do local room,roomErr=self:roomRecord(roomID); if room==nil then return nil,roomErr end; if not room.owned then allOwned=false; break end end
-      if allOwned then owner=self.owner end
+      if allOwned then
+        local persisted,persistErr=invoke(self.api,"setAreaUserData",area,"dghud.owner",self.owner)
+        if not persisted then return nil,"legacy mapper area ownership could not be persisted: "..tostring(persistErr) end
+        owner=self.owner
+      end
     end
   end
   return {id=area,exists=true,owned=owner==self.owner,owner=owner}
@@ -560,6 +569,12 @@ function MapAdapter:deleteOwnedRoom(roomID)
   if record==nil then return nil,recordErr end
   if not record.exists then return nil,"room "..tostring(room).." does not exist" end
   if not record.owned then return nil,"room "..tostring(room).." is not owned by DragonsGateHUD" end
+  -- Persist ownership while the room still proves that a legacy DGHUD area is
+  -- ours. Once its final room is gone, that evidence no longer exists.
+  if positiveInteger(record.area) then
+    local _,areaErr=self:areaRecord(record.area)
+    if areaErr then return nil,areaErr end
+  end
   local deleted,deleteErr=invoke(self.api,"deleteRoom",room)
   if deleted==nil then return nil,deleteErr end
   return true

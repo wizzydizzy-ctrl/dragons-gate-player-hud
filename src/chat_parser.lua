@@ -84,6 +84,12 @@ local function parseActiveRoom(line,character,now)
   local active=trim(character)
   if not active then return nil end
   for _,verb in ipairs({"says","asks","exclaims","shouts","yells"}) do
+    if verb=="asks" then
+      local speaker,target,language,message=line:match("^"..activeName.." asks "..name.." in (.+), \"(.*)\"$")
+      if speaker and speaker:lower()==active:lower() then return builtIn("OWN",message,{speaker=speaker,target=target,language=language},character,now,line) end
+      speaker,target,message=line:match("^"..activeName.." asks "..name..", \"(.*)\"$")
+      if speaker and speaker:lower()==active:lower() then return builtIn("OWN",message,{speaker=speaker,target=target},character,now,line) end
+    end
     local speaker,target,language,message=line:match("^"..activeName.." "..verb.." to "..name.." in (.+), \"(.*)\"$")
     if speaker and speaker:lower()==active:lower() then return builtIn("OWN",message,{speaker=speaker,target=target,language=language},character,now,line) end
     speaker,language,target,message=line:match("^"..activeName.." "..verb.." in (.+) to "..name..", \"(.*)\"$")
@@ -101,6 +107,12 @@ local function parseRoom(line,character,now)
   local activeEntry=parseActiveRoom(line,character,now)
   if activeEntry then return activeEntry end
   for _,verb in ipairs({"says","asks","exclaims","shouts","yells"}) do
+    if verb=="asks" then
+      local speaker,target,language,message=line:match("^"..name.." asks "..name.." in (.+), \"(.*)\"$")
+      if speaker then return builtIn(roomCategory(speaker,character),message,{speaker=speaker,target=target,language=language},character,now,line) end
+      speaker,target,message=line:match("^"..name.." asks "..name..", \"(.*)\"$")
+      if speaker then return builtIn(roomCategory(speaker,character),message,{speaker=speaker,target=target},character,now,line) end
+    end
     local speaker,target,language,message=line:match("^"..name.." "..verb.." to "..name.." in (.+), \"(.*)\"$")
     if speaker then return builtIn(roomCategory(speaker,character),message,{speaker=speaker,target=target,language=language},character,now,line) end
     speaker,language,target,message=line:match("^"..name.." "..verb.." in (.+) to "..name..", \"(.*)\"$")
@@ -125,7 +137,17 @@ function Parser.parse(line,character,now)
       return builtIn(rule.category,captures[rule.message],{speaker=captures[rule.speaker]},character,now,line)
     end
   end
-  local message=line:match("^You say (.+)$")
+  local target,language,message=line:match('^You ask '..name..' in (.+), "(.*)"$')
+  if target then return builtIn("OWN",message,{speaker=trim(character),target=target,language=language},character,now,line) end
+  target,message=line:match('^You ask '..name..', "(.*)"$')
+  if target then return builtIn("OWN",message,{speaker=trim(character),target=target},character,now,line) end
+  target,language,message=line:match('^You say to '..name..' in (.+), "(.*)"$')
+  if target then return builtIn("OWN",message,{speaker=trim(character),target=target,language=language},character,now,line) end
+  language,target,message=line:match('^You say in (.+) to '..name..', "(.*)"$')
+  if language then return builtIn("OWN",message,{speaker=trim(character),target=target,language=language},character,now,line) end
+  target,message=line:match('^You say to '..name..', "(.*)"$')
+  if target then return builtIn("OWN",message,{speaker=trim(character),target=target},character,now,line) end
+  message=line:match("^You say (.+)$")
   if message then return builtIn("OWN",message,{speaker=trim(character)},character,now,line) end
   local speaker,message=line:match("^"..name.." whispers to you, \"(.*)\"$")
   if speaker then return builtIn("WHISPER",message,{speaker=speaker,target=trim(character)},character,now,line) end

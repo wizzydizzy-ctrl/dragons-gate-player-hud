@@ -38,6 +38,12 @@ test("mutable HUD data lives outside the replaceable package directory",function
   eq(base:find("/DragonsGateHUD",1,true),nil)
   eq(Adapter.dataBase([[C:\profile\]]),[[C:\profile/DGHUDData]])
 end)
+test("display text settings accept only a bounded side-panel scale",function()
+  eq(Adapter.displaySettingsSnapshot({side_text_scale=.8}).side_text_scale,.8)
+  eq(Adapter.displaySettingsSnapshot({side_text_scale=1.2}).side_text_scale,1.2)
+  local value,err=Adapter.displaySettingsSnapshot({side_text_scale=.79}); eq(value,nil); assert(err:find("between 0.8 and 1.2",1,true))
+  value,err=Adapter.displaySettingsSnapshot({side_text_scale="large"}); eq(value,nil); assert(err:find("between 0.8 and 1.2",1,true))
+end)
 test("legacy mutable data migrates without moving package resources",function()
   local oldLfs,oldOpen,oldRename,oldRemove=lfs,io.open,os.rename,os.remove
   local directories={['/profile/DragonsGateHUD']=true,['/profile/DragonsGateHUD/map-collections']=true}
@@ -151,8 +157,9 @@ local function recoveryHarness(options,body)
   options=options or {}; local names={"DGHUDRecovery","lfs","getMudletHomeDir","getPackages","getPackageInfo","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","tempAlias","killAlias","downloadFile","uninstallPackage","installPackage","cecho"}; local saved={}
   for _,name in ipairs(names) do saved[name]=_G[name] end
   local h={installed=options.installed~=false,version=options.version,busy=tonumber(options.busy) or 0,handlers={},timers={},downloads={},uninstalls=0,installs=0,nextID=0,messages={}}
+  local expectedOwner=options.owner or "wizzydizzy-ctrl"; local expectedRepository=options.repository or "dragons-gate-player-hud"
   local ok,err=pcall(function()
-    DGHUDRecovery=options.runtimeVersion and {version=options.runtimeVersion,alias=options.runtimeAlias or 90,run=function() end} or nil
+    DGHUDRecovery=options.runtimeVersion and {version=options.runtimeVersion,owner=options.runtimeOwner or expectedOwner,repository=options.runtimeRepository or expectedRepository,alias=options.runtimeAlias or 90,run=function() end} or nil
     lfs={mkdir=function() return true end}; getMudletHomeDir=function() return "/profile" end
     getPackages=function() return h.installed and {"DGHUDRecovery"} or {} end
     getPackageInfo=function(name,key) if name=="DGHUDRecovery" and key=="version" and h.installed then return h.version end end
@@ -164,29 +171,32 @@ local function recoveryHarness(options,body)
     killAlias=function() return true end
     downloadFile=function(path,url) h.downloads[#h.downloads+1]={path=path,url=url}; return true end
     uninstallPackage=function() h.uninstalls=h.uninstalls+1; if h.busy>0 then h.busy=h.busy-1; return nil end; h.installed=false; h.version=nil; return true end
-    installPackage=function() h.installs=h.installs+1; h.installed=true; if options.deferActivation then h.pendingRuntime=true else DGHUDRecovery={version=Adapter.recovery_version,alias=91,run=function() end} end; return true end
+    installPackage=function() h.installs=h.installs+1; h.installed=true; if options.deferActivation then h.pendingRuntime=true else DGHUDRecovery={version=Adapter.recovery_version,owner=expectedOwner,repository=expectedRepository,alias=91,run=function() end} end; return true end
     cecho=function(message) h.messages[#h.messages+1]=message end
     function h:download() self.handlers.sysDownloadDone(nil,self.downloads[1].path) end
-    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingRuntime then DGHUDRecovery={version=Adapter.recovery_version,alias=92,run=function() end}; self.pendingRuntime=nil end; return true end end return false end
-    h.adapter=Adapter.new(); h.adapter.settings={github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"}}; body(h)
+    function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingRuntime then DGHUDRecovery={version=Adapter.recovery_version,owner=expectedOwner,repository=expectedRepository,alias=92,run=function() end}; self.pendingRuntime=nil end; return true end end return false end
+    h.adapter=Adapter.new(); h.adapter.settings={github={owner=expectedOwner,repository=expectedRepository}}; body(h)
   end)
   for _,name in ipairs(names) do _G[name]=saved[name] end
   if not ok then error(err,0) end
 end
 test("current recovery companion is retained without a download",function()
-  recoveryHarness({version="1.5.0",runtimeVersion="1.5.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
 end)
 test("package metadata alone cannot prove recovery runtime activation",function()
-  recoveryHarness({version="1.5.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.6.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
 end)
 test("recovery runtime without a callable registered alias is replaced",function()
-  recoveryHarness({version="1.5.0",runtimeVersion="1.5.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
+  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
+end)
+test("recovery companion from the other HUD edition is replaced",function()
+  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0",runtimeRepository="dragons-gate-staff-hud"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
 end)
 test("outdated recovery companion waits out a save and verifies deferred activation",function()
   recoveryHarness({version="1.0.0",runtimeVersion="1.0.0",busy=1,deferActivation=true},function(h)
     eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); h:download(); eq(h.uninstalls,1); eq(h.installs,0); eq(h.adapter.recovery_installing,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(h.installs,1); eq(h.adapter.recovery_installing,true)
-    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.5.0"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
+    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.6.0"); eq(DGHUDRecovery.repository,"dragons-gate-player-hud"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
   end)
 end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()
@@ -254,6 +264,10 @@ end)
 test("Mudlet activity detection survives asynchronous non-prompt output",function()
   local oldDGHUD,oldCurrent=DGHUD,getCurrentLine; DGHUD={controller={character_entry_started=true}}; getCurrentLine=function() return "The dark hound claws at you!" end
   local ok,err=pcall(function() eq(Adapter.new():isCharacterActive(),true) end); DGHUD,getCurrentLine=oldDGHUD,oldCurrent; if not ok then error(err,0) end
+end)
+test("Mudlet menu evidence overrides stale character activity",function()
+  local oldDGHUD,oldCurrent=DGHUD,getCurrentLine; DGHUD={controller={character_entry_started=true}}; getCurrentLine=function() return "Your selection, GM?" end
+  local ok,err=pcall(function() eq(Adapter.new():isCharacterActive(),false) end); DGHUD,getCurrentLine=oldDGHUD,oldCurrent; if not ok then error(err,0) end
 end)
 test("Mudlet version adapter captures the API numeric tuple",function()
   local prior=_G.getMudletVersion; _G.getMudletVersion=function(mode) eq(mode,"table"); return 5,0,1 end

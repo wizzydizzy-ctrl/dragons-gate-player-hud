@@ -71,6 +71,7 @@ local function fake()
   function f:refreshMap() self.mapRefreshes=(self.mapRefreshes or 0)+1; if self.refreshMapError then return nil,self.refreshMapError end; return true end
   function f:timestamp() return self.timestampValue or "2026-08-31T13:00:00-04:00" end
   function f:reportChatErrorOnce() self.chatErrors=(self.chatErrors or 0)+1 end
+  function f:reportCommandError(message) self.commandErrors=self.commandErrors or {}; self.commandErrors[#self.commandErrors+1]=message; return true end
   function f:createChatStorage(visibleLimit)
     f.chatVisibleLimit=visibleLimit
     f.chatEntries=f.chatEntries or {}; local storage={entries=f.chatEntries}
@@ -100,6 +101,9 @@ local function fake()
   function f:sendCommand(command) self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command; return true end
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
+  function f:saveDisplaySettings(config) self.savedDisplaySettings={side_text_scale=config.side_text_scale}; return true end
+  function f:reportCharacterRefresh() self.characterRefreshReports=(self.characterRefreshReports or 0)+1; return true end
+  function f:reportDisplayTextScale(name) self.displayTextReport=name; return true end
   function f:count(tableValue) local n=0; for _ in pairs(tableValue) do n=n+1 end; return n end
   function f:createMapAdapter()
     local map={rooms={},areas={},areaNames={},stubs={},links={},special={},current=nil,shutdowns=0,api={}}
@@ -420,9 +424,28 @@ test("cleanup reconciliation requires a valid fresh current room after mutation"
 end)
 
 test("shutdown removes all cleanup and transfer map aliases",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+22)
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+24)
   local owned={}; for id,alias in pairs(f.aliases) do if alias.pattern:match("%^dghud map ") then owned[id]=true end end; eq(f:count(owned),17)
   assert(hud:shutdown()); for id in pairs(owned) do eq(f.killed[id],true) end; eq(f:count(f.aliases),0)
+end)
+
+test("manual refresh alias restarts the full character collection without an update",function()
+  local f=fake(); f.character_active=true; local hud=Main.new(f,{layout={}}); assert(hud:start())
+  assert(aliasCallback(f,"^dghud refresh$")())
+  eq(f.sentCommands[1],"inventory"); eq(f.characterRefreshReports,1); assert(f.optionsActionCallback("refresh_data")); eq(f.characterRefreshReports,2)
+end)
+test("manual refresh refuses stale menu state and reports why",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); hud.character_entry_started=true
+  local ok,err=aliasCallback(f,"^dghud refresh$")(); eq(ok,nil); assert(err:find("Log into a character",1,true)); eq(f.commandErrors[1],err); eq(#(f.sentCommands or {}),0)
+end)
+
+test("HUD text size cycles persistently without changing center console geometry",function()
+  local f=fake(); local hud=Main.new(f,{layout={},display={side_text_scale=1,future_preference="kept"}}); assert(hud:start())
+  local normal=hud.current_layout.body_font; local consoleWidth=hud.current_layout.console_width; local wrap=hud.main_console_wrap_columns
+  local textAlias=assert(aliasCallback(f,"^dghud text(?:\\s+(.*))?$")); eq(textAlias({"","small"}),"small")
+  eq(f.savedDisplaySettings.side_text_scale,.9); eq(hud.settings.display.future_preference,"kept"); eq(hud.current_layout.body_font<normal,true); eq(hud.current_layout.console_width,consoleWidth); eq(hud.main_console_wrap_columns,wrap); eq(f.displayTextReport,"Small")
+  eq(f.optionsActionCallback("text_size"),"normal"); eq(f.savedDisplaySettings.side_text_scale,1); eq(hud.current_layout.body_font,normal)
+  local ok,err=textAlias({"","tiny"}); eq(ok,nil); assert(err:find("Usage:",1,true)); eq(f.commandErrors[#f.commandErrors],err)
 end)
 
 test("Mudlet cleanup adapter contains refresh exceptions and creates opaque tokens from secure bytes",function()

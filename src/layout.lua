@@ -75,7 +75,7 @@ local function chatMetrics(width,height,layout,settings)
   layout.top=layout.console_top
   return layout
 end
-local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
+local function metrics(width,height,layout,chatSettings,mapperSettings,vitals,displaySettings)
   layout.console_gutter=layout.mode=="compact" and 0 or math.min(12,math.floor(width*.005+.5))
   layout.console_left=layout.left+layout.console_gutter
   layout.console_right=layout.right+layout.console_gutter
@@ -83,25 +83,37 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   -- Leave room for Mudlet's main-console scrollbar and inner frame when
   -- translating the live pixel width into a character wrap width.
   layout.main_wrap_scrollbar_allowance=24
-  layout.body_font=clamp(width/100,16,22); layout.small_font=clamp((layout.body_font-2)*2,28,40); layout.heading_font=clamp(layout.body_font+5,21,27)
-  layout.equipment_font=clamp(layout.body_font-3,13,18)
+  displaySettings=type(displaySettings)=="table" and displaySettings or {}
+  local textScale=math.max(.8,math.min(1.2,tonumber(displaySettings.side_text_scale) or 1))
+  local baseBody=clamp(width/100,16,22)
+  local baseHeading=clamp(baseBody+5,21,27)
+  local basePanelPadding=clamp(width/120,12,22)
+  local baseRowGap=clamp(baseBody*.7,11,15)
+  local baseEquipmentFont=clamp(baseBody-3,13,18)
+  local baseInventoryFont=clamp(baseBody-2,14,20)
+  local baseListFont=clamp(baseInventoryFont-4,10,14)
+  local baseCompassFont=clamp(baseBody,16,22)
+  local baseUtilityFont=clamp(baseBody-4,12,18)
+  layout.side_text_scale=textScale
+  layout.body_font=clamp(baseBody*textScale,13,27); layout.small_font=clamp((layout.body_font-2)*2,24,44); layout.heading_font=clamp(baseHeading*textScale,17,32)
+  layout.equipment_font=clamp(baseEquipmentFont*textScale,11,21)
   layout.equipment_line_height=layout.equipment_font+4
   layout.header_clock_font=layout.mode=="medium" and 10 or clamp(layout.body_font-5,11,17)
   layout.color_toggle_font=clamp(layout.body_font-5,10,14)
   layout.color_toggle_height=clamp(layout.color_toggle_font+8,20,24)
   layout.attribute_strip_font=clamp(layout.console_width/100,10,14)
-  layout.panel_padding=clamp(width/120,12,22); layout.gauge_height=clamp(layout.small_font+10,38,50); layout.row_gap=clamp(layout.body_font*.7,11,15)
-  layout.equipment_padding=clamp(layout.panel_padding*.7,8,14)
-  layout.combat_font=clamp(layout.equipment_font-1,12,17); layout.combat_line_height=layout.combat_font+3; layout.combat_padding=clamp(layout.equipment_padding-1,7,12)
+  layout.panel_padding=clamp(basePanelPadding*textScale,8,26); layout.gauge_height=clamp(layout.small_font+10,34,54); layout.row_gap=clamp(baseRowGap*textScale,8,18)
+  layout.equipment_padding=clamp(layout.panel_padding*.7,6,16)
+  layout.combat_font=clamp(layout.equipment_font-1,9,20); layout.combat_line_height=layout.combat_font+3; layout.combat_padding=clamp(layout.equipment_padding-1,5,14)
   layout.title_height=layout.heading_font+30
   layout.room_height=layout.heading_font+layout.body_font*6+54; layout.exit_height=layout.small_font+16
   layout.identity_height=layout.heading_font+layout.body_font*7+56
-  layout.inventory_font=clamp(layout.body_font-2,14,20); layout.inventory_row_height=layout.inventory_font+10
-  layout.list_font=clamp(layout.inventory_font-4,10,14); layout.list_title_font=layout.list_font+3; layout.list_row_height=math.ceil(layout.list_font*1.3); layout.list_visible_rows=5
-  layout.list_padding=clamp(layout.panel_padding*.5,6,10)
+  layout.inventory_font=clamp(baseInventoryFont*textScale,11,23); layout.inventory_row_height=layout.inventory_font+10
+  layout.list_font=clamp(baseListFont*textScale,9,17); layout.list_title_font=layout.list_font+3; layout.list_row_height=math.ceil(layout.list_font*1.3); layout.list_visible_rows=5
+  layout.list_padding=clamp(layout.panel_padding*.5,4,12)
   layout.list_horizontal_scrollbar_height=clamp(layout.list_font+3,16,20)
-  layout.details_line_height=layout.body_font+6; layout.compass_font=clamp(layout.body_font,16,22); layout.compass_cell=layout.compass_font+14
-  layout.utility_font=clamp(layout.body_font-4,12,18); layout.utility_height=layout.utility_font+12
+  layout.details_line_height=layout.body_font+6; layout.compass_font=clamp(baseCompassFont*textScale,13,27); layout.compass_cell=layout.compass_font+14
+  layout.utility_font=clamp(baseUtilityFont*textScale,10,22); layout.utility_height=layout.utility_font+12
   local function scaled(value) return math.floor(value*.8+.5) end
   layout.lower_scale=.8
   layout.lower_body_font=scaled(layout.body_font); layout.lower_small_font=layout.lower_body_font; layout.lower_heading_font=scaled(layout.heading_font)
@@ -145,13 +157,13 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals)
   end
   return layout
 end
-function Layout.compute(width,height,chatSettings,mapperSettings,vitals)
+function Layout.compute(width,height,chatSettings,mapperSettings,vitals,displaySettings)
   width=tonumber(width) or 1200; height=tonumber(height) or 800
   local rail=math.floor(width*.17)
   local result
-  if width>=1400 then result=metrics(width,height,{mode="wide",left=rail,right=rail,top=74,bottom=0,show_character_rail=true,show_room_compass=height>=700,vitals_side="center"},chatSettings,mapperSettings,vitals)
-  elseif width>=800 then result=metrics(width,height,{mode="medium",left=rail,right=rail,top=66,bottom=0,show_character_rail=true,show_room_compass=height>=650,vitals_side="center"},chatSettings,mapperSettings,vitals)
-  else result=metrics(width,height,{mode="compact",left=0,right=0,top=116,bottom=0,show_character_rail=false,show_room_compass=false,vitals_side="center"},chatSettings,mapperSettings,vitals) end
+  if width>=1400 then result=metrics(width,height,{mode="wide",left=rail,right=rail,top=74,bottom=0,show_character_rail=true,show_room_compass=height>=700,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings)
+  elseif width>=800 then result=metrics(width,height,{mode="medium",left=rail,right=rail,top=66,bottom=0,show_character_rail=true,show_room_compass=height>=650,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings)
+  else result=metrics(width,height,{mode="compact",left=0,right=0,top=116,bottom=0,show_character_rail=false,show_room_compass=false,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings) end
   result.window_width=width
   result.window_height=height
   return result

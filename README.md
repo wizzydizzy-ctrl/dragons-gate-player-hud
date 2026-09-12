@@ -4,7 +4,7 @@ The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD f
 
 The header shows the player's local computer time and a synchronized Dragons Gate clock. Game time advances at the configurable 2× default, labels 6:00 AM–5:59 PM as `Daytime` and 6:00 PM–5:59 AM as `Night`, and resynchronizes from startup or manually entered `time` output.
 
-The compact `OPTIONS ▾` control includes an Automatic Updates toggle plus Help & Commands, Color Settings, Map Settings, Autoroller, and Support. Automatic updates are off by default and the choice persists across updates. Each section opens its own responsive settings box, so the top menu stays short and every related change can be made in one place. Every highlight is on by default and can be toggled independently in Color Settings: room titles, exits/directions, currency, travel objects, attacks aimed at you, damage received, danger/movement blocks, recovery, ongoing costs, spell threats, and discoveries/loot. Normal room prose and chat remain unchanged. Preferences survive HUD reloads and updates without changing personal Mudlet triggers or colors.
+The compact `OPTIONS ▾` control includes an Automatic Updates toggle, a persistent `HUD TEXT` size control, plus Help & Commands, Color Settings, Map Settings, Autoroller, and Support. Automatic updates are off by default and the choice persists across updates. `HUD TEXT` cycles through Small, Normal, and Large for the side cards without changing the main game-console font or wrap width. Each section opens its own responsive settings box, so the top menu stays short and every related change can be made in one place. Every highlight is on by default and can be toggled independently in Color Settings: room titles, exits/directions, currency, travel objects, attacks aimed at you, damage received, danger/movement blocks, recovery, ongoing costs, spell threats, and discoveries/loot. Normal room prose and chat remain unchanged. Preferences survive HUD reloads and updates without changing personal Mudlet triggers or colors.
 
 The HUD tracks posture from confirmed game output using the mutually exclusive global variables `standing` and `sitting`. Both begin unknown. Standing messages set `standing=true`; seated, lying, fallen, fainted, and passed-out messages set `sitting=true`. Merely being off balance, knocked back, seeing `You fall...`, or being told to stand does not change posture. The separate `unconscious` variable follows confirmed loss and recovery of consciousness. Matching is substring-safe so command echo and optional social wording do not prevent updates.
 
@@ -22,6 +22,8 @@ dghud colors spell off
 The setting is stored as `DGHUD.user_settings.colorization.enabled`. Integrations can read it with `Settings.colorEnabled(settings)` and update only that override with `Settings.setColorEnabled(DGHUD.user_settings, enabled)`.
 
 Run `dghud help` to open the scrollable, color-coded command guide. Everyday commands are green, descriptions are neutral, and potentially destructive package/map cleanup commands are red. The guide closes with its `× CLOSE` button and remains open and properly bounded during window resizing.
+
+Choose **OPTIONS → Refresh Character Data** or run `dghud refresh` whenever inventory, combat values, character details, religion, runes, skills, or time look stale. This reruns only the normal character-data commands; it does not download or reinstall the HUD. `dghud text small`, `dghud text normal`, and `dghud text large` provide the same persistent side-panel sizing as the OPTIONS control, while `dghud text status` reports the current choice.
 
 The HUD runs `info mag` during character startup and whenever the command is entered manually. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a five-row scrollable Runes card above Skills. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
 
@@ -63,7 +65,7 @@ The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, an
 
 ## Persistent top chatbox
 
-The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, `CONTACT`, and `STAFF`; `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
+The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, `CONTACT`, and `STAFF`; `ROOM` includes both nearby speech and your own outgoing speech, including direct forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
 
 The default chat settings are:
 
@@ -163,13 +165,15 @@ dghud mapstatus
 
 Walking sends exactly one command at a time and waits for the expected GMCP room number. Standard directions are normalized; a non-direction route step is sent only when its exact origin, destination, and command match a confirmed HUD-owned special exit. This allows `walkto` and owned native-map clicks to cross safe mixed directional/special routes without trusting an unobserved portal, door, gate, arch, or other command. After arrival, nonzero GMCP roundtime pauses the route until a later Vitals update reports zero. The per-step movement timeout is canceled while paused because no command is in flight; a fresh timeout starts only when the next command is sent. Wrong directions, unexpected rooms, manual movement, disconnection, timeout, and shutdown stop the route.
 
-The mapper toolbar owns four controls: `−` zooms out, the center control recenters on the current canonical room, `+` zooms in, and the red `⚠ CLEAR ALL` button starts a guarded reset of every DGHUD-owned map and submap. Zoom uses Mudlet's native area-specific value, so each normal area and special sub-map retains its own level across room changes, HUD reloads, updates, and profile restarts. Configured steps and bounds are enforced independently for the current saved area.
+The HUD does not create or overwrite keyboard shortcuts. If Mudlet's number pad does not move, configure or enable the profile's own Keys group in Mudlet and make sure its green activation arrow is on. This leaves every player's personal key layout under their control.
+
+The mapper toolbar owns four controls: `−` zooms out, the center control recenters on the current canonical room, `+` zooms in, and `MAP SETTINGS` opens the mapper controls. Guarded current-map and clear-all actions live inside that settings box. Zoom uses Mudlet's native area-specific value, so each normal area and special sub-map retains its own level across room changes, HUD reloads, updates, and profile restarts. Configured steps and bounds are enforced independently for the current saved area.
 
 The HUD tags only its own rooms and areas with `dghud.owner=DragonsGateHUD`. It refuses to rewrite an existing unowned room or area and never deletes personal map data. Successfully owned map data is eligible for deletion only through the explicit, confirmed cleanup controls described below; failed creations may also be rolled back transactionally. Discovered canonical rooms, partitions, observed exits, coordinates, and native per-area zoom otherwise remain when the HUD reloads, updates, or is uninstalled. `dghud mapstatus` reports only whether mapping is enabled, the current room, the number of rooms managed during the HUD session, an active walking destination, the latest mapper status, and the latest actual mapper error. Routine stops such as `walkstop`, manual movement, route replacement, and shutdown update the status but do not overwrite the last error. It does not dump room names, routes, personal map records, or unrelated data.
 
 ### Safe map cleanup
 
-Cleanup previews require secure token entropy from `/dev/urandom`. If that source is unavailable, preview creation fails closed without changing the map. Standard Windows environments are unsupported for cleanup previews until a supported secure entropy source is added; mapping itself remains available.
+Cleanup previews prefer secure token entropy from `/dev/urandom`. On hosts without that device, DGHUD uses a bounded local confirmation token; ownership, membership, inbound exits, movement state, and the complete preview are still re-read before any mutation. Tokens expire after 30 seconds, are one-use, and never weaken the rule that personal or unowned map content is excluded.
 
 To repair incorrectly generated HUD map content, run `walkstop` first. Move out of a room before deleting only that room. The current map command intentionally includes and then recreates your current room from live GMCP. Preview exactly one scope:
 
@@ -181,7 +185,7 @@ dghud map clear current
 dghud map clear all
 ```
 
-The red mapper button performs the same `clear all` operation. Its first click previews every DGHUD-owned area and room and changes the button to `CONFIRM CLEAR`; click it again within 30 seconds to delete that exact revalidated set. The current room is then recreated immediately from live GMCP so mapping starts fresh. Unowned and personal Mudlet map content is never included.
+Map Settings provides the same `clear all` operation. Its first click previews every DGHUD-owned area and room and changes the action to `CONFIRM CLEAR`; click it again within 30 seconds to delete that exact revalidated set. The current room is then recreated immediately from live GMCP so mapping starts fresh. Unowned and personal Mudlet map content is never included.
 
 Inspect the resolved area and every exact room ID in the preview. If anything is unexpected, run `dghud map cancel`. Otherwise, confirm with the printed one-use command within 30 seconds:
 

@@ -4,7 +4,7 @@ local function sha256Hex(payload)
   if not SHA256 then SHA256=require("sha256") end
   return SHA256.hex(payload)
 end
-local Adapter={recovery_version="1.5.0"}; Adapter.__index=Adapter
+local Adapter={recovery_version="1.6.0"}; Adapter.__index=Adapter
 function Adapter.dataBase(home) return tostring(home or getMudletHomeDir()):gsub("[/\\]+$","").."/DGHUDData" end
 function Adapter.prepareDataDirectory(home)
   home=tostring(home or getMudletHomeDir()):gsub("[/\\]+$","")
@@ -507,6 +507,9 @@ function Adapter:reportColorizerStatus(status)
   return true
 end
 function Adapter:reportRoller(message) cecho("\n<gold>[DGHUD Roller]<reset> "..tostring(message or "").."\n"); return true end
+function Adapter:reportCharacterRefresh() cecho("\n<gold>[DGHUD]<reset> Refreshing inventory, combat, character, religion, runes, skills, and time…\n"); return true end
+function Adapter:reportDisplayTextScale(name) cecho("\n<gold>[DGHUD]<reset> HUD text size: <white>"..tostring(name or "Normal").."<reset>.\n"); return true end
+function Adapter:reportCommandError(message) cecho("\n<red>[DGHUD]<reset> "..tostring(message or "Command failed.").."\n"); return true end
 function Adapter:standaloneRollerPresent() return type(rawget(_G,"OGDGROLLER"))=="table" end
 function Adapter:startRollerLog(config)
   local function component(value,fallback) value=tostring(value or ""):gsub("[^%w%._%-]","_"); if value=="" or value=="." or value==".." then return fallback end; return value end
@@ -597,6 +600,26 @@ end
 function Adapter.loadUpdateSettings()
   local loader=loadfile(updateSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.auto_apply)=="boolean" then return value end; return nil
 end
+local function displaySettingsPath() return Adapter.dataBase().."/display-settings.lua" end
+function Adapter.displaySettingsSnapshot(config)
+  local scale=tonumber(type(config)=="table" and config.side_text_scale)
+  if not scale or scale<.8 or scale>1.2 then return nil,"HUD text scale must be between 0.8 and 1.2" end
+  return {side_text_scale=scale}
+end
+function Adapter:saveDisplaySettings(config)
+  local snapshot,snapshotErr=Adapter.displaySettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
+  local base=Adapter.dataBase(); lfs.mkdir(base); local destination=displaySettingsPath(); local temp=destination..".tmp"
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f }\n",snapshot.side_text_scale)); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
+  local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
+end
+function Adapter.loadDisplaySettings()
+  local loader=loadfile(displaySettingsPath()); if not loader then return nil end
+  local ok,value=pcall(loader); if not ok then return nil end
+  local snapshot=Adapter.displaySettingsSnapshot(value); return snapshot
+end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end
@@ -612,7 +635,9 @@ function Adapter.characterPrompt(value)
   return line:match("^>")~=nil or line:match("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>")~=nil
 end
 function Adapter:isCharacterActive()
-  if Adapter.characterPrompt(getCurrentLine and getCurrentLine() or "") then return true end
+  local line=tostring(getCurrentLine and getCurrentLine() or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%s*(.-)%s*$")
+  if line=="Dragon's Gate Menu" or line:find("Dragon's Gate Character Creator",1,true) or line:match("^Your selection,.-%?%s*$") or line:match("^Do you wish to %(C, D, V, Q%) %?%s*$") or line:match("^How would you like to begin") then return false end
+  if Adapter.characterPrompt(line) then return true end
   local status=gmcp and gmcp.Char and gmcp.Char.Status
   if type(status)=="table" and type(status.name)=="string" and status.name~="" then return true end
   local controller=DGHUD and DGHUD.controller
@@ -690,7 +715,8 @@ end
 function Adapter:recoveryPackageCurrent()
   if not hasPackage("DGHUDRecovery") then return false end
   local runtime=rawget(_G,"DGHUDRecovery")
-  return type(runtime)=="table" and Adapter.versionAtLeast(runtime.version,Adapter.recovery_version) and type(runtime.alias)=="number" and runtime.alias>0 and type(runtime.run)=="function"
+  local github=self.settings and self.settings.github or {}
+  return type(runtime)=="table" and Adapter.versionAtLeast(runtime.version,Adapter.recovery_version) and runtime.owner==github.owner and runtime.repository==github.repository and type(runtime.alias)=="number" and runtime.alias>0 and type(runtime.run)=="function"
 end
 function Adapter:verifyFileAsync(path,digest,done)
   done=done or function() end
