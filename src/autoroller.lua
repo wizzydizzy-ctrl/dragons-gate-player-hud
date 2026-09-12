@@ -5,7 +5,7 @@ local oldOrder=order
 local creatorFirst={"STR","INT","WIS","DEX","AGI","CON"}
 local creatorSecond={"CHA","WIL","VOI","PER","APP","MP"}
 local currentCreatorSecond={"CHA","WIL","VOI","PER","APP"}
-local ranks={awful=1,poor=2,low=3,aver=4,average=4,fair=5,good=6,great=7,excel=7}
+local ranks={awful=1,poor=2,low=3,aver=4,average=4,fair=5,good=6,great=7,excel=7,superb=7}
 local rankLabels={[1]="Awful",[2]="Poor",[3]="Low",[4]="Aver",[5]="Fair",[6]="Good",[7]="Great"}
 local maximumTotal=#order*7
 local arrangeOrders={[11]=legacyOrder,[12]=order}
