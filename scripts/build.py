@@ -12,6 +12,15 @@ def migration_source_version():
     match=re.search(r'\bBridge\s*=\s*\{version\s*=\s*["\']([^"\']+)["\']',(ROOT/'src/migration_bridge.lua').read_text())
     if not match: raise ValueError('could not determine migration bridge version')
     return match.group(1)
+VIEW_CONTRACT_FILES=('view.lua','navigation.lua')
+def view_contract():
+    digest=hashlib.sha256()
+    for name in VIEW_CONTRACT_FILES:
+        payload=(ROOT/'src'/name).read_bytes()
+        digest.update(name.encode('utf-8')+b'\0')
+        digest.update(len(payload).to_bytes(8,'big'))
+        digest.update(payload)
+    return digest.hexdigest()
 def script_node(name,code,package_name='DragonsGateHUD'):
     return f'''<Script isActive="yes" isFolder="no"><name>{html.escape(name)}</name><packageName>{html.escape(package_name)}</packageName><script>{html.escape(code)}</script><eventHandlerList/></Script>'''
 def recovery_script_node(code):
@@ -21,6 +30,10 @@ def runtime_source():
     module_loaders=[]
     for module in MODULES:
         code=(ROOT/'src'/f'{module}.lua').read_text()
+        if module=='defaults':
+            marker='__DGHUD_VIEW_CONTRACT__'
+            if code.count(marker)!=1: raise ValueError('defaults.view_contract marker is missing or ambiguous')
+            code=code.replace(marker,view_contract())
         module_loaders.append(f'package.preload["{module}"] = function(...)\n{code}\nend')
     return '\n'.join([readiness,*module_loaders,(ROOT/'src/entry.lua').read_text()])
 def bootstrap_code():
@@ -77,7 +90,7 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_
   if downloaded~=path then return end; stopWatchers(); cecho("\\n<gold>[DGHUD Recovery]<reset> Replacing only the DragonsGateHUD package…\\n")
   local preserved,preserveErr=preserveData(); if not preserved then fail("Personal data preflight failed; nothing was removed: "..tostring(preserveErr)); return end
   local retired=rawget(_G,"DGHUD")
-  local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end end end
+  local function clearHandoff() local hud=rawget(_G,"DGHUD"); if hud==retired and type(hud)=="table" then hud._update_reinstall_pending=nil; hud._view_handoff=nil; if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end end end
   local function awaitHealthy(remaining)
     local hud=rawget(_G,"DGHUD"); local healthy=false
     if hasHUDPackage() and type(hud)=="table" and hud~=retired and type(hud.healthCheck)=="function" then local ok,value=pcall(hud.healthCheck); healthy=ok and value==true end
@@ -86,9 +99,9 @@ handlers[#handlers+1]=registerAnonymousEventHandler("sysDownloadDone",function(_
     timers[#timers+1]=tempTimer(0.25,function() awaitHealthy(remaining-1) end)
   end
   local function installClean() local installed=installPackage(path); if installed==nil then clearHandoff(); fail("Reinstall failed. Close and reopen this profile, then run dghud recover again."); return end; awaitHealthy(120) end
-  local function removeThenInstall(remaining)
+    local function removeThenInstall(remaining)
     if not hasHUDPackage() then installClean(); return end
-    local hud=rawget(_G,"DGHUD"); if type(hud)=="table" then hud._update_reinstall_pending=true; if type(hud.controller)=="table" then local controller=hud.controller; controller.update_handoff=true; local schema=hud.settings and tonumber(hud.settings.view_schema); if schema and controller.view and controller.view.root then hud._view_handoff={{schema=schema,view=controller.view}}; controller.update_preserve_view=true end end end
+    local hud=rawget(_G,"DGHUD"); if type(hud)=="table" then hud._update_reinstall_pending=true; hud._view_handoff=nil; if type(hud.controller)=="table" then local controller=hud.controller; controller.update_handoff=true; controller.update_preserve_view=nil end end
     local synced,syncErr=preserveData(); if not synced then clearHandoff(); fail("Final personal data sync failed; nothing was removed: "..tostring(syncErr)); return end
     if uninstallPackage("DragonsGateHUD") then installClean(); return end
     if remaining<=0 then clearHandoff(); fail("Could not remove the broken HUD package after waiting for Mudlet to finish saving."); return end
@@ -128,9 +141,9 @@ def build(output,owner,repository,version):
     defaults_text=(ROOT/'src/defaults.lua').read_text()
     view_schema_match=re.search(r'\bview_schema\s*=\s*(\d+)',defaults_text)
     if not view_schema_match: raise ValueError('could not determine defaults.view_schema')
-    manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','view_schema':int(view_schema_match.group(1)),'archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
+    manifest={'package':'DragonsGateHUD','version':version,'minimum_mudlet':'5.0.0','view_schema':int(view_schema_match.group(1)),'view_contract':view_contract(),'archive_url':f'https://github.com/{owner}/{repository}/releases/download/v{version}/DragonsGateHUD.mpackage','archive_size':package.stat().st_size,'sha256':digest}
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    recovery_version='1.6.0'
+    recovery_version='1.7.0'
     recovery_xml=('''<?xml version="1.0" encoding="UTF-8"?><MudletPackage version="1.001"><PackageInfo><packageName>DGHUDRecovery</packageName><title>DGHUD Emergency Recovery</title><version>'''+recovery_version+'''</version><author>Dragons Gate HUD contributors</author></PackageInfo><ScriptPackage><ScriptGroup isActive="yes" isFolder="yes"><name>DGHUDRecovery</name><packageName>DGHUDRecovery</packageName>'''+recovery_script_node(recovery_code(owner,repository,recovery_version))+'''</ScriptGroup></ScriptPackage></MudletPackage>''')
     with zipfile.ZipFile(output/'DGHUDRecovery.mpackage','w',zipfile.ZIP_DEFLATED) as z:
         info=zipfile.ZipInfo('DGHUDRecovery.xml',(2026,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info,recovery_xml)

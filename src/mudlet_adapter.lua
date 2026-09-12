@@ -4,7 +4,7 @@ local function sha256Hex(payload)
   if not SHA256 then SHA256=require("sha256") end
   return SHA256.hex(payload)
 end
-local Adapter={recovery_version="1.6.0"}; Adapter.__index=Adapter
+local Adapter={recovery_version="1.7.0"}; Adapter.__index=Adapter
 function Adapter.dataBase(home) return tostring(home or getMudletHomeDir()):gsub("[/\\]+$","").."/DGHUDData" end
 function Adapter.prepareDataDirectory(home)
   home=tostring(home or getMudletHomeDir()):gsub("[/\\]+$","")
@@ -111,21 +111,21 @@ function Adapter.prepareDataDirectory(home)
   end
   return true,#warnings>0 and table.concat(warnings,"; ") or nil
 end
-function Adapter.markUpdateHandoff(hud,destinationSchema)
+function Adapter.markUpdateHandoff(hud,destinationSchema,destinationContract)
   if type(hud)~="table" then return nil end
   hud._update_reinstall_pending=true
-  local destination=tonumber(destinationSchema); local controller=type(hud.controller)=="table" and hud.controller or nil
+  local destination=tonumber(destinationSchema); local contract=type(destinationContract)=="string" and destinationContract:match("^[0-9a-fA-F]+$") and #destinationContract==64 and destinationContract or nil; local controller=type(hud.controller)=="table" and hud.controller or nil
   local existing=hud._view_handoff
-  local existingValid=type(existing)=="table" and tonumber(existing.schema)==destination and type(existing.view)=="table" and existing.view.root~=nil
+  local existingValid=contract~=nil and type(existing)=="table" and tonumber(existing.schema)==destination and existing.contract==contract and type(existing.settings_contract)=="string" and #existing.settings_contract==64 and type(existing.view)=="table" and existing.view.root~=nil and existing.view.view_contract==contract and existing.view.view_settings_contract==existing.settings_contract
   if controller then
     controller.update_handoff=true
     if type(controller.chat)=="table" and type(controller.chat.handoff)=="function" then
       local captured,snapshot=pcall(controller.chat.handoff,controller.chat)
       if captured and type(snapshot)=="table" then hud._chat_handoff=snapshot end
     end
-    local sourceSchema=hud.settings and tonumber(hud.settings.view_schema)
-    if sourceSchema and sourceSchema==destination and controller.view and controller.view.root then
-      hud._view_handoff={schema=sourceSchema,view=controller.view}; controller.update_preserve_view=true
+    local sourceSchema=hud.settings and tonumber(hud.settings.view_schema); local sourceContract=hud.settings and hud.settings.view_contract; local settingsContract=hud.settings and hud.settings.view_settings_contract
+    if contract and sourceSchema and sourceSchema==destination and sourceContract==contract and type(settingsContract)=="string" and #settingsContract==64 and controller.view and controller.view.root and controller.view.view_contract==contract and controller.view.view_settings_contract==settingsContract then
+      hud._view_handoff={schema=sourceSchema,contract=sourceContract,settings_contract=settingsContract,view=controller.view}; controller.update_preserve_view=true
     elseif not existingValid then
       hud._view_handoff=nil; controller.update_preserve_view=nil
     end
@@ -235,8 +235,11 @@ function Adapter:createView(settings)
 end
 function Adapter:adoptView(view,settings)
   if type(view)~="table" or not view.root then return nil,"preserved HUD view is unavailable" end
+  local ok,result,message=pcall(View.validateReusable,view,settings)
+  if not ok then return nil,result end
+  if not result then return nil,message or "preserved HUD view is incompatible" end
   setmetatable(view,View)
-  local ok,result,message=pcall(view.prepareForReuse,view,settings)
+  ok,result,message=pcall(view.prepareForReuse,view,settings)
   if not ok then return nil,result end
   if not result then return nil,message or "preserved HUD view could not be prepared" end
   if view.setMapCenterCallback then view:setMapCenterCallback(function(roomID) return self:centerMap(roomID) end) end
@@ -500,6 +503,11 @@ function Adapter:reportChatStatus(status)
   cecho("\n<gold>[DGHUD Chat]<reset> filter="..tostring(status.active_filter or "OFF").." visible="..tostring(status.visible_count or 0).." storage="..tostring(storage).." last storage error="..tostring(error).."\n")
   return status
 end
+function Adapter:reportChatClear(kind,count)
+  if kind=="saved" then cecho("\n<gold>[DGHUD Chat]<reset> Permanently removed "..tostring(count or 0).." saved chat log files and cleared the chatbox.\n")
+  else cecho("\n<gold>[DGHUD Chat]<reset> Cleared "..tostring(count or 0).." visible chat entries; saved history was kept.\n") end
+  return true
+end
 function Adapter:reportColorizerStatus(status)
   if type(status)~="table" then status={enabled=status==true} end
   local function word(value) return value and "ON" or "OFF" end
@@ -509,6 +517,13 @@ end
 function Adapter:reportRoller(message) cecho("\n<gold>[DGHUD Roller]<reset> "..tostring(message or "").."\n"); return true end
 function Adapter:reportCharacterRefresh() cecho("\n<gold>[DGHUD]<reset> Refreshing inventory, combat, character, religion, runes, skills, and time…\n"); return true end
 function Adapter:reportDisplayTextScale(name) cecho("\n<gold>[DGHUD]<reset> HUD text size: <white>"..tostring(name or "Normal").."<reset>.\n"); return true end
+function Adapter:reportLayoutStatus(status)
+  status=type(status)=="table" and status or {}
+  cecho("\n<gold>[DGHUD Layout]<reset> "..tostring(status.window_width or 0).."x"..tostring(status.window_height or 0).."  mode=<white>"..tostring(status.mode or "unknown").."<reset>  rails="..tostring(status.left_width or 0).."/"..tostring(status.right_width or 0).."  center="..tostring(status.center_width or 0).."\n")
+  cecho("<gold>[DGHUD Layout]<reset> lists="..tostring(status.right_lists_mode or "hidden").."  fonts="..tostring(status.body_font or 0).."/"..tostring(status.list_font or 0).."/"..tostring(status.chat_font or 0).."  text="..tostring(status.text_preset or "normal").."  wrap="..tostring(status.wrap_columns or 0).."\n")
+  cecho("<gold>[DGHUD Layout]<reset> view schema="..tostring(status.view_schema or 0).." contract="..tostring(status.view_contract or "unavailable").."\n")
+  return status
+end
 function Adapter:reportCommandError(message) cecho("\n<red>[DGHUD]<reset> "..tostring(message or "Command failed.").."\n"); return true end
 function Adapter:standaloneRollerPresent() return type(rawget(_G,"OGDGROLLER"))=="table" end
 function Adapter:startRollerLog(config)
@@ -832,10 +847,13 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     if queued==false then fail(queueErr or "download could not start"); return nil end
     return true
   end
-  local function parseManifest(path)
+  local function parseManifest(path,rollback)
     local raw=readFile(path); if not raw or #raw>(policy.manifest_limit or 65536) then return nil,nil,"manifest is missing or too large" end
     local ok,manifest=pcall(yajl.to_value,raw); if not ok then return nil,nil,"manifest JSON is invalid" end
-    local valid,why=updater:validateManifest(manifest); if not valid then return nil,nil,why end
+    local valid,why
+    if rollback then valid,why=updater:validateRollbackManifest(manifest)
+    else valid,why=updater:validateManifest(manifest) end
+    if not valid then return nil,nil,why end
     return manifest,raw
   end
   local function exactInstalled(manifest) return manifest and tostring(manifest.version)==tostring(settings.version) end
@@ -850,13 +868,14 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     if not healthy then return nil,why or "installed HUD is not healthy" end
     return true
   end
-  local function markUpdateHandoff(destinationSchema)
-    Adapter.markUpdateHandoff(rawget(_G,"DGHUD"),destinationSchema)
+  local function markUpdateHandoff(destinationSchema,destinationContract)
+    Adapter.markUpdateHandoff(rawget(_G,"DGHUD"),destinationSchema,destinationContract)
   end
   local function clearUpdateHandoff()
     local hud=rawget(_G,"DGHUD")
     if type(hud)~="table" then return end
     hud._update_reinstall_pending=nil
+    hud._view_handoff=nil
     if type(hud.controller)=="table" then hud.controller.update_handoff=nil; hud.controller.update_preserve_view=nil end
   end
   local function awaitRuntime(version,attempts,done,retiredRuntime)
@@ -896,7 +915,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     if cachedManifestRaw then
       local ok,cachedManifest=pcall(yajl.to_value,cachedManifestRaw)
       if ok then
-        local valid=updater:validateManifest(cachedManifest)
+        local valid=updater:validateRollbackManifest(cachedManifest)
         local cachedSize=fileSize(currentPath)
         if valid and exactInstalled(cachedManifest) and cachedSize and cachedSize<=(policy.package_limit or 10485760) then
           self:verifyFileAsync(currentPath,cachedManifest.sha256,function(verified)
@@ -919,21 +938,21 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
     updater:stage("Installing")
     disarmTimeout(); expectedPath=nil; expectedUrl=nil
     self.replacePackageAsync=function(_,data,name,replaceDone)
-      if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch"); return end
-      if not Adapter.isCanonicalArchivePath(packagePath) then replaceDone(nil,"package archive filename is not canonical"); return end
+      if name~="DragonsGateHUD" then replaceDone(nil,"package identity mismatch",false); return end
+      if not Adapter.isCanonicalArchivePath(packagePath) then replaceDone(nil,"package archive filename is not canonical",false); return end
       local prepareCalled,prepared,prepareWarning=pcall(Adapter.prepareDataDirectory,getMudletHomeDir())
-      if not prepareCalled or not prepared or prepareWarning then replaceDone(nil,"persistent data preflight failed; nothing was removed: "..tostring((not prepareCalled and prepared) or prepareWarning or "filesystem is unavailable")); return end
+      if not prepareCalled or not prepared or prepareWarning then replaceDone(nil,"persistent data preflight failed; nothing was removed: "..tostring((not prepareCalled and prepared) or prepareWarning or "filesystem is unavailable"),false); return end
       local retiredRuntime=rawget(_G,"DGHUD")
-      markUpdateHandoff(targetManifest.view_schema)
+      markUpdateHandoff(targetManifest.view_schema,targetManifest.view_contract)
       local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
       removeWhenReady(name,retryWindow,"could not remove existing HUD package while Mudlet was saving",function(removed,removeErr)
-        if not removed then clearUpdateHandoff(); replaceDone(nil,removeErr); return end
+        if not removed then clearUpdateHandoff(); replaceDone(nil,removeErr,false); return end
         -- Mudlet queues a full profile save on the next event-loop pass after
         -- an uninstall. Install in this same callback so that save contains the
         -- replacement rather than forcing installation to wait behind it.
         local installed=installPackage(packagePath)
-        if installed==nil then replaceDone(nil,"could not install HUD package"); return end
-        awaitRuntime(targetManifest.version,12,replaceDone,retiredRuntime)
+        if installed==nil then replaceDone(nil,"could not install HUD package",true); return end
+        awaitRuntime(targetManifest.version,12,function(ok,why) replaceDone(ok,why,true) end,retiredRuntime)
       end)
     end
     self.healthCheck=nil
@@ -951,7 +970,9 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         local retiredRuntime=rawget(_G,"DGHUD")
         local prepareCalled,prepared,prepareWarning=pcall(Adapter.prepareDataDirectory,getMudletHomeDir())
         if not prepareCalled or not prepared or prepareWarning then rollbackDone(nil,"rollback data preflight failed; nothing was removed: "..tostring((not prepareCalled and prepared) or prepareWarning or "filesystem is unavailable")); return end
-        markUpdateHandoff(rollbackManifest and rollbackManifest.view_schema)
+        -- A failed candidate may have partially mutated or deleted its widgets.
+        -- Rollback always constructs a clean view instead of leasing that tree.
+        clearUpdateHandoff()
         local retryWindow=math.max(12,math.ceil((tonumber(policy.timeout_seconds) or 30)/0.10))
         removeWhenReady(name,retryWindow,"could not remove failed HUD package while Mudlet was saving",function(removed,removeErr)
           if not removed then clearUpdateHandoff(); rollbackDone(nil,removeErr); return end
@@ -990,7 +1011,7 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
         bootstrapRollback()
       end)
     elseif path==rollbackManifestPath then
-      local manifest,_,why=parseManifest(path); if not manifest then return fail("rollback bootstrap failed: "..tostring(why)) end
+      local manifest,_,why=parseManifest(path,true); if not manifest then return fail("rollback bootstrap failed: "..tostring(why)) end
       if not exactInstalled(manifest) then return fail("rollback bootstrap returned the wrong installed version") end
       rollbackManifest=manifest
       local cachedSize=fileSize(currentPath)

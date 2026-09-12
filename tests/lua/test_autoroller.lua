@@ -116,6 +116,99 @@ test("current totals validate through 77",function()
   local ok,err=r:command("set total 78"); eq(ok,nil); assert(err:find("invalid",1,true)); eq(r.cfg.target_total,77)
 end)
 
+test("rr show reports every setting in clear groups without changing state",function()
+  local f=fake(); local saves=0
+  local r=Roller.new(f,{
+    target_total=55,hard_stop=false,max_rolls=5000,reroll_delay=.25,reroll_command="reroll",
+    arrange_mode="minimums",minimum_greats=2,minimum_good_plus=5,
+    auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=false,
+    show_every_roll=false,logging_enabled=false,log_folder="private_rolls",master_file="summary.txt",
+    min_stats={STR=5,INT=7,APP=false,MP=6},
+  },function() saves=saves+1; return true end)
+  local state=r.state
+  assert(r:command("show")); eq(r.state,state); eq(r.state.active,false); eq(saves,0); eq(#f.sent,0)
+  local output=f.messages[#f.messages]
+  for _,expected in ipairs({
+    "Autoroller status","State: INACTIVE","Protocol: Not detected yet","Auto-start is off",
+    "[Roll rules]","Target total: 55 / 77","Hard stop: off","Maximum rolls: 5000",
+    "Reroll delay: 0.25 seconds","Reroll command: reroll (fixed)",
+    "[Characteristic minimums]","Minimums enabled: ON","Require minimums to stop: OFF",
+    "STR: 5 (Fair)","INT: 7 (Great)","APP: off","Legacy MP: 6 (Good)",
+    "[Roll-and-arrange only]","MY MINIMUMS + AUTO (minimums)","Minimum Great values: 2",
+    "Minimum Good-or-Great values: 5","apply only to Roll-and-arrange pools",
+    "[Startup, output, and logs]","Print every roll: OFF","Roll logging: OFF",
+    "Log folder: private_rolls (profile-local name)","Master log: summary.txt (profile-local name)",
+  }) do assert(output:find(expected,1,true),"missing from rr show: "..expected.."\n"..output) end
+end)
+
+test("rr status explains inactive observing capturing prompt and reroll wait states",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=.2,auto_start_on_name=false})
+  assert(r:command("status")); local output=f.messages[#f.messages]
+  assert(output:find("State: INACTIVE",1,true)); assert(output:find("Protocol: Not detected yet",1,true)); assert(output:find("Phase: Idle",1,true)); assert(output:find("Auto-start is off",1,true))
+
+  assert(r:start()); assert(r:command("status")); output=f.messages[#f.messages]
+  assert(output:find("State: ACTIVE",1,true)); assert(output:find("Phase: Observing",1,true)); assert(output:find("Waiting for a complete supported roll",1,true))
+
+  assert(r:onLine(firstHeader)); assert(r:command("status")); output=f.messages[#f.messages]
+  assert(output:find("Protocol: Roll in place",1,true)); assert(output:find("Phase: Capturing roll",1,true)); assert(output:find("Reading the characteristic values",1,true))
+
+  assert(r:onLine("Low Low Low Low Low Low")); r:onLine(""); assert(r:onLine(currentSecondHeader)); assert(r:onLine("Low Low Low Low Low")); assert(r:command("status")); output=f.messages[#f.messages]
+  assert(output:find("Phase: Waiting for prompt",1,true)); assert(output:find("Roll captured; waiting for the exact decision prompt",1,true))
+
+  assert(r:onLine(creatorPrompt)); assert(r:command("status")); output=f.messages[#f.messages]
+  assert(output:find("Phase: Reroll delay",1,true)); assert(output:find("waiting for the configured reroll delay",1,true))
+  local timer=r.state.timer; f.timers[timer].fn(); assert(r:command("status")); output=f.messages[#f.messages]
+  assert(output:find("Phase: Waiting for next roll",1,true)); assert(output:find("Reroll sent or observed",1,true)); eq(#f.sent,1)
+end)
+
+test("rr status identifies a held qualifying result and its protocol",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,auto_start_on_name=true})
+  currentRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); assert(r:command("status"))
+  local output=f.messages[#f.messages]
+  assert(output:find("State: INACTIVE",1,true)); assert(output:find("Protocol: Roll in place",1,true)); assert(output:find("Phase: Result held",1,true)); assert(output:find("manual done or reroll",1,true)); assert(output:find("never sends done",1,true)); eq(#f.sent,0)
+end)
+
+test("rr status explains arranged-pool auto confirmation wait",function()
+  local f=fake(); local r=Roller.new(f,{target_total=50,auto_start_on_name=true,use_min_stats=false,arrange_mode="game_auto"})
+  assert(r:onLine("Pool: Great Good Good Good Fair Fair Fair Aver Aver Low Low")); assert(r:onLine(arrangePrompt)); assert(r:command("status"))
+  local output=f.messages[#f.messages]
+  assert(output:find("State: ACTIVE",1,true)); assert(output:find("Protocol: Roll and arrange",1,true)); assert(output:find("Phase: Arranging pool",1,true)); assert(output:find("complete assignment board and an empty pool",1,true)); eq(f.sent[1],"auto")
+end)
+
+test("rr status explains passive prompt detection and manual-stop suppression",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,auto_start_on_name=true})
+  currentRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great"); assert(r:command("status"))
+  local output=f.messages[#f.messages]
+  assert(output:find("State: INACTIVE",1,true)); assert(output:find("Protocol: Roll in place",1,true)); assert(output:find("Phase: Checking decision prompt",1,true)); assert(output:find("complete roll was seen",1,true))
+
+  assert(r:command("stop")); assert(r:command("status")); output=f.messages[#f.messages]
+  assert(output:find("State: INACTIVE",1,true)); assert(output:find("Phase: Idle",1,true)); assert(output:find("Manual stop is holding automatic rolling off",1,true)); assert(output:find("Auto-start: ON",1,true))
+end)
+
+test("rr status explains the next confirmed minimum placement wait",function()
+  local f=fake(); local r=Roller.new(f,{target_total=50,auto_start_on_name=true,use_min_stats=true,arrange_mode="minimums",min_stats={INT=6}})
+  assert(r:onLine("Pool: Great Good Good Good Fair Fair Fair Aver Aver Low Low")); assert(r:onLine(arrangePrompt)); assert(r:command("status"))
+  local output=f.messages[#f.messages]
+  assert(output:find("Protocol: Roll and arrange",1,true)); assert(output:find("Phase: Arranging pool",1,true)); assert(output:find("next minimum placement and updated pool",1,true)); eq(f.sent[1],"int great")
+end)
+
+test("rr config and settings alias rr show while help advertises status and show",function()
+  local f=fake(); local r=Roller.new(f,{target_total=53,min_stats={}})
+  assert(r:command("config")); local config=f.messages[#f.messages]; assert(config:find("[Roll rules]",1,true))
+  assert(r:command("settings")); eq(f.messages[#f.messages],config)
+  assert(r:command("help")); local help=f.messages[#f.messages]
+  assert(help:find("rr start|stop|status|show|stats|last|reset|help",1,true)); assert(help:find("rr status to see what the roller is waiting for",1,true)); assert(help:find("rr show to display every saved setting",1,true))
+end)
+
+test("rr reports never expose legacy log paths",function()
+  local f=fake(); local r=Roller.new(f,{target_total=53,log_folder="/Users/example/private",master_file="C:\\private\\rolls.txt",min_stats={}})
+  assert(r:command("show")); local output=f.messages[#f.messages]
+  assert(output:find("Log folder: custom name hidden",1,true)); assert(output:find("Master log: custom name hidden",1,true))
+  assert(not output:find("/Users/example",1,true)); assert(not output:find("C:\\private",1,true))
+  assert(r:command("status")); output=f.messages[#f.messages]
+  assert(not output:find("private",1,true)); assert(not output:find("rolls.txt",1,true))
+end)
+
 test("malformed or incomplete new rows never reuse a previous roll",function()
   local f=fake(); local r=Roller.new(f,{target_total=84,reroll_delay=0,auto_start_on_name=true})
   newRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great Great"); assert(r:onLine(creatorPrompt)); eq(r.state.rolls,1)

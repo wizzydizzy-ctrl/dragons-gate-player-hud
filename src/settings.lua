@@ -1,3 +1,4 @@
+local SHA=require("sha256")
 local Settings={CURRENT_SCHEMA=1}
 local function copy(value,seen)
   if type(value)~="table" then return value end
@@ -8,6 +9,15 @@ local function overlay(target,source)
   for k,v in pairs(source or {}) do if type(v)=="table" and type(target[k])=="table" then overlay(target[k],v) else target[k]=copy(v) end end
 end
 function Settings.merge(defaults,overrides) local result=copy(defaults or {}); overlay(result,overrides or {}); return result end
+local function canonical(value)
+  local kind=type(value)
+  if kind~="table" then return kind..":"..tostring(value) end
+  local keys={}; for key in pairs(value) do keys[#keys+1]=tostring(key) end; table.sort(keys)
+  local parts={"{"}; for _,key in ipairs(keys) do parts[#parts+1]=key; parts[#parts+1]="="; parts[#parts+1]=canonical(value[key]); parts[#parts+1]=";" end; parts[#parts+1]="}"; return table.concat(parts)
+end
+function Settings.viewSettingsContract(settings)
+  return SHA.hex(canonical({theme=type(settings)=="table" and settings.theme or {}}))
+end
 function Settings.migrate(input)
   local result=copy(input or {}); local changed=false; local schema=tonumber(result.schema) or 0
   if schema<1 then result.update=result.update or {}; result.update.auto_apply=false; result.auto_update=nil; result.schema=1; changed=true end
@@ -21,7 +31,12 @@ function Settings.migrate(input)
 end
 function Settings.resolve(defaults,input)
   local migrated,changed=Settings.migrate(input)
-  return Settings.merge(defaults,migrated),migrated,changed
+  local resolved=Settings.merge(defaults,migrated)
+  -- Release identity and compatibility values belong to the installed package,
+  -- never to a persisted user override from an older release.
+  for _,key in ipairs({"view_schema","view_contract","edition","package_name","version","github"}) do resolved[key]=copy(defaults and defaults[key]) end
+  resolved.view_settings_contract=Settings.viewSettingsContract(resolved)
+  return resolved,migrated,changed
 end
 function Settings.colorEnabled(settings)
   local colorization=type(settings)=="table" and settings.colorization or nil

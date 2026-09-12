@@ -1,3 +1,4 @@
+local OutputColorizer=require("output_colorizer")
 local Parser={}
 
 local name="([%w_%-']+)"
@@ -63,6 +64,14 @@ local rules={
 
 local function builtIn(category,message,metadata,character,now,line)
   return entry(category,message,metadata,character,now,"builtin",line)
+end
+
+local combatKinds={attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true}
+local function parseCombat(line,character,now)
+  local segments=OutputColorizer.parse(line)
+  for _,segment in ipairs(type(segments)=="table" and segments or {}) do
+    if combatKinds[segment.kind] then return builtIn("COMBAT",line,nil,character,now,line) end
+  end
 end
 
 local function parseStaffVoice(line,character,now)
@@ -156,6 +165,8 @@ function Parser.parse(line,character,now)
   local target
   target,message=line:match("^You whisper to "..name..", \"(.*)\"$")
   if target then return builtIn("WHISPER",message,{speaker=trim(character),target=target},character,now,line) end
+  local combat=parseCombat(line,character,now)
+  if combat then return combat end
   return parseRoom(line,character,now)
 end
 

@@ -3,7 +3,7 @@ local Parser=require("chat_parser")
 local History=require("chat_history")
 
 local function fake(entries)
-  local f={next=0,triggers={},storageAppends=0,storageEntries=entries or {},storedCharacters={},errors=0,epochValue=100,timestampValue="2026-08-31T13:00:00-04:00",character="Dace Alterac",loadRecentCalls=0,loadedCharacterKeys={}}
+  local f={next=0,triggers={},storageAppends=0,storageClears=0,storageEntries=entries or {},storedCharacters={},errors=0,epochValue=100,timestampValue="2026-08-31T13:00:00-04:00",character="Dace Alterac",loadRecentCalls=0,loadedCharacterKeys={}}
   function f:addLineTrigger(fn) if self.triggerFailure then error(self.triggerFailure) end; self.next=self.next+1; local id="trigger-"..self.next; self.triggers[id]=fn; return id end
   function f:killTrigger(id) self.triggers[id]=nil end
   function f:line(value) for _,fn in pairs(self.triggers) do fn(value) end end
@@ -25,6 +25,11 @@ local function fake(entries)
     f.storedCharacters[#f.storedCharacters+1]=entry.character
     if f.storageFailure then return nil,"disk full" end
     return true
+  end
+  function f.storage:clearProfileHistory(confirmed)
+    f.storageClears=f.storageClears+1; f.storageClearConfirmed=confirmed
+    if f.storageClearFailure then return nil,"delete denied" end
+    return true,f.storageRemoved or 0
   end
   return f
 end
@@ -126,4 +131,42 @@ test("chat handoff remains profile-wide when the replacement has another charact
   local handoff=original:handoff(); local second=fake(); second.character="Gia"; second.storageEntriesByKey={profile={{category="ESP",message="older disk line"}}}
   local restored=makeController(second); assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
   eq(second.loadRecentCalls,0); eq(restored.currentCharacterKey,"profile"); eq(restored:entries()[1].message,"Dace only")
+end)
+
+test("visible clear empties memory without touching saved profile history",function()
+  local f=fake(); local notifications=0
+  local controller=makeController(f,function() notifications=notifications+1 end)
+  assert(controller:start()); assert(controller:capture("QUEST","keep on disk")); local before=notifications
+  local ok,removed=controller:clearVisibleHistory()
+  eq(ok,true); eq(removed,1); eq(#controller:entries(),0); eq(#controller.history:categories(),0)
+  eq(f.storageAppends,1); eq(f.storageClears,0); eq(notifications,before+1)
+  assert(controller:capture("QUEST","keep on disk")); eq(f.storageAppends,2)
+end)
+
+test("saved clear requires literal confirmation and defaults to retaining all history",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:capture("QUEST","retain me"))
+  for _,confirmation in ipairs({false,"yes",1}) do
+    local ok,err=controller:clearSavedHistory(confirmation)
+    eq(ok,nil); eq(err:find("explicit confirmation",1,true)~=nil,true)
+  end
+  local ok,err=controller:clearSavedHistory()
+  eq(ok,nil); eq(err:find("explicit confirmation",1,true)~=nil,true)
+  eq(f.storageClears,0); eq(#controller:entries(),1)
+end)
+
+test("confirmed saved clear removes profile history from disk and memory",function()
+  local f=fake(); f.storageRemoved=4; local notifications=0
+  local controller=makeController(f,function() notifications=notifications+1 end)
+  assert(controller:start()); assert(controller:capture("QUEST","remove me")); assert(controller:setFilter("QUEST")); local before=notifications
+  local ok,removed=controller:clearSavedHistory(true)
+  eq(ok,true); eq(removed,4); eq(f.storageClears,1); eq(f.storageClearConfirmed,true)
+  eq(#controller.history:entries("ALL"),0); eq(controller.filter,"QUEST"); eq(controller.currentCharacterKey,"profile")
+  eq(notifications,before+1); eq(#controller:handoff().entries,0)
+  f.character="Gia"; assert(controller:syncCharacter()); eq(f.loadRecentCalls,1); eq(#controller:entries(),0)
+end)
+
+test("failed saved clear retains memory and reports the storage failure",function()
+  local f=fake(); f.storageClearFailure=true; local controller=makeController(f); assert(controller:start()); assert(controller:capture("QUEST","retain after failure"))
+  local ok,err=controller:clearSavedHistory(true)
+  eq(ok,nil); eq(err,"delete denied"); eq(#controller:entries(),1); eq(f.storageClears,1); eq(f.errors,1)
 end)

@@ -40,6 +40,21 @@ test("resolves migrated chat settings without discarding user keys",function()
   eq(migrated.chat.personal_option,"keep"); eq(resolved.personal,"untouched")
 end)
 
+test("release identity cannot be replaced by stale persisted preferences",function()
+  local installed={schema=1,view_schema=4,view_contract=string.rep("a",64),edition="player",package_name="DragonsGateHUD",version="2.0.0",github={owner="safe",repository="player"},theme={accent="#112233"}}
+  local resolved,migrated=Settings.resolve(installed,{view_schema=1,view_contract=string.rep("b",64),edition="staff",package_name="Other",version="1.0.0",github={owner="other",repository="other"},theme={accent="#abcdef"},personal="kept"})
+  eq(resolved.view_schema,4); eq(resolved.view_contract,string.rep("a",64)); eq(resolved.edition,"player")
+  eq(resolved.package_name,"DragonsGateHUD"); eq(resolved.version,"2.0.0"); eq(resolved.github.owner,"safe"); eq(resolved.github.repository,"player")
+  eq(resolved.theme.accent,"#abcdef"); eq(resolved.personal,"kept"); eq(migrated.version,"1.0.0")
+end)
+
+test("view settings contract is deterministic and changes with the resolved theme",function()
+  local a=Settings.viewSettingsContract({theme={text="#ffffff",panel="#000000"}})
+  local b=Settings.viewSettingsContract({theme={panel="#000000",text="#ffffff"}})
+  local c=Settings.viewSettingsContract({theme={panel="#000000",text="#eeeeee"}})
+  eq(#a,64); eq(a,b); eq(a==c,false)
+end)
+
 test("colorization defaults enabled and preserves unrelated overrides",function()
   local resolved,migrated=Settings.resolve(defaults,{personal="untouched",colorization={exits_enabled=false,personal_option="keep"}})
   eq(resolved.colorization.enabled,true); eq(resolved.colorization.room_enabled,true); eq(resolved.colorization.exits_enabled,false); eq(resolved.colorization.currency_enabled,true); eq(resolved.colorization.personal_option,"keep")

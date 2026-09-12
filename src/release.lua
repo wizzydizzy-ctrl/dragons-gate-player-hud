@@ -26,10 +26,24 @@ function Release.validateManifest(manifest,policy)
   if type(manifest)~="table" or type(policy)~="table" then return nil,"manifest and policy are required" end
   if manifest.package~="DragonsGateHUD" then return nil,"unexpected package identity" end
   if not versionParts(manifest.version) or not versionParts(manifest.minimum_mudlet) then return nil,"invalid version" end
-  if manifest.view_schema~=nil and (tonumber(manifest.view_schema)~=manifest.view_schema or manifest.view_schema<1 or manifest.view_schema%1~=0) then return nil,"invalid view schema" end
+  if type(manifest.view_schema)~="number" or manifest.view_schema<1 or manifest.view_schema%1~=0 then return nil,"invalid view schema" end
+  if type(manifest.view_contract)~="string" or not manifest.view_contract:match("^[0-9a-fA-F]+$") or #manifest.view_contract~=64 then return nil,"invalid view contract" end
   if type(manifest.sha256)~="string" or not manifest.sha256:match("^[0-9a-fA-F]+$") or #manifest.sha256~=64 then return nil,"invalid SHA-256" end
   local size=tonumber(manifest.archive_size); if not size or size<1 or size>(policy.package_limit or 10485760) then return nil,"archive exceeds size policy" end
   local ok,err=Release.validateAssetUrl(manifest.archive_url,policy.owner,policy.repository,manifest.version); if not ok then return nil,err end
   return true
+end
+function Release.validateRollbackManifest(manifest,policy,installedVersion)
+  if type(manifest)~="table" then return nil,"manifest and policy are required" end
+  if tostring(manifest.version)~=tostring(installedVersion) then return nil,"rollback manifest version does not match the installed HUD" end
+  local compared,comparison=pcall(Release.compareVersions,manifest.version,"0.3.33")
+  if not compared then return nil,"invalid release version" end
+  if manifest.view_contract~=nil or comparison>=0 then return Release.validateManifest(manifest,policy) end
+  -- Releases before v0.3.33 did not publish a view contract. This compatibility
+  -- path is rollback-only and still validates the exact installed version,
+  -- package identity, versioned URL, archive size, and SHA-256 digest.
+  local legacy={}; for key,value in pairs(manifest) do legacy[key]=value end
+  legacy.view_contract=string.rep("0",64)
+  return Release.validateManifest(legacy,policy)
 end
 return Release

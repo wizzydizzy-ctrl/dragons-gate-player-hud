@@ -5,7 +5,7 @@ local function fakeChatRuntimeWithPersonalTrigger()
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
   function f:setBorders() end
   function f:getWindowSize() return 1920,1080 end
-  function f:createView() return {root={},update=function() end,applyLayout=function() end,renderChat=function() end,setChatFilterCallback=function() end,delete=function() end} end
+  function f:createView() return {root={},validateReusable=function() return true end,update=function() end,applyLayout=function() end,renderChat=function() end,setChatFilterCallback=function() end,delete=function() end} end
   function f:addEvent(name,fn) self.next=self.next+1; local id="event-"..self.next; self.events[id]={name=name,fn=fn}; return id end
   function f:killEvent(id) self.events[id]=nil end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end
@@ -33,6 +33,7 @@ local function fakeChatRuntimeWithPersonalTrigger()
       self.entries[#self.entries+1]=entry
       return true
     end
+    function storage:clearProfileHistory(confirmed) if confirmed~=true then return nil,"confirmation required" end; self.entries={}; return true,2 end
     function storage:close() return true end
     function storage:characterKey() return "profile" end
     return storage
@@ -60,6 +61,13 @@ test("capture reload shutdown and chat status preserve personal runtime",functio
   eq(status.storage_key,"profile"); eq(status.last_storage_error,"disk full"); eq(runtime.reportedChatStatus,status)
   hud:reload(); eq(runtime.triggers[personal]~=nil,true); eq(runtime.personalTrigger,true); eq(hud.chat:entries()[1].message,"hello")
   hud:shutdown(); eq(runtime.triggers[personal]~=nil,true); DGHUD=nil
+end)
+
+test("chat clear aliases keep saved logs unless the full confirmation command is used",function()
+  local runtime=fakeChatRuntimeWithPersonalTrigger(); local hud=Main.new(runtime,{layout={},chat={enabled=true,visible_limit=1000,dedupe_seconds=3}}); DGHUD={controller=hud}; Main.installChatApi(DGHUD); assert(hud:start()); assert(hud.chat:capture("QUEST","keep on disk"))
+  local clear=findAlias(runtime,"^dghud chat clear$"); assert(clear()); eq(#hud.chat:entries(),0)
+  assert(hud.chat:capture("QUEST","delete from disk")); local arm=findAlias(runtime,"^dghud chat clear saved$"); local ok,why=arm(); eq(ok,nil); eq(why,"confirmation required"); eq(#hud.chat:entries(),1)
+  local confirm=findAlias(runtime,"^dghud chat clear saved confirm$"); local saved,count=confirm(); eq(saved,true); eq(count,2); eq(#hud.chat:entries(),0); hud:shutdown(); DGHUD=nil
 end)
 
 test("disabled chat leaves personal trigger runtime untouched",function()

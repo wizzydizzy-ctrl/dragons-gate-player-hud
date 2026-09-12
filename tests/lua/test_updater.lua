@@ -1,6 +1,6 @@
 local Updater=require("updater"); local SHA=require("sha256"); local Adapter=require("mudlet_adapter"); local Roller=require("autoroller")
 local function releaseManifest(version)
-  return {package="DragonsGateHUD",version=version,minimum_mudlet="5.0.0",archive_url="https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/download/v"..version.."/DragonsGateHUD.mpackage",sha256=string.rep("a",64),archive_size=100}
+  return {package="DragonsGateHUD",version=version,minimum_mudlet="5.0.0",view_schema=4,view_contract=string.rep("b",64),archive_url="https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/download/v"..version.."/DragonsGateHUD.mpackage",sha256=string.rep("a",64),archive_size=100}
 end
 local updateSettings={version="0.2.83",github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"},update={package_limit=1000}}
 test("roller settings serialization preserves arrangement choices disabled limits and MP",function()
@@ -123,12 +123,13 @@ test("explicit migration read errors fail closed instead of looking like EOF",fu
   end)
   lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
 end)
-test("rollback handoff retains a valid lease owned by a failed candidate",function()
-  local view={root={}}; local snapshot={schema=1,character_key="dace",filter="ALL",entries={{message="kept"}}}
-  local hud={settings={view_schema=1},controller={view=nil,chat={handoff=function() return snapshot end}},_view_handoff={schema=1,view=view}}
-  local lease=Adapter.markUpdateHandoff(hud,1); eq(lease.view,view); eq(hud.controller.update_handoff,true)
+test("update handoff retains only an exact contracted view lease",function()
+  local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local view={root={},view_contract=contract,view_settings_contract=settingsContract}; local snapshot={schema=1,character_key="dace",filter="ALL",entries={{message="kept"}}}
+  local hud={settings={view_schema=1,view_contract=contract,view_settings_contract=settingsContract},controller={view=view,chat={handoff=function() return snapshot end}}}
+  local lease=Adapter.markUpdateHandoff(hud,1,contract); eq(lease.view,view); eq(lease.settings_contract,settingsContract); eq(hud.controller.update_handoff,true)
   eq(hud._chat_handoff,snapshot)
-  eq(Adapter.markUpdateHandoff(hud,2),nil)
+  eq(Adapter.markUpdateHandoff(hud,2,contract),nil)
+  eq(Adapter.markUpdateHandoff(hud,1,nil),nil)
 end)
 test("verified update archive retains the Mudlet package name",function()
   eq(Adapter.updateArchivePath("/profile"),"/profile/DGHUDUpdater/staging/DragonsGateHUD.mpackage")
@@ -181,22 +182,25 @@ local function recoveryHarness(options,body)
   if not ok then error(err,0) end
 end
 test("current recovery companion is retained without a download",function()
-  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.7.0",runtimeVersion="1.7.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,0); eq(h.uninstalls,0) end)
+end)
+test("previous recovery companion is upgraded so clean-view recovery reaches existing users",function()
+  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
 end)
 test("package metadata alone cannot prove recovery runtime activation",function()
-  recoveryHarness({version="1.6.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
+  recoveryHarness({version="1.7.0"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); eq(h.uninstalls,0) end)
 end)
 test("recovery runtime without a callable registered alias is replaced",function()
-  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
+  recoveryHarness({version="1.7.0",runtimeVersion="1.7.0",runtimeAlias=0},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
 end)
 test("recovery companion from the other HUD edition is replaced",function()
-  recoveryHarness({version="1.6.0",runtimeVersion="1.6.0",runtimeRepository="dragons-gate-staff-hud"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
+  recoveryHarness({version="1.7.0",runtimeVersion="1.7.0",runtimeRepository="dragons-gate-staff-hud"},function(h) eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1) end)
 end)
 test("outdated recovery companion waits out a save and verifies deferred activation",function()
   recoveryHarness({version="1.0.0",runtimeVersion="1.0.0",busy=1,deferActivation=true},function(h)
     eq(h.adapter:ensureRecoveryPackage(),true); eq(#h.downloads,1); h:download(); eq(h.uninstalls,1); eq(h.installs,0); eq(h.adapter.recovery_installing,true)
     assert(h:run(.10)); eq(h.uninstalls,2); eq(h.installs,1); eq(h.adapter.recovery_installing,true)
-    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.6.0"); eq(DGHUDRecovery.repository,"dragons-gate-player-hud"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
+    assert(h:run(.25)); eq(h.adapter.recovery_installing,false); eq(DGHUDRecovery.version,"1.7.0"); eq(DGHUDRecovery.repository,"dragons-gate-player-hud"); assert(DGHUDRecovery.alias>0); eq(type(DGHUDRecovery.run),"function"); eq(#h.messages,0)
   end)
 end)
 test("stable manifest downloads avoid slow cache-busting redirects",function()
@@ -243,6 +247,12 @@ test("replacement failure attempts rollback before completing",function()
   Updater.new(adapter,{}):installVerifiedAsync("payload",SHA.hex("payload"),function(ok,err) result={ok,err}; order[#order+1]="done" end)
   eq(table.concat(order,","),"replace,rollback,done"); eq(result[1],nil); eq(result[2],"install failed")
 end)
+test("replacement failure before package mutation does not reinstall a healthy HUD",function()
+  local rolledBack=false; local result
+  local adapter={replacePackageAsync=function(_,_,_,done) done(nil,"preflight failed; nothing was removed",false) end,rollbackAsync=function() rolledBack=true end}
+  Updater.new(adapter,{}):installVerifiedAsync("payload",SHA.hex("payload"),function(ok,err) result={ok,err} end)
+  eq(rolledBack,false); eq(result[1],nil); eq(result[2],"preflight failed; nothing was removed")
+end)
 test("manifest compatibility blocks replacement on an older known Mudlet",function()
   local u=Updater.new({mudletVersion=function() return "4.17.2" end},updateSettings)
   local ok,err=u:validateManifest(releaseManifest("0.2.84")); eq(ok,nil); assert(err:find("older than required",1,true))
@@ -285,9 +295,12 @@ local function replacementHarness(options,body)
   globalNames[#globalNames+1]="getEpoch"
   local saved={}; for _,name in ipairs(globalNames) do saved[name]=_G[name] end
   local originalOpen,originalRename,originalRemove=io.open,os.rename,os.remove; local h={files={},downloads={},handlers={},timers={},nextID=0,active=true,uninstalls=0,installs={},result=nil,targetUninstallBusy=tonumber(options.targetUninstallBusy) or 0,rollbackUninstallBusy=tonumber(options.rollbackUninstallBusy) or 0}
-  local target=releaseManifest("0.2.84"); target.sha256=SHA.hex("new-package")
-  local rollback=releaseManifest("0.2.83"); rollback.sha256=SHA.hex("old-package")
-  h.manifests={latest={tag_name="v0.2.84"},target=target,rollback=rollback}
+  local installedVersion=options.legacyRollbackManifest and "0.3.32" or "0.2.83"
+  local target=releaseManifest(options.legacyRollbackManifest and "0.3.33" or "0.2.84"); target.sha256=SHA.hex("new-package")
+  local rollback=releaseManifest(installedVersion); rollback.sha256=SHA.hex("old-package")
+  if options.legacyRollbackManifest then rollback.view_contract=nil end
+  h.manifests={latest={tag_name="v"..target.version},target=target,rollback=rollback}
+  local harnessSettings={version=installedVersion,github=updateSettings.github,update=updateSettings.update}
   local originalHex=SHA.hex; local originalPrepare=Adapter.prepareDataDirectory
   local function restore() SHA.hex=originalHex; Adapter.prepareDataDirectory=originalPrepare; io.open=originalOpen; os.rename,os.remove=originalRename,originalRemove; for _,name in ipairs(globalNames) do _G[name]=saved[name] end end
   local ok,err=pcall(function()
@@ -331,7 +344,7 @@ local function replacementHarness(options,body)
     function h:done(path,payload) self.files[path]=payload; self.handlers.sysDownloadDone(nil,path) end
     function h:error(url,message) self.handlers.sysDownloadError(nil,message or "download failed",url) end
     function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingVersion then DGHUD={settings={version=self.pendingVersion},healthCheck=function() return true end}; self.pendingVersion=nil end; return true end end return false end
-    h.adapter=Adapter.new(); h.updater=Updater.new(h.adapter,updateSettings); assert(h.updater:update(function(success,message) h.result={success,message} end,options.manifest,options.manifestRaw))
+    h.adapter=Adapter.new(); h.updater=Updater.new(h.adapter,harnessSettings); assert(h.updater:update(function(success,message) h.result={success,message} end,options.manifest,options.manifestRaw))
     body(h)
   end)
   restore(); if not ok then error(err,0) end
@@ -341,6 +354,12 @@ local function deliverTarget(h)
   h:done(h.downloads[2].path,"target")
   h:done(h.downloads[3].path,"new-package")
 end
+test("update can bootstrap a checksum-verified exact legacy rollback manifest",function()
+  replacementHarness({legacyRollbackManifest=true},function(h)
+    deliverTarget(h); h:done(h.downloads[4].path,"rollback"); h:done(h.downloads[5].path,"old-package")
+    eq(h.result[1],true); eq(h.uninstalls,1); eq(h.files["/profile/DGHUDUpdater/previous.mpackage"],"old-package")
+  end)
+end)
 test("first updater-managed update bootstraps exact rollback before uninstall",function()
   replacementHarness({},function(h)
     deliverTarget(h); eq(h.uninstalls,0); eq(#h.downloads,4)

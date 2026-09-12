@@ -149,6 +149,27 @@ function Controller:setFilter(filter)
   return true
 end
 
+function Controller:clearVisibleHistory()
+  local removed=self.history:clearVisible()
+  self:notify()
+  return true,removed
+end
+
+function Controller:clearSavedHistory(confirmed)
+  if confirmed~=true then return nil,"explicit confirmation is required to permanently clear saved chat history" end
+  local cleared,removedOrError=call(self.storage,"clearProfileHistory",true)
+  if not cleared then
+    local message=removedOrError or "saved chat history clearing is unavailable"
+    self:reportStorageError(message)
+    return nil,message
+  end
+  self.history:clearVisible()
+  self.currentCharacterKey="profile"
+  self.historiesByCharacter={profile=self.history}
+  self:notify()
+  return true,tonumber(removedOrError) or 0
+end
+
 function Controller:shutdown()
   self.started=false
   local trigger=self.trigger; self.trigger=nil; local storage=self.storage

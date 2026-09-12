@@ -6,6 +6,8 @@ The chatbox stays above the normal game display. It copies recognized communicat
 
 Chat history belongs to the Mudlet profile, not to one character. Switching characters in the same profile keeps the same history.
 
+Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanently remove all saved DGHUD chat history. Permanent deletion requires two clicks; the command-line equivalent requires the full `dghud chat clear saved confirm` phrase.
+
 ## Built-in filters
 
 - **ALL** — Every captured category.
@@ -15,8 +17,9 @@ Chat history belongs to the Mudlet profile, not to one character. Switching char
 - **DRAGON** — Mental and Dragon link messages.
 - **CONTACT** — Thoughts echoing through the area.
 - **STAFF** — Recognized Guide, GM, Elder, sends, and voice formats.
+- **COMBAT** — Conservative incoming attacks, damage, movement blocks, spell threats, upkeep, recovery, and similar high-value combat lines.
 
-If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too.
+If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too. The built-in Combat filter uses the same narrow matching rules as DGHUD's optional combat coloring, so ordinary room prose is not copied into it.
 
 ## Examples DGHUD recognizes
 

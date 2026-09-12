@@ -12,7 +12,7 @@ test("chat height scales and clamps",function()
   eq(Layout.compute(3840,2160).chat_height<=320,true)
 end)
 test("chat allocation preserves a usable console remainder at medium and compact thresholds",function()
-  for _,case in ipairs({{width=1200,header=66},{width=760,header=116}}) do
+  for _,case in ipairs({{width=1200,header=66},{width=760,header=210}}) do
     local sample=Layout.compute(case.width,700); local threshold=case.header+sample.bottom+160+120
     local above=Layout.compute(case.width,threshold+1); local at=Layout.compute(case.width,threshold); local below=Layout.compute(case.width,threshold-1)
     eq(at.minimum_console_remainder,120)
@@ -29,8 +29,16 @@ test("short medium and compact layouts keep chat visible above the console remai
   eq(medium.console_remainder>0,true); eq(compact.console_remainder>0,true)
   eq(medium.console_top<=medium.window_height,true); eq(compact.console_top<=compact.window_height,true)
 end)
+test("viable tiny compact windows preserve a real game console before optional lists",function()
+  for _,size in ipairs({{400,300},{320,260}}) do
+    for _,vitals in ipairs({{}, {psi={visible=true},web={visible=true}}}) do
+      local r=Layout.compute(size[1],size[2],nil,nil,vitals)
+      eq(r.chat_height,60); eq(r.console_remainder>=60,true); eq(r.console_top+r.bottom+r.console_remainder,r.window_height)
+    end
+  end
+end)
 test("functional chat chrome floor adapts the console minimum at medium and compact boundaries",function()
-  for _,case in ipairs({{width=1200,header=66},{width=760,header=116}}) do
+  for _,case in ipairs({{width=1200,header=66},{width=760,header=210}}) do
     local sample=Layout.compute(case.width,700); local threshold=case.header+sample.bottom+60+120
     local above=Layout.compute(case.width,threshold+1); local at=Layout.compute(case.width,threshold); local below=Layout.compute(case.width,threshold-1)
     eq(at.chat_functional_minimum,60); eq(at.chat_height,60); eq(at.chat_output_height,16); eq(at.console_remainder,120)
@@ -46,7 +54,7 @@ test("extreme compact height compresses header before chat or console overrun",f
 end)
 test("normal layouts retain their breakpoint headers and chat geometry",function()
   local compact=Layout.compute(760,700); local medium=Layout.compute(1200,800); local wide=Layout.compute(1920,1080)
-  eq(compact.header_height,116); eq(compact.chat_height,160)
+  eq(compact.header_height,210); eq(compact.chat_height,160)
   eq(medium.header_height,66); eq(medium.chat_height,178)
   eq(wide.header_height,74); eq(wide.chat_height,240)
 end)
@@ -81,7 +89,7 @@ test("medium screens preserve the seventeen sixty-six seventeen split",function(
   local r=Layout.compute(1200,800); eq(r.mode,"medium"); eq(r.left,204); eq(r.right,204); eq(r.console_gutter,6); eq(r.console_left,210); eq(r.console_width,780); eq(r.header_height,66); eq(r.show_character_rail,true); eq(r.show_room_compass,true); eq(r.vitals_side,"center")
 end)
 test("compact screens move all status out of side rails",function()
-  local r=Layout.compute(760,700); eq(r.mode,"compact"); eq(r.left,0); eq(r.right,0); eq(r.header_height,116); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.bottom>0,true); eq(r.show_room_compass,false)
+  local r=Layout.compute(760,700); eq(r.mode,"compact"); eq(r.left,0); eq(r.right,0); eq(r.header_height,210); eq(r.right_lists_mode,"compact-tabs"); eq(r.bottom,r.vitals_strip_height+r.command_line_clearance); eq(r.bottom>0,true); eq(r.show_room_compass,false)
 end)
 test("desktop breakpoint crossings retain rails until genuinely compact widths",function()
   for _,width in ipairs({999,1000,1399,1400}) do
@@ -106,9 +114,14 @@ end)
 test("layout keeps a usable center console with capped gutters",function()
   for _,w in ipairs({1000,1024,1366,1400,1600,1920,2056,2560,3840,7680}) do
     local r=Layout.compute(w,900)
-    eq(r.console_width>=math.floor(w*.65),true)
+    eq(r.console_width>=math.floor(w*.60),true)
     eq(r.console_gutter<=12,true)
   end
+end)
+test("laptop layouts retain readable rails and use tabbed right cards under pressure",function()
+  local small=Layout.compute(1024,600); eq(small.left>=190,true); eq(small.console_width>=math.floor(1024*.60),true); eq(small.right_lists_mode,"tabbed")
+  local common=Layout.compute(1366,768); eq(common.left,math.floor(1366*.17)); eq(common.right_lists_mode,"stacked")
+  local short=Layout.compute(1400,600); eq(short.right_lists_mode,"tabbed")
 end)
 test("responsive typography remains readable at every breakpoint",function()
   local compact=Layout.compute(760,700); local medium=Layout.compute(1200,800); local wide=Layout.compute(2056,1177); local ultra=Layout.compute(3840,2160)

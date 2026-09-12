@@ -86,6 +86,8 @@ Racial and profession adjustments may change the final labels shown after raw po
 
 With auto-start enabled, DGHUD can begin when it recognizes the exact current rolling screen. `rr start` is the clearest way to resume after you manually stopped or interrupted it.
 
+Before starting a long run, enter `rr show`. It prints every current roller setting in clearly labeled groups, including all 11 characteristic minimums and a separate **Roll-and-arrange only** group. While a run is in progress, enter `rr status` to see exactly what the roller is waiting for without stopping it.
+
 ## Every setting explained
 
 ### Target total
@@ -245,6 +247,8 @@ DGHUD assigns the strictest requested minimum first. Equal minimums follow the n
 ```text
 rr start
 rr stop
+rr status
+rr show
 rr stats
 rr last
 rr reset
@@ -253,10 +257,46 @@ rr help
 
 - `rr start` starts a new observed rolling session.
 - `rr stop` cancels queued rolling and suppresses automatic action until you explicitly restart.
+- `rr status` gives a short, non-sensitive live report: active or inactive state, detected rolling protocol, current phase, what DGHUD is waiting for, session roll count, and auto-start state.
+- `rr show` displays the live status plus every current setting in grouped form. `rr config` and `rr settings` are equivalent aliases.
 - `rr stats` shows roll count, average, best, and worst.
 - `rr last` shows the newest captured roll.
 - `rr reset` clears the current session statistics and state. It does not erase old log files.
 - `rr help` prints the short command summary.
+
+### Understanding `rr status`
+
+The status report does not print character names, raw game output, filesystem paths, or credentials. It reports only the roller's operational state.
+
+- **State** is `ACTIVE` while DGHUD is controlling or observing a requested rolling session. `INACTIVE` means it will not send a reroll at that moment.
+- **Protocol** is **Roll in place**, **Roll and arrange**, **Legacy body roller**, or **Not detected yet**.
+- **Phase** distinguishes observing, capturing a roll, waiting for the exact prompt, waiting through the reroll delay, waiting for the next roll, arranging a pool, and holding a result.
+- **Waiting** explains the next game output DGHUD needs. This is the most useful line when the roller appears to have stopped.
+- **Session rolls** is the number of complete rolls captured since the last start or reset.
+
+Example while waiting for a new result:
+
+```text
+Autoroller status
+State: ACTIVE
+Protocol: Roll in place
+Phase: Waiting for next roll
+Waiting: Reroll sent or observed; waiting for the next complete roll.
+Session rolls: 24
+Auto-start: ON
+Safety: DGHUD never sends done; final acceptance is always manual.
+```
+
+### Understanding `rr show`
+
+`rr show` begins with the same live status, followed by these groups:
+
+- **Roll rules** — target total, hard stop, maximum rolls, reroll delay, and the fixed reroll command.
+- **Characteristic minimums** — whether minimums are enabled, whether they are required to stop, and every current STR-through-APP minimum with its label.
+- **Roll-and-arrange only** — the qualifying-pool action and the Great and Good-or-Great pool-count requirements. Those two count settings do not affect Roll-in-place results.
+- **Startup, output, and logs** — auto-start, per-roll output, logging, and profile-local log names. Full filesystem paths are not printed.
+
+Use `rr show` after changing settings to verify what was actually saved. It only reports information: it does not start, stop, reset, reroll, or save anything.
 
 ### Numeric settings
 
@@ -349,7 +389,13 @@ Logs contain timestamped roller status and score lines. Resetting the session or
 
 ### It says “Already running”
 
-The roller is active even if it is waiting for the next exact screen. Use:
+The roller is active even if it is waiting for the next exact screen. First use:
+
+```text
+rr status
+```
+
+The **Waiting** line tells you whether DGHUD needs the rest of a roll, the exact decision prompt, the configured delay, the next roll, or arrangement confirmation. To restart intentionally, use:
 
 ```text
 rr stop
@@ -367,7 +413,7 @@ Check these points:
 5. DGHUD did not print `TARGET HIT`.
 6. No normal command canceled automatic rolling.
 
-Then use `rr start`. If the issue continues, update DGHUD and send the exact creator output through Support.
+Enter `rr status` to inspect the protocol, phase, and wait reason, then use `rr start` if the state is inactive. If the issue continues, update DGHUD and send the exact creator output plus the `rr status` report through Support.
 
 ### It stops after only a few rolls
 
@@ -380,7 +426,7 @@ Look for one of these messages:
 - configured total cannot be reached; or
 - standalone roller conflict.
 
-`rr stats` and `rr last` show what DGHUD most recently captured.
+`rr status` explains the current wait, while `rr stats` and `rr last` show what DGHUD most recently captured. Use `rr show` to check whether a maximum, hard stop, pool count, or minimum is configured differently than expected.
 
 ### One typed reroll produces two rerolls
 

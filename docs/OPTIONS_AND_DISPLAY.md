@@ -94,7 +94,7 @@ See [Automapper and Map Library](AUTOMAPPER_AND_MAP_LIBRARY.md).
 
 ## Autoroller
 
-**AUTOROLLER** opens all roller settings and controls in one place. You can set score targets, per-characteristic minimums, arranged-pool rules, safety limits, delay, output, and logging without editing a script.
+**AUTOROLLER** opens all roller settings and controls in one place. You can set score targets, per-characteristic minimums, arranged-pool rules, safety limits, delay, output, and logging without editing a script. Use **WHAT IS IT WAITING FOR?** if rolling appears paused, and **SHOW SAVED SETTINGS** to verify the active configuration.
 
 Read [Autoroller](AUTOROLLER.md) before using it during character creation.
 
@@ -111,7 +111,7 @@ These submissions do not require a GitHub account or browser. See [Support, Priv
 
 DGHUD recalculates panel sizes, font-aware spacing, chat wrapping, game-console wrapping, list scrollbars, map height, and resource bars when the Mudlet window changes size.
 
-At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. At compact widths, DGHUD hides side rails and presents only essential information so the normal display remains usable.
+At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. On shorter or narrower desktop windows, **Inventory**, **Runes**, and **Skills** become three tabs sharing the available space; no list is discarded. At compact widths the side rails hide, but those same three scrollable tabs move into a compact strip above the chatbox. On an exceptionally short window, normal game output takes priority and the optional strip returns automatically when enough height is available.
 
 If something disappears after resizing:
 
@@ -119,6 +119,8 @@ If something disappears after resizing:
 2. Try **HUD TEXT: Small**.
 3. Run `dghud reload` once.
 4. If the problem remains, send a report through **OPTIONS → SUPPORT**.
+
+For a layout problem, also enter `dghud layout` and include its privacy-safe output. It reports the chosen breakpoint, window and panel measurements, list mode, font sizes, wrap width, and short view compatibility ID without exposing character or game content.
 
 Hidden optional panels have not been erased. They return when enough space is available.
 

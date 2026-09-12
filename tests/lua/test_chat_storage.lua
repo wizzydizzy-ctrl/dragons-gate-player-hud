@@ -3,7 +3,7 @@ local Controller=require("chat_controller")
 local History=require("chat_history")
 
 local function fakeStorageApi()
-  local api={directories={},appends={},files={}}
+  local api={directories={},appends={},files={},removals={}}
   function api.mkdir(path) api.directories[#api.directories+1]=path; return true end
   function api.append(path,text)
     api.lastPath=path
@@ -13,6 +13,10 @@ local function fakeStorageApi()
   end
   function api.list(path) if api.listings then return api.listings[path] or {} end; return api.listed or {} end
   function api.read(path) return api.files[path] end
+  function api.remove(path)
+    if api.removeFailure==path then return nil,"remove denied" end
+    api.removals[#api.removals+1]=path; api.files[path]=nil; return true
+  end
   function api.encode(entry) return entry.message end
   function api.decode(line) return api.decoded and api.decoded[line] or nil,"invalid json" end
   return api
@@ -184,6 +188,57 @@ test("exposes the latest internal storage failure for diagnostics",function()
   eq(storage:lastError():find("directory unavailable",1,true)~=nil,true)
 end)
 
+test("saved profile clear requires literal confirmation and otherwise retains files",function()
+  local api=fakeStorageApi()
+  api.listings={
+    ["/chat"]={"profile"},
+    ["/chat/profile"]={"2026-09-11.jsonl"},
+  }
+  api.files["/chat/profile/2026-09-11.jsonl"]="saved\n"
+  local storage=Storage.new(api,"/chat",1000)
+  for _,confirmation in ipairs({false,"yes",1}) do
+    local ok,err=storage:clearProfileHistory(confirmation)
+    eq(ok,nil); eq(err:find("explicit confirmation",1,true)~=nil,true)
+  end
+  local ok,err=storage:clearProfileHistory()
+  eq(ok,nil); eq(err:find("explicit confirmation",1,true)~=nil,true)
+  eq(#api.removals,0); eq(api.files["/chat/profile/2026-09-11.jsonl"],"saved\n")
+end)
+
+test("confirmed profile clear removes dated shared and legacy logs only",function()
+  local api=fakeStorageApi()
+  api.listings={
+    ["/chat"]={"profile","dace","gia","notes.txt","../escape"},
+    ["/chat/profile"]={"2026-09-11.jsonl","keep.txt"},
+    ["/chat/dace"]={"2026-09-10.jsonl"},
+    ["/chat/gia"]={"2026-09-09.jsonl","settings.json"},
+  }
+  for _,pathname in ipairs({"/chat/profile/2026-09-11.jsonl","/chat/dace/2026-09-10.jsonl","/chat/gia/2026-09-09.jsonl","/chat/profile/keep.txt","/chat/gia/settings.json"}) do api.files[pathname]="data" end
+  local storage=Storage.new(api,"/chat",1000); storage.lastStorageError="old failure"
+  local ok,removed=storage:clearProfileHistory(true)
+  eq(ok,true); eq(removed,3); eq(#api.removals,3); eq(storage:lastError(),nil)
+  eq(api.files["/chat/profile/2026-09-11.jsonl"],nil); eq(api.files["/chat/dace/2026-09-10.jsonl"],nil); eq(api.files["/chat/gia/2026-09-09.jsonl"],nil)
+  eq(api.files["/chat/profile/keep.txt"],"data"); eq(api.files["/chat/gia/settings.json"],"data")
+end)
+
+test("profile clear enumerates safely before deleting and reports removal failures",function()
+  local api=fakeStorageApi()
+  api.listings={
+    ["/chat"]={"profile","dace"},
+    ["/chat/profile"]={"2026-09-11.jsonl"},
+  }
+  local list=api.list
+  api.list=function(path) if path=="/chat/dace" then return nil,"list denied" end; return list(path) end
+  local storage=Storage.new(api,"/chat",1000)
+  local ok,err=storage:clearProfileHistory(true)
+  eq(ok,nil); eq(err,"list denied"); eq(#api.removals,0)
+
+  api.list=list
+  api.listings["/chat/dace"]={"2026-09-10.jsonl"}; api.removeFailure="/chat/profile/2026-09-11.jsonl"
+  ok,err=storage:clearProfileHistory(true)
+  eq(ok,nil); eq(err:find("remove denied",1,true)~=nil,true); eq(#api.removals,1)
+end)
+
 test("Mudlet storage facade treats new character history as empty but reports real failures",function()
   local originalLfs,originalIo=lfs,io
   local ok,err=pcall(function()
@@ -249,6 +304,25 @@ test("Mudlet storage factory confines file access beneath its chat root",functio
   eq(api.append("/tmp/escape/log.jsonl","bad"),nil)
   eq(api.append("/profile/DGHUDData/chat/dace/../escape.jsonl","bad"),nil)
   lfs,io,yajl=originalLfs,originalIo,originalYajl
+end)
+
+test("Mudlet storage factory removes only dated JSONL beneath one chat directory",function()
+  local originalLfs,originalIo,originalYajl,originalRemove=lfs,io,yajl,os.remove
+  local ok,err=pcall(function()
+    lfs={mkdir=function() return true end,dir=function() return function() return nil end end}
+    io={open=function() error("unexpected file access") end}
+    yajl={to_string=function() return "{}" end,to_value=function() return {} end}
+    local removed={}; os.remove=function(pathname) removed[#removed+1]=pathname; return true end
+    local api=Storage.mudletApi("/profile")
+    eq(api.remove("/profile/DGHUDData/chat/profile/2026-09-11.jsonl"),true)
+    eq(api.remove("/profile/DGHUDData/chat/profile/settings.json"),nil)
+    eq(api.remove("/profile/DGHUDData/chat/2026-09-11.jsonl"),nil)
+    eq(api.remove("/profile/DGHUDData/chat/profile/../2026-09-11.jsonl"),nil)
+    eq(api.remove("/tmp/2026-09-11.jsonl"),nil)
+    eq(#removed,1); eq(removed[1],"/profile/DGHUDData/chat/profile/2026-09-11.jsonl")
+  end)
+  lfs,io,yajl,os.remove=originalLfs,originalIo,originalYajl,originalRemove
+  if not ok then error(err,0) end
 end)
 
 test("Mudlet storage factory appends valid in-root JSONL paths",function()

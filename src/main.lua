@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local NeedsTracker=require("needs_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local View=require("view"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local NeedsTracker=require("needs_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
@@ -292,6 +292,36 @@ function Main:setDisplayTextSize(action)
   if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(action:gsub("^%l",string.upper)) end
   return action
 end
+function Main:layoutStatus()
+  local layout=self.current_layout or self:applyResponsiveLayout(self.last_state)
+  local contract=tostring(self.settings and self.settings.view_contract or "")
+  if #contract>12 then contract=contract:sub(1,12) end
+  return {
+    window_width=tonumber(layout.window_width) or 0,
+    window_height=tonumber(layout.window_height) or 0,
+    mode=tostring(layout.mode or "unknown"),
+    left_width=tonumber(layout.left) or 0,
+    center_width=tonumber(layout.console_width) or 0,
+    right_width=tonumber(layout.right) or 0,
+    chat_height=tonumber(layout.chat_height) or 0,
+    right_lists_mode=tostring(layout.right_lists_mode or "hidden"),
+    body_font=tonumber(layout.body_font) or 0,
+    list_font=tonumber(layout.list_font) or 0,
+    chat_font=tonumber(layout.chat_font) or 0,
+    text_preset=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale),
+    wrap_columns=tonumber(self.main_console_wrap_columns) or 0,
+    view_schema=tonumber(self.settings and self.settings.view_schema) or 0,
+    view_contract=contract~="" and contract or "unavailable",
+  }
+end
+function Main:reportLayoutStatus()
+  local status=self:layoutStatus()
+  if self.adapter and type(self.adapter.reportLayoutStatus)=="function" then
+    local ok,result=pcall(self.adapter.reportLayoutStatus,self.adapter,status)
+    if ok then return result end
+  end
+  return status
+end
 function Main:onClockSync(value) local ok,err=self.clock:sync(value,self.adapter:epoch()); if not ok then return nil,err end; self:refreshClock(); return true end
 function Main:scheduleClockTick()
   if self.clock_timer then return true end
@@ -358,6 +388,17 @@ function Main:reportChatStatus()
     if ok then return result end
   end
   return status
+end
+function Main:clearVisibleChat()
+  if not self.chat then return nil,"chatbox is not running" end
+  local ok,count=self.chat:clearVisibleHistory(); if not ok then return nil,count end
+  if self.adapter.reportChatClear then self.adapter:reportChatClear("visible",count) end; return true,count
+end
+function Main:clearSavedChat(confirmed)
+  if confirmed~=true then return nil,"permanent saved-history clearing requires explicit confirmation" end
+  if not self.chat then return nil,"chatbox is not running" end
+  local ok,count=self.chat:clearSavedHistory(true); if not ok then return nil,count end
+  if self.adapter.reportChatClear then self.adapter:reportChatClear("saved",count) end; return true,count
 end
 function Main:scheduleRoundtimeTick()
   if self.roundtime_timer or self.roundtime_display<=0 then return end
@@ -847,8 +888,10 @@ function Main:start()
   self:installMapClickHook()
   local startupOk,startupErr=pcall(function()
   local handoff=self.view_handoff; self.view_handoff=nil
-  if type(handoff)=="table" and tonumber(handoff.schema)==tonumber(self.settings.view_schema) and handoff.view and self.adapter.adoptView then
-    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted; self.view_adopted=true; self.view_lease_uncommitted=true end
+  local expectedContract=type(self.settings.view_contract)=="string" and #self.settings.view_contract==64 and self.settings.view_contract or nil
+  local expectedSettingsContract=type(self.settings.view_settings_contract)=="string" and #self.settings.view_settings_contract==64 and self.settings.view_settings_contract or nil
+  if expectedContract and expectedSettingsContract and type(handoff)=="table" and tonumber(handoff.schema)==tonumber(self.settings.view_schema) and handoff.contract==expectedContract and handoff.settings_contract==expectedSettingsContract and handoff.view and handoff.view.view_contract==expectedContract and handoff.view.view_settings_contract==expectedSettingsContract and self.adapter.adoptView then
+    local adopted=select(1,self.adapter:adoptView(handoff.view,self.settings)); if adopted then self.view=adopted; self.view_adopted=true end
   end
   if not self.view then
     if type(handoff)=="table" and handoff.view and type(handoff.view.delete)=="function" then pcall(handoff.view.delete,handoff.view) end
@@ -894,7 +937,9 @@ function Main:start()
     if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="refresh_data" then return self:refreshCharacterData() end
-    if action=="roller_settings" then local status=self.roller and {config=self.roller.cfg}; return status and status.config end
+    if action=="chat_clear_visible" then return self:clearVisibleChat() end
+    if action=="chat_clear_saved" then return self:clearSavedChat(true) end
+    if action=="roller_settings" then return self.roller and self.roller.cfg end
     if action=="auto_update" then
       local enabled=not (self.settings.update and self.settings.update.auto_apply==true); self.settings.update=self.settings.update or {}; self.settings.update.auto_apply=enabled
       local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.update=type(root.user_settings.update)=="table" and root.user_settings.update or {}; root.user_settings.update.auto_apply=enabled end
@@ -905,7 +950,7 @@ function Main:start()
       local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
       return self:setDisplayTextSize(({small="normal",normal="large",large="small"})[current])
     end
-    local command=({roller_start="start",roller_stop="stop",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
+    local command=({roller_start="start",roller_stop="stop",roller_status="status",roller_show="show",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
@@ -1026,6 +1071,10 @@ function Main:start()
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud mapstatus$",function() return self:reportMapStatus() end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud chat clear$",function() return self:clearVisibleChat() end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud chat clear saved$",function() if self.adapter.reportCommandError then self.adapter:reportCommandError("This permanently deletes saved DGHUD chat logs. Run: dghud chat clear saved confirm") end; return nil,"confirmation required" end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud chat clear saved confirm$",function() return self:clearSavedChat(true) end)
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud layout$",function() return self:reportLayoutStatus() end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug$",function() return self:submitMapDiagnostic() end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map debug folder$",function() return self:exportMapDiagnostic(true) end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud map(?:per)?(?: (on|off|toggle|status))?$",function(value)
@@ -1091,7 +1140,6 @@ function Main:start()
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self.posture:onLine(line); self.needs:onLine(line,"output"); self.roller:onLine(line) end)
   end)
   if not startupOk then pcall(function() self:shutdown() end); return nil,startupErr end
-  self.view_lease_uncommitted=nil
   return true
 end
 function Main:shutdown()
@@ -1101,9 +1149,7 @@ function Main:shutdown()
   -- collection snapshot during this exact updater handoff; normal shutdowns,
   -- reloads, map switches, backups, imports, and exports still save it.
   local updateHandoff=self.update_handoff==true
-  local pendingLease=type(self.view_handoff)=="table" and type(self.view_handoff.view)=="table" and self.view_handoff.view.root~=nil
-  local preserveView=(updateHandoff and self.update_preserve_view==true and self.view~=nil) or self.view_lease_uncommitted==true or pendingLease
-  self.view_lease_uncommitted=nil
+  local preserveView=updateHandoff and self.update_preserve_view==true and self.view~=nil
   self.update_handoff=nil; self.update_preserve_view=nil
   if not updateHandoff and self.started and self.map_collections and not self.map_collection_unsafe then local ok,err=self:saveActiveMapCollection(); if not ok then self:captureFailure("map_collection",err,{operation="shutdown_save"}) end end
   if self.clock_timer then
@@ -1130,6 +1176,9 @@ function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
   local function validRegistrations(items) if type(items)~="table" or #items<1 then return false end; for _,id in ipairs(items) do if id==nil or id==false then return false end end; return true end
   if not self.started or not self.runtime_registration_complete or not self.view or not self.view.root or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or not validRegistrations(self.runtime.events) or not validRegistrations(self.runtime.aliases) or not validRegistrations(self.runtime.triggers) then return nil,"HUD is not healthy" end
+  local validator=self.view and self.view.validateReusable
+  if type(validator)~="function" then return nil,"HUD view validation is unavailable" end
+  local checked,reusable,why=pcall(validator,self.view,self.settings); if not checked or not reusable then return nil,(not checked and reusable) or why or "HUD view is not healthy" end
   -- start() has already rendered the complete HUD.  The updater needs a
   -- side-effect-free readiness gate here, not a second layout and repaint.
   return true

@@ -62,7 +62,7 @@ DGHUD keeps the previous valid value when a response is incomplete. A panel may 
 - Use the vertical bar on the right for more rows.
 - Use the horizontal bar at the bottom for long names or hidden columns.
 - Try **OPTIONS → HUD TEXT: Small** if the window is narrow.
-- Enlarge the Mudlet window enough to leave the right rail visible.
+- On a compact window, use the **INV**, **RUN**, and **SKL** tabs above the chatbox. If the window is exceptionally short, enlarge it vertically to restore the optional list strip; the game console is kept visible first.
 
 The lists retain all parsed rows even when only part of the list fits.
 
@@ -74,11 +74,11 @@ DGHUD calculates wrap columns from the actual main-display and chatbox pixel wid
 dghud reload
 ```
 
-If the main console still appears unusually narrow or wide, resize the window by a small amount to fire Mudlet's resize event. Send a support report with Mudlet version, operating system, resolution, and window size if it remains wrong.
+If the main console still appears unusually narrow or wide, resize the window by a small amount to fire Mudlet's resize event. Run `dghud layout` and include that safe output with a support report if it remains wrong.
 
 ## A panel disappears in a small window
 
-This can be normal responsive behavior. Optional Equipment hides before essential content, and all side rails hide in compact mode.
+This can be normal responsive behavior. Optional Equipment hides before essential content, and the side rails hide in compact mode. Inventory, Runes, and Skills remain available as tabs above the chatbox.
 
 Try:
 
@@ -208,11 +208,13 @@ The updater should retain or restore the prior working HUD when the newly regist
 Use:
 
 ```text
+rr status
+rr show
 rr stats
 rr last
 ```
 
-Then review the [Autoroller troubleshooting section](AUTOROLLER.md#troubleshooting). The most common causes are a reached target, maximum-roll cap, player command cancellation, unrecognized creator prompt, or a second roller conflict.
+The **Waiting** line from `rr status` explains the immediate pause, and `rr show` verifies all saved settings. Then review the [Autoroller troubleshooting section](AUTOROLLER.md#troubleshooting). The most common causes are a reached target, maximum-roll cap, player command cancellation, unrecognized creator prompt, or a second roller conflict.
 
 ## A normal command behaves differently with DGHUD
 

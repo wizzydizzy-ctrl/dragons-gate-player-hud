@@ -148,6 +148,46 @@ function Storage:loadRecent()
   return chronological
 end
 
+function Storage:clearProfileHistory(confirmed)
+  if confirmed~=true then return nil,"explicit confirmation is required to permanently clear saved chat history" end
+  if type(self.api.remove)~="function" then return nil,self:recordError("chat log removal is unavailable") end
+
+  local profileDirectory=path(self.basePath,self:characterKey())
+  local created,createErr=call(self.api,"mkdir",self.basePath)
+  if not created then return nil,self:recordError(createErr or "could not access chat storage") end
+  created,createErr=call(self.api,"mkdir",profileDirectory)
+  if not created then return nil,self:recordError(createErr or "could not access profile chat storage") end
+
+  local rootEntries,rootErr=call(self.api,"list",self.basePath)
+  if type(rootEntries)~="table" then return nil,self:recordError(rootErr or "could not list chat storage") end
+  local directories={profileDirectory}
+  for _,name in ipairs(rootEntries) do
+    if type(name)=="string" and name~="profile" and name:match("^[a-z0-9_-]+$") then directories[#directories+1]=path(self.basePath,name) end
+  end
+  table.sort(directories)
+
+  local targets={}
+  for _,directory in ipairs(directories) do
+    local files,listErr=call(self.api,"list",directory)
+    if type(files)~="table" then return nil,self:recordError(listErr or "could not list profile chat storage") end
+    for _,file in ipairs(datedFiles(files)) do targets[#targets+1]=path(directory,file) end
+  end
+  table.sort(targets)
+
+  local removed=0
+  for _,target in ipairs(targets) do
+    local ok,removeErr=call(self.api,"remove",target)
+    if not ok then
+      return nil,self:recordError((removeErr or "could not remove saved chat log").." after removing "..removed.." of "..#targets.." chat log files")
+    end
+    removed=removed+1
+  end
+  self.lastStorageError=nil
+  self.reportedMalformed=false
+  self.reportedFailure=false
+  return true,removed
+end
+
 function Storage:close()
   return true
 end
@@ -220,6 +260,15 @@ function Storage.mudletApi(home,dataFolder)
       file:close()
       if content==nil then return nil,readErr or "could not read chat log" end
       return content
+    end,
+    remove=function(pathname)
+      local relative=safeRelative(pathname,root,true)
+      if not relative or not relative:match("^[a-z0-9_-]+/%d%d%d%d%-%d%d%-%d%d%.jsonl$") then return nil,"unsafe chat storage path" end
+      if not os or type(os.remove)~="function" then return nil,"file removal is unavailable" end
+      local ok,removed,removeErr=pcall(os.remove,pathname)
+      if not ok then return nil,tostring(removed) end
+      if not removed then return nil,removeErr or "could not remove chat log" end
+      return true
     end,
     encode=function(entry) return yajl.to_string(entry) end,
     decode=function(line) return yajl.to_value(line) end,

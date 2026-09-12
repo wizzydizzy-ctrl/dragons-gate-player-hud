@@ -94,3 +94,12 @@ test("room filter includes both nearby speakers and the active character",functi
   eq(#entries,2); eq(entries[1].category,"ROOM"); eq(entries[2].category,"OWN")
   eq(#history:entries("PRIVATE"),1)
 end)
+
+test("clears only the visible in-memory history and resets dedupe state",function()
+  local history=History.new(10,3)
+  local entry={category="ESP",speaker="Tekk",message="repeatable"}
+  assert(history:append(entry,100)); assert(history:append({category="ROOM",message="nearby"},104))
+  eq(history:clearVisible(),2)
+  eq(#history:entries("ALL"),0); eq(#history:categories(),0); eq(history.lastKey,nil); eq(history.lastEpoch,nil)
+  eq(history:append(entry,100),true); eq(#history:entries("ALL"),1)
+end)

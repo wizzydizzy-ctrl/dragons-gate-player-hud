@@ -79,6 +79,32 @@ local function promptProtocol(line)
 end
 local function rerollCommand(protocol) return (protocol=="creator" or protocol=="arrange") and "reroll" or "n" end
 local function acceptanceCommand(protocol) return (protocol=="creator" or protocol=="arrange") and "done" or "y" end
+local function onOff(value,defaultEnabled)
+  local enabled=value
+  if enabled==nil then enabled=defaultEnabled==true end
+  return enabled and "ON" or "OFF"
+end
+local function optionalValue(value)
+  if value==nil or value==false or trim(value)=="" then return "off" end
+  return tostring(value)
+end
+local function rankSetting(value)
+  local number=tonumber(value)
+  if not number or not rankLabels[number] then return "off" end
+  return tostring(number).." ("..rankLabels[number]..")"
+end
+local function safeLocalName(value)
+  local name=trim(value)
+  if name=="" then return "not configured" end
+  if not name:match("^[%w%._%-]+$") then return "custom name hidden" end
+  return name
+end
+local function protocolText(protocol)
+  return ({creator="Roll in place",arrange="Roll and arrange",legacy="Legacy body roller"})[protocol] or "Not detected yet"
+end
+local function arrangeModeText(mode)
+  return ({manual="LET ME PLACE (manual)",game_auto="GAME AUTO (game_auto)",minimums="MY MINIMUMS + AUTO (minimums)"})[mode] or "LET ME PLACE (manual)"
+end
 
 function Roller.new(adapter,settings,onConfig)
   local config=copy(settings or {})
@@ -174,6 +200,85 @@ end
 function Roller:report(reason)
   local s=self.state; local lines={reason or "Roller statistics","Rolls: "..s.rolls.."  Average: "..string.format("%.2f",s.rolls>0 and s.sum/s.rolls or 0)}
   if s.best then lines[#lines+1]="Best: "..self:rollText(s.best) end; if s.worst then lines[#lines+1]="Worst: "..self:rollText(s.worst) end; self:echo(table.concat(lines,"\n")); return true
+end
+function Roller:waitReason()
+  local s=self.state or {}
+  if s.result_held then return "A result is held at the creator prompt for your manual done or reroll." end
+  if not s.active then
+    if s.pending_stats or s.pending_pool then return "A complete roll was seen; waiting for the exact decision prompt before auto-starting." end
+    if s.auto_suppressed then return "Manual stop is holding automatic rolling off; use rr start to resume." end
+    if autoStartEnabled(self.cfg) then return "Waiting for a supported rolling screen and its exact decision prompt; auto-start is on." end
+    return "Auto-start is off; use rr start while you are at the rolling screen."
+  end
+  local phase=s.phase
+  if phase=="observing" then return "Waiting for a complete supported roll." end
+  if phase=="capturing" then return "Reading the characteristic values from the current roll." end
+  if phase=="awaiting_prompt" then return "Roll captured; waiting for the exact decision prompt before acting." end
+  if phase=="reroll_delay" then return "Roll rejected; waiting for the configured reroll delay." end
+  if phase=="waiting_new_roll" then return "Reroll sent or observed; waiting for the next complete roll." end
+  if phase=="assigning" then
+    local sequence=s.arrangement; local awaiting=sequence and sequence.awaiting
+    if awaiting and awaiting.auto then return "Waiting for the game to confirm a complete assignment board and an empty pool." end
+    if awaiting and awaiting.stat then return "Waiting for the game to confirm the next minimum placement and updated pool." end
+    return "Preparing the next confirmed arranged-pool placement."
+  end
+  return "Waiting for the next recognized creator event."
+end
+function Roller:phaseText()
+  local s=self.state or {}
+  if s.result_held then return "Result held" end
+  if not s.active and (s.pending_stats or s.pending_pool) then return "Checking decision prompt" end
+  if not s.active then return "Idle" end
+  return ({observing="Observing",capturing="Capturing roll",awaiting_prompt="Waiting for prompt",reroll_delay="Reroll delay",waiting_new_roll="Waiting for next roll",assigning="Arranging pool"})[s.phase] or "Observing"
+end
+function Roller:statusLines()
+  local s=self.state or {}; local protocol=s.protocol or s.held_protocol
+  return {
+    "Autoroller status",
+    "State: "..(s.active and "ACTIVE" or "INACTIVE"),
+    "Protocol: "..protocolText(protocol),
+    "Phase: "..self:phaseText(),
+    "Waiting: "..self:waitReason(),
+    "Session rolls: "..tostring(tonumber(s.rolls) or 0),
+    "Auto-start: "..onOff(autoStartEnabled(self.cfg),false),
+    "Safety: DGHUD never sends done; final acceptance is always manual.",
+  }
+end
+function Roller:statusText() return table.concat(self:statusLines(),"\n") end
+function Roller:settingsText()
+  local cfg=self.cfg or {}; local lines=self:statusLines(); local minimums=cfg.min_stats or {}
+  lines[#lines+1]=""
+  lines[#lines+1]="[Roll rules]"
+  lines[#lines+1]="Target total: "..optionalValue(cfg.target_total).." / "..maximumTotal
+  lines[#lines+1]="Hard stop: "..optionalValue(cfg.hard_stop).." (bypasses normal filters when reached)"
+  lines[#lines+1]="Maximum rolls: "..optionalValue(cfg.max_rolls)
+  lines[#lines+1]="Reroll delay: "..tostring(math.max(0,tonumber(cfg.reroll_delay) or 0)).." seconds"
+  lines[#lines+1]="Reroll command: reroll (fixed)"
+  lines[#lines+1]=""
+  lines[#lines+1]="[Characteristic minimums]"
+  lines[#lines+1]="Minimums enabled: "..onOff(cfg.use_min_stats,false)
+  lines[#lines+1]="Require minimums to stop: "..onOff(cfg.require_min_stats_to_stop,true)
+  for index=1,#legacyOrder,2 do
+    local left=legacyOrder[index]..": "..rankSetting(minimums[legacyOrder[index]])
+    local right=legacyOrder[index+1]
+    lines[#lines+1]=right and (left.."    "..right..": "..rankSetting(minimums[right])) or left
+  end
+  if minimums.MP~=nil and minimums.MP~=false then lines[#lines+1]="Legacy MP: "..rankSetting(minimums.MP).." (ignored by current 11-stat screens)" end
+  lines[#lines+1]=""
+  lines[#lines+1]="[Roll-and-arrange only]"
+  lines[#lines+1]="Qualifying-pool action: "..arrangeModeText(cfg.arrange_mode)
+  lines[#lines+1]="Minimum Great values: "..optionalValue(cfg.minimum_greats)
+  lines[#lines+1]="Minimum Good-or-Great values: "..optionalValue(cfg.minimum_good_plus)
+  lines[#lines+1]="Note: Great and Good-or-Great counts apply only to Roll-and-arrange pools."
+  lines[#lines+1]=""
+  lines[#lines+1]="[Startup, output, and logs]"
+  lines[#lines+1]="Auto-start: "..onOff(autoStartEnabled(cfg),false)
+  lines[#lines+1]="Print every roll: "..onOff(cfg.show_every_roll,true)
+  lines[#lines+1]="Roll logging: "..onOff(cfg.logging_enabled,true)
+  lines[#lines+1]="Log folder: "..safeLocalName(cfg.log_folder).." (profile-local name)"
+  lines[#lines+1]="Master log: "..safeLocalName(cfg.master_file).." (profile-local name)"
+  lines[#lines+1]="Use rr status for a shorter live-state report."
+  return table.concat(lines,"\n")
 end
 function Roller:record(stats,protocol,names)
   local total=0; for _,name in ipairs(names) do local value=stats[name]; if not value then return false end; total=total+value end
@@ -458,9 +563,9 @@ function Roller:configure(values,silent)
 end
 function Roller:command(action)
   action=trim(action); local lower=action:lower()
-  if lower=="start" then return self:start() elseif lower=="stop" then self.state.auto_suppressed=true; return self:stop("Manual stop") elseif lower=="stats" then return self:report("Roller statistics") elseif lower=="last" then if self.state.last then self:echo(self:rollText(self.state.last)) else self:echo("No roll captured yet.") end; return true elseif lower=="reset" then self:reset(); self:echo("Reset complete."); return true end
+  if lower=="start" then return self:start() elseif lower=="stop" then self.state.auto_suppressed=true; return self:stop("Manual stop") elseif lower=="status" then self:echo(self:statusText()); return true elseif lower=="show" or lower=="config" or lower=="settings" then self:echo(self:settingsText()); return true elseif lower=="stats" then return self:report("Roller statistics") elseif lower=="last" then if self.state.last then self:echo(self:rollText(self.state.last)) else self:echo("No roll captured yet.") end; return true elseif lower=="reset" then self:reset(); self:echo("Reset complete."); return true end
   local key,value=action:match("^[Ss][Ee][Tt]%s+(%S+)%s+(%S+)%s*$"); if key then local ok,err=self:set(key,value); if not ok then self:echo(err) end; return ok,err end
-  self:echo("Commands: rr start|stop|stats|last|reset|help; rr set total|hard|max|delay|greats|goodplus|arrange|STAT <value>. Roll-and-arrange modes: manual, game_auto, minimums. The HUD never sends done."); return true
+  self:echo("Commands: rr start|stop|status|show|stats|last|reset|help; rr set total|hard|max|delay|greats|goodplus|arrange|STAT <value>. Use rr status to see what the roller is waiting for and rr show to display every saved setting. Roll-and-arrange modes: manual, game_auto, minimums. The HUD never sends done."); return true
 end
 function Roller:shutdown() self:cancelReroll(); self.state.active=false; self:clearCapture(); if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end; return true end
 Roller.order=order; Roller.ranks=ranks; Roller.maximumTotal=maximumTotal

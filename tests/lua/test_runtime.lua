@@ -14,7 +14,8 @@ local function fake()
     return math.max(1,math.floor((pixelWidth-(allowance or 0))/10))
   end
   function f:setMainConsoleWrap(columns) if self.main_wrap_columns~=columns then self.main_wrap_columns=columns; self.main_wrap_sets=(self.main_wrap_sets or 0)+1 end; return columns end
-  function f:createView() f.viewCreates=(f.viewCreates or 0)+1; local view={root={},
+  function f:createView(settings) f.viewCreates=(f.viewCreates or 0)+1; local view={root={},view_contract=settings and settings.view_contract,view_settings_contract=settings and settings.view_settings_contract,
+    validateReusable=function(self,candidateSettings) return self.view_contract==candidateSettings.view_contract and self.view_settings_contract==candidateSettings.view_settings_contract end,
     update=function(self,state) self.state=state; f.viewUpdates=(f.viewUpdates or 0)+1 end,
     updateClock=function(self,clock) self.state.clock=clock; f.clockUpdates=(f.clockUpdates or 0)+1 end,
     applyLayout=function(self,layout) f.layouts[#f.layouts+1]=layout end,
@@ -104,6 +105,7 @@ local function fake()
   function f:saveDisplaySettings(config) self.savedDisplaySettings={side_text_scale=config.side_text_scale}; return true end
   function f:reportCharacterRefresh() self.characterRefreshReports=(self.characterRefreshReports or 0)+1; return true end
   function f:reportDisplayTextScale(name) self.displayTextReport=name; return true end
+  function f:reportLayoutStatus(status) self.layoutReport=status; return status end
   function f:count(tableValue) local n=0; for _ in pairs(tableValue) do n=n+1 end; return n end
   function f:createMapAdapter()
     local map={rooms={},areas={},areaNames={},stubs={},links={},special={},current=nil,shutdowns=0,api={}}
@@ -424,7 +426,7 @@ test("cleanup reconciliation requires a valid fresh current room after mutation"
 end)
 
 test("shutdown removes all cleanup and transfer map aliases",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+24)
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+28)
   local owned={}; for id,alias in pairs(f.aliases) do if alias.pattern:match("%^dghud map ") then owned[id]=true end end; eq(f:count(owned),17)
   assert(hud:shutdown()); for id in pairs(owned) do eq(f.killed[id],true) end; eq(f:count(f.aliases),0)
 end)
@@ -506,24 +508,23 @@ test("update handoff skips only the redundant map snapshot",function()
   _G.DGHUD=previous; if not ok then error(err,0) end
 end)
 test("compatible update handoff preserves and adopts one live HUD view",function()
-  local f=fake(); local settings={layout={},view_schema=1}; local retiring=Main.new(f,settings); assert(retiring:start()); local view=retiring.view
+  local f=fake(); local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local settings={layout={},view_schema=1,view_contract=contract,view_settings_contract=settingsContract}; local retiring=Main.new(f,settings); assert(retiring:start()); local view=retiring.view
   assert(retiring.chat:capture("QUEST","visible through update")); assert(retiring.chat:setFilter("QUEST")); local chatHandoff=retiring.chat:handoff(); local renders=f.chatRenders; local appends=f.chatStorageAppends
   retiring.update_handoff=true; retiring.update_preserve_view=true; assert(retiring:shutdown()); eq(f.deleted,0)
-  local replacement=Main.new(f,settings,{schema=1,view=view},chatHandoff); assert(replacement:start()); eq(replacement.view,view); eq(f.viewCreates,1); eq(f.viewAdoptions,1)
+  local replacement=Main.new(f,settings,{schema=1,contract=contract,settings_contract=settingsContract,view=view},chatHandoff); assert(replacement:start()); eq(replacement.view,view); eq(f.viewCreates,1); eq(f.viewAdoptions,1)
   eq(replacement.chat.filter,"QUEST"); eq(replacement.chat:entries()[1].message,"visible through update"); eq(f.chatRenders,renders); eq(f.chatStorageAppends,appends)
   assert(replacement:shutdown()); eq(f.deleted,1)
 end)
-test("failed replacement startup leaves an adopted HUD view visible for recovery",function()
-  local f=fake(); local settings={layout={},view_schema=1}; local view=f:createView(); f.failChatTrigger=true
-  local replacement=Main.new(f,settings,{schema=1,view=view}); local started,err=replacement:start()
-  eq(started,nil); assert(tostring(err):find("chat trigger registration failed",1,true)); eq(f.deleted,0); assert(view.root)
-  eq(f.set_borders[1]~=0 or f.set_borders[2]~=0 or f.set_borders[3]~=0 or f.set_borders[4]~=0,true)
+test("failed replacement startup deletes an adopted HUD view so rollback rebuilds cleanly",function()
+  local f=fake(); local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local settings={layout={},view_schema=1,view_contract=contract,view_settings_contract=settingsContract}; local view=f:createView(settings); f.failChatTrigger=true
+  local replacement=Main.new(f,settings,{schema=1,contract=contract,settings_contract=settingsContract,view=view}); local started,err=replacement:start()
+  eq(started,nil); assert(tostring(err):find("chat trigger registration failed",1,true)); eq(f.deleted,1)
 end)
-test("early replacement startup failure does not reset a pending view lease",function()
-  local f=fake(); local view=f:createView()
+test("early replacement startup failure leaves no stale view lease",function()
+  local f=fake(); local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local settings={layout={},view_schema=1,view_contract=contract,view_settings_contract=settingsContract}; local view=f:createView(settings)
   function f:createMapAdapter() error("map preflight failed") end
-  local replacement=Main.new(f,{layout={},view_schema=1},{schema=1,view=view}); local started,err=replacement:start()
-  eq(started,nil); assert(tostring(err):find("map preflight failed",1,true)); eq(f.deleted,0); eq(#f.set_borders,0); assert(view.root)
+  local replacement=Main.new(f,settings,{schema=1,contract=contract,settings_contract=settingsContract,view=view}); local started,err=replacement:start()
+  eq(started,nil); assert(tostring(err):find("map preflight failed",1,true)); eq(f.deleted,0); eq(f.set_borders[1],0); eq(f.set_borders[2],0); eq(f.set_borders[3],0); eq(f.set_borders[4],0)
 end)
 test("incompatible update handoff deletes the stale view and constructs a new one",function()
   local f=fake(); local stale=f:createView(); local replacement=Main.new(f,{layout={},view_schema=2},{schema=1,view=stale}); assert(replacement:start())
@@ -533,7 +534,7 @@ test("health check requires root handlers and an owned chat trigger",function()
   local f=fake(); local hud=Main.new(f,{layout={left_width=190,right_width=270}}); eq(hud:healthCheck(),nil); hud:start(); local updates=f.viewUpdates; eq(hud:healthCheck(),true); eq(f.viewUpdates,updates); hud.runtime.aliases[#hud.runtime.aliases+1]=99999; eq(hud:healthCheck(),true); hud.chat.trigger=nil; eq(hud:healthCheck(),nil)
 end)
 test("window resize recomputes absolute borders and view layout",function()
-  local f=fake(); f.borders={1290,234,1610,120}; local hud=Main.new(f,{layout={}}); hud:start(); eq(f.layouts[#f.layouts].mode,"wide"); eq(f.set_borders[1],336); eq(f.set_borders[2],314); eq(f.set_borders[3],336); eq(f.set_borders[4],f.layouts[#f.layouts].bottom); f.width=760; f.height=700; f.callbacks["sysWindowResizeEvent"](); eq(f.layouts[#f.layouts].mode,"compact"); eq(f.set_borders[1],0); eq(f.set_borders[2],276); eq(f.set_borders[3],0); eq(f.set_borders[4],f.layouts[#f.layouts].bottom)
+  local f=fake(); f.borders={1290,234,1610,120}; local hud=Main.new(f,{layout={}}); hud:start(); eq(f.layouts[#f.layouts].mode,"wide"); eq(f.set_borders[1],336); eq(f.set_borders[2],314); eq(f.set_borders[3],336); eq(f.set_borders[4],f.layouts[#f.layouts].bottom); f.width=760; f.height=700; f.callbacks["sysWindowResizeEvent"](); eq(f.layouts[#f.layouts].mode,"compact"); eq(f.set_borders[1],0); eq(f.set_borders[2],f.layouts[#f.layouts].top); eq(f.set_borders[3],0); eq(f.set_borders[4],f.layouts[#f.layouts].bottom)
   local latest=f.main_wrap_measurements[#f.main_wrap_measurements]; eq(latest[1],760); eq(latest[2],24); eq(f.main_wrap_columns,73)
   local sets=f.main_wrap_sets; f.callbacks["sysWindowResizeEvent"](); eq(f.main_wrap_sets,sets)
   f.main_wrap_columns=150; f.callbacks["sysWindowResizeEvent"](); eq(f.main_wrap_columns,73); eq(f.main_wrap_sets,sets+1)
@@ -549,6 +550,17 @@ test("main-console wrap follows the usable center width across responsive breakp
     f.width,f.height=size[1],size[2]; f.callbacks["sysWindowResizeEvent"]()
     local layout=f.layouts[#f.layouts]; eq(f.main_wrap_columns,math.max(1,math.floor((layout.console_width-24)/10)))
   end
+end)
+test("layout diagnostic reports only responsive measurements and compatibility identity",function()
+  local f=fake(); f.width=1024; f.height=600
+  local contract=string.rep("a",64)
+  local hud=Main.new(f,{layout={},display={side_text_scale=1},view_schema=4,view_contract=contract}); assert(hud:start())
+  local callback=assert(aliasCallback(f,"^dghud layout$")); local status=callback()
+  eq(status.window_width,1024); eq(status.window_height,600); eq(status.mode,"medium")
+  eq(status.left_width,190); eq(status.right_width,190); eq(status.center_width,634)
+  eq(status.right_lists_mode,"tabbed"); eq(status.text_preset,"normal")
+  eq(status.view_schema,4); eq(status.view_contract,string.rep("a",12)); eq(f.layoutReport,status)
+  eq(status.character,nil); eq(status.room,nil); eq(status.inventory,nil)
 end)
 test("runtime wires one mapper toolbar callback across resize and reports zoom outcomes",function()
   local f=fake(); f.gmcp=gmcpRoom(175); f.zoomResult=17.5

@@ -1,4 +1,6 @@
 local View=require("view")
+local VIEW_CONTRACT=string.rep("a",64)
+local SETTINGS_CONTRACT=string.rep("b",64)
 test("rich text receives an explicit responsive font size",function()
   eq(View.withFont("Status",20),"<span style='font-size:20px'>Status</span>")
 end)
@@ -226,7 +228,7 @@ end
 
 local function chatView(glyphWidth,scrollbarWidth,measureFails)
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
-  local view=View.new({version="0.3.30",theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true}})
+  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true}})
   Geyser=original
   return view
 end
@@ -237,7 +239,7 @@ end)
 test("preserved view reuse closes transient panels and drops controller callbacks",function()
   local view=chatView(); view.options_action_callback=function() end; view.map_settings_action_callback=function() end; view.feedback_sending=true
   view.color_menu_visible=true; view.color_menu:show(); view.support_visible=true; view.support_panel:show()
-  local settings={theme=view.settings.theme,chat=view.settings.chat}; eq(view:prepareForReuse(settings),true)
+  local settings={view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme=view.settings.theme,chat=view.settings.chat}; eq(view:prepareForReuse(settings),true)
   eq(view.settings,settings); eq(view.color_menu_visible,false); eq(view.color_menu.visible,false); eq(view.support_visible,false); eq(view.support_panel.visible,false)
   eq(view.options_action_callback,nil); eq(view.map_settings_action_callback,nil); eq(view.feedback_sending,false)
 end)
@@ -269,10 +271,15 @@ end)
 
 test("preserved pre-version view creates and repaints the installed version label",function()
   local view=chatView(); view.version_label=nil
-  local settings={version="0.3.31",theme=view.settings.theme,chat=view.settings.chat}
+  local settings={version="0.3.31",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme=view.settings.theme,chat=view.settings.chat}
   assert(view:prepareForReuse(settings)); view:applyLayout(require("layout").compute(760,700))
   eq(view.version_label.message:find("v0.3.31",1,true)~=nil,true)
   local versionText=view.version_label.message; view:setColorEnabled(false); eq(view.version_label.message,versionText)
+end)
+test("damaged preserved version label is recreated before layout",function()
+  local view=chatView(); local damaged=view.version_label; damaged.setStyleSheet=nil
+  local replacement=view:ensureVersionLabel()
+  eq(replacement~=damaged,true); eq(damaged.deleted,true); eq(type(replacement.setStyleSheet),"function"); eq(type(replacement.raise),"function")
 end)
 
 test("color options button renders overall enabled and disabled states",function()
@@ -288,7 +295,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,8); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,9); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -298,6 +305,16 @@ test("color options menu exposes current and future feature toggles",function()
   view.color_option_buttons.exits.click(); eq(calls[#calls].key,"exits"); eq(calls[#calls].value,true); eq(view.color_settings_visible,true)
   view.color_option_buttons.damage.click(); eq(calls[#calls].key,"damage"); eq(calls[#calls].value,false)
   view.color_option_buttons.enabled.click(); eq(calls[#calls].key,"enabled"); eq(view.color_enabled,false)
+end)
+
+test("chat settings separates visible clearing from confirmed saved-history deletion",function()
+  local view=chatView(); local actions={}; view:setOptionsActionCallback(function(action) actions[#actions+1]=action; if action=="chat_clear_visible" then return true,12 elseif action=="chat_clear_saved" then return true,3 end; return true end)
+  view:applyLayout(require("layout").compute(1024,600)); view.color_toggle.click(); view.option_action_buttons.chat_settings.click()
+  eq(view.chat_settings_visible,true); eq(view.chat_settings_panel.visible,true)
+  assert(view.chat_settings_clear_visible.click()); eq(actions[#actions],"chat_clear_visible"); eq(view.chat_settings_status.message:find("12 visible",1,true)~=nil,true)
+  assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_visible"); eq(view.chat_settings_clear_pending,true)
+  assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_saved"); eq(view.chat_settings_clear_pending,false); eq(view.chat_settings_status.message:find("3 saved",1,true)~=nil,true)
+  view.chat_settings_close.click(); eq(view.chat_settings_visible,false)
 end)
 
 test("color options menu closes by button outside click and resize remains bounded",function()
@@ -332,6 +349,8 @@ test("options menu exposes every autoroller command and settings action",functio
   view.option_action_buttons.roller_settings.click(); eq(view.roller_settings_visible,true); eq(view.roller_fields.target_total.input.text,"53")
   for _,key in ipairs(view.roller_action_order) do eq(view.roller_action_buttons[key].visible,true) end
   view.roller_action_buttons.roller_start.click(); eq(calls[#calls],"roller_start")
+  view.roller_action_buttons.roller_status.click(); eq(calls[#calls],"roller_status")
+  view.roller_action_buttons.roller_show.click(); eq(calls[#calls],"roller_show")
 end)
 
 test("feedback option opens an in-game anonymous submission form",function()
@@ -537,11 +556,12 @@ test("narrow list panes preserve readable fonts and overflow horizontally",funct
   local view=chatView(7); local layout=require("layout").compute(1000,900); view:applyLayout(layout)
   eq(view.inventory_content.fontSize,layout.list_font); eq(view.skills_content.fontSize,layout.list_font)
   eq(view.inventory_content.width>view.inventory_output.width,true)
-  eq(view.skills_content.width>view.skills_output.width,true)
   eq(view.skill_name_width,20); eq(view.skill_level_width>=3,true); eq(view.skill_use_width>=4,true)
   eq(view.inventory_output.height>=layout.list_viewport_height+layout.list_horizontal_scrollbar_height,true)
-  eq(view.skills_output.height>=layout.list_viewport_height+layout.list_horizontal_scrollbar_height,true)
   eq(view.inventory_content.height,view.inventory_output.height)
+  view.right_list_tabs.skills.click(); eq(view.skills.visible,true); eq(view.inventory.visible,false)
+  eq(view.skills_content.width>view.skills_output.width,true)
+  eq(view.skills_output.height>=layout.list_viewport_height+layout.list_horizontal_scrollbar_height,true)
   eq(view.skills_content.height,view.skills_output.height)
 end)
 test("map settings toolbar label remains bounded at the medium breakpoint",function()
@@ -589,7 +609,7 @@ test("saving map settings applies changed area and subarea names first",function
 end)
 test("skill viewport uses live geometry with a conservative scrollbar reservation",function()
   local view=chatView(7); local layout=require("layout").compute(1920,1080); view:applyLayout(layout)
-  eq(view.list_resolved_scrollbar_width>=40,true)
+  eq(view.list_resolved_scrollbar_width>=18,true)
   eq(view.list_content_width,math.max(view.skills_output:get_width()-view.list_resolved_scrollbar_width,29*view.list_character_width))
   local header=View.skillHeader(view.skill_name_width,view.skill_column_gaps,view.skill_level_width,view.skill_use_width)
   local row=View.skillLine({name="Identify Armor Quality",level=30,remain=7},view.skill_name_width,view.skill_column_gaps,view.skill_level_width,view.skill_use_width)
@@ -621,6 +641,7 @@ test("measured fixed-width skill columns fit before scaled scrollbars",function(
     local width,height,glyph,scrollbar=case[1],case[2],case[3],case[4]
     local view=chatView(glyph); view.list_scrollbar_width=scrollbar
     local layout=require("layout").compute(width,height); view:applyLayout(layout)
+    if layout.right_lists_mode=="tabbed" then view.right_list_tabs.skills.click() end
     local header=View.skillHeader(view.skill_name_width,view.skill_column_gaps,view.skill_level_width,view.skill_use_width)
     local row=View.skillLine({name=string.rep("Wide Skill ",5),level=30,remain=7},view.skill_name_width,view.skill_column_gaps,view.skill_level_width,view.skill_use_width)
     eq(view.list_character_width,glyph)
@@ -643,7 +664,7 @@ test("scrollable cards render every inventory item and every ranked skill",funct
   eq(view.inventory_content.height>=view.list_row_height*12,true); eq(view.skills_content.height>=view.list_row_height*12,true); eq(view.inventory_content.height>view.inventory_output.height,true); eq(view.skills_content.height>view.skills_output.height,true); eq(view.inventory_footer.message:find("2gp",1,true)~=nil,true)
   eq(view.skills_content.message:find("white-space:pre",1,true),nil); eq(view.skills_content.message:find("&nbsp;",1,true)~=nil,true)
   local resized=require("layout").compute(1200,800); view:applyLayout(resized)
-  eq(view.inventory_content.height,view.list_row_height*12); eq(view.skills_content.height,view.list_row_height*12)
+  eq(view.inventory_content.height>=view.list_row_height*12,true); if resized.right_lists_mode=="tabbed" then view.right_list_tabs.skills.click() end; eq(view.skills_content.height>=view.list_row_height*12,true)
 end)
 
 test("unchanged HUD refreshes preserve inventory and skill scroll positions",function()
@@ -777,20 +798,38 @@ test("right-side vitals preserve required combat and scrollable lists",function(
   view:applyLayout(layout)
   eq(view.inventory.visible,true)
   eq(view.details.visible,true); eq(view.details.y+view.details.height<=view.inventory.y,true)
-  eq(view.skills.visible,true); eq(view.skills_output.visible,true)
+  eq(view.right_list_tabs.skills.visible,true); view.right_list_tabs.skills.click(); eq(view.skills.visible,true); eq(view.skills_output.visible,true); eq(view.inventory.visible,false)
   eq(view.inventory.y+view.inventory.height<=layout.window_height-12,true)
 end)
-test("short desktop windows retain both inventory and skills as scrollable cards",function()
-  for _,size in ipairs({{1000,600},{1200,600},{1400,600}}) do
+test("short desktop windows retain every list behind readable tabs",function()
+  for _,size in ipairs({{800,600},{1000,600},{1200,600},{1400,600}}) do
     local layout=require("layout").compute(size[1],size[2]); local view=chatView(7)
     view.last_state={vitals={psi={visible=false},web={visible=false}},equipment={items={}},inventory={items={}},runes={items={}},skills={items={}}}
     view:applyLayout(layout)
-    eq(view.inventory.visible,true); eq(view.inventory_output.visible,true)
-    eq(view.runes.visible,true); eq(view.runes_output.visible,true)
-    eq(view.skills.visible,true); eq(view.skills_output.visible,true)
-    eq(view.inventory.y+view.inventory.height<=view.runes.y,true); eq(view.runes.y+view.runes.height<=view.skills.y,true)
-    eq(view.runes_output.height<=layout.list_row_height*5+(layout.list_horizontal_scrollbar_height or 0),true)
-    eq(view.skills.y+view.skills.height<=layout.window_height-12,true)
+    eq(layout.right_lists_mode,"tabbed"); eq(view.inventory.visible,true); eq(view.inventory_output.visible,true)
+    if size[1]==800 then eq(view.right_list_tabs.inventory.message:find("INV",1,true)~=nil,true); eq(view.right_list_tabs.runes.message:find("RUN",1,true)~=nil,true); eq(view.right_list_tabs.skills.message:find("SKL",1,true)~=nil,true) end
+    for _,key in ipairs({"runes","skills","inventory"}) do view.right_list_tabs[key].click(); eq(view[key].visible,true); eq(view[key.."_output"].visible,true); eq(view[key].y+view[key].height<=layout.window_height-12,true) end
+  end
+end)
+test("compact windows retain scrollable inventory runes and skills above the chatbox",function()
+  for _,size in ipairs({{799,600},{760,700},{400,300},{320,260}}) do
+    local layout=require("layout").compute(size[1],size[2]); local view=chatView(7)
+    view.last_state={character={full_name="Test",race="Human",class="Fighter",physical={}},clock={},attributes={},combat={},needs={},vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},gold=3,silver=9,carry={current=12,maximum=100,percent=12},roundtime=0,position=0,psi={visible=false},web={visible=false}},equipment={items={}},inventory={items={{name="Torch",weight=.1}}},runes={items={{name="Force",remaining=10}}},skills={items={{name="Biting",level=4,remain=105}}},room={name="Room",num=1,area=1,environment="Test",players={},flags={},exits={"north"}}}
+    view:applyLayout(layout); view:update(view.last_state)
+    eq(layout.right_lists_mode,"compact-tabs"); eq(view.right_list_tabs.inventory.visible,true); eq(view.inventory.visible,true); eq(view.inventory_output.visible,true); eq(view.inventory.y+view.inventory.height<=layout.header_height,true)
+    for _,key in ipairs({"runes","skills","inventory"}) do view.right_list_tabs[key].click(); eq(view[key].visible,true); eq(view[key.."_output"].visible,true); eq(view[key].y+view[key].height<=layout.header_height,true) end
+  end
+end)
+test("tiny compact layouts never overlap inventory and wealth when extra vitals are visible",function()
+  local state={character={full_name="Test",race="Arachnian",class="Psion",physical={}},clock={},attributes={},combat={},needs={},vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},gold=3,silver=9,carry={current=12,maximum=100,percent=12},roundtime=0,position=0,psi={visible=true,current=1,maximum=1},web={visible=true,current=1,maximum=1}},equipment={items={}},inventory={items={{name="Torch",weight=.1}}},runes={items={}},skills={items={}},room={name="Room",num=1,area=1,environment="Test",players={},flags={},exits={}}}
+  for _,size in ipairs({{400,300},{320,260}}) do
+    local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals); local view=chatView(7); view.last_state=state; view:applyLayout(layout); view:update(state)
+    eq(layout.console_remainder>=60,true)
+    eq(view.right_list_tabs.inventory.visible,true); eq(view.inventory.visible,true); eq(view.inventory_output.visible,true)
+    eq(view.inventory_output.y+view.inventory_output.height<=view.inventory.y+view.inventory.height,true)
+    if view.inventory_footer.visible then eq(view.inventory_output.y+view.inventory_output.height<=view.inventory_footer.y,true) end
+    for _,key in ipairs({"runes","skills","inventory"}) do view.right_list_tabs[key].click(); eq(view[key].visible,true); eq(view[key.."_output"].visible,true); eq(view[key.."_output"].height>=layout.list_row_height,true); eq(view[key.."_output"].y+view[key.."_output"].height<=view[key].y+view[key].height,true) end
+    if layout.compact_minimal_header then eq(view.clock_header.visible,false); eq(view.attribute_strip.visible,false); eq(view.color_toggle.visible,true) end
   end
 end)
 test("large HUD text keeps the inventory viewport above its wrapped footer and redraws on resize",function()
@@ -808,10 +847,68 @@ test("crossing responsive breakpoints repeatedly restores every desktop card",fu
   view.last_state={vitals={psi={visible=false},web={visible=false}},equipment={items={}},inventory={items={}},skills={items={}}}
   for _,size in ipairs({{1400,800},{1399,800},{1000,800},{999,800},{760,800},{999,800},{1400,800}}) do
     local layout=Layout.compute(size[1],size[2]); view:applyLayout(layout)
-    if layout.mode=="compact" then eq(view.compact.visible,true) else
-      for _,widget in ipairs({view.identity,view.details,view.inventory,view.inventory_title,view.inventory_output,view.inventory_content,view.runes,view.runes_title,view.runes_output,view.runes_content,view.skills,view.skills_title,view.skills_output,view.skills_content,view.right}) do eq(widget.visible,true) end
+    if layout.mode=="compact" then eq(view.compact.visible,true); for _,key in ipairs({"inventory","runes","skills"}) do view.right_list_tabs[key].click(); eq(view[key].visible,true) end else
+      for _,widget in ipairs({view.identity,view.details,view.right}) do eq(widget.visible,true) end
+      if layout.right_lists_mode=="tabbed" then for _,key in ipairs({"inventory","runes","skills"}) do view.right_list_tabs[key].click(); eq(view[key].visible,true); eq(view[key.."_output"].visible,true) end else for _,widget in ipairs({view.inventory,view.inventory_title,view.inventory_output,view.inventory_content,view.runes,view.runes_title,view.runes_output,view.runes_content,view.skills,view.skills_title,view.skills_output,view.skills_content}) do eq(widget.visible,true) end end
     end
   end
+end)
+test("chat settings controls never overlap or leave the panel on short compact windows",function()
+  local view=chatView(); view:showChatSettings()
+  for _,size in ipairs({{400,300},{320,260},{800,600},{1024,600}}) do
+    local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); local panel=view.chat_settings_panel
+    local ordered={view.chat_settings_title,view.chat_settings_text,view.chat_settings_clear_visible,view.chat_settings_clear_saved}
+    for index,item in ipairs(ordered) do eq(item.y>=0,true); eq(item.y+item.height<=panel.height,true); if index>1 then eq(item.y>=ordered[index-1].y+ordered[index-1].height,true) end end
+    if view.chat_settings_status.visible then eq(view.chat_settings_status.y>=view.chat_settings_clear_saved.y+view.chat_settings_clear_saved.height,true); eq(view.chat_settings_status.y+view.chat_settings_status.height<=view.chat_settings_close.y,true) end
+    eq(view.chat_settings_close.y>=view.chat_settings_clear_saved.y+view.chat_settings_clear_saved.height,true); eq(view.chat_settings_close.y+view.chat_settings_close.height<=panel.height,true)
+  end
+end)
+test("reusable view validation rejects missing responsive list tab structures",function()
+  local View=require("view"); local view=chatView(); local settings=view.settings
+  eq(View.validateReusable(view,settings),true)
+  local tabs=view.right_list_tabs; local skillsTab=tabs.skills; view.right_list_tabs=nil
+  local ok,err=View.validateReusable(view,settings); eq(ok,nil); assert(err:find("list tabs",1,true))
+  view.right_list_tabs=tabs; view.right_list_tabs.skills=nil
+  ok,err=View.validateReusable(view,settings); eq(ok,nil); assert(err:find("list tabs",1,true))
+  view.right_list_tabs.skills=skillsTab; view.right_list_active="missing"
+  ok,err=View.validateReusable(view,settings); eq(ok,nil); assert(err:find("active list tab",1,true))
+end)
+test("reusable view validation rejects damaged structural widgets and controls",function()
+  local View=require("view")
+  for _,name in ipairs({"clock_header","attribute_strip","mapper","chat_settings_clear_saved"}) do
+    local view=chatView(); view[name]=nil
+    local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find(name,1,true))
+  end
+  local view=chatView(); view.option_action_buttons.chat_settings=nil
+  local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("controls",1,true))
+  view=chatView(); view.hp.text=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("gauge",1,true))
+  view=chatView(); view.roundtime_bar.back=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("gauge",1,true))
+  view=chatView(); view.hp.text.setStyleSheet=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("gauge",1,true))
+  view=chatView(); view.right_list_tabs.inventory.move=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("list tabs",1,true))
+  view=chatView(); view.right_list_tabs.inventory.echo=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("list tabs",1,true))
+  view=chatView(); view.option_action_buttons.chat_settings.setStyleSheet=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("controls",1,true))
+  view=chatView(); view.map_library_rows={view.version_label}; view.map_library_rows[1].hide=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("map library rows",1,true))
+  view=chatView(); view.map_collection_rows={view.version_label}; view.map_collection_rows[1].echo=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("map collection rows",1,true))
+  view=chatView(); view.map_settings_fields.minimum_height.input.setStyleSheet=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("mapper settings",1,true))
+  view=chatView(); view.header.echo=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("header",1,true))
+  view=chatView(); view.chat_output.clear=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("chat_output",1,true))
+  view=chatView(); view.attribute_strip.raise=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("attribute_strip",1,true))
+  view=chatView(); view.root.delete=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("view is unavailable",1,true))
+  view=chatView(); view.color_options=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("color state",1,true))
 end)
 
 test("equipment is optional below identity while combat remains required",function()
@@ -922,7 +1019,7 @@ test("chat tabs stay inside narrow panels and expose deterministic overflow",fun
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)
   view:renderChat({}, {"QUEST","EVENTS","QUEST<script>","LINE\nBREAK"}, "ALL")
-  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,QUEST,EVENTS,QUEST<SCRIPT>,LINE\nBREAK")
+  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,QUEST,EVENTS,QUEST<SCRIPT>,LINE\nBREAK")
   eq(#view.chat_overflow_categories>0,true)
   for _,button in ipairs(view.chat_buttons) do
     eq(button.x+button.width<=layout.chat_width,true); eq(tostring(button.message):find("<script>",1,true),nil)
@@ -965,16 +1062,16 @@ test("chat wrap uses live MiniConsole metrics after resize and font application"
   view:applyLayout(layout)
   eq(layout.chat_wrap_columns==52,false)
   eq(output.metricFontSeen,layout.chat_font)
-  eq(output.wrap,51)
+  eq(output.wrap,math.max(1,math.floor((layout.chat_width-(2*layout.chat_padding)-layout.chat_scrollbar_allowance)/output.metricWidth)))
 
   local entries={}
   for index=1,20 do entries[index]={category="ESP",timestamp="2026-08-31T13:00:00-04:00",line=string.rep("entry-"..index.." ",40)} end
   view:renderChat(entries,{"ESP"},"ESP"); output.currentScroll=output.renderedEntries[10].first+1
   output.metricWidth=16; view:applyLayout(layout)
   local anchored=output.renderedEntries[10]
-  eq(output.wrap,38); eq(output.currentScroll>=anchored.first and output.currentScroll<=anchored.last,true)
+  eq(output.wrap,math.max(1,math.floor((layout.chat_width-(2*layout.chat_padding)-layout.chat_scrollbar_allowance)/output.metricWidth))); eq(output.currentScroll>=anchored.first and output.currentScroll<=anchored.last,true)
   output.currentScroll=output.lastLine; output.metricWidth=10; view:applyLayout(layout)
-  eq(output.wrap,61); eq(output.scrollCalls[#output.scrollCalls],"bottom")
+  eq(output.wrap,math.max(1,math.floor((layout.chat_width-(2*layout.chat_padding)-layout.chat_scrollbar_allowance)/output.metricWidth))); eq(output.scrollCalls[#output.scrollCalls],"bottom")
 end)
 
 test("chat wrap accepts legacy Geyser setters that return no value",function()

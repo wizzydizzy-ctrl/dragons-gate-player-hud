@@ -136,7 +136,16 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals,di
   -- Reserving its height again creates a visible empty band above the input.
   layout.command_line_clearance=0
   layout.bottom=layout.vitals_strip_height+layout.command_line_clearance; layout.window_height=height
+  if layout.mode=="compact" then
+    -- On exceptionally short windows, essential game output wins over the
+    -- optional compact list band. Keep at least three lines of console while
+    -- allowing the list strip to grow back automatically as height returns.
+    local consoleFloor=math.min(120,math.max(60,math.floor(height*.20)))
+    layout.top=math.max(62,math.min(layout.top,height-layout.bottom-60-consoleFloor))
+  end
   chatMetrics(width,height,layout,chatSettings)
+  layout.compact_minimal_header=layout.mode=="compact" and layout.header_height<90
+  layout.compact_band_top=layout.compact_minimal_header and 28 or 62
   layout.lower_mapper_gap=layout.lower_row_gap
   if layout.mode=="compact" or (type(mapperSettings)=="table" and mapperSettings.enabled==false) then
     layout.mapper_visible=false; layout.lower_mapper_height=0; layout.lower_mapper_min_height=0; layout.lower_mapper_toolbar_height=0; layout.lower_room_visible_height=0
@@ -160,12 +169,20 @@ end
 function Layout.compute(width,height,chatSettings,mapperSettings,vitals,displaySettings)
   width=tonumber(width) or 1200; height=tonumber(height) or 800
   local rail=math.floor(width*.17)
+  -- Keep the requested 17% desktop proportion, but do not let common laptop
+  -- windows squeeze both rails below a readable width while ample center space
+  -- still exists. Very narrow windows retain the proportional fallback and use
+  -- tabbed list cards rather than sacrificing the game console.
+  if width>=1000 then rail=math.max(190,rail) end
+  rail=math.min(rail,math.max(0,math.floor((width-520)/2)))
   local result
   if width>=1400 then result=metrics(width,height,{mode="wide",left=rail,right=rail,top=74,bottom=0,show_character_rail=true,show_room_compass=height>=700,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings)
   elseif width>=800 then result=metrics(width,height,{mode="medium",left=rail,right=rail,top=66,bottom=0,show_character_rail=true,show_room_compass=height>=650,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings)
-  else result=metrics(width,height,{mode="compact",left=0,right=0,top=116,bottom=0,show_character_rail=false,show_room_compass=false,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings) end
+  else result=metrics(width,height,{mode="compact",left=0,right=0,top=210,bottom=0,show_character_rail=false,show_room_compass=false,vitals_side="center"},chatSettings,mapperSettings,vitals,displaySettings) end
   result.window_width=width
   result.window_height=height
+  result.narrow_rails=result.mode~="compact" and rail<205
+  result.right_lists_mode=result.mode=="compact" and "compact-tabs" or ((result.narrow_rails or height<760) and "tabbed" or "stacked")
   return result
 end
 return Layout

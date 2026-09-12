@@ -92,4 +92,14 @@ function History:categories()
   return categories
 end
 
+function History:clearVisible()
+  local removed=#self.items
+  self.items={}
+  self.categoryOrder={}
+  self.knownCategories={}
+  self.lastKey=nil
+  self.lastEpoch=nil
+  return removed
+end
+
 return History

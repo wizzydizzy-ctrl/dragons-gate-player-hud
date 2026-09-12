@@ -32,10 +32,10 @@ function Updater:installVerifiedAsync(payload,expected,done,preverified)
   done=done or function() end
   if type(payload)~="string" or (preverified~=true and sha256Hex(payload)~=tostring(expected):lower()) then done(nil,"package checksum mismatch"); return nil,"package checksum mismatch" end
   if not self.adapter.replacePackageAsync then done(nil,"package adapter unavailable"); return nil,"package adapter unavailable" end
-  self.adapter:replacePackageAsync(payload,"DragonsGateHUD",function(ok,err)
+  self.adapter:replacePackageAsync(payload,"DragonsGateHUD",function(ok,err,mutated)
     if not ok then
       local message=err or "package installation failed"
-      if self.adapter.rollbackAsync then self.adapter:rollbackAsync("DragonsGateHUD",function(restored,rollbackErr)
+      if mutated~=false and self.adapter.rollbackAsync then self.adapter:rollbackAsync("DragonsGateHUD",function(restored,rollbackErr)
         if not restored and rollbackErr then message=message.."; rollback failed: "..tostring(rollbackErr) end
         done(nil,message)
       end) else done(nil,message) end
@@ -58,6 +58,13 @@ end
 function Updater:validateManifest(manifest)
   local github=self.settings.github or {}; local update=self.settings.update or {}
   local valid,why=Release.validateManifest(manifest,{owner=github.owner,repository=github.repository,package_limit=update.package_limit})
+  if not valid then return nil,why end
+  local running=self.adapter.mudletVersion and self.adapter:mudletVersion() or nil
+  return Release.validateMinimumMudlet(manifest.minimum_mudlet,running)
+end
+function Updater:validateRollbackManifest(manifest)
+  local github=self.settings.github or {}; local update=self.settings.update or {}
+  local valid,why=Release.validateRollbackManifest(manifest,{owner=github.owner,repository=github.repository,package_limit=update.package_limit},self.settings.version)
   if not valid then return nil,why end
   local running=self.adapter.mudletVersion and self.adapter:mudletVersion() or nil
   return Release.validateMinimumMudlet(manifest.minimum_mudlet,running)

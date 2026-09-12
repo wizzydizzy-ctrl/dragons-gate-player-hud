@@ -22,6 +22,7 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 | `dghud text normal` | Use the Normal HUD text preset. |
 | `dghud text large` | Use the Large HUD text preset. |
 | `dghud text status` | Report the current HUD text preset. |
+| `dghud layout` | Print privacy-safe responsive-layout measurements for troubleshooting clipping or low-resolution behavior. |
 
 `dghud purge` may appear in older built-in command text. Do not use it for routine repair or map cleanup; use `dghud recover` or the specific map commands below.
 
@@ -124,6 +125,8 @@ Tokens expire after 30 seconds. There is no force-delete command.
 | --- | --- |
 | `rr start` | Reset and start a rolling session. |
 | `rr stop` | Stop automatic rolling and cancel queued work. |
+| `rr status` | Explain whether the roller is active and exactly what it is waiting for. |
+| `rr show` | Show every saved roller setting in clear groups. |
 | `rr stats` | Show roll count, average, best, and worst. |
 | `rr last` | Show the newest captured roll. |
 | `rr reset` | Clear the current roller session state and counters. |
@@ -163,5 +166,15 @@ time
 ```
 
 DGHUD observes their complete responses and refreshes the matching panel.
+
+## Chat history commands
+
+| Command | What it does |
+| --- | --- |
+| `dghud chat clear` | Clear the visible chatbox while keeping saved history. |
+| `dghud chat clear saved` | Show the required permanent-deletion confirmation command. |
+| `dghud chat clear saved confirm` | Permanently delete saved DGHUD profile chat history and clear the chatbox. |
+
+The same actions are available under **OPTIONS → CHAT SETTINGS**. Saved history is retained by default and remains shared across characters in the profile.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)

@@ -22,7 +22,7 @@ local function alignmentLabel(value)
   if key=="order" then return "Orderly" elseif key=="entropy" then return "Entropic" elseif key=="chaos" then return "Chaotic" end
   return raw
 end
-local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672"}
+local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62"}
 local function chatScroll(output,ranges)
   local okCurrent,current=pcall(function() return output:getScroll() end)
   local okLast,last=pcall(function() return output:getLastLineNumber() end)
@@ -226,12 +226,15 @@ local help_entries={
   {command="dghud reload",description="Reload the HUD using your saved preferences."},
   {command="dghud refresh",description="Refresh inventory, combat, character, religion, runes, skills, and time without reinstalling."},
   {command="dghud text small|normal|large|status",description="Adjust persistent HUD text sizing while leaving the main game-console font unchanged."},
-  {command="rr start|stop|stats|last|reset|help",description="Control both 11-characteristic rolling methods; DGHUD always leaves done for you."},
+  {command="dghud layout",description="Show safe window, rail, font, list-mode, and wrap diagnostics for layout troubleshooting."},
+  {command="rr start|stop|status|show|stats|last|reset|help",description="Control both 11-characteristic rolling methods; status explains what it is waiting for, and show lists every saved setting."},
   {command="rr set total|hard|max|delay|greats|goodplus|STAT <value>",description="Adjust totals, arranged-pool counts, or 1-7 minimums for the 11 current stats."},
   {command="rr set arrange manual|auto|minimums",description="Choose whether a qualifying arranged pool waits, uses game auto, or places your raw pool-label minimums before auto."},
   {command="dghud config",description="Open the DGHUD settings location."},
   {command="dghud purge",description="Remove DGHUD-owned installed data.",warning=true},
   {command="dghud chatstatus",description="Show chat capture, filter, and storage status."},
+  {command="dghud chat clear",description="Clear the currently visible chatbox without deleting saved history."},
+  {command="dghud chat clear saved confirm",description="Permanently delete DGHUD's saved profile chat history after explicit confirmation.",warning=true},
   {command="dghud mapstatus",description="Show mapper, walking, and latest-error status."},
   {command="dghud map debug",description="Send a sanitized mapper diagnostic anonymously and show its reference number."},
   {command="dghud map debug folder",description="Save a private local diagnostic copy and open its folder."},
@@ -298,11 +301,15 @@ local function listViewportWidth(output,plannedWidth,override)
     if value and value>0 and math.abs(value-outer)<=1 then outer=value end
   end
   local scrollbar=tonumber(override)
-  if not scrollbar then scrollbar=math.max(40,math.min(48,math.ceil(outer*.16))) end
+  -- Qt scrollbars observed on Mudlet 5 consume roughly 16-24 logical pixels.
+  -- The previous 40-48px guess removed nearly half of a narrow laptop rail.
+  -- Keep an overridable, DPI-safe allowance without starving list content.
+  if not scrollbar then scrollbar=math.max(18,math.min(28,math.ceil(outer*.10))) end
   return math.max(1,outer-math.max(0,math.min(scrollbar,outer-1))),scrollbar
 end
 function View:ensureVersionLabel()
-  if type(self.version_label)=="table" and self.version_label.deleted~=true then return self.version_label end
+  if type(self.version_label)=="table" and self.version_label.deleted~=true and type(self.version_label.echo)=="function" and type(self.version_label.setStyleSheet)=="function" and type(self.version_label.move)=="function" and type(self.version_label.resize)=="function" and type(self.version_label.show)=="function" and type(self.version_label.hide)=="function" and type(self.version_label.raise)=="function" then return self.version_label end
+  if type(self.version_label)=="table" and type(self.version_label.delete)=="function" then pcall(self.version_label.delete,self.version_label) end
   if not self.root then return nil end
   local t=self.settings and self.settings.theme or {muted="#75857c"}
   self.version_label=label("DGHUD.Header.Version",self.root,"background:transparent;color:"..(t.muted or "#75857c")..";font-weight:700;",self.geyser)
@@ -318,6 +325,8 @@ function View:renderVersion()
 end
 function View.new(settings)
   local self=setmetatable({settings=settings,geyser=Geyser,direction_buttons={},utility_buttons={},exit_available={}},View); local t=settings.theme
+  self.view_contract=settings.view_contract
+  self.view_settings_contract=settings.view_settings_contract
   local available={}; if type(rawget(_G,"getAvailableFonts"))=="function" then local ok,value=pcall(getAvailableFonts); if ok and type(value)=="table" then available=value end end
   self.list_font_family=View.monospaceFont(available)
   self.root=Geyser.Container:new({name="DGHUD.Root",x=0,y=0,width="100%",height="100%"})
@@ -343,8 +352,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","refresh_data","auto_update","text_size","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","refresh_data","auto_update","text_size","chat_settings","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",chat_settings="CHAT SETTINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -363,6 +372,26 @@ function View.new(settings)
   self.chat_output=Geyser.MiniConsole:new({name="DGHUD.Chat.Output",x=8,y=36,width="100%-16",height="100%-44"},self.chat_container)
   self.chat_output:enableScrollBar()
   self.chat_output:disableHorizontalScrollBar()
+  self.chat_settings_overlay=label("DGHUD.ChatSettings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
+  self.chat_settings_panel=Geyser.Container:new({name="DGHUD.ChatSettings.Panel",x=0,y=0,width=560,height=360},self.root)
+  self.chat_settings_bg=label("DGHUD.ChatSettings.Background",self.chat_settings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
+  self.chat_settings_title=label("DGHUD.ChatSettings.Title",self.chat_settings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
+  self.chat_settings_text=label("DGHUD.ChatSettings.Text",self.chat_settings_panel,"background:transparent;color:"..t.text..";")
+  self.chat_settings_clear_visible=label("DGHUD.ChatSettings.ClearVisible",self.chat_settings_panel,"background:#17231c;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.chat_settings_clear_saved=label("DGHUD.ChatSettings.ClearSaved",self.chat_settings_panel,"background:#3a1715;border:1px solid #a94d46;border-radius:5px;color:#ffb0a8;font-weight:700;")
+  self.chat_settings_status=label("DGHUD.ChatSettings.Status",self.chat_settings_panel,"background:transparent;color:"..t.muted..";")
+  self.chat_settings_close=label("DGHUD.ChatSettings.Close",self.chat_settings_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
+  self.chat_settings_clear_visible:setClickCallback(function()
+    if not self.options_action_callback then return nil,"chat clearing is unavailable" end
+    local ok,count=self.options_action_callback("chat_clear_visible"); self.chat_settings_status_text=ok and ("Cleared "..tostring(count or 0).." visible chat entries. Saved history was kept.") or tostring(count or "Could not clear the chatbox."); self:renderChatSettings(); return ok,count
+  end)
+  self.chat_settings_clear_saved:setClickCallback(function()
+    if not self.chat_settings_clear_pending then self.chat_settings_clear_pending=true; self.chat_settings_status_text="Permanent deletion requires one more click. This cannot be undone."; self:renderChatSettings(); return true end
+    if not self.options_action_callback then return nil,"saved chat clearing is unavailable" end
+    local ok,count=self.options_action_callback("chat_clear_saved"); self.chat_settings_clear_pending=false; self.chat_settings_status_text=ok and ("Permanently removed "..tostring(count or 0).." saved chat log files.") or tostring(count or "Could not clear saved chat history."); self:renderChatSettings(); return ok,count
+  end)
+  self.chat_settings_close:setClickCallback(function() return self:hideChatSettings() end); self.chat_settings_overlay:setClickCallback(function() return self:hideChatSettings() end); self.chat_settings_visible=false
+  for _,widget in ipairs({self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_text,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}) do widget:hide() end
   self.left_bg=label("DGHUD.LeftBackground",self.root,"background:"..t.panel..";border-right:1px solid "..t.border..";")
   self.identity=label("DGHUD.Identity",self.root,"background:"..t.panel..";border-right:1px solid "..t.border..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:18px;")
   self.details=label("DGHUD.Details",self.root,"background:"..t.panel..";border:1px solid "..t.border..";color:"..t.text..";padding:18px;")
@@ -381,6 +410,12 @@ function View.new(settings)
   self.skills_title=label("DGHUD.Skills.Title",self.root,"background:transparent;color:"..t.accent..";")
   self.skills_output=Geyser.ScrollBox:new({name="DGHUD.Skills.Output",x=0,y=0,width=100,height=100},self.root)
   self.skills_content=label("DGHUD.Skills.Content",self.skills_output,"background:#101713;color:"..t.text..";")
+  self.right_list_tab_order={"inventory","runes","skills"}; self.right_list_active="inventory"; self.right_list_tabs={}
+  local rightTabLabels={inventory="INVENTORY",runes="RUNES",skills="SKILLS"}
+  for _,key in ipairs(self.right_list_tab_order) do
+    local button=label("DGHUD.RightLists.Tab."..key,self.root,"background:#111713;border:1px solid "..t.border..";border-radius:4px;color:"..t.muted..";font-weight:700;")
+    button.option_text=rightTabLabels[key]; button:setClickCallback(function() self.right_list_active=key; if self.layout then self:applyLayout(self.layout) end; return key end); button:hide(); self.right_list_tabs[key]=button
+  end
   self.list_measure=label("DGHUD.List.Measure",self.root,"background:transparent;color:transparent;")
   self.list_measure:move(-1000,-1000); self.list_measure:hide()
   self.right=Geyser.Container:new({name="DGHUD.RightRail",x=0,y=0,width=300,height=500},self.root)
@@ -436,14 +471,14 @@ function View.new(settings)
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.roller_cancel=label("DGHUD.RollerSettings.Cancel",self.roller_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
   self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
-  local fieldLabels={target_total="Target total (1-77/off)",hard_stop="Hard stop (1-77/off; overrides all normal filters)",max_rolls="Maximum rolls (off=unlimited)",reroll_delay="Reroll delay (seconds)",minimum_greats="Roll & arrange: minimum Great values (1-11/off)",minimum_good_plus="Roll & arrange: minimum Good-or-Great values (1-11/off)",log_folder="Log folder",master_file="Master log filename"}
+  local fieldLabels={target_total="Normal target total (1-77/off)",hard_stop="Keep any roll at/above (1-77/off; bypasses normal rules)",max_rolls="Stop safely after this many rolls (off=unlimited)",reroll_delay="Pause between rerolls (seconds)",minimum_greats="Arranged pools: minimum Great values (1-11/off)",minimum_good_plus="Arranged pools: minimum Good-or-Great values (1-11/off)",log_folder="Log folder name",master_file="Master log filename"}
   for _,key in ipairs(self.roller_field_order) do local caption=label("DGHUD.RollerSettings.Caption."..key,self.roller_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.RollerSettings.Input."..key,self.roller_content,self.geyser); self.roller_fields[key]={caption=caption,input=edit,label=fieldLabels[key] or (key.." minimum (1-7/off)")} end
   self.roller_toggle_order={"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}; self.roller_toggles={}
   local toggleLabels={auto_start_on_name="Auto-start when roll screen appears",use_min_stats="Enable stat minimums",require_min_stats_to_stop="Require minimums to stop",show_every_roll="Print every roll",logging_enabled="Enable roll logging"}
   for _,key in ipairs(self.roller_toggle_order) do local button=label("DGHUD.RollerSettings.Toggle."..key,self.roller_content); button.option_text=toggleLabels[key]; button:setClickCallback(function() self.roller_draft[key]=not self.roller_draft[key]; self:renderRollerSettings(false); return self.roller_draft[key] end); self.roller_toggles[key]=button end
   self.roller_arrange_caption=label("DGHUD.RollerSettings.ArrangeCaption",self.roller_content,"background:transparent;color:"..t.muted..";"); self.roller_arrange_buttons={}; self.roller_arrange_order={"manual","game_auto","minimums"}; local arrangeLabels={manual="LET ME PLACE",game_auto="GAME AUTO",minimums="MY MINIMUMS + AUTO"}
   for _,mode in ipairs(self.roller_arrange_order) do local button=label("DGHUD.RollerSettings.ArrangeMode."..mode,self.roller_content); button.option_text=arrangeLabels[mode]; button:setClickCallback(function() self.roller_draft.arrange_mode=mode; self:renderRollerSettings(false); return mode end); if button.setToolTip then button:setToolTip(mode=="manual" and "Stop on a qualifying pool so you can place every value." or mode=="game_auto" and "Ask Dragon's Gate to place the qualifying pool." or "Place your configured raw pool-label minimums first, then ask the game to fill the rest. Racial and profession modifiers may change final shown ranks.") end; self.roller_arrange_buttons[mode]=button end
-  self.roller_action_order={"roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}; self.roller_action_buttons={}; local rollerActionLabels={roller_start="START ROLLER",roller_stop="STOP ROLLER",roller_stats="SESSION STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET SESSION",roller_help="ROLLER HELP"}
+  self.roller_action_order={"roller_start","roller_stop","roller_status","roller_show","roller_stats","roller_last","roller_reset","roller_help"}; self.roller_action_buttons={}; local rollerActionLabels={roller_start="START ROLLER",roller_stop="STOP ROLLER",roller_status="WHAT IS IT WAITING FOR?",roller_show="SHOW SAVED SETTINGS",roller_stats="SESSION STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET SESSION",roller_help="ROLLER HELP"}
   for _,key in ipairs(self.roller_action_order) do local button=label("DGHUD.RollerSettings.Action."..key,self.roller_content); button.option_text=rollerActionLabels[key]; button:setClickCallback(function() if self.options_action_callback then return self.options_action_callback(key) end; return nil,"autoroller action is unavailable" end); self.roller_action_buttons[key]=button end
   self.roller_save:setClickCallback(function() return self:saveRollerSettings() end); self.roller_cancel:setClickCallback(function() return self:hideRollerSettings() end); self.roller_overlay:setClickCallback(function() return self:hideRollerSettings() end)
   self.roller_settings_visible=false
@@ -539,8 +574,8 @@ function View.new(settings)
   for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_search_label,self.map_library_search,self.map_library_list,self.map_collection_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_filters) do button:hide() end; for _,button in pairs(self.map_library_modes) do button:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end; for _,button in pairs(self.map_collection_actions) do button:hide() end; for _,button in pairs(self.map_library_download_actions) do button:hide() end
   return self
 end
-local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF"}
-local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,OWN=true,WHISPER=true}
+local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"}
+local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,COMBAT=true,OWN=true,WHISPER=true}
 local function chatFilterOrder(categories)
   local result={}; local seen={}
   for _,category in ipairs(default_chat_filters) do result[#result+1]=category; seen[category]=true end
@@ -608,6 +643,53 @@ function View:renderChatTabs(categories,activeFilter)
     self.chat_overflow_button=button; self.chat_buttons[#self.chat_buttons+1]=button
   end
 end
+function View:layoutCompactLists(layout,top)
+  local t=self.settings.theme; local width=math.max(1,tonumber(layout.window_width) or 760); local band_top=tonumber(layout.compact_band_top) or 62; local band_height=math.max(0,top-band_top)
+  local listWidgets={inventory={self.inventory,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer},runes={self.runes,self.runes_title,self.runes_output,self.runes_content},skills={self.skills,self.skills_title,self.skills_output,self.skills_content}}
+  for _,widgets in pairs(listWidgets) do for _,widget in ipairs(widgets) do widget:hide() end end
+  for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
+  local summary_h=band_height>=130 and math.min(30,(layout.body_font or 16)+14) or 0
+  if summary_h>0 then place(self.compact,6,band_top,width-12,summary_h) else self.compact:hide() end
+  local tab_h=math.max(20,math.min(26,(layout.list_font or 10)+12)); local gap=4; local tab_y=band_top+summary_h+(summary_h>0 and 3 or 0)
+  if top-tab_y<tab_h then return true end
+  local tab_w=(width-12-gap*2)/3; local labels=tab_w<62 and {inventory="INV",runes="RUN",skills="SKL"} or {inventory="INVENTORY",runes="RUNES",skills="SKILLS"}
+  for index,key in ipairs(self.right_list_tab_order) do
+    local button=self.right_list_tabs[key]; local selected=key==(self.right_list_active or "inventory")
+    place(button,6+(index-1)*(tab_w+gap),tab_y,tab_w,tab_h)
+    button:setStyleSheet("background:"..(selected and "#193024" or "#111713")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.muted)..";font-weight:700;font-size:"..layout.list_font.."px;")
+    button:echo(View.withFont("<center><b>"..labels[key].."</b></center>",layout.list_font))
+  end
+  local card_y=tab_y+tab_h+3; local card_h=math.max(0,top-card_y); if card_h<20 then return true end
+  local active=self.right_list_active or "inventory"; if not listWidgets[active] then active="inventory"; self.right_list_active=active end
+  -- Preserve at least one complete rendered row in very short windows. The
+  -- card keeps normal padding whenever it fits and sheds only inner whitespace.
+  local row_h=math.max(1,tonumber(layout.list_row_height) or 1)
+  local rp=math.max(1,math.min(7,layout.list_padding or 4,math.floor(math.max(2,card_h-row_h)/2)))
+  local card_x=6; local card_w=width-12; local list_x=card_x+rp; local list_w=math.max(1,card_w-rp*2)
+  self.list_outer_width=list_w; self.list_viewport_width,self.list_resolved_scrollbar_width=listViewportWidth(active=="inventory" and self.inventory_output or active=="runes" and self.runes_output or self.skills_output,list_w,self.list_scrollbar_width)
+  self.skills_content_width=math.max(self.list_viewport_width,29*self.list_character_width); self.runes_content_width=math.max(self.list_viewport_width,28*self.list_character_width)
+  local inventoryItems=self.last_state and self.last_state.inventory and self.last_state.inventory.items or {}; self.inventory_content_width=math.max(self.list_viewport_width,View.inventoryRequiredColumns(inventoryItems)*self.list_character_width); self.list_content_width=self.skills_content_width
+  self.inventory_horizontal_overflow=self.inventory_content_width>self.list_viewport_width; self.runes_horizontal_overflow=self.runes_content_width>self.list_viewport_width; self.skills_horizontal_overflow=self.skills_content_width>self.list_viewport_width
+  self.skill_character_capacity=math.max(1,math.floor(self.skills_content_width/self.list_character_width)); self.skill_level_width=self.skill_character_capacity>=8 and 3 or 2; self.skill_use_width=self.skill_character_capacity>=8 and 4 or 3
+  local fixedColumns=self.skill_level_width+self.skill_use_width; self.skill_column_gaps=math.min(2,math.max(0,self.skill_character_capacity-fixedColumns-1)); self.skill_name_width=math.min(20,math.max(1,self.skill_character_capacity-fixedColumns-self.skill_column_gaps))
+  for key,widgets in pairs(listWidgets) do if key~=active then for _,widget in ipairs(widgets) do widget:hide() end end end
+  local inventory_rows=self.last_state and self.last_state.inventory and #(self.last_state.inventory.items or {}) or 0; local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0; local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
+  if active=="inventory" then
+    local vitals=self.last_state and self.last_state.vitals or {}; local footer_capacity=math.max(4,math.floor(list_w/math.max(1,self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font))))); self.inventory_footer_capacity=footer_capacity
+    local footer_lines=View.inventoryFooterLines(vitals,t,footer_capacity); local footer_h=math.max(layout.list_row_height,math.ceil((layout.list_font+2)*1.3))*#footer_lines+3; local inner_h=math.max(1,card_h-rp*2)
+    if inner_h<footer_h+math.max(1,layout.list_row_height) then footer_h=0 end
+    local viewport_h=math.max(1,inner_h-footer_h)
+    place(self.inventory,card_x,card_y,card_w,card_h); self.inventory_title:hide(); place(self.inventory_output,list_x,card_y+rp,list_w,viewport_h)
+    if footer_h>0 then place(self.inventory_footer,list_x,card_y+card_h-rp-footer_h,list_w,footer_h); self:renderInventoryFooter(vitals) else self.inventory_footer:hide() end
+    self.inventory_content:resize(self.inventory_content_width,math.max(viewport_h,inventory_rows*layout.list_row_height)); self.inventory_content:show()
+  elseif active=="runes" then
+    local viewport_h=math.max(1,card_h-rp*2); place(self.runes,card_x,card_y,card_w,card_h); self.runes_title:hide(); place(self.runes_output,list_x,card_y+rp,list_w,viewport_h); self.runes_content:resize(self.runes_content_width,math.max(viewport_h,rune_rows*layout.list_row_height)); self.runes_content:show()
+  else
+    local inner_h=math.max(1,card_h-rp*2); local wanted_title=layout.list_row_height+2; local title_h=inner_h>=wanted_title+1 and wanted_title or 0; local viewport_h=math.max(1,inner_h-title_h); place(self.skills,card_x,card_y,card_w,card_h); if title_h>0 then place(self.skills_title,list_x,card_y+rp,list_w,title_h) else self.skills_title:hide() end; place(self.skills_output,list_x,card_y+rp+title_h,list_w,viewport_h); self.skills_content:resize(self.skills_content_width,math.max(viewport_h,skill_rows*layout.list_row_height)); self.skills_content:show()
+  end
+  local raised={self.compact,self.inventory,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes,self.runes_output,self.runes_content,self.skills,self.skills_title,self.skills_output,self.skills_content}; for _,button in pairs(self.right_list_tabs or {}) do raised[#raised+1]=button end; View.raiseCards(raised)
+  return true
+end
 function View:applyLayout(layout)
   self.layout=layout; local top,bottom=layout.header_height or layout.top,0; local t=self.settings.theme; local p=layout.panel_padding; local lp=layout.lower_panel_padding
   local side_bottom=layout.command_line_clearance or 0
@@ -630,6 +712,7 @@ function View:applyLayout(layout)
     if title.setFont then title:setFont(self.list_font_family) end
     if title.setFontSize then title:setFontSize(layout.list_title_font) end
   end
+  for _,button in pairs(self.right_list_tabs or {}) do if button.setFontSize then button:setFontSize(layout.list_font) end end
   if self.inventory_footer.setFontSize then self.inventory_footer:setFontSize(layout.list_font+2) end
   self.list_measure:setStyleSheet("background:transparent;color:transparent;font-family:'"..self.list_font_family.."';font-size:"..layout.list_font.."px;")
   local glyphRun=string.rep("M",10)
@@ -661,11 +744,14 @@ function View:applyLayout(layout)
   local version_x=toggle_x+toggle_width+version_gap; local version_width=math.max(1,math.min(72,version_boundary-version_x))
   self.version_font=math.max(7,math.min((layout.color_toggle_font or 11)-1,math.floor(math.max(1,version_width-4)/4.5)))
   local attributeWidth=math.max(1,clock_x-(layout.console_left or layout.left)-6)
-  place(self.attribute_strip,layout.console_left or layout.left,0,attributeWidth,top); self.attribute_strip:raise()
+  if layout.compact_minimal_header then self.attribute_strip:hide() else place(self.attribute_strip,layout.console_left or layout.left,0,attributeWidth,top); self.attribute_strip:raise() end
   place(self.color_toggle,toggle_x,toggle_y,toggle_width,layout.color_toggle_height); self.options_anchor={x=toggle_x,y=toggle_y,width=toggle_width,height=layout.color_toggle_height}; self:setColorEnabled(self.color_enabled~=false); self.color_toggle:raise()
   local versionLabel=self:ensureVersionLabel(); versionLabel:setStyleSheet("background:transparent;color:"..t.muted..";font-weight:700;"); place(versionLabel,version_x,toggle_y,version_width,layout.color_toggle_height); self:renderVersion(); versionLabel:raise()
-  if layout.mode=="compact" then place(self.clock_header,"50%",0,"50%",top) else place(self.clock_header,"100%-"..layout.right,0,layout.right,top) end
-  self.clock_header:raise(); self.bottom:hide()
+  if layout.compact_minimal_header then self.header:echo(""); self.clock_header:hide()
+  elseif layout.mode=="compact" then place(self.clock_header,"50%",0,"50%",top); self.clock_header:raise()
+  else place(self.clock_header,"100%-"..layout.right,0,layout.right,top); self.clock_header:raise() end
+  if not layout.compact_minimal_header and self.last_state then self.header:echo(View.headerContent(layout,t,self.last_state.character and self.last_state.character.full_name)); self.attribute_strip:echo(View.attributeStripContent(self.last_state.attributes,t,layout)); self:updateClock(self.last_state.clock) end
+  self.bottom:hide()
   place(self.chat_container,layout.chat_x or layout.left,top,layout.chat_width or layout.console_width,layout.chat_height or 240)
   place(self.chat_bg,0,0,"100%","100%")
   place(self.chat_tabs,0,0,"100%",32)
@@ -731,7 +817,16 @@ function View:applyLayout(layout)
     local minimum_inventory=rp*2+title_h+layout.list_row_height+inventory_scroll_h+footer_h+4
     local minimum_runes=rp*2+title_h+layout.list_row_height+runes_scroll_h+4
     local minimum_skills=rp*2+title_h+layout.list_row_height+skills_scroll_h+4
-    if remaining>=minimum_inventory+gap+minimum_runes+gap+minimum_skills then
+    local stackedFits=remaining>=minimum_inventory+gap+minimum_runes+gap+minimum_skills
+    local tabbed=layout.right_lists_mode=="tabbed" or not stackedFits
+    local listWidgets={
+      inventory={self.inventory,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer},
+      runes={self.runes,self.runes_title,self.runes_output,self.runes_content},
+      skills={self.skills,self.skills_title,self.skills_output,self.skills_content},
+    }
+    local function hideList(key) for _,widget in ipairs(listWidgets[key]) do widget:hide() end end
+    if not tabbed then
+      for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
       local usable=remaining-gap*2; local equal=math.floor(usable/3); local inventory_h,runes_h,skills_h
       if equal>=math.max(minimum_inventory,minimum_runes,minimum_skills) then
         inventory_h=equal; runes_h=math.floor((usable-inventory_h)/2); skills_h=usable-inventory_h-runes_h
@@ -750,15 +845,40 @@ function View:applyLayout(layout)
       self.runes_content:resize(self.runes_content_width,math.max(runes_view_h,rune_rows*layout.list_row_height))
       self.skills_content:resize(self.skills_content_width,math.max(skills_view_h,skill_rows*layout.list_row_height))
       self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
+    elseif remaining>=math.max(72,title_h+layout.list_row_height+28) then
+      local tab_h=math.max(22,layout.list_font+12); local tab_gap=3; local tab_left=(layout.window_width or 800)-layout.right+p; local tab_width=(card_w-tab_gap*2)/3
+      local short=card_w<245; local tabLabels=short and {inventory="INV",runes="RUN",skills="SKL"} or {inventory="INVENTORY",runes="RUNES",skills="SKILLS"}
+      for index,key in ipairs(self.right_list_tab_order) do
+        local button=self.right_list_tabs[key]; local selected=key==(self.right_list_active or "inventory")
+        place(button,tab_left+(index-1)*(tab_width+tab_gap),inventory_y,tab_width,tab_h)
+        button:setStyleSheet("background:"..(selected and "#193024" or "#111713")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.muted)..";font-weight:700;font-size:"..layout.list_font.."px;")
+        button:echo(View.withFont("<center><b>"..tabLabels[key].."</b></center>",layout.list_font))
+      end
+      local active=self.right_list_active or "inventory"; if not listWidgets[active] then active="inventory"; self.right_list_active=active end
+      for _,key in ipairs(self.right_list_tab_order) do if key~=active then hideList(key) end end
+      local card_y=inventory_y+tab_h+4; local card_h=math.max(1,rail_bottom-card_y); local viewport_h
+      if active=="inventory" then
+        viewport_h=math.max(1,card_h-rp*2-title_h-footer_h-4)
+        place(self.inventory,card_x,card_y,card_w,card_h); place(self.inventory_title,list_x,card_y+rp,list_w,title_h); place(self.inventory_output,list_x,card_y+rp+title_h,list_w,viewport_h); place(self.inventory_footer,list_x,card_y+card_h-rp-footer_h,list_w,footer_h)
+        self.inventory_content:resize(self.inventory_content_width,math.max(viewport_h,inventory_rows*layout.list_row_height)); self.inventory_content:show(); self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
+      elseif active=="runes" then
+        viewport_h=math.max(1,card_h-rp*2-title_h-4)
+        place(self.runes,card_x,card_y,card_w,card_h); place(self.runes_title,list_x,card_y+rp,list_w,title_h); place(self.runes_output,list_x,card_y+rp+title_h,list_w,viewport_h)
+        self.runes_content:resize(self.runes_content_width,math.max(viewport_h,rune_rows*layout.list_row_height)); self.runes_content:show()
+      else
+        viewport_h=math.max(1,card_h-rp*2-title_h-4)
+        place(self.skills,card_x,card_y,card_w,card_h); place(self.skills_title,list_x,card_y+rp,list_w,title_h); place(self.skills_output,list_x,card_y+rp+title_h,list_w,viewport_h)
+        self.skills_content:resize(self.skills_content_width,math.max(viewport_h,skill_rows*layout.list_row_height)); self.skills_content:show()
+      end
     else
-        self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide()
+      for _,key in ipairs(self.right_list_tab_order) do hideList(key) end; for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
     end
     if self.inventory_output.visible then self.inventory_content:show() end
     if self.runes_output.visible then self.runes_content:show() end
     if self.skills_output.visible then self.skills_content:show() end
-    View.raiseCards({self.equipment,self.inventory,self.details,self.runes,self.skills,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes_title,self.runes_output,self.runes_content,self.skills_title,self.skills_output,self.skills_content})
+    local raised={self.equipment,self.inventory,self.details,self.runes,self.skills,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes_title,self.runes_output,self.runes_content,self.skills_title,self.skills_output,self.skills_content}; for _,button in pairs(self.right_list_tabs or {}) do raised[#raised+1]=button end; View.raiseCards(raised)
   else
-    self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.inventory:hide(); self.inventory_title:hide(); self.inventory_output:hide(); self.inventory_footer:hide(); self.runes:hide(); self.runes_title:hide(); self.runes_output:hide(); self.skills:hide(); self.skills_title:hide(); self.skills_output:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.roundtime_bar:hide(); self.right:hide(); self.attribute_strip:hide(); if top>62 then place(self.compact,0,62,"100%",top-62) else self.compact:hide() end
+    self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.roundtime_bar:hide(); self.right:hide(); self.attribute_strip:hide(); self:layoutCompactLists(layout,top)
   end
   do
     local vitals=self.last_state and self.last_state.vitals or {}; local bars={self.hp,self.fatigue}
@@ -806,9 +926,15 @@ function View:applyLayout(layout)
       self.roundtime_bar:raise()
     else self.roundtime_bar:hide() end
   end
+  local listLayoutSignature=table.concat({tostring(layout.mode),tostring(layout.list_font),tostring(math.floor(tonumber(self.list_outer_width) or 0)),tostring(self.skill_name_width or 0)},":")
+  if self.list_layout_signature~=listLayoutSignature then
+    self.list_layout_signature=listLayoutSignature
+    if self.last_state then self.inventory_signature=nil; self.runes_signature=nil; self.skills_signature=nil; self:renderInventory(self.last_state); self:renderRunes(self.last_state); self:renderSkills(self.last_state) end
+  end
   self:applyChatWrap(layout)
   self:layoutColorMenu(layout)
   self:layoutColorSettings(layout)
+  self:layoutChatSettings(layout)
   self:layoutHelp(layout)
   self:layoutFeedback(layout)
   self:layoutSupport(layout)
@@ -840,6 +966,24 @@ function View:layoutColorSettings(layout)
   place(self.color_settings_overlay,0,0,"100%","100%"); place(self.color_settings_panel,x,y,pw,ph); place(self.color_settings_bg,0,0,"100%","100%"); place(self.color_settings_title,14,10,pw-150,30); self.color_settings_title:echo(View.withFont("<b>COLOR SETTINGS</b>",font+3)); place(self.color_settings_close,pw-116,8,102,32); self.color_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); place(self.color_settings_content,14,48,pw-28,math.max(1,ph-64)); self.color_settings_content.content_height=rows*row
   for index,key in ipairs(self.color_option_order) do local column=(index-1)%columns; local line=math.floor((index-1)/columns); place(self.color_option_buttons[key],column*(cw+gap),line*row,cw,row-4) end; self:renderColorOptions(); View.raiseCards(widgets); return true
 end
+function View:chatSettingsWidgets() return {self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_text,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close} end
+function View:layoutChatSettings(layout)
+  local widgets=self:chatSettingsWidgets(); if not self.chat_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
+  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(580,width-margin*2),math.min(370,height-margin*2); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(layout.mode=="compact" and 9 or 10,math.min(14,(layout.body_font or 14)-2))
+  local pad=math.max(6,math.min(16,math.floor(ph*.04))); local gap=math.max(3,math.min(8,math.floor(ph*.02))); local title_h=math.max(22,math.min(32,font+14)); local close_h=math.max(24,math.min(34,font+14)); local button_h=math.max(24,math.min(42,font+18)); local close_y=math.max(pad,ph-pad-close_h); local content_y=pad+title_h+gap; local available=math.max(1,close_y-gap-content_y); local status_h=math.max(18,math.min(42,font*2+8)); local text_h=available-button_h*2-status_h-gap*3
+  if text_h<18 then status_h=math.max(0,status_h-(18-text_h)); text_h=18 end
+  if text_h+button_h*2+status_h+gap*3>available then status_h=0; text_h=math.max(1,available-button_h*2-gap*2) end
+  local button1_y=content_y+text_h+gap; local button2_y=button1_y+button_h+gap; local status_y=button2_y+button_h+gap
+  self.chat_settings_compact_copy=pw<430 or ph<320
+  place(self.chat_settings_overlay,0,0,"100%","100%"); place(self.chat_settings_panel,x,y,pw,ph); place(self.chat_settings_bg,0,0,"100%","100%"); place(self.chat_settings_title,pad,pad,pw-pad*2,title_h); place(self.chat_settings_text,pad,content_y,pw-pad*2,text_h); place(self.chat_settings_clear_visible,pad,button1_y,pw-pad*2,button_h); place(self.chat_settings_clear_saved,pad,button2_y,pw-pad*2,button_h); if status_h>0 then place(self.chat_settings_status,pad,status_y,pw-pad*2,status_h) else self.chat_settings_status:hide() end; place(self.chat_settings_close,math.max(pad,pw-pad-110),close_y,math.min(110,pw-pad*2),close_h); self:renderChatSettings(font); View.raiseCards(widgets); return true
+end
+function View:renderChatSettings(font)
+  font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Profile-wide history survives updates. COMBAT captures warnings. Clear Chatbox keeps saved files; permanent clear deletes them." or "History is shared by every character in this profile and normally survives updates. COMBAT captures conservative warnings. Personal triggers can add more categories through DGHUD.chat.capture. Clearing the chatbox keeps files."; self.chat_settings_text:echo(View.withFont(explanation,font)); self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Saved history is retained by default."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); return true
+end
+function View:showChatSettings()
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.chat_settings_visible=true; self.chat_settings_clear_pending=false; self.chat_settings_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutChatSettings(self.layout) end; return true
+end
+function View:hideChatSettings() self.chat_settings_visible=false; self.chat_settings_clear_pending=false; if self.layout then self:layoutChatSettings(self.layout) end; return true end
 function View:layoutRollerSettings(layout)
   local widgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel,self.roller_arrange_caption}; for _,button in pairs(self.roller_arrange_buttons or {}) do widgets[#widgets+1]=button end; for _,entry in pairs(self.roller_fields or {}) do widgets[#widgets+1]=entry.caption; widgets[#widgets+1]=entry.input end; for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.roller_action_buttons or {}) do widgets[#widgets+1]=button end
   if not self.roller_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
@@ -862,7 +1006,7 @@ function View:layoutRollerSettings(layout)
     local modeWidth=(contentWidth-modeGap*2)/3
     for index,mode in ipairs(self.roller_arrange_order) do place(self.roller_arrange_buttons[mode],(index-1)*(modeWidth+modeGap),24,modeWidth,34) end
   end
-  local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_stats","roller_last","roller_reset","roller_help"}
+  local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_status","roller_show","roller_stats","roller_last","roller_reset","roller_help"}
   local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
   local function layoutColumn(items,column)
     local cx=(column-1)*(columnWidth+gap)
@@ -945,13 +1089,13 @@ function View:layoutSupport(layout)
   place(self.support_overlay,0,0,"100%","100%"); place(self.support_panel,x,y,pw,ph); place(self.support_bg,0,0,"100%","100%"); place(self.support_title,16,10,pw-32,32); place(self.support_text,16,50,pw-32,70); place(self.support_feedback,16,126,pw-32,40); place(self.support_debug,16,174,pw-32,40); place(self.support_status,16,222,pw-32,math.max(24,ph-278)); place(self.support_close,pw-126,ph-48,110,34); self:renderSupport(font); View.raiseCards(widgets); return true
 end
 function View:renderSupport(font) font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.support_title:echo(View.withFont("<b>SUPPORT</b>",font+3)); self.support_text:echo(View.withFont("Send feedback, request a feature, or anonymously submit the latest privacy-safe debug report. No GitHub account or browser is needed.",font)); self.support_feedback:echo(View.withFont("<center><b>FEEDBACK & REQUESTS…</b></center>",font)); self.support_debug:echo(View.withFont("<center><b>SEND LAST DEBUG REPORT</b></center>",font)); self.support_status:echo(View.withFont(safeText(self.support_status_text or "Debug reports exclude chat, room prose, credentials, character names, and command history."),font)); self.support_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); return true end
-function View:showSupport() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.color_settings_visible then self:hideColorSettings() end; self.support_visible=true; self.support_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutSupport(self.layout) end; return true end
+function View:showSupport() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; self.support_visible=true; self.support_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutSupport(self.layout) end; return true end
 function View:hideSupport() self.support_visible=false; if self.layout then self:layoutSupport(self.layout) end; return true end
 function View:setSupportStatus(message) self.support_status_text=tostring(message or ""); if self.support_visible then self:renderSupport() end; return true end
 function View:setHelpCloseCallback(callback) self.help_close_callback=type(callback)=="function" and callback or nil; return true end
 function View:setHelpVisible(visible,entries)
   self.help_visible=visible==true
-  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end end
+  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end end
   if entries~=nil then self.help_entries=type(entries)=="table" and entries or View.defaultHelpEntries() end
   if self.layout then return self:layoutHelp(self.layout) end
   return true
@@ -988,6 +1132,7 @@ function View:setMapSettingsActionCallback(callback) self.map_settings_action_ca
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
   if action=="command_help" then return self:showHelp() end
+  if action=="chat_settings" then return self:showChatSettings() end
   if action=="color_settings" then return self:showColorSettings() end
   if action=="support" then return self:showSupport() end
   if action=="map_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showMapSettings(config) end; return config end; return nil,"map settings are unavailable" end
@@ -995,10 +1140,10 @@ function View:selectOptionsAction(action)
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
 end
-function View:showColorSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; self.color_settings_visible=true; self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return true end
+function View:showColorSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; self.color_settings_visible=true; self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return true end
 function View:hideColorSettings() self.color_settings_visible=false; if self.layout then self:layoutColorSettings(self.layout) end; return true end
 function View:showFeedback()
-  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self:setColorMenuVisible(false); self.feedback_draft={kind="feedback"}; self.feedback_visible=true; self.feedback_sending=false; self.feedback_error=nil; self.feedback_result=nil
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self:setColorMenuVisible(false); self.feedback_draft={kind="feedback"}; self.feedback_visible=true; self.feedback_sending=false; self.feedback_error=nil; self.feedback_result=nil
   if self.feedback_summary.print then self.feedback_summary:print("") end; if self.feedback_details.print then self.feedback_details:print("") end
   if self.layout then self:layoutFeedback(self.layout) end; return true
 end
@@ -1112,10 +1257,10 @@ function View:renderColorOptions()
 end
 local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 function View:showRollerSettings(config)
-  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
-  self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
+  self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]~=false end
   self.map_settings_visible=true; self:setColorMenuVisible(false); self.map_settings_error=nil; self:renderMapSettings(true); if self.layout then self:layoutMapSettings(self.layout) end; return true
 end
 function View:hideMapSettings() self.map_settings_visible=false; self.map_settings_draft=nil; self.map_settings_error=nil; if self.layout then self:layoutMapSettings(self.layout) end; return true end
@@ -1151,7 +1296,10 @@ function View:renderRollerSettings(populate)
   for _,key in ipairs(self.roller_toggle_order) do local enabled=self.roller_draft[key]==true; local button=self.roller_toggles[key]; button:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
   local mode=self.roller_draft.arrange_mode or "manual"; self.roller_arrange_caption:echo(View.withFont("<b>WHEN A ROLL-AND-ARRANGE POOL QUALIFIES</b> &nbsp; (DGHUD never sends done)",font)); for _,key in ipairs(self.roller_arrange_order) do local selected=key==mode; local button=self.roller_arrange_buttons[key]; button:setStyleSheet("background:"..(selected and "#193024" or "#111512")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
   for _,key in ipairs(self.roller_action_order or {}) do local button=self.roller_action_buttons[key]; button:setStyleSheet("background:#151d18;border:1px solid "..t.border..";border-radius:4px;color:"..t.accent..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
-  local note=mode=="minimums" and self.roller_draft.use_min_stats~=true and "Minimums are disabled; this choice will behave like Game Auto." or "Ranks: 1 Awful · 2 Poor · 3 Low · 4 Aver · 5 Fair · 6 Good · 7 Great"
+  local note
+  if self.roller_draft.auto_start_on_name~=true then note="Auto-start is OFF. Use START ROLLER or rr start at the rolling screen."
+  elseif mode=="minimums" and self.roller_draft.use_min_stats~=true then note="Minimums are disabled; this choice will behave like Game Auto."
+  else note="Ranks: 1 Awful · 2 Poor · 3 Low · 4 Aver · 5 Fair · 6 Good · 7 Great" end
   self.roller_status:echo(View.withFont(self.roller_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.roller_error).."</b></span>") or note,font))
   return true
 end
@@ -1222,7 +1370,7 @@ function View:updateRoundtime(remaining,total)
   return isActive
 end
 function View:renderInventory(s)
-  local t=self.settings.theme; local layout=self.layout; if not layout or layout.mode=="compact" then return end
+  local t=self.settings.theme; local layout=self.layout; if not layout then return end
   local inventory=s.inventory or {}; local v=s.vitals or {}; local carry=v.carry or {}; local signature={tostring(inventory.total_weight or ""),tostring(v.gold or 0),tostring(v.silver or 0),tostring(carry.current or ""),tostring(carry.maximum or ""),tostring(carry.percent or "")}
   for _,item in ipairs(inventory.items or {}) do signature[#signature+1]=tostring(item.name or "").."\31"..tostring(item.weight or "") end
   signature=table.concat(signature,"\30"); if signature==self.inventory_signature then return end; self.inventory_signature=signature
@@ -1232,7 +1380,7 @@ function View:renderInventory(s)
   self:renderInventoryFooter(v)
 end
 function View:renderRunes(s)
-  local layout=self.layout; if not layout or layout.mode=="compact" then return end
+  local layout=self.layout; if not layout then return end
   local runes=s.runes or {}; local items=runes.items or {}; local signature={}
   for _,rune in ipairs(items) do signature[#signature+1]=tostring(rune.name or rune.rune or rune.label or "").."\31"..tostring(rune.remaining or rune.remain or rune.weaves or rune.count or "") end
   signature=table.concat(signature,"\30"); if signature==self.runes_signature then return end; self.runes_signature=signature
@@ -1244,7 +1392,7 @@ function View:renderRunes(s)
   self.runes_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.runes_content:move(0,0); self.runes_content:resize(self.runes_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height)); self.runes_content:show()
 end
 function View:renderSkills(s)
-  local layout=self.layout; if not layout or layout.mode=="compact" then return end
+  local layout=self.layout; if not layout then return end
   local nameWidth=self.skill_name_width or 22; local signature={tostring(nameWidth)}; local items=(s.skills or {}).items or {}
   for _,skill in ipairs(items) do signature[#signature+1]=tostring(skill.name or "").."\31"..tostring(skill.level or "").."\31"..tostring(skill.remain or "") end
   signature=table.concat(signature,"\30"); if signature==self.skills_signature then return end; self.skills_signature=signature
@@ -1332,7 +1480,7 @@ function View:update(s)
   self.hp:setValue(v.hp.current,math.max(v.hp.maximum,1),(shortLabels and "HP  " or "Health  ")..v.hp.current.." / "..v.hp.maximum); self.fatigue:setValue(v.fatigue.current,math.max(v.fatigue.maximum,1),(shortLabels and "FAT  " or "Fatigue  ")..v.fatigue.current.." / "..v.fatigue.maximum)
   if v.psi.visible then self.psi:setValue(v.psi.current,math.max(v.psi.maximum,1),"PSI  "..v.psi.current.." / "..v.psi.maximum) end; if v.web.visible then self.web:setValue(v.web.current,math.max(v.web.maximum,1),"Web  "..v.web.current.." / "..v.web.maximum) end
   self.room:echo(View.withFont("<span style='color:"..t.accent..";font-size:"..layout.lower_heading_font.."px'><b>"..esc(s.room.name).."</b></span><br><span style='color:"..t.muted.."'>Room "..esc(s.room.num or "—").." · Area "..esc(s.room.area or "—").."</span><br><br>"..esc(s.room.environment).."<br>Players &nbsp; <b>"..#s.room.players.."</b><br>Flags &nbsp; "..esc(table.concat(s.room.flags,", ")),layout.lower_body_font))
-  self.compact:echo(View.withFont("<span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(v.gold or 0).."gp</b></span> &nbsp; <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(v.silver or 0).."sp</b></span><br>Carry <b>"..esc(v.carry.current or 0).." / "..esc(v.carry.maximum or 0).." / "..esc(v.carry.percent or 0).."%</b><br><span style='color:"..t.accent.."'>"..esc(s.room.name).."</span> &nbsp; EXITS "..esc(table.concat(s.room.exits,", ")),layout.body_font))
+  self.compact:echo(View.withFont("<span style='color:"..t.accent.."'><b>"..esc(s.room.name).."</b></span> &nbsp; EXITS "..esc(table.concat(s.room.exits,", ")).." &nbsp; · &nbsp; <span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(v.gold or 0).."gp</b></span> <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(v.silver or 0).."sp</b></span>",layout.body_font))
   self.bottom:echo(View.withFont("EXITS &nbsp; <b>"..esc(table.concat(s.room.exits,", ")).."</b> &nbsp;&nbsp; | &nbsp;&nbsp; CARRY &nbsp; <b>"..v.carry.current.." / "..v.carry.maximum.."</b> &nbsp;&nbsp; | &nbsp;&nbsp; ROUND &nbsp; <b>"..(v.roundtime==0 and "READY" or v.roundtime).."</b>",layout.small_font))
   if self.layout then self:applyLayout(self.layout); self.details:echo(View.detailsContent(s.combat,s.attributes,t,self.layout,v)); self:renderInventory(s); self:renderRunes(s); self:renderSkills(s); self:renderNavigation(s.room.exits) end
 end
@@ -1341,8 +1489,74 @@ function View:updateClock(clock)
   self.clock_header:echo(View.clockContent(layout,t,clock))
   return true
 end
+local reusableWidgetNames={
+  "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
+  "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
+  "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_text","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
+  "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
+  "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
+  "help_overlay","help_panel","help_bg","help_title","help_close","help_copy","help_output","help_content",
+  "roller_overlay","roller_panel","roller_bg","roller_content","roller_title","roller_status","roller_save","roller_cancel","roller_arrange_caption",
+  "map_settings_overlay","map_settings_panel","map_settings_bg","map_settings_content","map_settings_title","map_settings_status","map_settings_save","map_settings_cancel","map_settings_clear_current","map_settings_clear_all","map_settings_library","map_settings_area_name","map_settings_subarea_name","map_settings_rename_area","map_settings_rename_subarea",
+  "feedback_overlay","feedback_panel","feedback_bg","feedback_title","feedback_explanation","feedback_kind","feedback_summary_label","feedback_summary","feedback_details_label","feedback_details","feedback_status","feedback_send","feedback_cancel",
+  "support_overlay","support_panel","support_bg","support_title","support_text","support_feedback","support_debug","support_close","support_status",
+  "map_library_overlay","map_library_panel","map_library_bg","map_library_title","map_library_copy","map_library_search_label","map_library_search","map_library_list","map_collection_list","map_library_copy_button","map_library_close",
+}
+local function reusableWidget(value) return type(value)=="table" and value.deleted~=true and type(value.move)=="function" and type(value.resize)=="function" and type(value.show)=="function" and type(value.hide)=="function" and type(value.raise)=="function" end
+local function reusableStyledWidget(value) return reusableWidget(value) and type(value.setStyleSheet)=="function" end
+local function reusableLabel(value) return reusableStyledWidget(value) and type(value.echo)=="function" end
+local function reusableInput(value) return reusableStyledWidget(value) and type(value.print)=="function" and type(value.getText)=="function" end
+local function reusableConsole(value) return reusableWidget(value) and type(value.setFontSize)=="function" and type(value.setWrap)=="function" and type(value.clear)=="function" and type(value.hecho)=="function" and type(value.echo)=="function" end
+local function nameSet(values) local result={}; for _,name in ipairs(values) do result[name]=true end; return result end
+local plainReusableWidgets=nameSet({
+  "root","color_menu","options_scroll","color_settings_panel","color_settings_content","chat_container","chat_tabs","chat_settings_panel",
+  "inventory_output","runes_output","skills_output","right","vitals_right","mapper","compass_area","utility_area","help_panel","help_output",
+  "roller_panel","roller_content","map_settings_panel","map_settings_content","feedback_panel","support_panel","map_library_panel","map_library_list","map_collection_list",
+  "hp","fatigue","carry","psi","web","roundtime_bar",
+})
+local inputReusableWidgets=nameSet({"map_settings_area_name","map_settings_subarea_name","feedback_summary","feedback_details","map_library_search"})
+function View.validateReusable(candidate,settings)
+  if type(candidate)~="table" or not reusableWidget(candidate.root) or type(candidate.root.delete)~="function" then return nil,"preserved HUD view is unavailable" end
+  local expected=type(settings)=="table" and settings.view_contract or nil
+  local expectedSettings=type(settings)=="table" and settings.view_settings_contract or nil
+  if type(expected)~="string" or #expected~=64 or candidate.view_contract~=expected then return nil,"preserved HUD view contract does not match" end
+  if type(expectedSettings)~="string" or #expectedSettings~=64 or candidate.view_settings_contract~=expectedSettings then return nil,"preserved HUD settings contract does not match" end
+  for _,name in ipairs(reusableWidgetNames) do
+    local valid
+    if name=="chat_output" then valid=reusableConsole(candidate[name])
+    elseif inputReusableWidgets[name] then valid=reusableInput(candidate[name])
+    elseif plainReusableWidgets[name] then valid=reusableWidget(candidate[name])
+    else valid=reusableLabel(candidate[name]) end
+    if not valid then return nil,"preserved HUD view is missing "..name end
+  end
+  for _,name in ipairs({"hp","fatigue","carry","psi","web","roundtime_bar"}) do local gauge=candidate[name]; if type(gauge.setValue)~="function" or not reusableStyledWidget(gauge.front) or not reusableStyledWidget(gauge.back) or not reusableStyledWidget(gauge.text) then return nil,"preserved HUD gauge is incomplete: "..name end end
+  if type(candidate.color_options)~="table" then return nil,"preserved HUD color state is incomplete" end
+  for _,name in ipairs(candidate.color_option_order or {}) do if type(candidate.color_options[name])~="boolean" then return nil,"preserved HUD color state is incomplete" end end
+  if type(candidate.right_list_tab_order)~="table" or type(candidate.right_list_tabs)~="table" then return nil,"preserved HUD list tabs are incomplete" end
+  for index,name in ipairs({"inventory","runes","skills"}) do if candidate.right_list_tab_order[index]~=name or not reusableLabel(candidate.right_list_tabs[name]) then return nil,"preserved HUD list tabs are incomplete" end end
+  if candidate.right_list_active~=nil and not candidate.right_list_tabs[candidate.right_list_active] then return nil,"preserved HUD active list tab is invalid" end
+  for _,collection in ipairs({
+    {"color_option_order","color_option_buttons"},{"option_action_order","option_action_buttons"},{"roller_toggle_order","roller_toggles"},{"roller_arrange_order","roller_arrange_buttons"},{"roller_action_order","roller_action_buttons"},{"map_settings_toggle_order","map_settings_toggles"},{"map_library_mode_order","map_library_modes"},{"map_library_filter_order","map_library_filters"},{"map_library_action_order","map_library_actions"},{"map_collection_action_order","map_collection_actions"},{"map_library_download_action_order","map_library_download_actions"},
+  }) do
+    local order,items=candidate[collection[1]],candidate[collection[2]]
+    if type(order)~="table" or type(items)~="table" then return nil,"preserved HUD controls are incomplete" end
+    for _,key in ipairs(order) do if not reusableLabel(items[key]) then return nil,"preserved HUD controls are incomplete" end end
+  end
+  for _,collection in ipairs({{"map_library_rows","map library rows"},{"map_collection_rows","map collection rows"}}) do
+    local rows=candidate[collection[1]]; if type(rows)~="table" then return nil,"preserved HUD "..collection[2].." are incomplete" end
+    for _,row in ipairs(rows) do if not reusableLabel(row) then return nil,"preserved HUD "..collection[2].." are incomplete" end end
+  end
+  for index=1,#Navigation.directions do if type(candidate.direction_buttons)~="table" or type(candidate.direction_buttons[index])~="table" or not reusableLabel(candidate.direction_buttons[index].label) then return nil,"preserved HUD direction controls are incomplete" end end
+  for index=1,#Navigation.utilities do if type(candidate.utility_buttons)~="table" or type(candidate.utility_buttons[index])~="table" or not reusableLabel(candidate.utility_buttons[index].label) then return nil,"preserved HUD utility controls are incomplete" end end
+  local rollerRequired={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
+  for _,name in ipairs(rollerRequired) do local field=type(candidate.roller_fields)=="table" and candidate.roller_fields[name] or nil; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD autoroller view is incomplete" end end
+  local mapSettingsRequired={"minimum_height","height_percent","maximum_height","zoom_step","zoom_min","zoom_max","walk_timeout","special_timeout"}
+  if type(candidate.map_settings_field_order)~="table" or type(candidate.map_settings_fields)~="table" then return nil,"preserved HUD mapper settings are incomplete" end
+  for index,name in ipairs(mapSettingsRequired) do local field=candidate.map_settings_fields[name]; if candidate.map_settings_field_order[index]~=name or type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD mapper settings are incomplete" end end
+  return true
+end
 function View:prepareForReuse(settings)
-  if type(self.root)~="table" then return nil,"preserved HUD view is unavailable" end
+  local valid,why=View.validateReusable(self,settings); if not valid then return nil,why end
   self.settings=settings or self.settings
   self:ensureVersionLabel(); self:renderVersion()
   self.chat_filter_callback=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
@@ -1352,15 +1566,15 @@ function View:prepareForReuse(settings)
   -- Force the first refresh under the new runtime to repaint list content even
   -- when the character data itself did not change across the update.
   self.inventory_signature=nil; self.runes_signature=nil; self.skills_signature=nil
-  self.color_menu_visible=false; self.color_settings_visible=false; self.help_visible=false; self.roller_settings_visible=false
+  self.color_menu_visible=false; self.color_settings_visible=false; self.chat_settings_visible=false; self.chat_settings_clear_pending=false; self.help_visible=false; self.roller_settings_visible=false
   self.map_settings_visible=false; self.feedback_visible=false; self.feedback_sending=false; self.support_visible=false; self.map_library_visible=false
-  local methods={"setColorMenuVisible","hideColorSettings","hideHelp","hideRollerSettings","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
+  local methods={"setColorMenuVisible","hideColorSettings","hideChatSettings","hideHelp","hideRollerSettings","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
   for _,name in ipairs(methods) do if type(self[name])=="function" then pcall(self[name],self) end end
   -- The explicit hide methods above already cover every overlay and its
   -- children. Recursively walking Geyser's parent/child object graph here made
   -- otherwise safe in-place updates spend seconds traversing UI internals.
   for key,value in pairs(self) do
-    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^help_") or key:match("^roller_") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
+    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^help_") or key:match("^roller_") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
   end
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
   return true
