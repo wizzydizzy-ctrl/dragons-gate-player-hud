@@ -2,6 +2,10 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
+## Player guide
+
+- [How to use the DGHUD Automapper and Map Library](docs/AUTOMAPPER_AND_MAP_LIBRARY.md)
+
 The header shows the player's local computer time and a synchronized Dragons Gate clock. Game time advances at the configurable 2× default, labels 6:00 AM–5:59 PM as `Daytime` and 6:00 PM–5:59 AM as `Night`, and resynchronizes from startup or manually entered `time` output.
 
 The compact `OPTIONS ▾` control includes an Automatic Updates toggle, a persistent `HUD TEXT` size control, plus Help & Commands, Color Settings, Map Settings, Autoroller, and Support. Automatic updates are off by default and the choice persists across updates. `HUD TEXT` cycles through Small, Normal, and Large for the side cards without changing the main game-console font or wrap width. Each section opens its own responsive settings box, so the top menu stays short and every related change can be made in one place. Every highlight is on by default and can be toggled independently in Color Settings: room titles, exits/directions, currency, travel objects, attacks aimed at you, damage received, danger/movement blocks, recovery, ongoing costs, spell threats, and discoveries/loot. Normal room prose and chat remain unchanged. Preferences survive HUD reloads and updates without changing personal Mudlet triggers or colors.
