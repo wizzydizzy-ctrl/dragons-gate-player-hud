@@ -636,6 +636,7 @@ function Adapter.loadDisplaySettings()
   local snapshot=Adapter.displaySettingsSnapshot(value); return snapshot
 end
 local function chatSettingsPath() return Adapter.dataBase().."/chat-settings.lua" end
+local chatAllSourceOrder={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}
 function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
   local result={tab_order={}}; local seen={}
@@ -645,6 +646,15 @@ function Adapter.chatSettingsSnapshot(config)
     if category~="" and #category<=32 and not category:find("[%c<>]") and category~="OWN" and category~="WHISPER" and not seen[category] then result.tab_order[#result.tab_order+1]=category; seen[category]=true end
   end
   if #result.tab_order==0 then return nil,"chat tab order is empty" end
+  if config.all_sources~=nil then
+    if type(config.all_sources)~="table" then return nil,"ALL tab sources must be a table" end
+    result.all_sources={}
+    for _,category in ipairs(chatAllSourceOrder) do
+      local value=config.all_sources[category]
+      if value~=nil and type(value)~="boolean" then return nil,"ALL tab source values must be booleans" end
+      result.all_sources[category]=value~=false
+    end
+  end
   return result
 end
 function Adapter:saveChatSettings(config)
@@ -652,7 +662,9 @@ function Adapter:saveChatSettings(config)
   local base=Adapter.dataBase(); lfs.mkdir(base); local destination=chatSettingsPath(); local temp=destination..".tmp"; local values={}
   for _,value in ipairs(snapshot.tab_order) do values[#values+1]=string.format("%q",value) end
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
-  local wrote,writeErr=file:write("return { tab_order={"..table.concat(values,",").."} }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local sourceValues={}; for _,category in ipairs(chatAllSourceOrder) do if snapshot.all_sources then sourceValues[#sourceValues+1]="["..string.format("%q",category).."]="..tostring(snapshot.all_sources[category]==true) end end
+  local sources=#sourceValues>0 and ", all_sources={"..table.concat(sourceValues,",").."}" or ""
+  local wrote,writeErr=file:write("return { tab_order={"..table.concat(values,",").."}"..sources.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true

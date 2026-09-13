@@ -309,9 +309,13 @@ test("color options menu exposes current and future feature toggles",function()
 end)
 
 test("chat settings separates visible clearing from confirmed saved-history deletion",function()
-  local view=chatView(); local actions={}; view:setOptionsActionCallback(function(action) actions[#actions+1]=action; if action=="chat_clear_visible" then return true,12 elseif action=="chat_clear_saved" then return true,3 end; return true end)
+  local view=chatView(); local actions={}; local sourceCall; view:setOptionsActionCallback(function(action,key,wanted) actions[#actions+1]=action; if action=="chat_all_source" then sourceCall={key=key,wanted=wanted}; return wanted elseif action=="chat_clear_visible" then return true,12 elseif action=="chat_clear_saved" then return true,3 end; return true end)
+  view:setChatAllSources({ROOM=true,COMBAT=false})
   view:applyLayout(require("layout").compute(1024,600)); view.color_toggle.click(); view.option_action_buttons.chat_settings.click()
   eq(view.chat_settings_visible,true); eq(view.chat_settings_panel.visible,true)
+  assert(view.chat_all_source_buttons.COMBAT.message:find("OFF",1,true)); assert(view.chat_all_source_buttons.ROOM.message:find("ON",1,true))
+  eq(view.chat_all_source_buttons.COMBAT.click(),true); eq(sourceCall.key,"COMBAT"); eq(sourceCall.wanted,true); assert(view.chat_all_source_buttons.COMBAT.message:find("ON",1,true))
+  eq(view.chat_all_source_buttons.ROOM.click(),false); eq(sourceCall.key,"ROOM"); eq(sourceCall.wanted,false); assert(view.chat_all_source_buttons.ROOM.message:find("OFF",1,true))
   assert(view.chat_settings_clear_visible.click()); eq(actions[#actions],"chat_clear_visible"); eq(view.chat_settings_status.message:find("12 visible",1,true)~=nil,true)
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_visible"); eq(view.chat_settings_clear_pending,true)
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_saved"); eq(view.chat_settings_clear_pending,false); eq(view.chat_settings_status.message:find("3 saved",1,true)~=nil,true)
@@ -858,10 +862,17 @@ test("chat settings controls never overlap or leave the panel on short compact w
   local view=chatView(); view:showChatSettings()
   for _,size in ipairs({{400,300},{320,260},{800,600},{1024,600}}) do
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout); local panel=view.chat_settings_panel
-    local ordered={view.chat_settings_title,view.chat_settings_text,view.chat_settings_clear_visible,view.chat_settings_clear_saved}
-    for index,item in ipairs(ordered) do eq(item.y>=0,true); eq(item.y+item.height<=panel.height,true); if index>1 then eq(item.y>=ordered[index-1].y+ordered[index-1].height,true) end end
-    if view.chat_settings_status.visible then eq(view.chat_settings_status.y>=view.chat_settings_clear_saved.y+view.chat_settings_clear_saved.height,true); eq(view.chat_settings_status.y+view.chat_settings_status.height<=view.chat_settings_close.y,true) end
-    eq(view.chat_settings_close.y>=view.chat_settings_clear_saved.y+view.chat_settings_clear_saved.height,true); eq(view.chat_settings_close.y+view.chat_settings_close.height<=panel.height,true)
+    eq(panel.x>=0,true); eq(panel.y>=0,true); eq(panel.x+panel.width<=size[1],true); eq(panel.y+panel.height<=size[2],true)
+    eq(view.chat_settings_title.y+view.chat_settings_title.height<=view.chat_settings_content.y,true)
+    eq(view.chat_settings_content.y+view.chat_settings_content.height<=view.chat_settings_close.y,true)
+    eq(view.chat_settings_close.y+view.chat_settings_close.height<=panel.height,true)
+    local buttons={}; for _,key in ipairs(view.chat_all_source_order) do local button=view.chat_all_source_buttons[key]; buttons[#buttons+1]=button; eq(button.x>=0,true); eq(button.y>=0,true); eq(button.x+button.width<=view.chat_settings_content.width,true); eq(button.width>0,true); eq(button.height>0,true) end
+    for first=1,#buttons do for second=first+1,#buttons do local a,b=buttons[first],buttons[second]; local overlap=a.x<b.x+b.width and b.x<a.x+a.width and a.y<b.y+b.height and b.y<a.y+a.height; eq(overlap,false) end end
+    eq(view.chat_settings_clear_visible.y>=view.chat_all_source_buttons.COMBAT.y+view.chat_all_source_buttons.COMBAT.height,true)
+    eq(view.chat_settings_clear_saved.y>=view.chat_settings_clear_visible.y+view.chat_settings_clear_visible.height,true)
+    eq(view.chat_settings_status.y>=view.chat_settings_clear_saved.y+view.chat_settings_clear_saved.height,true)
+    eq(view.chat_settings_content.content_height>=view.chat_settings_status.y+view.chat_settings_status.height,true)
+    if size[2]<=300 then eq(view.chat_settings_content.content_height>view.chat_settings_content.height,true) end
   end
 end)
 test("reusable view validation rejects missing responsive list tab structures",function()

@@ -8,6 +8,8 @@ Chat history belongs to the Mudlet profile, not to one character. Switching char
 
 Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanently remove all saved DGHUD chat history. Permanent deletion requires two clicks; the command-line equivalent requires the full `dghud chat clear saved confirm` phrase.
 
+The same settings window has a **SHOW IN ALL** section. Toggle any source to control whether it appears in the combined **ALL** tab. `COMBAT` starts off there; every other source starts on. This changes only the combined view—dedicated tabs continue to work, capture continues, and saved history is untouched. The choices persist through profile restarts and HUD updates.
+
 ## Built-in filters
 
 - **ALL** — Every captured category.

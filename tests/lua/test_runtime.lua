@@ -27,6 +27,7 @@ local function fake()
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
     setOptionsActionCallback=function(self,callback) f.optionsActionCallback=callback end,
+    setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
     setMapLibraryActionCallback=function(self,callback) f.mapLibraryActionCallback=callback end,
     showMapLibrary=function(self) f.mapLibraryShown=true; return true end,
@@ -104,7 +105,12 @@ local function fake()
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
   function f:saveDisplaySettings(config) self.savedDisplaySettings={side_text_scale=config.side_text_scale}; return true end
-  function f:saveChatSettings(config) self.savedChatSettings={tab_order=config.tab_order}; self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1; return true end
+  function f:saveChatSettings(config)
+    self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1
+    if self.failChatSettingsSave then return nil,self.failChatSettingsSave end
+    self.savedChatSettings={tab_order=config.tab_order,all_sources=config.all_sources}
+    return true
+  end
   function f:reportCharacterRefresh() self.characterRefreshReports=(self.characterRefreshReports or 0)+1; return true end
   function f:reportDisplayTextScale(name) self.displayTextReport=name; return true end
   function f:reportLayoutStatus(status) self.layoutReport=status; return status end
@@ -588,6 +594,22 @@ test("chat tab reorder persists once without changing the active filter",functio
   eq(type(f.chatOrderCallback),"function"); local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT"}
   assert(f.chatOrderCallback(order)); eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.tab_order[1],"STAFF")
   eq(DGHUD.user_settings.chat.tab_order[1],"STAFF"); eq(hud.chat.filter,"ALL")
+  DGHUD=nil
+end)
+test("ALL source toggles persist and never disable capture or dedicated tabs",function()
+  DGHUD={user_settings={}}
+  local settings={layout={},chat={visible_limit=1000,dedupe_seconds=3,tab_order={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=false}}}
+  local f=fake(); local hud=Main.new(f,settings); assert(hud:start())
+  assert(hud.chat:capture("ROOM","Room speech")); assert(hud.chat:capture("COMBAT","Incoming attack"))
+  eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"Room speech")
+  assert(hud.chat:setFilter("COMBAT")); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"Incoming attack")
+  assert(hud.chat:setFilter("ALL")); eq(#hud.chat:entries(),1)
+  eq(f.optionsActionCallback("chat_all_source","COMBAT",true),true)
+  eq(#hud.chat:entries(),2); eq(f.savedChatSettings.all_sources.COMBAT,true); eq(f.savedChatSettings.tab_order[1],"ALL")
+  eq(DGHUD.user_settings.chat.all_sources.COMBAT,true); eq(f.viewChatAllSources.COMBAT,true)
+  f.failChatSettingsSave="disk full"
+  local ok,err=f.optionsActionCallback("chat_all_source","ROOM",false); eq(ok,nil); assert(err:find("disk full",1,true))
+  eq(hud.settings.chat.all_sources.ROOM,true); eq(#hud.chat:entries(),2)
   DGHUD=nil
 end)
 test("resize preserves chat controller history and trigger ownership",function()

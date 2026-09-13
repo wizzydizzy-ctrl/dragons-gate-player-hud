@@ -76,12 +76,19 @@ function History:hydrate(entries)
   return true
 end
 
-function History:entries(filter)
+local function includedInAll(category,sources)
+  if type(sources)~="table" then return true end
+  if category=="OWN" then category="ROOM" end
+  local enabled=sources[category]
+  return enabled==nil or enabled==true
+end
+
+function History:entries(filter,allSources)
   filter=tostring(filter or "ALL"):upper()
   local entries={}
   for _,entry in ipairs(self.items) do
     local category=tostring(entry.category or ""):upper()
-    if filter=="ALL" or category==filter or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=entry end
+    if (filter=="ALL" and includedInAll(category,allSources)) or category==filter or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=entry end
   end
   return entries
 end

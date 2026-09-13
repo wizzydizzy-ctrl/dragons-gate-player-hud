@@ -362,7 +362,7 @@ function Main:startChat()
   local storage=self.adapter:createChatStorage(visibleLimit)
   self.chat=ChatController.new(self.adapter,ChatParser,ChatHistory.new(visibleLimit,settings.dedupe_seconds or 3),storage,function(entries,categories,filter)
     if self.view and self.view.renderChat then self.view:renderChat(entries,categories,filter) end
-  end,function() return self:characterName() end)
+  end,function() return self:characterName() end,settings.all_sources)
   local restored=false
   if type(self.chat_handoff)=="table" then restored=self.chat:restoreHandoff(self.chat_handoff)==true end
   if self.view and self.view.setChatFilterCallback then
@@ -374,7 +374,7 @@ function Main:startChat()
   end
   if self.view and self.view.setChatOrderCallback then
     self.view:setChatOrderCallback(function(order)
-      local candidate={tab_order=order}
+      local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources}
       if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
       self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=order
       local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.tab_order=order end
@@ -408,6 +408,23 @@ function Main:clearSavedChat(confirmed)
   if not self.chat then return nil,"chatbox is not running" end
   local ok,count=self.chat:clearSavedHistory(true); if not ok then return nil,count end
   if self.adapter.reportChatClear then self.adapter:reportChatClear("saved",count) end; return true,count
+end
+local chatAllSourceKeys={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true}
+function Main:setChatAllSource(category,enabled)
+  category=tostring(category or ""):upper()
+  if not chatAllSourceKeys[category] then return nil,"unknown ALL tab source" end
+  enabled=enabled==true
+  local chatSettings=self.settings.chat or {}; local sources={}
+  for key,value in pairs(chatSettings.all_sources or {}) do sources[key]=value~=false end
+  sources[category]=enabled
+  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=sources}
+  if self.adapter.saveChatSettings then local saved,err=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save ALL tab sources: "..tostring(err) end end
+  self.settings.chat=chatSettings; chatSettings.all_sources=sources
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.all_sources=sources end
+  if self.chat then self.chat:setAllSources(sources) end
+  if self.view and self.view.setChatAllSources then self.view:setChatAllSources(sources) end
+  return enabled
 end
 function Main:scheduleRoundtimeTick()
   if self.roundtime_timer or self.roundtime_display<=0 then return end
@@ -942,12 +959,13 @@ function Main:start()
   elseif self.view.setColorEnabled then self.view:setColorEnabled(self.colorizer_enabled) end
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setFeedbackCallback then self.view:setFeedbackCallback(function(payload,done) return self.adapter:submitFeedback(payload,done) end) end
-  if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action)
+  if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action,key,wanted)
     if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="refresh_data" then return self:refreshCharacterData() end
     if action=="chat_clear_visible" then return self:clearVisibleChat() end
     if action=="chat_clear_saved" then return self:clearSavedChat(true) end
+    if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
     if action=="roller_settings" then return self.roller and self.roller.cfg end
     if action=="auto_update" then
       local enabled=not (self.settings.update and self.settings.update.auto_apply==true); self.settings.update=self.settings.update or {}; self.settings.update.auto_apply=enabled
@@ -962,6 +980,7 @@ function Main:start()
     local command=({roller_start="start",roller_stop="stop",roller_status="status",roller_show="show",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
+  if self.view.setChatAllSources then self.view:setChatAllSources(self.settings.chat and self.settings.chat.all_sources or {}) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)

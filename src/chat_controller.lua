@@ -35,8 +35,8 @@ local function call(object,name,...)
   return first,second
 end
 
-function Controller.new(adapter,parser,history,storage,onChange,characterProvider)
-  return setmetatable({adapter=adapter,parser=parser,history=history,storage=storage,onChange=onChange or function() end,characterProvider=characterProvider or function() end,filter="ALL",started=false,historiesByCharacter={}},Controller)
+function Controller.new(adapter,parser,history,storage,onChange,characterProvider,allSources)
+  return setmetatable({adapter=adapter,parser=parser,history=history,storage=storage,onChange=onChange or function() end,characterProvider=characterProvider or function() end,allSources=type(allSources)=="table" and allSources or nil,filter="ALL",started=false,historiesByCharacter={}},Controller)
 end
 
 function Controller:character()
@@ -49,7 +49,14 @@ function Controller:notify()
 end
 
 function Controller:entries()
-  return self.history:entries(self.filter)
+  return self.history:entries(self.filter,self.allSources)
+end
+
+function Controller:setAllSources(sources)
+  if type(sources)~="table" then return nil,"ALL tab sources must be a table" end
+  self.allSources=sources
+  if self.started then self:notify() end
+  return true
 end
 
 function Controller:reportStorageError(message)

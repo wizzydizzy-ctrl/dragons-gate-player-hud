@@ -95,6 +95,15 @@ test("room filter includes both nearby speakers and the active character",functi
   eq(#history:entries("PRIVATE"),1)
 end)
 
+test("ALL source settings hide only selected categories and map OWN to ROOM",function()
+  local history=History.new(10,3)
+  for index,category in ipairs({"ROOM","OWN","WHISPER","ESP","COMBAT","QUEST"}) do history:append({category=category,message=category},index) end
+  local sources={ROOM=false,WHISPER=true,ESP=true,COMBAT=false}
+  local entries=history:entries("ALL",sources)
+  eq(#entries,3); eq(entries[1].category,"WHISPER"); eq(entries[2].category,"ESP"); eq(entries[3].category,"QUEST")
+  eq(#history:entries("ROOM",sources),2); eq(#history:entries("COMBAT",sources),1); eq(#history:entries("PRIVATE",sources),2)
+end)
+
 test("clears only the visible in-memory history and resets dedupe state",function()
   local history=History.new(10,3)
   local entry={category="ESP",speaker="Tekk",message="repeatable"}
