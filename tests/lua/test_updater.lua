@@ -44,6 +44,11 @@ test("display text settings accept only a bounded side-panel scale",function()
   local value,err=Adapter.displaySettingsSnapshot({side_text_scale=.79}); eq(value,nil); assert(err:find("between 0.8 and 1.2",1,true))
   value,err=Adapter.displaySettingsSnapshot({side_text_scale="large"}); eq(value,nil); assert(err:find("between 0.8 and 1.2",1,true))
 end)
+test("chat settings snapshot sanitizes persistent tab order as data",function()
+  local value=assert(Adapter.chatSettingsSnapshot({tab_order={" staff ","ALL","STAFF","OWN","<BAD>","ROOM\nESP"}}))
+  eq(table.concat(value.tab_order,","),"STAFF,ALL")
+  local missing,err=Adapter.chatSettingsSnapshot({tab_order={}}); eq(missing,nil); assert(err:find("empty",1,true))
+end)
 test("legacy mutable data migrates without moving package resources",function()
   local oldLfs,oldOpen,oldRename,oldRemove=lfs,io.open,os.rename,os.remove
   local directories={['/profile/DragonsGateHUD']=true,['/profile/DragonsGateHUD/map-collections']=true}

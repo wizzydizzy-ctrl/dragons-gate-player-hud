@@ -171,6 +171,7 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
     function item:raise() self.raised=true end
     function item:delete() self.deleted=true end
     function item:setClickCallback(callback) self.click=callback end
+    function item:setReleaseCallback(callback) self.release=callback end
     function item:setAction(callback) self.action=callback end
     function item:setToolTip(value) self.tooltip=value end
     function item:print(value) self.text=tostring(value) end
@@ -1019,12 +1020,34 @@ test("chat tabs stay inside narrow panels and expose deterministic overflow",fun
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)
   view:renderChat({}, {"QUEST","EVENTS","QUEST<script>","LINE\nBREAK"}, "ALL")
-  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,QUEST,EVENTS,QUEST<SCRIPT>,LINE\nBREAK")
+  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,QUEST,EVENTS")
   eq(#view.chat_overflow_categories>0,true)
   for _,button in ipairs(view.chat_buttons) do
     eq(button.x+button.width<=layout.chat_width,true); eq(tostring(button.message):find("<script>",1,true),nil)
   end
   local first=view.chat_overflow_categories[1]; view.chat_overflow_button.click(); eq(selected,first)
+end)
+
+test("chat tab order sanitizes saved preferences and appends missing categories",function()
+  local order=View.chatFilterOrder({"QUEST","EVENTS"},{" events ","ROOM","OWN","<BAD>","EVENTS","ALL"})
+  eq(table.concat(order,","),"EVENTS,ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,QUEST")
+end)
+
+test("chat tabs drag left and right, persist once, and keep click filtering",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1920,1080)); local selected,saved,calls
+  view:setChatFilterCallback(function(category) selected=category; return true end)
+  view:setChatOrderCallback(function(order) saved=table.concat(order,","); calls=(calls or 0)+1; return true end)
+  view:renderChat({}, {}, "ALL")
+  local room=view.chat_buttons[2]; room.click({button="LeftButton",globalX=100}); room.release({button="LeftButton",globalX=20})
+  eq(saved,"ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT"); eq(calls,1); eq(view.chat_active_filter,"ALL")
+  local all=view.chat_buttons[2]; all.click({button="LeftButton",globalX=100}); all.release({button="LeftButton",globalX=101})
+  eq(selected,"ALL"); eq(calls,1)
+end)
+
+test("failed chat tab persistence leaves the visible order unchanged",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1920,1080)); view:setChatOrderCallback(function() return nil,"disk full" end); view:renderChat({}, {}, "ALL")
+  local before=table.concat(view.chat_filter_order,","); local ok,err=view:reorderChatTab("ROOM",1)
+  eq(ok,nil); eq(err,"disk full"); eq(table.concat(view.chat_filter_order,","),before)
 end)
 
 test("chat wrap reflows on resize while preserving scroll intent and filter",function()

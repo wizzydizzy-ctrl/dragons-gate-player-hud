@@ -19,7 +19,9 @@ Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanent
 - **STAFF** — Recognized Guide, GM, Elder, sends, and voice formats.
 - **COMBAT** — Conservative incoming attacks, damage, movement blocks, spell threats, upkeep, recovery, and similar high-value combat lines.
 
-If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too. The built-in Combat filter uses the same narrow matching rules as DGHUD's optional combat coloring, so ordinary room prose is not copied into it.
+Drag any chat tab left or right to arrange the filters in the order you prefer. The order is saved for the whole Mudlet profile and survives character changes, reconnects, and HUD updates. A short click still selects the tab normally.
+
+If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too, and can be reordered after they appear. The built-in Combat filter uses the same narrow matching rules as DGHUD's optional combat coloring, so ordinary room prose is not copied into it.
 
 ## Examples DGHUD recognizes
 

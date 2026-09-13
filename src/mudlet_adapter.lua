@@ -635,6 +635,32 @@ function Adapter.loadDisplaySettings()
   local ok,value=pcall(loader); if not ok then return nil end
   local snapshot=Adapter.displaySettingsSnapshot(value); return snapshot
 end
+local function chatSettingsPath() return Adapter.dataBase().."/chat-settings.lua" end
+function Adapter.chatSettingsSnapshot(config)
+  local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
+  local result={tab_order={}}; local seen={}
+  for index,value in ipairs(order) do
+    if index>64 then break end
+    local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
+    if category~="" and #category<=32 and not category:find("[%c<>]") and category~="OWN" and category~="WHISPER" and not seen[category] then result.tab_order[#result.tab_order+1]=category; seen[category]=true end
+  end
+  if #result.tab_order==0 then return nil,"chat tab order is empty" end
+  return result
+end
+function Adapter:saveChatSettings(config)
+  local snapshot,snapshotErr=Adapter.chatSettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
+  local base=Adapter.dataBase(); lfs.mkdir(base); local destination=chatSettingsPath(); local temp=destination..".tmp"; local values={}
+  for _,value in ipairs(snapshot.tab_order) do values[#values+1]=string.format("%q",value) end
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end
+  local wrote,writeErr=file:write("return { tab_order={"..table.concat(values,",").."} }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
+  local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
+end
+function Adapter.loadChatSettings()
+  local loader=loadfile(chatSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if not ok then return nil end
+  local snapshot=Adapter.chatSettingsSnapshot(value); return snapshot
+end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end

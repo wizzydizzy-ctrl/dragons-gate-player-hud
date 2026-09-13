@@ -21,6 +21,7 @@ local function fake()
     applyLayout=function(self,layout) f.layouts[#f.layouts+1]=layout end,
     renderChat=function(self,entries,categories,filter) f.chatRenders=(f.chatRenders or 0)+1; f.renderedChat={entries=entries,categories=categories,filter=filter} end,
     setChatFilterCallback=function(self,callback) f.chatFilterCallback=callback end,
+    setChatOrderCallback=function(self,callback) f.chatOrderCallback=callback end,
     setColorToggleCallback=function(self,callback) f.colorToggleCallback=callback end,
     setColorOptionsCallback=function(self,callback) f.colorOptionsCallback=callback end,
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
@@ -103,6 +104,7 @@ local function fake()
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
   function f:saveDisplaySettings(config) self.savedDisplaySettings={side_text_scale=config.side_text_scale}; return true end
+  function f:saveChatSettings(config) self.savedChatSettings={tab_order=config.tab_order}; self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1; return true end
   function f:reportCharacterRefresh() self.characterRefreshReports=(self.characterRefreshReports or 0)+1; return true end
   function f:reportDisplayTextScale(name) self.displayTextReport=name; return true end
   function f:reportLayoutStatus(status) self.layoutReport=status; return status end
@@ -579,6 +581,14 @@ test("chat controller renders through the view and tab callbacks select filters"
   eq(f.renderedChat.filter,"ALL"); eq(type(f.chatFilterCallback),"function")
   assert(hud.chat:capture("QUEST","The quest begins.")); f.chatFilterCallback("QUEST")
   eq(hud.chat.filter,"QUEST"); eq(f.renderedChat.filter,"QUEST"); eq(f.renderedChat.entries[1].message,"The quest begins.")
+end)
+test("chat tab reorder persists once without changing the active filter",function()
+  DGHUD={user_settings={}}
+  local f=fake(); local hud=Main.new(f,{layout={},chat={visible_limit=1000,dedupe_seconds=3}}); hud:start()
+  eq(type(f.chatOrderCallback),"function"); local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT"}
+  assert(f.chatOrderCallback(order)); eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.tab_order[1],"STAFF")
+  eq(DGHUD.user_settings.chat.tab_order[1],"STAFF"); eq(hud.chat.filter,"ALL")
+  DGHUD=nil
 end)
 test("resize preserves chat controller history and trigger ownership",function()
   local f=fake(); local hud=Main.new(f,{layout={},chat={height_percent=.25}}); hud:start(); assert(hud.chat:capture("QUEST","kept"))

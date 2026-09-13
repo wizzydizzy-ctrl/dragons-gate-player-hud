@@ -62,6 +62,8 @@ local persistedMapper=Adapter.loadMapperSettings and Adapter.loadMapperSettings(
 if type(persistedMapper)=="table" then userSettings.mapper=type(userSettings.mapper)=="table" and userSettings.mapper or {}; for key,value in pairs(persistedMapper) do if userSettings.mapper[key]==nil then userSettings.mapper[key]=value end end end
 local persistedDisplay=Adapter.loadDisplaySettings and Adapter.loadDisplaySettings()
 if type(persistedDisplay)=="table" then userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}; for key,value in pairs(persistedDisplay) do userSettings.display[key]=value end end
+local persistedChat=Adapter.loadChatSettings and Adapter.loadChatSettings()
+if type(persistedChat)=="table" then userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}; userSettings.chat.tab_order=persistedChat.tab_order end
 DGHUD.user_settings=userSettings
 local function applyUserSettings()
   local ok,resolvedSettings,migratedSettings=pcall(Settings.resolve,defaults,DGHUD.user_settings or {})

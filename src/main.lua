@@ -372,6 +372,15 @@ function Main:startChat()
       return chat:setFilter(category)
     end)
   end
+  if self.view and self.view.setChatOrderCallback then
+    self.view:setChatOrderCallback(function(order)
+      local candidate={tab_order=order}
+      if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
+      self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=order
+      local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.tab_order=order end
+      return true
+    end)
+  end
   local started,err=self.chat:start(restored and self.view_adopted==true)
   if started then self.chat_handoff=nil end
   return started,err

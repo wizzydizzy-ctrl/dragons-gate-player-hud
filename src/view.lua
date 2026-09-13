@@ -576,15 +576,24 @@ function View.new(settings)
 end
 local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"}
 local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,COMBAT=true,OWN=true,WHISPER=true}
-local function chatFilterOrder(categories)
+local function cleanChatCategory(value)
+  local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
+  if category=="" or #category>32 or category:find("[%c<>]") or category=="OWN" or category=="WHISPER" then return nil end
+  return category
+end
+local function chatFilterOrder(categories,preferred)
   local result={}; local seen={}
-  for _,category in ipairs(default_chat_filters) do result[#result+1]=category; seen[category]=true end
+  local available={}; for _,category in ipairs(default_chat_filters) do available[category]=true end
   for _,value in ipairs(categories or {}) do
-    local category=tostring(value or ""):upper()
-    if category~="" and not reserved_chat_filters[category] and not seen[category] then result[#result+1]=category; seen[category]=true end
+    local category=cleanChatCategory(value)
+    if category and not reserved_chat_filters[category] then available[category]=true end
   end
+  for _,value in ipairs(type(preferred)=="table" and preferred or {}) do local category=cleanChatCategory(value); if category and available[category] and not seen[category] then result[#result+1]=category; seen[category]=true end end
+  for _,category in ipairs(default_chat_filters) do if not seen[category] then result[#result+1]=category; seen[category]=true end end
+  for _,value in ipairs(categories or {}) do local category=cleanChatCategory(value); if category and available[category] and not seen[category] then result[#result+1]=category; seen[category]=true end end
   return result
 end
+View.chatFilterOrder=chatFilterOrder
 local function chatTabWidth(category,font)
   return math.max(42,math.min(96,math.floor(#tostring(category)*(tonumber(font) or 13)*.55+18)))
 end
@@ -592,9 +601,31 @@ function View:setChatFilterCallback(callback)
   self.chat_filter_callback=type(callback)=="function" and callback or nil
   return true
 end
+function View:setChatOrderCallback(callback)
+  self.chat_order_callback=type(callback)=="function" and callback or nil
+  return true
+end
+function View:reorderChatTab(category,targetIndex)
+  category=cleanChatCategory(category); local old=self.chat_filter_order or {}
+  if not category or #old<2 then return false end
+  local sourceIndex; for index,value in ipairs(old) do if value==category then sourceIndex=index; break end end
+  targetIndex=math.max(1,math.min(#old,math.floor(tonumber(targetIndex) or sourceIndex or 1)))
+  if not sourceIndex or sourceIndex==targetIndex then return false end
+  local reordered={}; for index,value in ipairs(old) do if index~=sourceIndex then reordered[#reordered+1]=value end end
+  table.insert(reordered,targetIndex,category)
+  if self.chat_order_callback then
+    local ok,accepted,message=pcall(self.chat_order_callback,reordered)
+    if not ok or accepted==nil or accepted==false then self.chat_drag=nil; return nil,tostring(message or accepted or "Could not save chat tab order") end
+  end
+  self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=reordered; self.chat_filter_order=reordered; self.chat_drag=nil
+  self:renderChatTabs(self.chat_categories,self.chat_active_filter)
+  return true
+end
 function View:renderChatTabs(categories,activeFilter)
+  if self.chat_drag then self.chat_tabs_refresh_pending=true; return true end
+  self.chat_tabs_refresh_pending=nil
   for _,button in ipairs(self.chat_buttons or {}) do if button.delete then button:delete() end end
-  self.chat_buttons={}; self.chat_overflow_button=nil; self.chat_filter_order=chatFilterOrder(categories)
+  self.chat_buttons={}; self.chat_overflow_button=nil; self.chat_filter_order=chatFilterOrder(categories,self.settings.chat and self.settings.chat.tab_order)
   local width=math.max(80,tonumber(self.layout and self.layout.chat_width) or 640)
   local font=tonumber(self.layout and self.layout.chat_font) or 13
   local gap,padding,overflowWidth=4,8,64
@@ -620,7 +651,7 @@ function View:renderChatTabs(categories,activeFilter)
   self.chat_overflow_categories=hidden
   local t=self.settings.theme; local x=padding; local active=tostring(activeFilter or "ALL"):upper()
   local maxNormal=width-padding-(#hidden>0 and overflowWidth+gap or 0)
-  for _,category in ipairs(visible) do
+  for visibleIndex,category in ipairs(visible) do
     local remaining=maxNormal-x; if remaining<=0 then break end
     local button=label("DGHUD.Chat.Tab."..(#self.chat_buttons+1),self.chat_tabs,nil,self.geyser)
     local buttonWidth=math.min(chatTabWidth(category,font),remaining)
@@ -629,7 +660,24 @@ function View:renderChatTabs(categories,activeFilter)
     button.category=selected
     button:setStyleSheet("background:"..(selected==active and "#26382d" or "#121a16")..";border:1px solid "..(selected==active and t.jade or t.border)..";border-radius:4px;color:"..(selected==active and t.jade or t.muted)..";font-size:"..font.."px;")
     button:echo("<center><b>"..safeText(selected).."</b></center>")
-    button:setClickCallback(function() if self.chat_filter_callback then self.chat_filter_callback(selected) end end)
+    if button.setToolTip then button:setToolTip("Click to view. Drag left or right to reorder.") end
+    local logicalIndex; for index,value in ipairs(self.chat_filter_order) do if value==selected then logicalIndex=index; break end end
+    button:setClickCallback(function(event)
+      if type(event)~="table" then if self.chat_filter_callback then return self.chat_filter_callback(selected) end; return end
+      if event.button and event.button~="LeftButton" then return end
+      self.chat_drag={category=selected,index=logicalIndex,start_x=tonumber(event.globalX or event.x),width=buttonWidth}
+    end)
+    local release=function(event)
+      local drag=self.chat_drag; self.chat_drag=nil
+      if not drag or drag.category~=selected then return end
+      local finish=type(event)=="table" and tonumber(event.globalX or event.x) or drag.start_x
+      local delta=(finish and drag.start_x) and finish-drag.start_x or 0
+      if math.abs(delta)<math.max(8,drag.width*.2) then if self.chat_filter_callback then return self.chat_filter_callback(selected) end; return end
+      local step=math.max(1,drag.width+gap); local offset=delta>0 and math.floor(delta/step+.5) or math.ceil(delta/step-.5)
+      return self:reorderChatTab(selected,drag.index+offset)
+    end
+    if button.setReleaseCallback then button:setReleaseCallback(release) elseif type(setLabelReleaseCallback)=="function" then setLabelReleaseCallback(button.name,release) end
+    button.drag_index=logicalIndex; button.visible_index=visibleIndex
     self.chat_buttons[#self.chat_buttons+1]=button
   end
   if #hidden>0 then
@@ -1559,7 +1607,7 @@ function View:prepareForReuse(settings)
   local valid,why=View.validateReusable(self,settings); if not valid then return nil,why end
   self.settings=settings or self.settings
   self:ensureVersionLabel(); self:renderVersion()
-  self.chat_filter_callback=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
+  self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
   self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
   self.map_zoom_callback=nil; self.map_clear_all_callback=nil
