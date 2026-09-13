@@ -51,8 +51,8 @@ end
 local rules={
   {category="ESP",pattern='^'..name..' %(ESP%): "(.*)"$',speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' %(ELDER%): "(.*)"$',speaker=1,message=2},
-  {category="STAFF",pattern='^%[GUIDE%] '..name..': (.+)$',speaker=1,message=2},
-  {category="STAFF",pattern='^%[GM%] '..name..': (.+)$',speaker=1,message=2},
+  {category="STAFF",pattern='^%[GUIDE%] '..activeName..': (.+)$',speaker=1,message=2},
+  {category="STAFF",pattern='^%[GM%] '..activeName..': (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' sends: (.+)$',speaker=1,message=2},
   {category="DRAGON",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
   {category="DRAGON",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},
@@ -64,6 +64,13 @@ local rules={
 
 local function builtIn(category,message,metadata,character,now,line)
   return entry(category,message,metadata,character,now,"builtin",line)
+end
+
+local function parseAssistanceRequest(line,character,now)
+  local speaker,room,pending=line:match('^%[GUIDE%] '..activeName..' %(room (%d+)%) requests your assistance%.%s+%((%d+) total requests pending%.%)$')
+  if not speaker then return nil end
+  local message="requests your assistance in room "..room.." ("..pending.." total requests pending)."
+  return builtIn("STAFF",message,{speaker=speaker},character,now,line)
 end
 
 local combatKinds={attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true}
@@ -138,6 +145,8 @@ end
 function Parser.parse(line,character,now)
   line=plain(line)
   if not line then return nil end
+  local assistance=parseAssistanceRequest(line,character,now)
+  if assistance then return assistance end
   local staffVoice=parseStaffVoice(line,character,now)
   if staffVoice then return staffVoice end
   for _,rule in ipairs(rules) do

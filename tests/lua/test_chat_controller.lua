@@ -43,6 +43,15 @@ test("one owned line trigger captures and persists recognized chat",function()
   eq(controller:entries()[1].category,"ESP"); eq(f.storageAppends,1); eq(f:count(f.triggers),1)
 end)
 
+test("GUIDE assistance requests flow through the owned trigger into staff chat",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("STAFF"))
+  local line="[GUIDE] Bork Biigfeet (room 174) requests your assistance.  (1 total requests pending.)"
+  f:line(line)
+  local entries=controller:entries()
+  eq(#entries,1); eq(entries[1].category,"STAFF"); eq(entries[1].speaker,"Bork Biigfeet"); eq(entries[1].line,line)
+  eq(f.storageAppends,1)
+end)
+
 test("targeted asks are captured and visible in the room tab",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("ROOM"))
   f:line('Eilan asks Atrax, "You asked two already, didn\'t you?"')
