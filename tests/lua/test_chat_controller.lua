@@ -43,6 +43,14 @@ test("one owned line trigger captures and persists recognized chat",function()
   eq(controller:entries()[1].category,"ESP"); eq(f.storageAppends,1); eq(f:count(f.triggers),1)
 end)
 
+test("direct thoughts flow through the owned trigger into ESP and private filters",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("ESP"))
+  f:line('Seaux thinks to you, "Hello"')
+  local entries=controller:entries()
+  eq(#entries,1); eq(entries[1].category,"ESP"); eq(entries[1].speaker,"Seaux"); eq(entries[1].message,"Hello")
+  eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),1)
+end)
+
 test("GUIDE assistance requests flow through the owned trigger into staff chat",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("STAFF"))
   local line="[GUIDE] Bork Biigfeet (room 174) requests your assistance.  (1 total requests pending.)"

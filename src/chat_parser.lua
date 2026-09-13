@@ -50,6 +50,7 @@ end
 
 local rules={
   {category="ESP",pattern='^'..name..' %(ESP%): "(.*)"$',speaker=1,message=2},
+  {category="ESP",pattern='^'..activeName..' thinks to you, "(.*)"$',speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' %(ELDER%): "(.*)"$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GUIDE%] '..activeName..': (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..activeName..': (.+)$',speaker=1,message=2},
