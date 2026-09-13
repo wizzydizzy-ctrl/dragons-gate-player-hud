@@ -50,16 +50,21 @@ end
 
 local rules={
   {category="ESP",pattern='^'..name..' %(ESP%): "(.*)"$',speaker=1,message=2},
-  {category="ESP",pattern='^'..activeName..' thinks to you, "(.*)"$',speaker=1,message=2},
+  {category="ESP",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="ESP",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\"$",speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' %(ELDER%): "(.*)"$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GUIDE%] '..activeName..': (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..activeName..': (.+)$',speaker=1,message=2},
+  {category="STAFF",pattern='^%[GM%] '..activeName..' %[[%w_.%-]+%] reports: (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' sends: (.+)$',speaker=1,message=2},
   {category="DRAGON",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
   {category="DRAGON",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},
   {category="DRAGON",pattern="^You pick up "..name.."'s Dragon link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
   {category="SECIAN",pattern="^You pick up "..name.."'s Secian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
   {category="SECIAN",pattern="^You pick up "..name.."'s Secian link, \"(.*)\"$",speaker=1,message=2},
+  {category="CONTACT",pattern='^'..activeName..' thinks to you, "(.*)"$',speaker=1,message=2},
+  {category="CONTACT",pattern="^You pick up "..activeName.."'s thoughts, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="CONTACT",pattern="^You pick up "..activeName.."'s thoughts, \"(.*)\"$",speaker=1,message=2},
   {category="CONTACT",pattern="^You pick up "..name.."'s thoughts echoing through the area, \"(.*)\"$",speaker=1,message=2},
 }
 
