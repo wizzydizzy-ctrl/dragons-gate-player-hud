@@ -3,10 +3,13 @@ local Parser=require("chat_parser")
 local History=require("chat_history")
 
 local function fake(entries)
-  local f={next=0,triggers={},storageAppends=0,storageClears=0,storageEntries=entries or {},storedCharacters={},errors=0,epochValue=100,timestampValue="2026-08-31T13:00:00-04:00",character="Dace Alterac",loadRecentCalls=0,loadedCharacterKeys={}}
+  local f={next=0,triggers={},timers={},storageAppends=0,storageClears=0,storageEntries=entries or {},storedCharacters={},errors=0,epochValue=100,timestampValue="2026-08-31T13:00:00-04:00",character="Dace Alterac",loadRecentCalls=0,loadedCharacterKeys={}}
   function f:addLineTrigger(fn) if self.triggerFailure then error(self.triggerFailure) end; self.next=self.next+1; local id="trigger-"..self.next; self.triggers[id]=fn; return id end
   function f:killTrigger(id) self.triggers[id]=nil end
   function f:line(value) for _,fn in pairs(self.triggers) do fn(value) end end
+  function f:schedule(_,fn) self.next=self.next+1; local id="timer-"..self.next; self.timers[id]=fn; return id end
+  function f:cancelTimer(id) self.timers[id]=nil; return true end
+  function f:fireTimer() local id,fn=next(self.timers); if id then self.timers[id]=nil; fn() end end
   function f:count(value) local total=0; for _ in pairs(value) do total=total+1 end; return total end
   function f:epoch() return self.epochValue end
   function f:timestamp() return self.timestampValue end
@@ -75,6 +78,16 @@ test("GUIDE assistance cancellations flow through the owned trigger into staff c
   local entries=controller:entries()
   eq(#entries,1); eq(entries[1].category,"STAFF"); eq(entries[1].speaker,"Wizzy Dizzy"); eq(entries[1].line,line)
   eq(f.storageAppends,1)
+end)
+
+test("wrapped GM bug reports flow through the owned trigger as one staff entry",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("STAFF"))
+  local first="[GM] Vaeltherion [forhekset] reports a bug in room 10532: Traveling Drag-al Merchants have spawned in the hunting area .. and all the mobs are gone. And I can't"
+  f:line(first); f:line("finish the hunt or find the original creatures."); f:line(">")
+  local entries=controller:entries()
+  eq(#entries,1); eq(entries[1].speaker,"Vaeltherion")
+  eq(entries[1].message,"reports a bug in room 10532: Traveling Drag-al Merchants have spawned in the hunting area .. and all the mobs are gone. And I can't finish the hunt or find the original creatures.")
+  eq(f.storageAppends,1); eq(next(f.timers),nil)
 end)
 
 test("targeted asks are captured and visible in the room tab",function()

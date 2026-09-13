@@ -165,6 +165,16 @@ end
 function Adapter.versionManifestUrl(github,version,nonce)
   return "https://github.com/"..github.owner.."/"..github.repository.."/releases/download/v"..tostring(version).."/manifest.json"
 end
+function Adapter.sameDownloadPath(actual,expected)
+  local function normalize(value)
+    value=tostring(value or ""):gsub("^file://",""):gsub("\\","/"):gsub("/+","/")
+    return value
+  end
+  local left,right=normalize(actual),normalize(expected)
+  if left==right then return true end
+  if left:match("^%a:/") and right:match("^%a:/") then return left:lower()==right:lower() end
+  return false
+end
 local updateNonce=0
 function Adapter.new() return setmetatable({},Adapter) end
 function Adapter:getBorders() return getBorderLeft(),getBorderTop(),getBorderRight(),getBorderBottom() end
@@ -873,27 +883,20 @@ function Adapter:checkLatestAsync(updater,done)
   local settings=updater.settings; local github=settings.github or {}; local policy=settings.update or {}
   if github.owner=="GITHUB_OWNER" or not tostring(github.owner):match("^[%w_.-]+$") or not tostring(github.repository):match("^[%w_.-]+$") then return nil,"configure the GitHub owner and repository first" end
   local base=Adapter.updateBase(getMudletHomeDir()); local staging=base.."/staging"; lfs.mkdir(base); lfs.mkdir(staging)
-  local releasePath=staging.."/latest-release.json"; local manifestPath=staging.."/startup-manifest.json"; local ids={}; local timeoutId; local finished=false
+  local manifestPath=staging.."/startup-manifest.json"; local ids={}; local timeoutId; local finished=false
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; ids={}; if timeoutId then killTimer(timeoutId); timeoutId=nil end end
   local function finish(manifest,message,raw) if finished then return end; finished=true; cleanup(); done(manifest,message,raw) end
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,url) if url and url:find(github.repository,1,true) then finish(nil,message) end end)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,path)
-    if path==releasePath then
-      local raw=readFile(path); if not raw or #raw>1048576 then finish(nil,"release metadata is missing or too large"); return end
-      local ok,release=pcall(yajl.to_value,raw); if not ok or type(release)~="table" then finish(nil,"release metadata JSON is invalid"); return end
-      local version=type(release.tag_name)=="string" and release.tag_name:match("^v(%d+%.%d+%.%d+)$")
-      if not version then finish(nil,"latest release has an invalid version tag"); return end
-      os.remove(manifestPath); local queued,queueErr=downloadFile(manifestPath,Adapter.versionManifestUrl(github,version)); if queued==false then finish(nil,queueErr or "manifest download could not start") end; return
-    end
-    if path~=manifestPath then return end
-    local raw=readFile(path); if not raw or #raw>(policy.manifest_limit or 65536) then finish(nil,"manifest is missing or too large"); return end
+    if not Adapter.sameDownloadPath(path,manifestPath) then return end
+    local raw=readFile(manifestPath); if not raw or #raw>(policy.manifest_limit or 65536) then finish(nil,"manifest is missing or too large"); return end
     local ok,manifest=pcall(yajl.to_value,raw); if not ok then finish(nil,"manifest JSON is invalid"); return end
     local valid,why=updater:validateManifest(manifest); if not valid then finish(nil,why); return end
     finish(manifest,nil,raw)
   end)
-  updateNonce=updateNonce+1; os.remove(releasePath)
-  local queued,queueErr=downloadFile(releasePath,Adapter.latestReleaseUrl(github))
-  if queued==false then finish(nil,queueErr or "release metadata download could not start"); return nil,queueErr or "release metadata download could not start" end
+  updateNonce=updateNonce+1; os.remove(manifestPath)
+  local queued,queueErr=downloadFile(manifestPath,Adapter.manifestUrl(github,tostring(os.time()).."-"..tostring(updateNonce)))
+  if queued==false then finish(nil,queueErr or "manifest download could not start"); return nil,queueErr or "manifest download could not start" end
   timeoutId=tempTimer(policy.timeout_seconds or 30,function() timeoutId=nil; finish(nil,"download timed out") end)
   return true
 end
@@ -1066,21 +1069,22 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
   end
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadError",function(_,message,url) if expectedUrl and url==expectedUrl then fail(message) end end)
   ids[#ids+1]=registerAnonymousEventHandler("sysDownloadDone",function(_,path)
-    if finished or path~=expectedPath then return end
+    if finished or not Adapter.sameDownloadPath(path,expectedPath) then return end
+    local completedPath=expectedPath
     disarmTimeout(); expectedPath=nil; expectedUrl=nil
-    if path==manifestPath then
-      local manifest,raw,why=parseManifest(path); if not manifest then return fail(why) end
+    if completedPath==manifestPath then
+      local manifest,raw,why=parseManifest(manifestPath); if not manifest then return fail(why) end
       targetManifest=manifest; targetManifestRaw=raw; updater:stage("Downloading package"); request(packagePath,manifest.archive_url)
-    elseif path==packagePath then
-      local size=fileSize(path)
+    elseif completedPath==packagePath then
+      local size=fileSize(packagePath)
       if not size or size>(policy.package_limit or 10485760) then return fail("package is missing or too large") end
-      self:verifyFileAsync(path,targetManifest.sha256,function(verified)
+      self:verifyFileAsync(packagePath,targetManifest.sha256,function(verified)
         if finished then return end
         if not verified then return fail("package checksum mismatch") end
         bootstrapRollback()
       end)
-    elseif path==rollbackManifestPath then
-      local manifest,_,why=parseManifest(path,true); if not manifest then return fail("rollback bootstrap failed: "..tostring(why)) end
+    elseif completedPath==rollbackManifestPath then
+      local manifest,_,why=parseManifest(rollbackManifestPath,true); if not manifest then return fail("rollback bootstrap failed: "..tostring(why)) end
       if not exactInstalled(manifest) then return fail("rollback bootstrap returned the wrong installed version") end
       rollbackManifest=manifest
       local cachedSize=fileSize(currentPath)
