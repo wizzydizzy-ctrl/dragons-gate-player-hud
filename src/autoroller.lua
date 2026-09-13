@@ -14,6 +14,8 @@ local maximumTotal=#legacyOrder*7
 local arrangeOrders={[11]=legacyOrder,[12]=order}
 local captureLineLimit=8
 local arrangeModes={manual=true,game_auto=true,minimums=true}
+local latentPsionMessage="Something stirs behind your eyes. You have a latent psionic gift."
+local latentPsionAlert="RARE CHARACTER ALERT — LATENT PSION DETECTED\nAutomatic rolling has stopped. Do not leave this profession screen until you decide how to continue."
 
 local function copy(value)
   if type(value)~="table" then return value end; local out={}; for k,v in pairs(value) do out[k]=copy(v) end; return out
@@ -106,7 +108,7 @@ local function arrangeModeText(mode)
   return ({manual="LET ME PLACE (manual)",game_auto="GAME AUTO (game_auto)",minimums="MY MINIMUMS + AUTO (minimums)"})[mode] or "LET ME PLACE (manual)"
 end
 
-function Roller.new(adapter,settings,onConfig)
+function Roller.new(adapter,settings,onConfig,onAlert)
   local config=copy(settings or {})
   -- Older DGHUD releases persisted "n" for the retired body prompt. The new
   -- creator uses a named command; normalize the old value without losing any
@@ -115,7 +117,7 @@ function Roller.new(adapter,settings,onConfig)
   for _,key in ipairs({"target_total","hard_stop","max_rolls","minimum_greats","minimum_good_plus"}) do if config[key]==false then config[key]=nil end end
   config.arrange_mode=trim(config.arrange_mode):lower(); if not arrangeModes[config.arrange_mode] then config.arrange_mode="manual" end
   config.min_stats=copy(config.min_stats or {}); for _,key in ipairs(order) do if config.min_stats[key]==false then config.min_stats[key]=nil end end
-  local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig},Roller); self:reset(); return self
+  local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert},Roller); self:reset(); return self
 end
 function Roller:echo(message) if self.adapter.reportRoller then self.adapter:reportRoller(message) end end
 function Roller:cancelReroll()
@@ -132,7 +134,7 @@ function Roller:reset()
   local timerGeneration=0
   if self.state then self:cancelReroll(); timerGeneration=tonumber(self.state.timer_generation) or 0 end
   if self.state and self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log) end
-  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,expected=nil,partial=nil,pending_stats=nil,pending_pool=nil,arrangement=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil,result_held=false,held_protocol=nil,awaiting_new_roll=false,phase="idle",expected_echo=nil,owned_outgoing=nil}; return true
+  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,expected=nil,partial=nil,pending_stats=nil,pending_pool=nil,arrangement=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil,result_held=false,held_protocol=nil,awaiting_new_roll=false,phase="idle",expected_echo=nil,owned_outgoing=nil,latent_psion=false}; return true
 end
 function Roller:log(message)
   if not self.state.log or not self.adapter.appendRollerLog then return end
@@ -203,6 +205,7 @@ function Roller:report(reason)
 end
 function Roller:waitReason()
   local s=self.state or {}
+  if s.latent_psion then return "Latent psion detected. Automatic input is disabled; choose the profession yourself." end
   if s.result_held then return "A result is held at the creator prompt for your manual done or reroll." end
   if not s.active then
     if s.pending_stats or s.pending_pool then return "A complete roll was seen; waiting for the exact decision prompt before auto-starting." end
@@ -226,10 +229,22 @@ function Roller:waitReason()
 end
 function Roller:phaseText()
   local s=self.state or {}
+  if s.latent_psion then return "LATENT PSION FOUND" end
   if s.result_held then return "Result held" end
   if not s.active and (s.pending_stats or s.pending_pool) then return "Checking decision prompt" end
   if not s.active then return "Idle" end
   return ({observing="Observing",capturing="Capturing roll",awaiting_prompt="Waiting for prompt",reroll_delay="Reroll delay",waiting_new_roll="Waiting for next roll",assigning="Arranging pool"})[s.phase] or "Observing"
+end
+function Roller:onLatentPsion()
+  local s=self.state
+  if s.latent_psion then return true end
+  self:cancelReroll(); self:clearCapture()
+  s.active=false; s.auto_suppressed=true; s.result_held=false; s.held_protocol=nil; s.latent_psion=true; s.phase="latent_psion"
+  self:log("Latent psion detected; automatic input stopped")
+  if s.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,s.log); s.log=nil end
+  self:echo(latentPsionAlert)
+  if type(self.onAlert)=="function" then pcall(self.onAlert,latentPsionAlert) end
+  return true
 end
 function Roller:statusLines()
   local s=self.state or {}; local protocol=s.protocol or s.held_protocol
@@ -242,6 +257,7 @@ function Roller:statusLines()
     "Session rolls: "..tostring(tonumber(s.rolls) or 0),
     "Auto-start: "..onOff(autoStartEnabled(self.cfg),false),
     "Safety: DGHUD never sends done; final acceptance is always manual.",
+    "Rare safety: latent psion discovery stops all automatic input and opens a persistent HUD alert.",
   }
 end
 function Roller:statusText() return table.concat(self:statusLines(),"\n") end
@@ -351,6 +367,7 @@ function Roller:onOutgoing(command)
   return false
 end
 function Roller:onDisconnect()
+  if self.state.latent_psion then return self:reset() end
   if self.state.active or self.state.result_held or self.state.log then return self:stop("Disconnected") end
   self:cancelReroll(); self:clearCapture(); self.state.result_held=false; self.state.held_protocol=nil; self.state.phase="idle"; return true
 end
@@ -415,6 +432,17 @@ end
 function Roller:onLine(line)
   line=tostring(line or "")
   local lower=trim(cleanLine(line)):lower(); local bare=lower:gsub("^>%s*",""); local s=self.state
+  local cleaned=trim(cleanLine(line)):gsub("%s+"," ")
+  local latentCandidate=cleaned
+  local afterPrompt=cleaned:match(">%s*(.-)%s*$")
+  if afterPrompt and afterPrompt~="" then latentCandidate=afterPrompt end
+  if latentCandidate==latentPsionMessage then s.latent_phrase_buffer=nil; return self:onLatentPsion() end
+  if s.latent_phrase_buffer then
+    local joined=(s.latent_phrase_buffer.." "..latentCandidate):gsub("%s+"," ")
+    s.latent_phrase_buffer=nil
+    if joined==latentPsionMessage then return self:onLatentPsion() end
+  end
+  if latentPsionMessage:sub(1,#latentCandidate)==latentCandidate and latentCandidate~="" then s.latent_phrase_buffer=latentCandidate; return true end
   if lower:match("step%s+7%s+of%s+10") then
     local suppressed=s.auto_suppressed; self:reset(); self.state.auto_suppressed=suppressed; return false
   end

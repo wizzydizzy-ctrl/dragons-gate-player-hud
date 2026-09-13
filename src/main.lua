@@ -944,6 +944,9 @@ function Main:start()
   self.roller=Autoroller.new(self.adapter,self.settings.roller,function(config)
     if self.adapter.saveRollerSettings then local saved,err=self.adapter:saveRollerSettings(config); if not saved then return nil,"Could not save settings: "..tostring(err) end end
     self.settings.roller=config; local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.roller=self.adapter.rollerSettingsSnapshot and self.adapter.rollerSettingsSnapshot(config) or config end; return true
+  end,function(message)
+    if self.adapter.alertLatentPsion then pcall(self.adapter.alertLatentPsion,self.adapter) end
+    if self.view and self.view.showLatentPsionAlert then pcall(self.view.showLatentPsionAlert,self.view,message) end
   end)
   self.keybindings=Keybindings.new(self.adapter,self.settings.keybindings); self.keybindings:start()
   if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end

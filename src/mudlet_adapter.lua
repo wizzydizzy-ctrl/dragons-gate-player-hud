@@ -525,6 +525,10 @@ function Adapter:reportColorizerStatus(status)
   return true
 end
 function Adapter:reportRoller(message) cecho("\n<gold>[DGHUD Roller]<reset> "..tostring(message or "").."\n"); return true end
+function Adapter:alertLatentPsion()
+  if type(rawget(_G,"beep"))=="function" then pcall(beep) elseif type(rawget(_G,"echo"))=="function" then pcall(echo,"\a") end
+  return true
+end
 function Adapter:reportCharacterRefresh() cecho("\n<gold>[DGHUD]<reset> Refreshing inventory, combat, character, religion, runes, skills, and time…\n"); return true end
 function Adapter:reportDisplayTextScale(name) cecho("\n<gold>[DGHUD]<reset> HUD text size: <white>"..tostring(name or "Normal").."<reset>.\n"); return true end
 function Adapter:reportLayoutStatus(status)

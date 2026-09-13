@@ -505,6 +505,15 @@ function View.new(settings)
   for _,key in ipairs(self.roller_action_order) do local button=label("DGHUD.RollerSettings.Action."..key,self.roller_content); button.option_text=rollerActionLabels[key]; button:setClickCallback(function() if self.options_action_callback then return self.options_action_callback(key) end; return nil,"autoroller action is unavailable" end); self.roller_action_buttons[key]=button end
   self.roller_save:setClickCallback(function() return self:saveRollerSettings() end); self.roller_cancel:setClickCallback(function() return self:hideRollerSettings() end); self.roller_overlay:setClickCallback(function() return self:hideRollerSettings() end)
   self.roller_settings_visible=false
+  self.latent_alert_overlay=label("DGHUD.LatentPsion.Overlay",self.root,"background:rgba(0,0,0,0.78);")
+  self.latent_alert_panel=Geyser.Container:new({name="DGHUD.LatentPsion.Panel",x=0,y=0,width=620,height=230},self.root)
+  self.latent_alert_bg=label("DGHUD.LatentPsion.Background",self.latent_alert_panel,"background:#24100f;border:3px solid #ffb347;border-radius:10px;")
+  self.latent_alert_title=label("DGHUD.LatentPsion.Title",self.latent_alert_panel,"background:transparent;color:#ffd27a;font-weight:700;")
+  self.latent_alert_text=label("DGHUD.LatentPsion.Text",self.latent_alert_panel,"background:transparent;color:#ffffff;")
+  self.latent_alert_close=label("DGHUD.LatentPsion.Close",self.latent_alert_panel,"background:#503019;border:1px solid #ffd27a;border-radius:5px;color:#ffffff;font-weight:700;")
+  self.latent_alert_close:setClickCallback(function() return self:hideLatentPsionAlert() end)
+  self.latent_alert_visible=false; self.latent_alert_message=""
+  for _,widget in ipairs({self.latent_alert_overlay,self.latent_alert_panel,self.latent_alert_bg,self.latent_alert_title,self.latent_alert_text,self.latent_alert_close}) do widget:hide() end
   self.map_settings_overlay=label("DGHUD.MapSettings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
   self.map_settings_panel=Geyser.Container:new({name="DGHUD.MapSettings.Panel",x=0,y=0,width=760,height=600},self.root)
   self.map_settings_bg=label("DGHUD.MapSettings.Background",self.map_settings_panel,"background:"..t.panel..";border:2px solid "..t.border..";border-radius:8px;")
@@ -1011,8 +1020,33 @@ function View:applyLayout(layout)
   self:layoutFeedback(layout)
   self:layoutSupport(layout)
   self:layoutRollerSettings(layout)
+  self:layoutLatentPsionAlert(layout)
   self:layoutMapSettings(layout)
   self:layoutMapLibrary(layout)
+end
+function View:layoutLatentPsionAlert(layout)
+  local widgets={self.latent_alert_overlay,self.latent_alert_panel,self.latent_alert_bg,self.latent_alert_title,self.latent_alert_text,self.latent_alert_close}
+  if not self.latent_alert_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
+  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800)
+  local margin=layout.mode=="compact" and 8 or 18; local pw=math.min(640,math.max(1,width-margin*2)); local ph=math.min(240,math.max(1,height-margin*2))
+  local x,y=math.floor((width-pw)/2),math.floor((height-ph)/2); local font=math.max(11,math.min(17,(layout.body_font or 14)))
+  place(self.latent_alert_overlay,0,0,"100%","100%"); place(self.latent_alert_panel,x,y,pw,ph); place(self.latent_alert_bg,0,0,"100%","100%")
+  place(self.latent_alert_title,18,16,pw-36,36); place(self.latent_alert_text,18,58,pw-36,math.max(44,ph-122)); place(self.latent_alert_close,math.max(18,pw-198),ph-52,180,36)
+  self.latent_alert_title:echo(View.withFont("<center><b>⚠ RARE RESULT: LATENT PSIONIC GIFT</b></center>",font+2))
+  self.latent_alert_text:echo(View.withFont("<center>"..safeText(self.latent_alert_message).."</center>",font))
+  self.latent_alert_close:echo(View.withFont("<center><b>I UNDERSTAND</b></center>",font))
+  View.raiseCards(widgets); return true
+end
+function View:showLatentPsionAlert(message)
+  self.latent_alert_message=tostring(message or "Automatic rolling has stopped. Choose the profession yourself.")
+  self.latent_alert_visible=true
+  if self.layout then self:layoutLatentPsionAlert(self.layout) end
+  return true
+end
+function View:hideLatentPsionAlert()
+  self.latent_alert_visible=false
+  if self.layout then self:layoutLatentPsionAlert(self.layout) end
+  return true
 end
 function View:layoutColorMenu(layout)
   if not self.color_menu_visible then
@@ -1594,6 +1628,7 @@ local reusableWidgetNames={
   "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
   "help_overlay","help_panel","help_bg","help_title","help_close","help_copy","help_output","help_content",
   "roller_overlay","roller_panel","roller_bg","roller_content","roller_title","roller_status","roller_save","roller_cancel","roller_arrange_caption",
+  "latent_alert_overlay","latent_alert_panel","latent_alert_bg","latent_alert_title","latent_alert_text","latent_alert_close",
   "map_settings_overlay","map_settings_panel","map_settings_bg","map_settings_content","map_settings_title","map_settings_status","map_settings_save","map_settings_cancel","map_settings_clear_current","map_settings_clear_all","map_settings_library","map_settings_area_name","map_settings_subarea_name","map_settings_rename_area","map_settings_rename_subarea",
   "feedback_overlay","feedback_panel","feedback_bg","feedback_title","feedback_explanation","feedback_kind","feedback_summary_label","feedback_summary","feedback_details_label","feedback_details","feedback_status","feedback_send","feedback_cancel",
   "support_overlay","support_panel","support_bg","support_title","support_text","support_feedback","support_debug","support_close","support_status",
@@ -1608,7 +1643,7 @@ local function nameSet(values) local result={}; for _,name in ipairs(values) do 
 local plainReusableWidgets=nameSet({
   "root","color_menu","options_scroll","color_settings_panel","color_settings_content","chat_container","chat_tabs","chat_settings_panel","chat_settings_content","keybindings_panel","keybindings_content",
   "inventory_output","runes_output","skills_output","right","vitals_right","mapper","compass_area","utility_area","help_panel","help_output",
-  "roller_panel","roller_content","map_settings_panel","map_settings_content","feedback_panel","support_panel","map_library_panel","map_library_list","map_collection_list",
+  "roller_panel","roller_content","latent_alert_panel","map_settings_panel","map_settings_content","feedback_panel","support_panel","map_library_panel","map_library_list","map_collection_list",
   "hp","fatigue","carry","psi","web","roundtime_bar",
 })
 local inputReusableWidgets=nameSet({"map_settings_area_name","map_settings_subarea_name","feedback_summary","feedback_details","map_library_search"})
@@ -1665,15 +1700,15 @@ function View:prepareForReuse(settings)
   -- Force the first refresh under the new runtime to repaint list content even
   -- when the character data itself did not change across the update.
   self.inventory_signature=nil; self.runes_signature=nil; self.skills_signature=nil
-  self.color_menu_visible=false; self.color_settings_visible=false; self.chat_settings_visible=false; self.chat_settings_clear_pending=false; self.keybindings_visible=false; self.help_visible=false; self.roller_settings_visible=false
+  self.color_menu_visible=false; self.color_settings_visible=false; self.chat_settings_visible=false; self.chat_settings_clear_pending=false; self.keybindings_visible=false; self.help_visible=false; self.roller_settings_visible=false; self.latent_alert_visible=false
   self.map_settings_visible=false; self.feedback_visible=false; self.feedback_sending=false; self.support_visible=false; self.map_library_visible=false
-  local methods={"setColorMenuVisible","hideColorSettings","hideChatSettings","hideKeybindingSettings","hideHelp","hideRollerSettings","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
+  local methods={"setColorMenuVisible","hideColorSettings","hideChatSettings","hideKeybindingSettings","hideHelp","hideRollerSettings","hideLatentPsionAlert","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
   for _,name in ipairs(methods) do if type(self[name])=="function" then pcall(self[name],self) end end
   -- The explicit hide methods above already cover every overlay and its
   -- children. Recursively walking Geyser's parent/child object graph here made
   -- otherwise safe in-place updates spend seconds traversing UI internals.
   for key,value in pairs(self) do
-    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^keybinding") or key:match("^help_") or key:match("^roller_") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
+    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^keybinding") or key:match("^help_") or key:match("^roller_") or key:match("^latent_alert") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
   end
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
   return true

@@ -6,6 +6,12 @@ The DGHUD autoroller watches the current Dragons Gate Character Creator, scores 
 
 The autoroller never sends `done`. When it finds a result to keep, the creator prompt remains waiting for you.
 
+## Rare latent psion alert
+
+If character creation reports `Something stirs behind your eyes. You have a latent psionic gift.`, DGHUD immediately cancels every pending automatic reroll and disables further automatic input. It sounds an alert when Mudlet supports it and opens a persistent warning over the HUD. The warning is detected even if the autoroller is not currently active.
+
+Do not reroll unless you intentionally want to discard the rare result. DGHUD leaves the Profession screen untouched so you can choose the profession manually. Dismissing the warning only closes the message; it does not send a command or restart the roller.
+
 ## Important safety rules
 
 - Use the roller only on the characteristic-rolling step of character creation.
