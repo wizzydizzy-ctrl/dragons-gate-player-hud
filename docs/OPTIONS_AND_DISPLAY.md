@@ -4,6 +4,12 @@
 
 The **OPTIONS** button is at the far left of the header. The current DGHUD version is shown beside it. Click **OPTIONS** to open a short menu of sections.
 
+## Keybindings
+
+Open **OPTIONS → KEYBINDINGS** to enable or customize the number pad. Standard movement follows the keypad compass: 8 north, 9 northeast, 6 east, 3 southeast, 2 south, 1 southwest, 4 west, and 7 northwest. Numpad 5 sends `look`, `+` sends `up`, and `-` sends `down`. The remaining keypad keys are editable and begin blank.
+
+Keep Num Lock on. DGHUD creates temporary bindings that it owns and removes only those exact bindings when it reloads. If a requested key is already assigned in Mudlet, DGHUD leaves its whole keypad set inactive and reports the collision instead of replacing a personal key. Saved choices are stored outside the package and survive updates.
+
 ## Help & Commands
 
 **HELP & COMMANDS** opens a scrollable, color-coded command list.

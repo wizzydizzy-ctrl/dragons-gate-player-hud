@@ -1,5 +1,5 @@
 package.loaded["output_colorizer"]=nil
-local State=require("state"); local Events=require("events"); local Layout=require("layout"); local View=require("view"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local NeedsTracker=require("needs_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
+local State=require("state"); local Events=require("events"); local Layout=require("layout"); local View=require("view"); local Keybindings=require("keybindings"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local NeedsTracker=require("needs_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
 local Main={}; Main.__index=Main
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
@@ -945,6 +945,7 @@ function Main:start()
     if self.adapter.saveRollerSettings then local saved,err=self.adapter:saveRollerSettings(config); if not saved then return nil,"Could not save settings: "..tostring(err) end end
     self.settings.roller=config; local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.roller=self.adapter.rollerSettingsSnapshot and self.adapter.rollerSettingsSnapshot(config) or config end; return true
   end)
+  self.keybindings=Keybindings.new(self.adapter,self.settings.keybindings); self.keybindings:start()
   if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
   if self.view.setColorOptionsCallback then self.view:setColorOptionsCallback(function(name,wanted)
     if name=="mapper" then return self:setMapperEnabled(wanted) end
@@ -967,6 +968,7 @@ function Main:start()
     if action=="chat_clear_saved" then return self:clearSavedChat(true) end
     if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
     if action=="roller_settings" then return self.roller and self.roller.cfg end
+    if action=="keybindings_settings" then return self.keybindings and self.keybindings:snapshot() end
     if action=="auto_update" then
       local enabled=not (self.settings.update and self.settings.update.auto_apply==true); self.settings.update=self.settings.update or {}; self.settings.update.auto_apply=enabled
       local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.update=type(root.user_settings.update)=="table" and root.user_settings.update or {}; root.user_settings.update.auto_apply=enabled end
@@ -1034,6 +1036,11 @@ function Main:start()
     return nil,"unknown map library action"
   end) end
   if self.view.setRollerSettingsCallback then self.view:setRollerSettingsCallback(function(values) local ok,err=self.roller:configure(values); if not ok then return nil,err end; return true,nil,self.roller.cfg end) end
+  if self.view.setKeybindingSettingsCallback then self.view:setKeybindingSettingsCallback(function(values)
+    local ok,err,config,status=self.keybindings:configure(values); if not ok then return nil,err end
+    self.settings.keybindings=config; local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.keybindings=config end
+    return true,nil,config,status
+  end) end
   if self.view.setMapZoomCallback then self.view:setMapZoomCallback(function(action) return self:mapToolbarAction(action) end) end
   if self.view.setMapClearAllCallback then self.view:setMapClearAllCallback(function() if self.view.showMapSettings then return self.view:showMapSettings(self.settings.mapper) end; return self:clearAllMapsAction() end) end
   if self.view.setMapSettingsCallback then self.view:setMapSettingsCallback(function(values) return self:configureMapper(values) end) end
@@ -1188,6 +1195,7 @@ function Main:shutdown()
   local chat=self.chat; self.chat=nil; if chat then chat:shutdown() end
   local colorizer=self.colorizer; self.colorizer=nil; if colorizer then colorizer:shutdown() end
   local roller=self.roller; self.roller=nil; if roller then roller:shutdown() end
+  local keybindings=self.keybindings; self.keybindings=nil; if keybindings then keybindings:stop() end
   if self.collector then self.collector:shutdown(); self.collector=nil end
   if self.walker then self.walker:shutdown(); self.walker=nil end; self.generated_command=nil; self:removeMapClickHook()
   if self.special_transition then self:callSpecialTransition("shutdown"); self.special_transition=nil end

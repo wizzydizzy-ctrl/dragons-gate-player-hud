@@ -296,7 +296,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,9); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,10); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -320,6 +320,9 @@ test("chat settings separates visible clearing from confirmed saved-history dele
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_visible"); eq(view.chat_settings_clear_pending,true)
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_saved"); eq(view.chat_settings_clear_pending,false); eq(view.chat_settings_status.message:find("3 saved",1,true)~=nil,true)
   view.chat_settings_close.click(); eq(view.chat_settings_visible,false)
+end)
+test("keybinding settings are editable responsive and save the full keypad",function()
+  local view=chatView(); local saved; view:setOptionsActionCallback(function(action) if action=="keybindings_settings" then return {enabled=false,commands={["8"]="north",Plus="up"}} end end); view:setKeybindingSettingsCallback(function(values) saved=values; return true,nil,values,{active=0,conflicts={}} end); view:applyLayout(require("layout").compute(420,360)); view.color_toggle.click(); assert(view.option_action_buttons.keybindings_settings.click()); eq(view.keybindings_visible,true); eq(view.keybinding_fields["8"].input.text,"north"); view.keybindings_enable.click(); view.keybinding_fields["0"].input:print("look"); assert(view.keybindings_save.click()); eq(saved.enabled,true); eq(saved.commands["0"],"look"); eq(view.keybindings_visible,false)
 end)
 
 test("color options menu closes by button outside click and resize remains bounded",function()

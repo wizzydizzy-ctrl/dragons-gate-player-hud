@@ -352,8 +352,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","refresh_data","auto_update","text_size","chat_settings","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",chat_settings="CHAT SETTINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","refresh_data","auto_update","text_size","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -397,6 +397,24 @@ function View.new(settings)
   end)
   self.chat_settings_close:setClickCallback(function() return self:hideChatSettings() end); self.chat_settings_overlay:setClickCallback(function() return self:hideChatSettings() end); self.chat_settings_visible=false
   for _,widget in ipairs({self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}) do widget:hide() end; for _,button in pairs(self.chat_all_source_buttons) do button:hide() end
+  self.keybindings_overlay=label("DGHUD.Keybindings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
+  self.keybindings_panel=Geyser.Container:new({name="DGHUD.Keybindings.Panel",x=0,y=0,width=680,height=570},self.root)
+  self.keybindings_bg=label("DGHUD.Keybindings.Background",self.keybindings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
+  self.keybindings_title=label("DGHUD.Keybindings.Title",self.keybindings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
+  self.keybindings_content=Geyser.ScrollBox:new({name="DGHUD.Keybindings.Content",x=14,y=48,width=652,height=450},self.keybindings_panel)
+  self.keybindings_text=label("DGHUD.Keybindings.Text",self.keybindings_content,"background:transparent;color:"..t.text..";")
+  self.keybindings_enable=label("DGHUD.Keybindings.Enable",self.keybindings_content,"background:#17231c;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.keybindings_defaults=label("DGHUD.Keybindings.Defaults",self.keybindings_content,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.accent..";font-weight:700;")
+  self.keybindings_status=label("DGHUD.Keybindings.Status",self.keybindings_content,"background:transparent;color:"..t.muted..";")
+  self.keybindings_save=label("DGHUD.Keybindings.Save",self.keybindings_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
+  self.keybindings_cancel=label("DGHUD.Keybindings.Cancel",self.keybindings_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
+  self.keybinding_order={"8","9","6","3","2","1","4","7","5","Plus","Minus","0","Period","Asterisk","Slash","Enter"}; self.keybinding_fields={}
+  local keyLabels={["8"]="Numpad 8",["9"]="Numpad 9",["6"]="Numpad 6",["3"]="Numpad 3",["2"]="Numpad 2",["1"]="Numpad 1",["4"]="Numpad 4",["7"]="Numpad 7",["5"]="Numpad 5",Plus="Numpad +",Minus="Numpad -",["0"]="Numpad 0",Period="Numpad Decimal",Asterisk="Numpad *",Slash="Numpad /",Enter="Numpad Enter"}
+  for _,key in ipairs(self.keybinding_order) do local caption=label("DGHUD.Keybindings.Caption."..key,self.keybindings_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.Keybindings.Input."..key,self.keybindings_content,self.geyser); self.keybinding_fields[key]={caption=caption,input=edit,label=keyLabels[key]} end
+  self.keybindings_enable:setClickCallback(function() self.keybindings_draft.enabled=not self.keybindings_draft.enabled; return self:renderKeybindingSettings(false) end)
+  self.keybindings_defaults:setClickCallback(function() self.keybindings_draft.commands={["8"]="north",["9"]="northeast",["6"]="east",["3"]="southeast",["2"]="south",["1"]="southwest",["4"]="west",["7"]="northwest",["5"]="look",Plus="up",Minus="down",["0"]="",Period="",Asterisk="",Slash="",Enter=""}; return self:renderKeybindingSettings(true) end)
+  self.keybindings_save:setClickCallback(function() return self:saveKeybindingSettings() end); self.keybindings_cancel:setClickCallback(function() return self:hideKeybindingSettings() end); self.keybindings_overlay:setClickCallback(function() return self:hideKeybindingSettings() end); self.keybindings_visible=false
+  local keyWidgets={self.keybindings_overlay,self.keybindings_panel,self.keybindings_bg,self.keybindings_title,self.keybindings_content,self.keybindings_text,self.keybindings_enable,self.keybindings_defaults,self.keybindings_status,self.keybindings_save,self.keybindings_cancel}; for _,field in pairs(self.keybinding_fields) do keyWidgets[#keyWidgets+1]=field.caption; keyWidgets[#keyWidgets+1]=field.input end; for _,widget in ipairs(keyWidgets) do widget:hide() end
   self.left_bg=label("DGHUD.LeftBackground",self.root,"background:"..t.panel..";border-right:1px solid "..t.border..";")
   self.identity=label("DGHUD.Identity",self.root,"background:"..t.panel..";border-right:1px solid "..t.border..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:18px;")
   self.details=label("DGHUD.Details",self.root,"background:"..t.panel..";border:1px solid "..t.border..";color:"..t.text..";padding:18px;")
@@ -988,6 +1006,7 @@ function View:applyLayout(layout)
   self:layoutColorMenu(layout)
   self:layoutColorSettings(layout)
   self:layoutChatSettings(layout)
+  self:layoutKeybindingSettings(layout)
   self:layoutHelp(layout)
   self:layoutFeedback(layout)
   self:layoutSupport(layout)
@@ -1038,6 +1057,27 @@ function View:showChatSettings()
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.chat_settings_visible=true; self.chat_settings_clear_pending=false; self.chat_settings_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutChatSettings(self.layout) end; return true
 end
 function View:hideChatSettings() self.chat_settings_visible=false; self.chat_settings_clear_pending=false; if self.layout then self:layoutChatSettings(self.layout) end; return true end
+function View:keybindingWidgets() local widgets={self.keybindings_overlay,self.keybindings_panel,self.keybindings_bg,self.keybindings_title,self.keybindings_content,self.keybindings_text,self.keybindings_enable,self.keybindings_defaults,self.keybindings_status,self.keybindings_save,self.keybindings_cancel}; for _,field in pairs(self.keybinding_fields or {}) do widgets[#widgets+1]=field.caption; widgets[#widgets+1]=field.input end; return widgets end
+function View:layoutKeybindingSettings(layout)
+  local widgets=self:keybindingWidgets(); if not self.keybindings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
+  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(720,width-margin*2),math.min(620,height-margin*2); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(9,math.min(13,(layout.body_font or 14)-3)); local footer=52
+  place(self.keybindings_overlay,0,0,"100%","100%"); place(self.keybindings_panel,x,y,pw,ph); place(self.keybindings_bg,0,0,"100%","100%"); place(self.keybindings_title,14,9,pw-28,32); place(self.keybindings_content,14,44,pw-28,ph-44-footer)
+  local inner=pw-38; place(self.keybindings_text,0,0,inner,46); place(self.keybindings_enable,0,50,inner,32); place(self.keybindings_defaults,0,88,inner,32)
+  local columns=pw>=540 and 2 or 1; local gap=10; local cw=columns==2 and (inner-gap)/2 or inner; local rowHeight=43; local top=128
+  for index,key in ipairs(self.keybinding_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); local field=self.keybinding_fields[key]; local fx=column*(cw+gap); local fy=top+row*rowHeight; place(field.caption,fx,fy,cw,18); place(field.input,fx,fy+18,cw,23); field.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";border-radius:3px;color:"..self.settings.theme.text..";font-size:"..font.."px;") end
+  local rows=math.ceil(#self.keybinding_order/columns); local statusY=top+rows*rowHeight+8; place(self.keybindings_status,0,statusY,inner,50); self.keybindings_content.content_height=statusY+54
+  local bw=120; place(self.keybindings_cancel,pw-14-bw*2-10,ph-42,bw,32); place(self.keybindings_save,pw-14-bw,ph-42,bw,32); self:renderKeybindingSettings(false); View.raiseCards(widgets); return true
+end
+function View:renderKeybindingSettings(populate)
+  if not self.keybindings_draft then return true end; local font=self.layout and math.max(9,math.min(13,(self.layout.body_font or 14)-3)) or 11; local t=self.settings.theme
+  self.keybindings_title:echo(View.withFont("<b>NUMPAD KEYBINDINGS</b>",font+3)); self.keybindings_text:echo(View.withFont("Num Lock should be on. Blank commands stay unassigned. Existing personal Mudlet keys are never replaced.",font)); local enabled=self.keybindings_draft.enabled==true; self.keybindings_enable:setStyleSheet("background:"..(enabled and "#193024" or "#2a1d1b")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:5px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); self.keybindings_enable:echo(View.withFont("<center><b>NUMPAD MOVEMENT: "..(enabled and "ON" or "OFF").."</b></center>",font)); self.keybindings_defaults:echo(View.withFont("<center><b>RESTORE STANDARD COMMANDS</b></center>",font))
+  for _,key in ipairs(self.keybinding_order) do local field=self.keybinding_fields[key]; field.caption:echo(View.withFont(field.label,font)); if populate and field.input.print then field.input:print(tostring((self.keybindings_draft.commands or {})[key] or "")) end end
+  self.keybindings_status:echo(View.withFont(self.keybindings_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.keybindings_error).."</b></span>") or safeText(self.keybindings_status_text or "Changes apply after Save. If any key conflicts, DGHUD leaves the full keypad set inactive."),font)); self.keybindings_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.keybindings_save:echo(View.withFont("<center><b>SAVE</b></center>",font)); return true
+end
+function View:showKeybindingSettings(config) self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; config=type(config)=="table" and config or {}; self.keybindings_draft={enabled=config.enabled==true,commands={}}; for _,key in ipairs(self.keybinding_order) do self.keybindings_draft.commands[key]=tostring(type(config.commands)=="table" and config.commands[key] or "") end; self.keybindings_visible=true; self.keybindings_error=nil; self.keybindings_status_text=nil; self:setColorMenuVisible(false); self:renderKeybindingSettings(true); if self.layout then self:layoutKeybindingSettings(self.layout) end; return true end
+function View:hideKeybindingSettings() self.keybindings_visible=false; self.keybindings_draft=nil; self.keybindings_error=nil; if self.layout then self:layoutKeybindingSettings(self.layout) end; return true end
+function View:keybindingSettingsValues() local result={enabled=self.keybindings_draft.enabled==true,commands={}}; for _,key in ipairs(self.keybinding_order) do local field=self.keybinding_fields[key]; result.commands[key]=field.input.getText and field.input:getText() or "" end; return result end
+function View:saveKeybindingSettings() if not self.keybindings_settings_callback then return nil,"keybinding settings callback is unavailable" end; local ok,err,config,status=self.keybindings_settings_callback(self:keybindingSettingsValues()); if not ok then self.keybindings_error=err or "Could not save keybindings"; self:renderKeybindingSettings(false); return nil,self.keybindings_error end; if status and status.conflicts and #status.conflicts>0 then self.keybindings_status_text="Saved, but inactive because: "..table.concat(status.conflicts,", "); self.keybindings_draft=config; self:renderKeybindingSettings(true); return true,config,status end; self:hideKeybindingSettings(); return true,config,status end
 function View:layoutRollerSettings(layout)
   local widgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel,self.roller_arrange_caption}; for _,button in pairs(self.roller_arrange_buttons or {}) do widgets[#widgets+1]=button end; for _,entry in pairs(self.roller_fields or {}) do widgets[#widgets+1]=entry.caption; widgets[#widgets+1]=entry.input end; for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.roller_action_buttons or {}) do widgets[#widgets+1]=button end
   if not self.roller_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
@@ -1181,12 +1221,14 @@ function View:setCopyTextCallback(callback) self.copy_text_callback=type(callbac
 function View:setMapLibraryActionCallback(callback) self.map_library_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapCollectionActionCallback(callback) self.map_collection_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:setRollerSettingsCallback(callback) self.roller_settings_callback=type(callback)=="function" and callback or nil; return true end
+function View:setKeybindingSettingsCallback(callback) self.keybindings_settings_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapSettingsCallback(callback) self.map_settings_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapSettingsActionCallback(callback) self.map_settings_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:selectOptionsAction(action)
   self:setColorMenuVisible(false)
   if action=="command_help" then return self:showHelp() end
   if action=="chat_settings" then return self:showChatSettings() end
+  if action=="keybindings_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showKeybindingSettings(config) end; return config end; return nil,"keybinding settings are unavailable" end
   if action=="color_settings" then return self:showColorSettings() end
   if action=="support" then return self:showSupport() end
   if action=="map_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showMapSettings(config) end; return config end; return nil,"map settings are unavailable" end
@@ -1547,6 +1589,7 @@ local reusableWidgetNames={
   "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
   "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
+  "keybindings_overlay","keybindings_panel","keybindings_bg","keybindings_title","keybindings_content","keybindings_text","keybindings_enable","keybindings_defaults","keybindings_status","keybindings_save","keybindings_cancel",
   "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
   "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
   "help_overlay","help_panel","help_bg","help_title","help_close","help_copy","help_output","help_content",
@@ -1563,7 +1606,7 @@ local function reusableInput(value) return reusableStyledWidget(value) and type(
 local function reusableConsole(value) return reusableWidget(value) and type(value.setFontSize)=="function" and type(value.setWrap)=="function" and type(value.clear)=="function" and type(value.hecho)=="function" and type(value.echo)=="function" end
 local function nameSet(values) local result={}; for _,name in ipairs(values) do result[name]=true end; return result end
 local plainReusableWidgets=nameSet({
-  "root","color_menu","options_scroll","color_settings_panel","color_settings_content","chat_container","chat_tabs","chat_settings_panel","chat_settings_content",
+  "root","color_menu","options_scroll","color_settings_panel","color_settings_content","chat_container","chat_tabs","chat_settings_panel","chat_settings_content","keybindings_panel","keybindings_content",
   "inventory_output","runes_output","skills_output","right","vitals_right","mapper","compass_area","utility_area","help_panel","help_output",
   "roller_panel","roller_content","map_settings_panel","map_settings_content","feedback_panel","support_panel","map_library_panel","map_library_list","map_collection_list",
   "hp","fatigue","carry","psi","web","roundtime_bar",
@@ -1596,6 +1639,8 @@ function View.validateReusable(candidate,settings)
     if type(order)~="table" or type(items)~="table" then return nil,"preserved HUD controls are incomplete" end
     for _,key in ipairs(order) do if not reusableLabel(items[key]) then return nil,"preserved HUD controls are incomplete" end end
   end
+  if type(candidate.keybinding_order)~="table" or type(candidate.keybinding_fields)~="table" then return nil,"preserved HUD keybinding controls are incomplete" end
+  for _,key in ipairs(candidate.keybinding_order) do local field=candidate.keybinding_fields[key]; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD keybinding controls are incomplete" end end
   for _,collection in ipairs({{"map_library_rows","map library rows"},{"map_collection_rows","map collection rows"}}) do
     local rows=candidate[collection[1]]; if type(rows)~="table" then return nil,"preserved HUD "..collection[2].." are incomplete" end
     for _,row in ipairs(rows) do if not reusableLabel(row) then return nil,"preserved HUD "..collection[2].." are incomplete" end end
@@ -1615,20 +1660,20 @@ function View:prepareForReuse(settings)
   self:ensureVersionLabel(); self:renderVersion()
   self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
-  self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
+  self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.keybindings_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
   self.map_zoom_callback=nil; self.map_clear_all_callback=nil
   -- Force the first refresh under the new runtime to repaint list content even
   -- when the character data itself did not change across the update.
   self.inventory_signature=nil; self.runes_signature=nil; self.skills_signature=nil
-  self.color_menu_visible=false; self.color_settings_visible=false; self.chat_settings_visible=false; self.chat_settings_clear_pending=false; self.help_visible=false; self.roller_settings_visible=false
+  self.color_menu_visible=false; self.color_settings_visible=false; self.chat_settings_visible=false; self.chat_settings_clear_pending=false; self.keybindings_visible=false; self.help_visible=false; self.roller_settings_visible=false
   self.map_settings_visible=false; self.feedback_visible=false; self.feedback_sending=false; self.support_visible=false; self.map_library_visible=false
-  local methods={"setColorMenuVisible","hideColorSettings","hideChatSettings","hideHelp","hideRollerSettings","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
+  local methods={"setColorMenuVisible","hideColorSettings","hideChatSettings","hideKeybindingSettings","hideHelp","hideRollerSettings","hideMapSettings","hideFeedback","hideSupport","hideMapLibrary"}
   for _,name in ipairs(methods) do if type(self[name])=="function" then pcall(self[name],self) end end
   -- The explicit hide methods above already cover every overlay and its
   -- children. Recursively walking Geyser's parent/child object graph here made
   -- otherwise safe in-place updates spend seconds traversing UI internals.
   for key,value in pairs(self) do
-    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^help_") or key:match("^roller_") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
+    if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^keybinding") or key:match("^help_") or key:match("^roller_") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
   end
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
   return true

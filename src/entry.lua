@@ -43,7 +43,7 @@ chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
 DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending,_view_handoff=viewHandoff,_chat_handoff=chatHandoff}
-local moduleNames={"defaults","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
+local moduleNames={"defaults","keybindings","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")
@@ -64,6 +64,8 @@ local persistedDisplay=Adapter.loadDisplaySettings and Adapter.loadDisplaySettin
 if type(persistedDisplay)=="table" then userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}; for key,value in pairs(persistedDisplay) do userSettings.display[key]=value end end
 local persistedChat=Adapter.loadChatSettings and Adapter.loadChatSettings()
 if type(persistedChat)=="table" then userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}; userSettings.chat.tab_order=persistedChat.tab_order; if type(persistedChat.all_sources)=="table" then userSettings.chat.all_sources=persistedChat.all_sources end end
+local persistedKeys=Adapter.loadKeybindingSettings and Adapter.loadKeybindingSettings()
+if type(persistedKeys)=="table" then userSettings.keybindings=persistedKeys end
 DGHUD.user_settings=userSettings
 local function applyUserSettings()
   local ok,resolvedSettings,migratedSettings=pcall(Settings.resolve,defaults,DGHUD.user_settings or {})

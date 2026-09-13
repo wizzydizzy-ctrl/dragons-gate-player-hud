@@ -96,6 +96,7 @@ This directory may contain:
 | `mapper-settings.lua` | Saved automapper preferences. |
 | `update-settings.lua` | Saved automatic-update choice. |
 | `display-settings.lua` | Saved HUD text-size choice. |
+| `keybindings-settings.lua` | Saved opt-in number-pad commands. |
 
 File names or exact internal structure may expand in later releases. Use the built-in settings and library controls when possible.
 

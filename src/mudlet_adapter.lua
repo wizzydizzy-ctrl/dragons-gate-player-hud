@@ -673,6 +673,37 @@ function Adapter.loadChatSettings()
   local loader=loadfile(chatSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if not ok then return nil end
   local snapshot=Adapter.chatSettingsSnapshot(value); return snapshot
 end
+local function keybindingSettingsPath() return Adapter.dataBase().."/keybindings-settings.lua" end
+function Adapter.keybindingSettingsSnapshot(config)
+  local Keybindings=require("keybindings"); return Keybindings.validate(config)
+end
+function Adapter:saveKeybindingSettings(config)
+  local snapshot,validationErr=Adapter.keybindingSettingsSnapshot(config); if not snapshot then return nil,validationErr end
+  local base=Adapter.dataBase(); lfs.mkdir(base); local destination=keybindingSettingsPath(); local temp=destination..".tmp"; local values={}
+  for _,key in ipairs(require("keybindings").order) do values[#values+1]="["..string.format("%q",key).."]="..string.format("%q",snapshot.commands[key]) end
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end
+  local wrote,writeErr=file:write("return { enabled="..tostring(snapshot.enabled)..", commands={"..table.concat(values,",").."} }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
+  local installed,installErr=os.rename(temp,destination); if not installed then os.rename(backup,destination); return nil,installErr end; os.remove(backup); return true
+end
+function Adapter.loadKeybindingSettings()
+  local loader=loadfile(keybindingSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if not ok then return nil end; return Adapter.keybindingSettingsSnapshot(value)
+end
+function Adapter:isKeyBindingUsed(key,api)
+  api=api or _G; local codes=type(api.mudlet)=="table" and api.mudlet.key or nil; local modifiers=type(api.mudlet)=="table" and api.mudlet.keymodifier or nil
+  if type(codes)~="table" or type(modifiers)~="table" or codes[key]==nil or modifiers.Keypad==nil then return true,"keypad is unavailable" end
+  if type(api.findItems)~="function" or type(api.getKeyCode)~="function" then return true,"collision detection is unavailable" end
+  local ok,items=pcall(api.findItems,"","keybinding",false); if not ok or type(items)~="table" then return true,"collision detection failed" end
+  for _,id in pairs(items) do local read,code,modifier=pcall(api.getKeyCode,id); if not read then return true,"collision detection failed" end; if code==codes[key] and modifier==modifiers.Keypad then return true,"already assigned in Mudlet" end end
+  return false
+end
+function Adapter:addKeyBinding(key,callback,api)
+  api=api or _G; local codes=type(api.mudlet)=="table" and api.mudlet.key or nil; local modifiers=type(api.mudlet)=="table" and api.mudlet.keymodifier or nil
+  if type(api.tempKey)~="function" or type(codes)~="table" or type(modifiers)~="table" or codes[key]==nil or modifiers.Keypad==nil then return nil,"keypad binding API is unavailable" end
+  local ok,id=pcall(api.tempKey,modifiers.Keypad,codes[key],callback); if not ok or id==nil then return nil,ok and "Mudlet rejected the binding" or tostring(id) end; return id
+end
+function Adapter:removeKeyBinding(id,api) api=api or _G; if type(api.killKey)~="function" then return nil,"key removal API is unavailable" end; local ok,result=pcall(api.killKey,id); if not ok then return nil,tostring(result) end; return result~=false end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end
