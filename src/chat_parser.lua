@@ -73,6 +73,12 @@ local function parseAssistanceRequest(line,character,now)
   return builtIn("STAFF",message,{speaker=speaker},character,now,line)
 end
 
+local function parseAssistanceCancellation(line,character,now)
+  local speaker,pronoun=line:match('^%[GUIDE%] '..activeName..' just canceled (%a+) assistance request%.$')
+  if not speaker or not ({his=true,her=true,their=true})[pronoun] then return nil end
+  return builtIn("STAFF","just canceled "..pronoun.." assistance request.",{speaker=speaker},character,now,line)
+end
+
 local combatKinds={attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true}
 local function parseCombat(line,character,now)
   local segments=OutputColorizer.parse(line)
@@ -147,6 +153,8 @@ function Parser.parse(line,character,now)
   if not line then return nil end
   local assistance=parseAssistanceRequest(line,character,now)
   if assistance then return assistance end
+  local cancellation=parseAssistanceCancellation(line,character,now)
+  if cancellation then return cancellation end
   local staffVoice=parseStaffVoice(line,character,now)
   if staffVoice then return staffVoice end
   for _,rule in ipairs(rules) do

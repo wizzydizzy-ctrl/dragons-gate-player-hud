@@ -52,6 +52,15 @@ test("GUIDE assistance requests flow through the owned trigger into staff chat",
   eq(f.storageAppends,1)
 end)
 
+test("GUIDE assistance cancellations flow through the owned trigger into staff chat",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("STAFF"))
+  local line="[GUIDE] Wizzy Dizzy just canceled his assistance request."
+  f:line(line)
+  local entries=controller:entries()
+  eq(#entries,1); eq(entries[1].category,"STAFF"); eq(entries[1].speaker,"Wizzy Dizzy"); eq(entries[1].line,line)
+  eq(f.storageAppends,1)
+end)
+
 test("targeted asks are captured and visible in the room tab",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("ROOM"))
   f:line('Eilan asks Atrax, "You asked two already, didn\'t you?"')

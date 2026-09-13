@@ -6,7 +6,7 @@ return {
   view_contract = "__DGHUD_VIEW_CONTRACT__",
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.3.34",
+  version = "0.3.35",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   display = { side_text_scale = 1.0 },
   chat = { enabled=true, height_percent=.21, target_height=240, min_height=160, max_height=320, visible_limit=1000, dedupe_seconds=3, timestamps=true },
