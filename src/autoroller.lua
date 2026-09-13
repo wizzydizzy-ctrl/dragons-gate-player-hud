@@ -344,6 +344,11 @@ function Roller:rearmForManualReroll(protocol)
   local previous=protocol or s.protocol or s.held_protocol or "arrange"
   if not s.active then s.active=true; s.result_held=false; s.phase="observing" end
   self:prepareForReroll(previous)
+  -- A player can change creator rolling methods before manually entering
+  -- reroll.  Do not carry a stale modern protocol into the next response:
+  -- the next explicit Pool: line or split characteristic header is a safer
+  -- source of truth.  Legacy body rolling must retain its distinct n command.
+  if previous~="legacy" then s.protocol=nil end
   -- sysDataSendRequest observes the player's command immediately before Mudlet
   -- transmits it. Sending here duplicates that command on the wire. Manual
   -- rerolls only re-arm capture; sendOwnedCommand is reserved for HUD timers.
@@ -444,7 +449,16 @@ function Roller:onLine(line)
   end
   if latentPsionMessage:sub(1,#latentCandidate)==latentCandidate and latentCandidate~="" then s.latent_phrase_buffer=latentCandidate; return true end
   if lower:match("step%s+7%s+of%s+10") then
-    local suppressed=s.auto_suppressed; self:reset(); self.state.auto_suppressed=suppressed; return false
+    local suppressed=s.auto_suppressed
+    if s.active then
+      -- START ROLLER may be pressed just before Mudlet receives the Step 7
+      -- banner.  Keep that explicit running state and its session/log alive;
+      -- only discard stale capture fragments from a previous creator screen.
+      self:cancelReroll(); self:clearCapture(); s.active=true; s.auto_suppressed=suppressed; s.result_held=false; s.held_protocol=nil; s.latent_psion=false; s.phase="observing"
+    else
+      self:reset(); self.state.auto_suppressed=suppressed
+    end
+    return false
   end
   if s.expected_echo and bare==s.expected_echo then s.expected_echo=nil; return true end
   if bare=="reroll" and s.awaiting_new_roll then return true end
@@ -499,9 +513,17 @@ function Roller:onLine(line)
   -- Passively collect the new split layout, then auto-start only after its
   -- exact decision prompt identifies Roll in place or Roll and arrange.
   if headerMatches(line,creatorFirst) then
-    if s.active and (s.protocol=="arrange" or s.fresh_roll or (s.phase=="reroll_delay" and not s.awaiting_new_roll)) then return false end
+    if s.active and (s.fresh_roll or (s.phase=="reroll_delay" and not s.awaiting_new_roll)) then return false end
     if not s.active and (not autoStartEnabled(self.cfg) or s.auto_suppressed) then return false end
     s.characteristic_order=nil
+    -- The creator may move from Roll and arrange to Roll in place without
+    -- restarting DGHUD.  An explicit six-column characteristic header is
+    -- authoritative, so recover from a stale arrange protocol instead of
+    -- silently discarding every subsequent roll.
+    if s.active and s.protocol=="arrange" then
+      s.pending_pool=nil
+      return self:beginBlock("creator",creatorFirst,true)
+    end
     if not s.active then s.protocol="creator"; s.fresh_roll=false; s.expected=creatorFirst; s.partial={}; s.pending_stats=nil; s.passive_lines=0; return true end
     return self:beginBlock("creator",creatorFirst,true)
   end

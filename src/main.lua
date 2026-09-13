@@ -1175,7 +1175,14 @@ function Main:start()
   self.runtime_registration_complete=true; self.started=true; local data=self.adapter:getGMCP(); if self:mapperEnabled() and data and data.Room and data.Room.Info then local mapped=self.automapper:onRoom(data.Room.Info); if mapped and tonumber(data.Room.Info.num) then self.managed_rooms[tonumber(data.Room.Info.num)]=true end end; self:refresh(); self:scheduleRoundtimeTick(); self:scheduleClockTick()
   local chatStarted,chatErr=self:startChat(); if not chatStarted then error(chatErr,0) end
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self:callSpecialTransition("onLine",line) end)
-  self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self.posture:onLine(line); self.needs:onLine(line,"output"); self.roller:onLine(line) end)
+  self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line)
+    -- These consumers are independent. One optional tracker must never stop
+    -- the autoroller from receiving the same game output.
+    pcall(self.posture.onLine,self.posture,line)
+    pcall(self.needs.onLine,self.needs,line,"output")
+    local ok,err=pcall(self.roller.onLine,self.roller,line)
+    if not ok then self:captureFailure("autoroller",err,{operation="line_capture"}) end
+  end)
   end)
   if not startupOk then pcall(function() self:shutdown() end); return nil,startupErr end
   return true

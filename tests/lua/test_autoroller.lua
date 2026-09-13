@@ -38,6 +38,29 @@ test("manual start captures the current eleven-stat roll in place",function()
   currentRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low"); eq(r.state.rolls,1); assert(r:onLine(creatorPrompt)); f.timers[1].fn(); eq(#f.sent,1); eq(f.sent[1],"reroll")
 end)
 
+test("step seven banner does not cancel an explicit manual start",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=false}); assert(r:start())
+  eq(r:onLine("Step 7 of 10 - Characteristics"),false); eq(r.state.active,true); eq(r.state.rolls,0); eq(r.state.phase,"observing")
+  currentRoll(r,"Great Fair Good Aver Good Aver","Fair Fair Aver Low Aver")
+  eq(r.state.rolls,1); eq(r.state.last.maximum,77)
+end)
+
+test("manual reroll redetects roll in place after a stale arrange protocol",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=false}); assert(r:start())
+  r.state.protocol="arrange"; r.state.phase="waiting_new_roll"; r.state.awaiting_new_roll=true
+  assert(r:onOutgoing("reroll")); eq(r.state.protocol,nil)
+  currentRoll(r,"Great Fair Good Aver Good Aver","Fair Fair Aver Low Aver")
+  eq(r.state.rolls,1); eq(r.state.last.protocol,"creator"); eq(r.state.last.maximum,77)
+  assert(r:onLine(creatorPrompt)); local timer=r.state.timer; assert(timer and f.timers[timer]); f.timers[timer].fn(); eq(f.sent[1],"reroll")
+end)
+
+test("split characteristic header resynchronizes an active stale arrange protocol",function()
+  local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=false}); assert(r:start())
+  r.state.protocol="arrange"; r.state.phase="waiting_new_roll"; r.state.awaiting_new_roll=true
+  currentRoll(r,"Great Fair Good Aver Good Aver","Fair Fair Aver Low Aver")
+  eq(r.state.rolls,1); eq(r.state.last.protocol,"creator"); eq(r.state.last.stats.STR,7); eq(r.state.last.stats.APP,4)
+end)
+
 test("current roll in place continues for fifty rejected rolls without duplicates",function()
   local f=fake(); local r=Roller.new(f,{target_total=77,reroll_delay=0,auto_start_on_name=true})
   for index=1,50 do

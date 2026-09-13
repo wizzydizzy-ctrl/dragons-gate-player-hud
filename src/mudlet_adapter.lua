@@ -294,7 +294,17 @@ function Adapter:addEvent(name,fn) return registerAnonymousEventHandler(name,fn)
 function Adapter:killEvent(id) return killAnonymousEventHandler(id) end
 function Adapter:addAlias(pattern,fn) return tempAlias(pattern,fn) end
 function Adapter:killAlias(id) return killAlias(id) end
-function Adapter:addLineTrigger(fn) return tempRegexTrigger("^.*$",function() fn(line or "") end) end
+function Adapter:addLineTrigger(fn)
+  return tempRegexTrigger("^.*$",function()
+    local value=line
+    -- Some Mudlet/platform combinations do not populate the callback's
+    -- global `line` consistently for temporary regex triggers.  Reading the
+    -- current console line keeps all HUD parsers, including the autoroller,
+    -- functional without changing or consuming the player's output.
+    if value==nil and type(getCurrentLine)=="function" then value=getCurrentLine() end
+    fn(value or "")
+  end)
+end
 function Adapter:addColorizerTrigger(fn)
   -- Keep recognition in output_colorizer.lua. A broad owned trigger prevents
   -- new independently configurable categories from being silently excluded
