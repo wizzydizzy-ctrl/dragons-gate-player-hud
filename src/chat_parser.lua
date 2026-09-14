@@ -58,6 +58,7 @@ local rules={
   {category="STAFF",pattern='^%[GM%] '..activeName..' %[[%w_.%-]+%] reports: (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..activeName..' %[[%w_.%-]+%] (reports a bug in room %d+: .+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..activeName..' %[[%w_.%-]+%] (submits an idea: .+)$',speaker=1,message=2},
+  {category="STAFF",pattern='^%[GM%] '..activeName..' (resolved report #%d+: .+)$',speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' sends: (.+)$',speaker=1,message=2},
   {category="DRAGON",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
   {category="DRAGON",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},

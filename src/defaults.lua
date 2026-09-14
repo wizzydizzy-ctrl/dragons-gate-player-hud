@@ -6,7 +6,7 @@ return {
   view_contract = "__DGHUD_VIEW_CONTRACT__",
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.3.47",
+  version = "0.3.48",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   display = { side_text_scale = 1.0 },
   keybindings = { enabled=false, commands={ ["8"]="north",["9"]="northeast",["6"]="east",["3"]="southeast",["2"]="south",["1"]="southwest",["4"]="west",["7"]="northwest",["5"]="look",Plus="up",Minus="down",["0"]="",Period="",Asterisk="",Slash="",Enter="" } },

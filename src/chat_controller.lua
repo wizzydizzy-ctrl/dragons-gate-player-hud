@@ -92,7 +92,7 @@ end
 local function bufferedStaffEntry(entry)
   if type(entry)~="table" or entry.category~="STAFF" then return false end
   local message=tostring(entry.message or "")
-  return message:match("^submits an idea:")~=nil or message:match("^reports a bug in room %d+:")~=nil
+  return message:match("^submits an idea:")~=nil or message:match("^reports a bug in room %d+:")~=nil or message:match("^resolved report #%d+:")~=nil
 end
 
 local function staffMessageBoundary(line,parsed)
