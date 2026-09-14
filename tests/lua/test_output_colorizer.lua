@@ -100,11 +100,16 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
   local dark=assert(Colorizer.parse("This area is not illuminated.")); eq(dark[1].kind,"darkness"); eq(dark[1].color[1],105)
   eq(assert(Colorizer.parse("This room is not illuminated."))[1].kind,"darkness")
 end)
-test("formats new version notes as a prominent important notice",function()
-  for _,line in ipairs({"(There are new version notes and gm version notes.)","There are new version notes and GM version notes."}) do
+test("formats player and staff version notes as prominent important notices",function()
+  for _,line in ipairs({"(There are new version notes and gm version notes.)","There  are\tnew version notes and GM version notes\r"," ( THERE ARE NEW VERSION NOTES ) "}) do
     local part=assert(Colorizer.parse(line))[1]; eq(part.kind,"notice"); eq(part.bold,true); eq(part.underline,true); eq(part.color[1],255); eq(part.background[1],80)
-    eq(part.display_text,"*** IMPORTANT - PLEASE READ: NEW VERSION NOTES AND GM VERSION NOTES ARE AVAILABLE. ***")
+    assert(part.display_text:find("IMPORTANT %- PLEASE READ"))
   end
+  eq(Colorizer.parse("Display notices and version notes."),nil)
+end)
+test("Mudlet adapter aborts notice formatting when selection fails",function()
+  local formatted=0; local api={selectSection=function() return false end,setFgColor=function() formatted=formatted+1 end,deselect=function() end}
+  local ok,err=MudletAdapter.new():applyLineColors(assert(Colorizer.parse("(There are new version notes.)")),api); eq(ok,nil); assert(err:find("could not select",1,true)); eq(formatted,0)
 end)
 
 test("special lines retain independently filterable currency segments",function()

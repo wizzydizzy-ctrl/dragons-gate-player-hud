@@ -63,10 +63,14 @@ local function portalSegment(line,lower,colors)
 end
 
 local function specialSegments(line,lower,colors)
-  local notice=lower:match("^%s*%((.-)%)%s*$") or lower:match("^%s*(.-)%s*$")
-  if notice=="there are new version notes and gm version notes." then
+  local notice=lower:gsub("\r",""):match("^%s*(.-)%s*$")
+  if notice:sub(1,1)=="(" and notice:sub(-1)==")" then notice=notice:sub(2,-2):match("^%s*(.-)%s*$") end
+  notice=notice:gsub("%s+"," "):gsub("%.$","")
+  local playerNotice=notice=="there are new version notes"
+  local staffNotice=notice=="there are new version notes and gm version notes"
+  if playerNotice or staffNotice then
     local parts=whole(line,"notice",colors)
-    if parts then parts[1].bold=true; parts[1].underline=true; parts[1].background={80,25,20}; parts[1].display_text="*** IMPORTANT - PLEASE READ: NEW VERSION NOTES AND GM VERSION NOTES ARE AVAILABLE. ***" end
+    if parts then parts[1].bold=true; parts[1].underline=true; parts[1].background={80,25,20}; parts[1].display_text=staffNotice and "*** IMPORTANT - PLEASE READ: NEW VERSION NOTES AND GM VERSION NOTES ARE AVAILABLE. ***" or "*** IMPORTANT - PLEASE READ: NEW VERSION NOTES ARE AVAILABLE. ***" end
     return parts
   end
   if lower:match("^%s*this area is illuminated%.%s*$") or lower:match("^%s*this room is illuminated%.%s*$") then return whole(line,"illumination",colors) end

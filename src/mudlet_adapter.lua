@@ -320,10 +320,12 @@ function Adapter:applyLineColors(segments,api)
     for _,item in ipairs(segments) do
       local color=item.color
       assert(type(item.start)=="number" and type(item.length)=="number" and type(color)=="table","invalid color segment")
-      api.selectSection(item.start-1,item.length)
+      local selected=api.selectSection(item.start-1,item.length)
+      if selected==false then error("Mudlet could not select the requested line segment") end
       if item.display_text and type(api.replace)=="function" then
         api.replace(item.display_text)
-        api.selectSection(item.start-1,#item.display_text)
+        selected=api.selectSection(item.start-1,#item.display_text)
+        if selected==false then error("Mudlet could not select the formatted notice") end
       end
       api.setFgColor(color[1],color[2],color[3])
       if item.background and type(api.setBgColor)=="function" then api.setBgColor(item.background[1],item.background[2],item.background[3]) end
