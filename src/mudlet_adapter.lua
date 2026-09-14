@@ -321,7 +321,14 @@ function Adapter:applyLineColors(segments,api)
       local color=item.color
       assert(type(item.start)=="number" and type(item.length)=="number" and type(color)=="table","invalid color segment")
       api.selectSection(item.start-1,item.length)
+      if item.display_text and type(api.replace)=="function" then
+        api.replace(item.display_text)
+        api.selectSection(item.start-1,#item.display_text)
+      end
       api.setFgColor(color[1],color[2],color[3])
+      if item.background and type(api.setBgColor)=="function" then api.setBgColor(item.background[1],item.background[2],item.background[3]) end
+      if item.bold and type(api.setBold)=="function" then api.setBold(true) end
+      if item.underline and type(api.setUnderline)=="function" then api.setUnderline(true) end
     end
     if type(api.deselect)=="function" then api.deselect() end
   end)

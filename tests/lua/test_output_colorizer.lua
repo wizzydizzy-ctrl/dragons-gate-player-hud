@@ -100,6 +100,12 @@ test("classifies restrained combat danger recovery upkeep spell and discovery li
   local dark=assert(Colorizer.parse("This area is not illuminated.")); eq(dark[1].kind,"darkness"); eq(dark[1].color[1],105)
   eq(assert(Colorizer.parse("This room is not illuminated."))[1].kind,"darkness")
 end)
+test("formats new version notes as a prominent important notice",function()
+  for _,line in ipairs({"(There are new version notes and gm version notes.)","There are new version notes and GM version notes."}) do
+    local part=assert(Colorizer.parse(line))[1]; eq(part.kind,"notice"); eq(part.bold,true); eq(part.underline,true); eq(part.color[1],255); eq(part.background[1],80)
+    eq(part.display_text,"*** IMPORTANT - PLEASE READ: NEW VERSION NOTES AND GM VERSION NOTES ARE AVAILABLE. ***")
+  end
+end)
 
 test("special lines retain independently filterable currency segments",function()
   local parts=assert(Colorizer.parse("You have discovered 10 gold!")); eq(#parts,2); eq(parts[1].kind,"discovery"); eq(parts[2].kind,"gold")
@@ -144,6 +150,14 @@ test("Mudlet adapter changes only selected foreground ranges",function()
   }
   local segments=assert(Colorizer.parse("Obvious paths: north east west."))
   assert(MudletAdapter.new():applyLineColors(segments,api)); eq(#selected,4); eq(selected[1][1],0); eq(selected[1][2],14); eq(selected[2][1],15); eq(selected[2][2],5); eq(#colors,4); eq(deselected,1)
+end)
+test("Mudlet adapter applies prominent notice styling and replacement",function()
+  local selected,replaced,fg,bg,bold,underline={}; local api={
+    selectSection=function(start,length) selected[#selected+1]={start,length} end,replace=function(value) replaced=value end,
+    setFgColor=function(...) fg={...} end,setBgColor=function(...) bg={...} end,setBold=function(value) bold=value end,setUnderline=function(value) underline=value end,deselect=function() end,
+  }
+  assert(MudletAdapter.new():applyLineColors(assert(Colorizer.parse("(There are new version notes and gm version notes.)")),api))
+  assert(replaced:find("IMPORTANT %- PLEASE READ")); eq(fg[1],255); eq(bg[1],80); eq(bold,true); eq(underline,true); eq(#selected,2)
 end)
 
 test("Mudlet colorizer registration forwards every line to the conservative parser",function()

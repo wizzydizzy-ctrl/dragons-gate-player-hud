@@ -345,8 +345,8 @@ function View.new(settings)
   self.color_settings_content=Geyser.ScrollBox:new({name="DGHUD.ColorSettings.Content",x=14,y=48,width=592,height=410},self.color_settings_panel)
   self.color_settings_close=label("DGHUD.ColorSettings.Close",self.color_settings_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
   self.color_option_buttons={}
-  self.color_option_order={"mapper","enabled","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
-  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
+  self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
