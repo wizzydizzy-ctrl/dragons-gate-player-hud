@@ -7,6 +7,7 @@ local religion={"You are a Novitiate follower of Unknown.","You have earned 5700
 local runes={"You have the following elemental runes available to you...","  force       - 100 weaves remain   healing     -  14 weaves remain","  holy        -  99 weaves remain   vigor       - 100 weaves remain","  light       - 100 weaves remain",">"}
 local skills={"Skill                     Remain Level","Biting                    105    4","Clawing                   276    2",">"}
 local time={"Current time is: Wed Sep  2 00:40:30 2026 EST.","It is now 3:22 am on the 4th day of the 8th month in the year 362.","You have been adventuring for 14 secs this session.",">"}
+local namedTime={"Server local time is: Mon Sep 14 01:13:51 2026 (pacific).","Today is the 59th day of Majus in the year 362. The time is 4:29.","You have been adventuring for 4 hrs, 50 mins, 30 secs this session.","[9006] 301/301 hp, 173/173 ftg >"}
 local function fake()
   local f={next=0,triggers={},events={},timers={},timer_delays={},sent={}}
   local function id(self,prefix) self.next=self.next+1; return prefix..self.next end
@@ -76,6 +77,15 @@ end)
 test("collector captures manual time commands",function()
   local f=fake(); local changed; local c=Collector.new(f,Parser,function(_,key) changed=key end); c:start(); f:outgoing("time"); f:lines(time)
   eq(changed,"time"); eq(c.snapshot.time.hour,3); eq(c.snapshot.time.minute,22)
+end)
+test("new named-month time response completes without injecting blank prompts",function()
+  local f=fake(); local changed; local c=Collector.new(f,Parser,function(_,key) changed=key end); c:start(); f:outgoing("time")
+  eq(f:fireDelay(.15),false); eq(#f.sent,0); f:lines(namedTime)
+  eq(changed,"time"); eq(c.snapshot.time.month_name,"Majus"); eq(c.snapshot.time.minute,29); eq(c.active,nil); eq(#f.sent,0)
+end)
+test("unknown time format ends at its natural prompt without injecting Enter",function()
+  local f=fake(); local c=Collector.new(f,Parser,function() end); c:start(); f:outgoing("time"); f:lines({"A future time format.","[9006] 301/301 hp, 173/173 ftg >"})
+  eq(c.active,nil); eq(#f.sent,0); eq(f:fireDelay(2),false)
 end)
 test("collector captures manual info religion commands",function()
   local f=fake(); local c=Collector.new(f,Parser,function() end); c:start(); f:outgoing("info religion"); f:lines(religion); eq(c.snapshot.religion.rank,"Novitiate")

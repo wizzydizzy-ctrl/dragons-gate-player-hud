@@ -7,6 +7,7 @@ local religion={"You are a Novitiate follower of Unknown.","You have earned 5700
 local runes={"You have the following elemental runes available to you...","  force       - 100 weaves remain   healing     -  14 weaves remain","  holy        -  99 weaves remain   vigor       - 100 weaves remain","  light       - 100 weaves remain",">"}
 local skills={"Skill                     Remain Level","Biting                    105    4","Clawing                   276    2","Pole Weapons               42    4","Identify Armor Quality    100    1",">"}
 local time={"Current time is: Wed Sep  2 00:40:30 2026 EST.","It is now 3:22 am on the 4th day of the 8th month in the year 362.","You have been adventuring for 14 secs this session.",">"}
+local namedTime={"Server local time is: Mon Sep 14 01:13:51 2026 (pacific).","Today is the 59th day of Majus in the year 362. The time is 4:29.","You have been adventuring for 4 hrs, 50 mins, 30 secs this session.","[9006] 301/301 hp, 173/173 ftg >"}
 
 test("parses inventory items without merging duplicates",function()
   local r=assert(Parser.parseInventory(inventory)); eq(#r.items,3); eq(r.items[1].name,"A wooden torch"); eq(r.items[2].weight,0.1); eq(r.total_weight,1.6)
@@ -122,6 +123,10 @@ test("parses game time and completes only at the prompt",function()
   eq(assert(Parser.parseTime(pm)).hour,12)
   local midnight={time[1],"It is now 12:07 am on the 4th day of the 8th month in the year 362.",time[3],">"}
   eq(assert(Parser.parseTime(midnight)).hour,0)
+end)
+test("parses named game months from Dragon's Gate 4.0.9.4",function()
+  local r=assert(Parser.parseTime(namedTime)); eq(r.hour,4); eq(r.minute,29); eq(r.day,59); eq(r.month,4); eq(r.month_name,"Majus"); eq(r.year,362); eq(r.days_per_month,60); eq(r.months_per_year,6)
+  eq(Parser.parseTime({namedTime[1],namedTime[2],namedTime[3]}),nil); eq(Parser.isComplete("time",namedTime),true)
 end)
 
 return {inventory=inventory,stat=stat,info=info,religion=religion,skills=skills,time=time}

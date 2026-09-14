@@ -1,6 +1,8 @@
 local Collector={}; Collector.__index=Collector
 local SPECS={inventory={parser="parseInventory",snapshot="inventory"},stat={parser="parseStat",snapshot="stat"},info={parser="parseInfo",snapshot="info"},["info religion"]={parser="parseReligion",snapshot="religion"},["info mag"]={parser="parseRunes",snapshot="runes"},skill={parser="parseSkills",snapshot="skills"},time={parser="parseTime",snapshot="time"}}
-local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info mag"]=true,skill=true,time=true}
+-- TIME now returns a complete prompt on its own. Nudging it injects visible,
+-- duplicate prompts on Dragon's Gate 4.0.9.4 and later.
+local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info mag"]=true,skill=true}
 local RESPONSE_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info mag"]=2.5,skill=3,time=2}
 local RECOVERY_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info mag"]=2.5,skill=3,time=2}
 function Collector.new(adapter,parser,onChange,onRoundtime,onCharacterEntry,onCharacterExit)
@@ -107,7 +109,12 @@ function Collector:onLine(value)
   -- complete delayed response can still succeed before the bounded drain ends.
   if #self.active.lines==1 and self.parser.isPrompt(self.active.lines[1]) and not self.parser.isPrompt(value) then self.active.lines={} end
   self.active.lines[#self.active.lines+1]=value
-  if self.parser.isComplete(self.active.command,self.active.lines) then self:finish(self.active.lines) end
+  if self.parser.isComplete(self.active.command,self.active.lines) then self:finish(self.active.lines)
+  elseif self.active.command=="time" and #self.active.lines>1 and self.parser.isPrompt(value) then
+    -- A natural terminal prompt ends TIME even if a future server format cannot
+    -- be parsed. Never stall startup or manufacture another prompt with Enter.
+    self:finish(nil)
+  end
 end
 function Collector:onOutgoing(command)
   command=tostring(command or ""):match("^%s*(.-)%s*$"):lower()

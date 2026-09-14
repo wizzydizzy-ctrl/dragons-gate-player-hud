@@ -10,6 +10,10 @@ test("game clock rolls a twelve-month thirty-day calendar into the next year",fu
   local clock=Clock.new({speed=2},function() return 0 end); clock:sync({hour=23,minute=59,day=30,month=12,year=362},0)
   local value=clock:current(30); eq(value.hour,0); eq(value.minute,0); eq(value.day,1); eq(value.month,1); eq(value.year,363)
 end)
+test("game clock adopts the named six-month sixty-day calendar",function()
+  local clock=Clock.new({speed=2},function() return 0 end); clock:sync({hour=23,minute=59,day=60,month=6,year=362,days_per_month=60,months_per_year=6},0)
+  local value=clock:current(30); eq(value.hour,0); eq(value.minute,0); eq(value.day,1); eq(value.month,1); eq(value.year,363)
+end)
 
 test("game clock handles noon midnight and calendar rollover",function()
   local clock=Clock.new({speed=2,sunrise_hour=6,sunset_hour=18},function() return 0 end)

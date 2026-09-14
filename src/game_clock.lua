@@ -12,6 +12,7 @@ function Clock.new(settings,now)
     sunrise_hour=math.max(0,math.min(23,math.floor(tonumber(settings.sunrise_hour) or 6))),
     sunset_hour=math.max(0,math.min(23,math.floor(tonumber(settings.sunset_hour) or 18))),
     days_per_month=math.max(1,math.floor(tonumber(settings.days_per_month) or 30)),
+    months_per_year=math.max(1,math.floor(tonumber(settings.months_per_year) or 12)),
     now=type(now)=="function" and now or os.time,
   },Clock)
 end
@@ -20,6 +21,8 @@ function Clock:sync(value,epoch)
   if type(value)~="table" then return nil,"invalid game time" end
   local hour,minute=tonumber(value.hour),tonumber(value.minute)
   if not hour or not minute or hour<0 or hour>23 or minute<0 or minute>59 then return nil,"invalid game time" end
+  self.days_per_month=math.max(1,math.floor(tonumber(value.days_per_month) or self.days_per_month))
+  self.months_per_year=math.max(1,math.floor(tonumber(value.months_per_year) or self.months_per_year))
   self.base={hour=math.floor(hour),minute=math.floor(minute),day=math.floor(tonumber(value.day) or 1),month=math.floor(tonumber(value.month) or 1),year=math.floor(tonumber(value.year) or 1)}
   self.synced_at=tonumber(epoch) or self.now()
   return true
@@ -34,7 +37,7 @@ function Clock:current(epoch)
   local hour=math.floor(total/60)
   local dayIndex=(self.base.day-1)+days
   local monthIndex=(self.base.month-1)+math.floor(dayIndex/self.days_per_month)
-  return {hour=hour,minute=total%60,day=dayIndex%self.days_per_month+1,month=monthIndex%12+1,year=self.base.year+math.floor(monthIndex/12),
+  return {hour=hour,minute=total%60,day=dayIndex%self.days_per_month+1,month=monthIndex%self.months_per_year+1,year=self.base.year+math.floor(monthIndex/self.months_per_year),
     period=(hour>=self.sunrise_hour and hour<self.sunset_hour) and "Daytime" or "Night"}
 end
 

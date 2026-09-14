@@ -1,6 +1,7 @@
 local Parser={}
 local ATTRS={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
 local RANKS={awful="Awful",poor="Poor",low="Low",aver="Aver",fair="Fair",good="Good",great="Great",excel="Excel",super="Super",godly="Godly"}
+local GAME_MONTHS={tanei=1,odeth=2,daleth=3,majus=4,mateth=5,rina=6}
 local function clean(value)
   return tostring(value or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("%s+$","")
 end
@@ -181,10 +182,17 @@ end
 function Parser.parseTime(lines)
   if not hasPrompt(lines) then return nil,"incomplete time response" end
   for _,raw in ipairs(lines or {}) do
-    local hour,minute,meridiem,day,month,year=clean(raw):match("^It is now (%d+):(%d+) ([ap]m) on the (%d+)%a* day of the (%d+)%a* month in the year (%d+)%.$")
+    local line=clean(raw)
+    local day,monthName,year,hour,minute=line:match("^Today is the (%d+)%a* day of ([%a]+) in the year (%d+)%. The time is (%d+):(%d+)%.%s*$")
+    if hour then
+      local month=GAME_MONTHS[monthName:lower()]
+      if month then return {hour=tonumber(hour),minute=tonumber(minute),day=tonumber(day),month=month,month_name=monthName,year=tonumber(year),days_per_month=60,months_per_year=6} end
+    end
+    local meridiem,oldDay,oldMonth,oldYear
+    hour,minute,meridiem,oldDay,oldMonth,oldYear=line:match("^It is now (%d+):(%d+) ([ap]m) on the (%d+)%a* day of the (%d+)%a* month in the year (%d+)%.$")
     if hour then
       hour=tonumber(hour); if meridiem=="am" and hour==12 then hour=0 elseif meridiem=="pm" and hour<12 then hour=hour+12 end
-      return {hour=hour,minute=tonumber(minute),day=tonumber(day),month=tonumber(month),year=tonumber(year)}
+      return {hour=hour,minute=tonumber(minute),day=tonumber(oldDay),month=tonumber(oldMonth),year=tonumber(oldYear)}
     end
   end
   return nil,"unrecognized time response"
