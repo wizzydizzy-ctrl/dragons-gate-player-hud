@@ -199,7 +199,7 @@ function Parser.parseTime(lines)
 end
 
 function Parser.isComplete(command,lines)
-  local fn={inventory=Parser.parseInventory,stat=Parser.parseStat,info=Parser.parseInfo,["info religion"]=Parser.parseReligion,["info mag"]=Parser.parseRunes,skill=Parser.parseSkills,time=Parser.parseTime}
+  local fn={inventory=Parser.parseInventory,stat=Parser.parseStat,info=Parser.parseInfo,["info religion"]=Parser.parseReligion,["info mag"]=Parser.parseRunes,["info magic"]=Parser.parseRunes,skill=Parser.parseSkills,time=Parser.parseTime}
   if not fn[command] or type(lines)~="table" or #lines==0 or not isPrompt(lines[#lines]) then return false end
   return fn[command](lines)~=nil
 end

@@ -1,12 +1,12 @@
 local Collector={}; Collector.__index=Collector
-local SPECS={inventory={parser="parseInventory",snapshot="inventory"},stat={parser="parseStat",snapshot="stat"},info={parser="parseInfo",snapshot="info"},["info religion"]={parser="parseReligion",snapshot="religion"},["info mag"]={parser="parseRunes",snapshot="runes"},skill={parser="parseSkills",snapshot="skills"},time={parser="parseTime",snapshot="time"}}
+local SPECS={inventory={parser="parseInventory",snapshot="inventory"},stat={parser="parseStat",snapshot="stat"},info={parser="parseInfo",snapshot="info"},["info religion"]={parser="parseReligion",snapshot="religion"},["info magic"]={parser="parseRunes",snapshot="runes"},skill={parser="parseSkills",snapshot="skills"},time={parser="parseTime",snapshot="time"}}
 -- TIME now returns a complete prompt on its own. Nudging it injects visible,
 -- duplicate prompts on Dragon's Gate 4.0.9.4 and later.
-local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info mag"]=true,skill=true}
-local RESPONSE_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info mag"]=2.5,skill=3,time=2}
-local RECOVERY_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info mag"]=2.5,skill=3,time=2}
+local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info magic"]=true,skill=true}
+local RESPONSE_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info magic"]=2.5,skill=3,time=2}
+local RECOVERY_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info magic"]=2.5,skill=3,time=2}
 function Collector.new(adapter,parser,onChange,onRoundtime,onCharacterEntry,onCharacterExit)
-  return setmetatable({adapter=adapter,parser=parser,onChange=onChange,onRoundtime=onRoundtime,onCharacterEntry=onCharacterEntry,onCharacterExit=onCharacterExit,snapshot={},sequence={"inventory","stat","info","info religion","info mag","skill","time"},runtime={triggers={},events={}},started=false,refreshed=false,prompt_nudge_delay=.15,drain_delay=.5},Collector)
+  return setmetatable({adapter=adapter,parser=parser,onChange=onChange,onRoundtime=onRoundtime,onCharacterEntry=onCharacterEntry,onCharacterExit=onCharacterExit,snapshot={},sequence={"inventory","stat","info","info religion","info magic","skill","time"},runtime={triggers={},events={}},started=false,refreshed=false,prompt_nudge_delay=.15,drain_delay=.5},Collector)
 end
 function Collector:cancelActive()
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
@@ -119,6 +119,7 @@ end
 function Collector:onOutgoing(command)
   command=tostring(command or ""):match("^%s*(.-)%s*$"):lower()
   if command=="inv" then command="inventory" end
+  if command=="info mag" then command="info magic" end
   if not SPECS[command] or self.sending_startup_command==command then return end
   if self.active then
     if self.active.startup then self.retry_startup=true end

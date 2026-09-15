@@ -50,7 +50,7 @@ Wait for all seven source commands to complete. If only one section is blank, ru
 - Combat: `stat`
 - Identity, needs, vitals fallback, and characteristics: `info`
 - Faith and favors: `info religion`
-- Runes: `info mag`
+- Runes: `info magic`
 - Skills: `skill`
 - Game clock: `time`
 

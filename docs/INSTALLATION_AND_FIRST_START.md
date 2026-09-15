@@ -50,7 +50,7 @@ inventory
 stat
 info
 info religion
-info mag
+info magic
 skill
 time
 ```
@@ -71,7 +71,7 @@ You can also enter one source command manually. For example:
 
 ```text
 skill
-info mag
+info magic
 inventory
 ```
 

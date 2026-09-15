@@ -92,7 +92,7 @@ Items and total carried weight come from `inventory`. Money and carrying capacit
 
 ## Runes
 
-`info mag` fills the Runes list. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
+`info magic` fills the Runes list. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
 
 This puts the runes closest to needing renewal at the top.
 
@@ -133,7 +133,7 @@ inventory
 stat
 info
 info religion
-info mag
+info magic
 skill
 time
 ```

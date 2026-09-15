@@ -160,7 +160,7 @@ inv
 stat
 info
 info religion
-info mag
+info magic
 skill
 time
 ```

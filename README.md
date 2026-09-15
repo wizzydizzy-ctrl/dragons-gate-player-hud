@@ -33,7 +33,7 @@ Run `dghud help` to open the scrollable, color-coded command guide. Everyday com
 
 Choose **OPTIONS → Refresh Character Data** or run `dghud refresh` whenever inventory, combat values, character details, religion, runes, skills, or time look stale. This reruns only the normal character-data commands; it does not download or reinstall the HUD. `dghud text small`, `dghud text normal`, and `dghud text large` provide the same persistent side-panel sizing as the OPTIONS control, while `dghud text status` reports the current choice.
 
-The HUD runs `info mag` during character startup and whenever the command is entered manually. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a five-row scrollable Runes card above Skills. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
+The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a five-row scrollable Runes card above Skills. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
 
 ## Local build and install
 
