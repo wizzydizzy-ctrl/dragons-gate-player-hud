@@ -62,6 +62,21 @@ test("public reload re-resolves current nested user settings without replacing u
   end)
 end)
 
+test("persisted hidden chat survives package replacement and public reload",function()
+  withEntryStubs(function(context)
+    context.defaults.chat.visible=true
+    local persisted={visible=false,tab_order={"STAFF","ALL","ROOM"},all_sources={COMBAT=false,ROOM=true}}
+    context.install("mudlet_adapter",function() return {loadChatSettings=function() return persisted end,new=function() return context.adapter end} end)
+    DGHUD={user_settings={chat={visible=true,personal_option="keep"}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.user_settings.chat.visible,false); eq(DGHUD.settings.chat.visible,false)
+    eq(DGHUD.controller.settings.chat.visible,false); eq(DGHUD.settings.chat.enabled,true)
+    eq(DGHUD.settings.chat.personal_option,"keep"); eq(DGHUD.settings.chat.tab_order[1],"STAFF")
+    eq(DGHUD.settings.chat.all_sources.COMBAT,false)
+    assert(DGHUD.reload()); eq(DGHUD.settings.chat.visible,false)
+    eq(DGHUD.controller.settings.chat.visible,false)
+  end)
+end)
 test("persisted roller settings override stale live values during package replacement",function()
   withEntryStubs(function(context)
     context.defaults.roller={schema=3,target_total=53,hard_stop=62,max_rolls=false,arrange_mode="manual",minimum_greats=false,minimum_good_plus=false,auto_start_on_name=true,min_stats={STR=5,MP=5}}

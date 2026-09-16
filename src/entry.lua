@@ -63,7 +63,7 @@ if type(persistedMapper)=="table" then userSettings.mapper=type(userSettings.map
 local persistedDisplay=Adapter.loadDisplaySettings and Adapter.loadDisplaySettings()
 if type(persistedDisplay)=="table" then userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}; for key,value in pairs(persistedDisplay) do userSettings.display[key]=value end end
 local persistedChat=Adapter.loadChatSettings and Adapter.loadChatSettings()
-if type(persistedChat)=="table" then userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}; userSettings.chat.tab_order=persistedChat.tab_order; if type(persistedChat.all_sources)=="table" then userSettings.chat.all_sources=persistedChat.all_sources end end
+if type(persistedChat)=="table" then userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}; userSettings.chat.tab_order=persistedChat.tab_order; if type(persistedChat.visible)=="boolean" then userSettings.chat.visible=persistedChat.visible end; if type(persistedChat.all_sources)=="table" then userSettings.chat.all_sources=persistedChat.all_sources end end
 local persistedKeys=Adapter.loadKeybindingSettings and Adapter.loadKeybindingSettings()
 if type(persistedKeys)=="table" then userSettings.keybindings=persistedKeys end
 DGHUD.user_settings=userSettings

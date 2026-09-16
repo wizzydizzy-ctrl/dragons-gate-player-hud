@@ -42,6 +42,7 @@ end
 local function clamp(value,minimum,maximum) return math.max(minimum,math.min(maximum,math.floor(value+0.5))) end
 local function chatMetrics(width,height,layout,settings)
   settings=type(settings)=="table" and settings or {}
+  layout.chat_visible=settings.visible~=false
   local default_percent=.21
   local target=tonumber(settings.target_height) or 240
   local minimum=tonumber(settings.min_height) or 160
@@ -50,7 +51,7 @@ local function chatMetrics(width,height,layout,settings)
   local minimum_console_remainder=math.max(1,math.floor(tonumber(settings.minimum_console_remainder) or 120))
   local chat_chrome_height=44
   local chat_output_minimum=16
-  local chat_functional_minimum=chat_chrome_height+chat_output_minimum
+  local chat_functional_minimum=layout.chat_visible and (chat_chrome_height+chat_output_minimum) or 0
   if maximum<minimum then maximum=minimum end
   local bottom=tonumber(layout.bottom) or 0
   layout.header_height=math.min(layout.top,math.max(0,height-bottom-chat_functional_minimum-1))
@@ -60,7 +61,7 @@ local function chatMetrics(width,height,layout,settings)
   local available_chat=math.min(math.max(0,available-1),math.max(chat_functional_minimum,available-adaptive_console_remainder))
   layout.minimum_console_remainder=minimum_console_remainder
   layout.chat_functional_minimum=chat_functional_minimum
-  layout.chat_height=math.min(configured_height,available_chat)
+  layout.chat_height=layout.chat_visible and math.min(configured_height,available_chat) or 0
   layout.chat_x=layout.console_left
   layout.chat_width=layout.console_width
   layout.chat_padding=8

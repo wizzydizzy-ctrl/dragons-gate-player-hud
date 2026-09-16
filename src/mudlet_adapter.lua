@@ -672,7 +672,8 @@ local function chatSettingsPath() return Adapter.dataBase().."/chat-settings.lua
 local chatAllSourceOrder={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}
 function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
-  local result={tab_order={}}; local seen={}
+  if config.visible~=nil and type(config.visible)~="boolean" then return nil,"chat visibility must be a boolean" end
+  local result={tab_order={},visible=config.visible~=false}; local seen={}
   for index,value in ipairs(order) do
     if index>64 then break end
     local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
@@ -697,7 +698,7 @@ function Adapter:saveChatSettings(config)
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
   local sourceValues={}; for _,category in ipairs(chatAllSourceOrder) do if snapshot.all_sources then sourceValues[#sourceValues+1]="["..string.format("%q",category).."]="..tostring(snapshot.all_sources[category]==true) end end
   local sources=#sourceValues>0 and ", all_sources={"..table.concat(sourceValues,",").."}" or ""
-  local wrote,writeErr=file:write("return { tab_order={"..table.concat(values,",").."}"..sources.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write("return { visible="..tostring(snapshot.visible)..", tab_order={"..table.concat(values,",").."}"..sources.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true

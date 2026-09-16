@@ -374,7 +374,7 @@ function Main:startChat()
   end
   if self.view and self.view.setChatOrderCallback then
     self.view:setChatOrderCallback(function(order)
-      local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources}
+      local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources,visible=not (self.settings.chat and self.settings.chat.visible==false)}
       if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
       self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=order
       local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.tab_order=order end
@@ -409,6 +409,27 @@ function Main:clearSavedChat(confirmed)
   local ok,count=self.chat:clearSavedHistory(true); if not ok then return nil,count end
   if self.adapter.reportChatClear then self.adapter:reportChatClear("saved",count) end; return true,count
 end
+function Main:setChatVisible(visible)
+  if type(visible)~="boolean" then return nil,"chat visibility must be a boolean" end
+  local chatSettings=self.settings.chat or {}
+  local candidate={visible=visible,tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=chatSettings.all_sources}
+  if self.adapter.saveChatSettings then
+    local saved,err=self.adapter:saveChatSettings(candidate)
+    if not saved then return nil,"Could not save chat visibility: "..tostring(err) end
+  end
+  self.settings.chat=chatSettings; chatSettings.visible=visible
+  local root=rawget(_G,"DGHUD")
+  if root then
+    root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}
+    root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}
+    root.user_settings.chat.visible=visible
+  end
+  if self.view and self.view.setChatVisible then self.view:setChatVisible(visible) end
+  -- Visibility is presentation only: leave the controller and saved history
+  -- running so showing chat again immediately restores the captured messages.
+  self:applyResponsiveLayout()
+  return visible
+end
 local chatAllSourceKeys={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true}
 function Main:setChatAllSource(category,enabled)
   category=tostring(category or ""):upper()
@@ -417,7 +438,7 @@ function Main:setChatAllSource(category,enabled)
   local chatSettings=self.settings.chat or {}; local sources={}
   for key,value in pairs(chatSettings.all_sources or {}) do sources[key]=value~=false end
   sources[category]=enabled
-  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=sources}
+  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=sources,visible=chatSettings.visible~=false}
   if self.adapter.saveChatSettings then local saved,err=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save ALL tab sources: "..tostring(err) end end
   self.settings.chat=chatSettings; chatSettings.all_sources=sources
   local root=rawget(_G,"DGHUD")
@@ -970,6 +991,7 @@ function Main:start()
     if action=="chat_clear_visible" then return self:clearVisibleChat() end
     if action=="chat_clear_saved" then return self:clearSavedChat(true) end
     if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
+    if action=="chat_visibility" then return self:setChatVisible(wanted) end
     if action=="roller_settings" then return self.roller and self.roller.cfg end
     if action=="keybindings_settings" then return self.keybindings and self.keybindings:snapshot() end
     if action=="auto_update" then
@@ -986,6 +1008,7 @@ function Main:start()
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
   if self.view.setChatAllSources then self.view:setChatAllSources(self.settings.chat and self.settings.chat.all_sources or {}) end
+  if self.view.setChatVisible then self.view:setChatVisible(not (self.settings.chat and self.settings.chat.visible==false)) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)

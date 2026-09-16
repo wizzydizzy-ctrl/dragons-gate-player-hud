@@ -1,6 +1,33 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("chat visibility defaults on for fresh and legacy settings",function()
+  eq(defaults.chat.visible,true)
+  for _,user in ipairs({{}, {schema=0,chat={tab_order={"STAFF","ALL"},all_sources={COMBAT=false},personal_option="keep"}}, {schema=1,chat={timestamps=false}}}) do
+    local resolved=Settings.resolve(defaults,user)
+    eq(resolved.chat.visible,true); eq(resolved.chat.enabled,true)
+    eq(user.chat and user.chat.visible,nil)
+    if user.chat and user.chat.personal_option then
+      eq(resolved.chat.personal_option,"keep"); eq(resolved.chat.tab_order[1],"STAFF"); eq(resolved.chat.all_sources.COMBAT,false)
+    end
+  end
+end)
+
+test("chat visibility survives migration and repeated resolution without changing capture or defaults",function()
+  for _,schema in ipairs({0,1}) do
+    for _,visible in ipairs({false,true}) do
+      local user={schema=schema,personal="untouched",chat={visible=visible,tab_order={"STAFF","ALL"},all_sources={ROOM=false,COMBAT=true},personal_option="keep"}}
+      local resolved,migrated=Settings.resolve(defaults,user)
+      eq(resolved.chat.visible,visible); eq(migrated.chat.visible,visible); eq(user.chat.visible,visible)
+      eq(resolved.chat.enabled,true); eq(resolved.chat.visible_limit,1000); eq(resolved.chat.timestamps,true)
+      eq(resolved.chat.tab_order[1],"STAFF"); eq(resolved.chat.all_sources.ROOM,false); eq(resolved.chat.all_sources.COMBAT,true)
+      eq(resolved.chat.personal_option,"keep"); eq(resolved.personal,"untouched")
+      local reloaded=Settings.resolve(defaults,migrated); eq(reloaded.chat.visible,visible); eq(defaults.chat.visible,true)
+    end
+  end
+end)
+
+
 test("merges nested overrides without changing defaults", function()
   local defaults={schema=1,theme={accent="#aa8844",panel="#111111"},github={owner="OWNER"}}
   local merged=Settings.merge(defaults,{theme={accent="#00ff00"},custom="keep"})

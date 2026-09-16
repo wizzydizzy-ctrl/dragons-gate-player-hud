@@ -73,7 +73,9 @@ The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, an
 
 ## Persistent top chatbox
 
-The always-visible top-center chatbox records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, `CONTACT`, `STAFF`, and `COMBAT`; `ROOM` includes both nearby speech and your own outgoing speech, including direct forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. `STAFF` includes GUIDE/GM messages, staff voice/sends output, GUIDE assistance requests with their room and pending-request count, and assistance-request cancellations. `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
+The top-center chatbox (shown by default) records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, `CONTACT`, `STAFF`, and `COMBAT`; `ROOM` includes both nearby speech and your own outgoing speech, including direct forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. `STAFF` includes GUIDE/GM messages, staff voice/sends output, GUIDE assistance requests with their room and pending-request count, and assistance-request cancellations. `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
+
+Use **OPTIONS → Chat Settings → Show Chatbox** to hide or show the entire chatbox. Hiding it expands the main display; chat capture and saved history continue. The profile remembers this choice across character changes, restarts, and updates.
 
 Use **OPTIONS → Chat Settings → Show in ALL** to choose which sources are included in the combined `ALL` tab. All sources are shown there by default except `COMBAT`. These choices are saved across restarts and updates. A source that is hidden from `ALL` is still captured and remains available in its own tab; no history is deleted.
 
@@ -82,6 +84,7 @@ The default chat settings are:
 ```lua
 chat = {
   enabled = true,
+  visible = true,
   height_percent = 0.21,
   target_height = 240,
   min_height = 160,

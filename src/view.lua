@@ -377,6 +377,17 @@ function View.new(settings)
   self.chat_settings_bg=label("DGHUD.ChatSettings.Background",self.chat_settings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.chat_settings_title=label("DGHUD.ChatSettings.Title",self.chat_settings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.chat_settings_content=Geyser.ScrollBox:new({name="DGHUD.ChatSettings.Content",x=12,y=46,width=556,height=406},self.chat_settings_panel)
+  self.chat_settings_visibility=label("DGHUD.ChatSettings.Visibility",self.chat_settings_content)
+  self.chat_settings_visibility:setClickCallback(function()
+    local wanted=self.chat_visible==false
+    local saved,err
+    if self.options_action_callback then saved,err=self.options_action_callback("chat_visibility",nil,wanted)
+    else err="Chat visibility settings are unavailable." end
+    if saved==nil then err=tostring(err or "Could not save chat visibility."); self.chat_settings_status_text=err; self:renderChatSettings(); return nil,err end
+    self:setChatVisible(saved)
+    self.chat_settings_status_text=self.chat_visible and "Chatbox shown." or "Chatbox hidden. Capture and history continue; the main console expands."
+    self:renderChatSettings(); return saved
+  end)
   self.chat_settings_text=label("DGHUD.ChatSettings.Text",self.chat_settings_content,"background:transparent;color:"..t.text..";")
   self.chat_settings_sources_caption=label("DGHUD.ChatSettings.SourcesCaption",self.chat_settings_content,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.chat_all_source_order={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}; self.chat_all_source_buttons={}; self.chat_all_sources={}
@@ -396,7 +407,7 @@ function View.new(settings)
     local ok,count=self.options_action_callback("chat_clear_saved"); self.chat_settings_clear_pending=false; self.chat_settings_status_text=ok and ("Permanently removed "..tostring(count or 0).." saved chat log files.") or tostring(count or "Could not clear saved chat history."); self:renderChatSettings(); return ok,count
   end)
   self.chat_settings_close:setClickCallback(function() return self:hideChatSettings() end); self.chat_settings_overlay:setClickCallback(function() return self:hideChatSettings() end); self.chat_settings_visible=false
-  for _,widget in ipairs({self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}) do widget:hide() end; for _,button in pairs(self.chat_all_source_buttons) do button:hide() end
+  for _,widget in ipairs(self:chatSettingsWidgets()) do widget:hide() end
   self.keybindings_overlay=label("DGHUD.Keybindings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
   self.keybindings_panel=Geyser.Container:new({name="DGHUD.Keybindings.Panel",x=0,y=0,width=680,height=570},self.root)
   self.keybindings_bg=label("DGHUD.Keybindings.Background",self.keybindings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
@@ -604,7 +615,41 @@ function View.new(settings)
   self.map_library_copy_button:setClickCallback(function() if self.copy_text_callback then return self.copy_text_callback("Map Library\n\nFIND SHARED MAPS: Load maps shared by other players.\nDOWNLOAD AS NEW: Keep the selected map as a separate editable collection.\nADD TO CURRENT MAP: Combine your Current Map with the selected Downloaded Map, then create a new editable combined copy. Choose which map wins room-number collisions before installing.\nREPLACE CURRENT: Replace your active map after a warning and automatic backup.\nSHARE MY MAP: Send your current map to the owner for safety review. No GitHub account is needed.\nREPORT A PROBLEM: Send the most recent map error for help.\n\nShared maps never silently overwrite personal rooms. You choose whether the Current Map wins, the Downloaded Map wins, or overlapping areas are skipped.") end end)
   self.map_library_visible=false
   for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_search_label,self.map_library_search,self.map_library_list,self.map_collection_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_filters) do button:hide() end; for _,button in pairs(self.map_library_modes) do button:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end; for _,button in pairs(self.map_collection_actions) do button:hide() end; for _,button in pairs(self.map_library_download_actions) do button:hide() end
+  self:setChatVisible(settings.chat and settings.chat.visible)
   return self
+end
+function View:isChatVisible()
+  return self.chat_visible~=false and not (self.layout and self.layout.chat_visible==false)
+end
+function View:applyChatVisibility()
+  local layout=self.layout
+  local widgets={self.chat_container,self.chat_bg,self.chat_tabs,self.chat_output}
+  if not self:isChatVisible() then
+    self.chat_drag=nil; self.chat_tabs_refresh_pending=true
+    for _,widget in ipairs(widgets) do widget:hide() end
+    for _,button in ipairs(self.chat_buttons or {}) do button:hide() end
+    self.chat_container:resize(layout and (layout.chat_width or layout.console_width) or "100%",0)
+    self.chat_output:resize("100%-"..((layout and layout.chat_padding or 8)*2),0)
+    return false
+  end
+  if layout then
+    place(self.chat_container,layout.chat_x or layout.left,layout.header_height or layout.top,layout.chat_width or layout.console_width,layout.chat_height or 240)
+    place(self.chat_bg,0,0,"100%","100%")
+    place(self.chat_tabs,0,0,"100%",32)
+    place(self.chat_output,layout.chat_padding or 8,36,"100%-"..((layout.chat_padding or 8)*2),"100%-44")
+  else
+    self.chat_container:resize("100%",240); self.chat_output:resize("100%-16","100%-44")
+    for _,widget in ipairs(widgets) do widget:show() end
+  end
+  for _,button in ipairs(self.chat_buttons or {}) do button:show() end
+  if self.chat_tabs_refresh_pending then self:renderChatTabs(self.chat_categories,self.chat_active_filter) end
+  return true
+end
+function View:setChatVisible(visible)
+  self.chat_visible=visible~=false
+  self:applyChatVisibility()
+  if self.chat_settings_visibility then self:renderChatSettings() end
+  return self.chat_visible
 end
 local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"}
 local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,COMBAT=true,OWN=true,WHISPER=true}
@@ -654,6 +699,10 @@ function View:reorderChatTab(category,targetIndex)
   return true
 end
 function View:renderChatTabs(categories,activeFilter)
+  self.chat_categories={}; for _,category in ipairs(type(categories)=="table" and categories or {}) do self.chat_categories[#self.chat_categories+1]=category end
+  self.chat_active_filter=tostring(activeFilter or "ALL"):upper()
+  categories=self.chat_categories; activeFilter=self.chat_active_filter
+  if not self:isChatVisible() then self:applyChatVisibility(); return true end
   if self.chat_drag then self.chat_tabs_refresh_pending=true; return true end
   self.chat_tabs_refresh_pending=nil
   for _,button in ipairs(self.chat_buttons or {}) do if button.delete then button:delete() end end
@@ -832,10 +881,7 @@ function View:applyLayout(layout)
   else place(self.clock_header,"100%-"..layout.right,0,layout.right,top); self.clock_header:raise() end
   if not layout.compact_minimal_header and self.last_state then self.header:echo(View.headerContent(layout,t,self.last_state.character and self.last_state.character.full_name)); self.attribute_strip:echo(View.attributeStripContent(self.last_state.attributes,t,layout)); self:updateClock(self.last_state.clock) end
   self.bottom:hide()
-  place(self.chat_container,layout.chat_x or layout.left,top,layout.chat_width or layout.console_width,layout.chat_height or 240)
-  place(self.chat_bg,0,0,"100%","100%")
-  place(self.chat_tabs,0,0,"100%",32)
-  place(self.chat_output,layout.chat_padding or 8,36,"100%-"..((layout.chat_padding or 8)*2),"100%-44")
+  self:applyChatVisibility()
   if layout.mode=="wide" or layout.mode=="medium" then
     self.compact:hide()
     place(self.left_bg,0,top,layout.left,"100%-"..top)
@@ -1072,19 +1118,23 @@ function View:layoutColorSettings(layout)
   place(self.color_settings_overlay,0,0,"100%","100%"); place(self.color_settings_panel,x,y,pw,ph); place(self.color_settings_bg,0,0,"100%","100%"); place(self.color_settings_title,14,10,pw-150,30); self.color_settings_title:echo(View.withFont("<b>COLOR SETTINGS</b>",font+3)); place(self.color_settings_close,pw-116,8,102,32); self.color_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); place(self.color_settings_content,14,48,pw-28,math.max(1,ph-64)); self.color_settings_content.content_height=rows*row
   for index,key in ipairs(self.color_option_order) do local column=(index-1)%columns; local line=math.floor((index-1)/columns); place(self.color_option_buttons[key],column*(cw+gap),line*row,cw,row-4) end; self:renderColorOptions(); View.raiseCards(widgets); return true
 end
-function View:chatSettingsWidgets() local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}; for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end; return widgets end
+function View:chatSettingsWidgets() local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_visibility,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}; for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end; return widgets end
 function View:layoutChatSettings(layout)
   local widgets=self:chatSettingsWidgets(); if not self.chat_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(620,math.max(1,width-margin*2)),math.min(520,math.max(1,height-margin*2)); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(layout.mode=="compact" and 9 or 10,math.min(14,(layout.body_font or 14)-2)); local pad=math.max(6,math.min(14,math.floor(math.min(pw,ph)*.03))); local gap=6; local title_h=math.max(24,font+14); local close_h=math.max(26,font+14); local close_y=math.max(pad,ph-pad-close_h); local content_y=pad+title_h+gap; local content_h=math.max(1,close_y-gap-content_y); local inner_w=math.max(1,pw-pad*2); self.chat_settings_compact_copy=pw<430
   place(self.chat_settings_overlay,0,0,"100%","100%"); place(self.chat_settings_panel,x,y,pw,ph); place(self.chat_settings_bg,0,0,"100%","100%"); place(self.chat_settings_title,pad,pad,pw-pad*2,title_h); place(self.chat_settings_content,pad,content_y,inner_w,content_h); place(self.chat_settings_close,math.max(pad,pw-pad-110),close_y,math.min(110,pw-pad*2),close_h)
-  local cy=0; local text_h=self.chat_settings_compact_copy and 38 or 52; place(self.chat_settings_text,0,cy,inner_w-10,text_h); cy=cy+text_h+gap; place(self.chat_settings_sources_caption,0,cy,inner_w-10,24); cy=cy+28
+  local cy=0; local visibility_h=math.max(36,font+22); place(self.chat_settings_visibility,0,cy,inner_w-10,visibility_h); cy=cy+visibility_h+gap
+  local text_h=self.chat_settings_compact_copy and 100 or 88; place(self.chat_settings_text,0,cy,inner_w-10,text_h); cy=cy+text_h+gap; place(self.chat_settings_sources_caption,0,cy,inner_w-10,24); cy=cy+28
   local columns=inner_w>=500 and 4 or 2; local column_gap=6; local cell_w=math.max(1,(inner_w-10-column_gap*(columns-1))/columns); local row_h=math.max(28,font+16); local rows=math.ceil(#self.chat_all_source_order/columns)
   for index,key in ipairs(self.chat_all_source_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); place(self.chat_all_source_buttons[key],column*(cell_w+column_gap),cy+row*row_h,cell_w,row_h-4) end
   cy=cy+rows*row_h+gap; local action_h=math.max(30,font+18); place(self.chat_settings_clear_visible,0,cy,inner_w-10,action_h); cy=cy+action_h+gap; place(self.chat_settings_clear_saved,0,cy,inner_w-10,action_h); cy=cy+action_h+gap; place(self.chat_settings_status,0,cy,inner_w-10,math.max(34,font*2+8)); cy=cy+math.max(34,font*2+8); self.chat_settings_content.content_height=cy
   self:renderChatSettings(font); View.raiseCards(widgets); return true
 end
 function View:renderChatSettings(font)
-  font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. Dedicated tabs and saved history are unchanged." or "Choose which message sources appear in the ALL tab. Turning one off does not disable capture, delete history, or hide it from its dedicated tab."; self.chat_settings_text:echo(View.withFont(explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); return true
+  local visible=self.chat_visible~=false; local t=self.settings.theme
+  self.chat_settings_visibility:setStyleSheet("background:"..(visible and "#173526" or "#252b28")..";border:2px solid "..t.accent..";border-radius:5px;color:"..(visible and "#c8f2d5" or t.text)..";font-weight:700;")
+  self.chat_settings_visibility:echo(View.withFont("<center><b>SHOW CHATBOX: "..(visible and "ON" or "OFF").."</b></center>",(font or 11)+2))
+  font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. Dedicated tabs and saved history are unchanged." or "Choose which message sources appear in the ALL tab. Turning one off does not disable capture, delete history, or hide it from its dedicated tab."; self.chat_settings_text:echo(View.withFont("Hide the chatbox to expand the main console. Capture and history continue.<br><br>"..explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); return true
 end
 function View:setChatAllSources(sources) self.chat_all_sources={}; for _,key in ipairs(self.chat_all_source_order or {}) do self.chat_all_sources[key]=not (type(sources)=="table" and sources[key]==false) end; if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:showChatSettings()
@@ -1551,6 +1601,7 @@ function View:renderChat(entries,categories,activeFilter,savedScroll)
     self.chat_line_ranges[index]={entry=entry,first=before+1,last=math.max(before+1,after)}
   end
   restoreChatScroll(self.chat_output,state,self.chat_line_ranges)
+  if not self:isChatVisible() then self:applyChatVisibility() end
   return true
 end
 local function chatFontWidth(output)
@@ -1622,7 +1673,7 @@ end
 local reusableWidgetNames={
   "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
-  "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
+  "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_visibility","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
   "keybindings_overlay","keybindings_panel","keybindings_bg","keybindings_title","keybindings_content","keybindings_text","keybindings_enable","keybindings_defaults","keybindings_status","keybindings_save","keybindings_cancel",
   "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
   "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
@@ -1711,6 +1762,7 @@ function View:prepareForReuse(settings)
     if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^keybinding") or key:match("^help_") or key:match("^roller_") or key:match("^latent_alert") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
   end
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
+  self:setChatVisible(self.settings.chat and self.settings.chat.visible)
   return true
 end
 function View:delete() if self.root then self.root:delete(); self.root=nil end end

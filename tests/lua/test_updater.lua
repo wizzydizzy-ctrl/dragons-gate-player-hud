@@ -56,6 +56,112 @@ test("chat settings snapshot sanitizes persistent tab order as data",function()
   local missing,err=Adapter.chatSettingsSnapshot({tab_order={}}); eq(missing,nil); assert(err:find("empty",1,true))
   missing,err=Adapter.chatSettingsSnapshot({tab_order={"ALL"},all_sources={COMBAT="no"}}); eq(missing,nil); assert(err:find("booleans",1,true))
 end)
+
+local function withChatSettingsFiles(run)
+  local oldOpen,oldLoadfile,oldRename,oldRemove=io.open,loadfile,os.rename,os.remove
+  local oldLfs,oldHome=rawget(_G,"lfs"),rawget(_G,"getMudletHomeDir")
+  local h={files={},path="/profile/DGHUDData/chat-settings.lua",writes=0}
+  local ok,err=xpcall(function()
+    getMudletHomeDir=function() return "/profile" end
+    lfs={mkdir=function() return true end}
+    io.open=function(path,mode)
+      if mode=="rb" then
+        if h.files[path]==nil then return nil,"missing file" end
+        return {read=function() return h.files[path] end,close=function() return true end}
+      end
+      eq(mode,"wb"); eq(path,h.path..".tmp")
+      if h.fail=="open" then return nil,"disk full at open" end
+      local file={}
+      function file:write(source)
+        h.writes=h.writes+1
+        if h.fail=="write" then return nil,"disk full at write" end
+        h.files[path]=source; return self
+      end
+      function file:close() if h.fail=="close" then return nil,"disk full at close" end; return true end
+      return file
+    end
+    os.remove=function(path) h.files[path]=nil; return true end
+    os.rename=function(from,to)
+      if (h.fail=="backup" and from==h.path) or (h.fail=="install" and from==h.path..".tmp") then return nil,"disk full at "..h.fail end
+      if h.files[from]==nil then return nil,"missing file" end
+      h.files[to]=h.files[from]; h.files[from]=nil; return true
+    end
+    loadfile=function(path)
+      local source=h.files[path]; if not source then return nil,"missing file" end
+      return (loadstring or load)(source)
+    end
+    run(h)
+  end,debug.traceback)
+  io.open,loadfile,os.rename,os.remove=oldOpen,oldLoadfile,oldRename,oldRemove
+  rawset(_G,"lfs",oldLfs); rawset(_G,"getMudletHomeDir",oldHome)
+  if not ok then error(err,0) end
+end
+
+test("chat visibility snapshots preserve booleans and default legacy records to visible",function()
+  for _,visible in ipairs({false,true}) do
+    local config={visible=visible,tab_order={" staff ","ALL"},all_sources={ROOM=false,COMBAT=true}}
+    local snapshot=assert(Adapter.chatSettingsSnapshot(config))
+    eq(snapshot.visible,visible); eq(table.concat(snapshot.tab_order,","),"STAFF,ALL")
+    eq(snapshot.all_sources.ROOM,false); eq(snapshot.all_sources.COMBAT,true); eq(snapshot.all_sources.ESP,true)
+    eq(config.tab_order[1]," staff "); eq(config.visible,visible)
+  end
+  eq(assert(Adapter.chatSettingsSnapshot({tab_order={"ALL"}})).visible,true)
+end)
+
+test("chat visibility rejects nonboolean persisted values",function()
+  for _,visible in ipairs({"false",0,1,{}}) do
+    local value,err=Adapter.chatSettingsSnapshot({visible=visible,tab_order={"ALL"}})
+    eq(value,nil); eq(type(err),"string")
+  end
+end)
+
+test("chat settings save and load round trip visibility with tab order and ALL sources",function()
+  withChatSettingsFiles(function(h)
+    local adapter=Adapter.new()
+    for _,visible in ipairs({false,true,false}) do
+      local config={visible=visible,tab_order={"STAFF","ALL","ROOM"},all_sources={ROOM=false,COMBAT=true}}
+      assert(adapter:saveChatSettings(config))
+      local serialized=assert((loadstring or load)(assert(h.files[h.path])))()
+      eq(serialized.visible,visible); eq(type(serialized.visible),"boolean")
+      local loaded=assert(Adapter.loadChatSettings())
+      eq(loaded.visible,visible); eq(table.concat(loaded.tab_order,","),"STAFF,ALL,ROOM")
+      eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,true); eq(loaded.all_sources.ESP,true)
+      eq(config.visible,visible); eq(config.tab_order[1],"STAFF"); eq(h.files[h.path..".tmp"],nil); eq(h.files[h.path..".bak"],nil)
+    end
+    eq(h.writes,3)
+  end)
+end)
+
+test("legacy chat settings without visibility load visible and persist the new boolean",function()
+  withChatSettingsFiles(function(h)
+    h.files[h.path]="return {tab_order={'STAFF','ALL'},all_sources={ROOM=false,COMBAT=true}}"
+    local loaded=assert(Adapter.loadChatSettings())
+    eq(loaded.visible,true); eq(loaded.tab_order[1],"STAFF"); eq(loaded.all_sources.ROOM,false)
+    assert(Adapter.new():saveChatSettings(loaded))
+    local serialized=assert((loadstring or load)(h.files[h.path]))()
+    eq(serialized.visible,true); eq(assert(Adapter.loadChatSettings()).all_sources.COMBAT,true)
+  end)
+end)
+
+test("failed chat visibility persistence retains the previous complete settings file",function()
+  for _,prior in ipairs({false,true}) do
+    for _,stage in ipairs({"open","write","close","backup","install"}) do
+      withChatSettingsFiles(function(h)
+        local adapter=Adapter.new()
+        assert(adapter:saveChatSettings({visible=prior,tab_order={"STAFF","ALL"},all_sources={ROOM=false,COMBAT=true}}))
+        local original=h.files[h.path]; h.fail=stage
+        local candidate={visible=not prior,tab_order={"ALL","ROOM"},all_sources={ROOM=true,COMBAT=false}}
+        local saved,err=adapter:saveChatSettings(candidate)
+        eq(saved,nil); assert(tostring(err):find("disk full",1,true)); eq(h.files[h.path],original)
+        local loaded=assert(Adapter.loadChatSettings())
+        eq(loaded.visible,prior); eq(table.concat(loaded.tab_order,","),"STAFF,ALL")
+        eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,true)
+        eq(candidate.visible,not prior); eq(candidate.tab_order[1],"ALL"); eq(candidate.all_sources.ROOM,true)
+      end)
+    end
+  end
+end)
+
 test("legacy mutable data migrates without moving package resources",function()
   local oldLfs,oldOpen,oldRename,oldRemove=lfs,io.open,os.rename,os.remove
   local directories={['/profile/DragonsGateHUD']=true,['/profile/DragonsGateHUD/map-collections']=true}

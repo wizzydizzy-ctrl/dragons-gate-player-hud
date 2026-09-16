@@ -3,6 +3,7 @@ local MudletAdapter=require("mudlet_adapter")
 local MapAdapter=require("map_adapter")
 local MapperModel=require("mapper_model")
 local Events=require("events")
+local Settings=require("settings")
 local function fake()
   local f={next=0,killed={},deleted=0,borders={10,20,30,40},set_borders={},callbacks={},layouts={},triggers={},timers={},timer_delays={},timer_cancels={},events={},aliases={}}
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
@@ -28,6 +29,7 @@ local function fake()
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
     setOptionsActionCallback=function(self,callback) f.optionsActionCallback=callback end,
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
+    setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
     setMapLibraryActionCallback=function(self,callback) f.mapLibraryActionCallback=callback end,
     showMapLibrary=function(self) f.mapLibraryShown=true; return true end,
@@ -107,8 +109,9 @@ local function fake()
   function f:saveDisplaySettings(config) self.savedDisplaySettings={side_text_scale=config.side_text_scale}; return true end
   function f:saveChatSettings(config)
     self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1
+    if self.onChatSettingsSave then self.onChatSettingsSave(config) end
     if self.failChatSettingsSave then return nil,self.failChatSettingsSave end
-    self.savedChatSettings={tab_order=config.tab_order,all_sources=config.all_sources}
+    self.savedChatSettings=Settings.merge({},config)
     return true
   end
   function f:reportCharacterRefresh() self.characterRefreshReports=(self.characterRefreshReports or 0)+1; return true end
@@ -612,6 +615,224 @@ test("ALL source toggles persist and never disable capture or dedicated tabs",fu
   eq(hud.settings.chat.all_sources.ROOM,true); eq(#hud.chat:entries(),2)
   DGHUD=nil
 end)
+
+local function withChatVisibilityRuntime(overrides,run)
+  local previous=rawget(_G,"DGHUD")
+  local f=fake(); local settings=Settings.resolve(require("defaults"),overrides)
+  local hud=Main.new(f,settings)
+  local ok,err=xpcall(function()
+    DGHUD={user_settings=Settings.merge({},overrides or {}),controller=hud}
+    assert(hud:start()); run(f,hud)
+  end,debug.traceback)
+  hud:shutdown(); rawset(_G,"DGHUD",previous)
+  if not ok then error(err,0) end
+end
+
+local function assertChatRuntimeUnchanged(f,hud,before)
+  eq(hud.chat,before.chat); eq(hud.chat.history,before.history); eq(hud.chat.storage,before.storage)
+  eq(hud.chat.trigger,before.trigger); eq(f.triggers[before.trigger],before.callback); eq(hud.chat.started,true)
+  eq(f.lineTriggerCalls,before.registrations); eq(f:count(f.triggers),before.triggers); eq(f.loadRecentCalls,before.loads)
+  eq(f.viewCreates,before.views); eq(hud.view,before.view); eq(hud.chat.filter,before.filter)
+end
+
+local function chatRuntimeSnapshot(f,hud)
+  return {chat=hud.chat,history=hud.chat.history,storage=hud.chat.storage,trigger=hud.chat.trigger,callback=f.triggers[hud.chat.trigger],
+    registrations=f.lineTriggerCalls,triggers=f:count(f.triggers),loads=f.loadRecentCalls,views=f.viewCreates,view=hud.view,filter=hud.chat.filter}
+end
+
+for _,route in ipairs({"Main API","Options callback"}) do
+  test("chat visibility "..route.." saves both booleans and immediately resizes without restarting capture",function()
+    withChatVisibilityRuntime({chat={tab_order={"STAFF","ALL","ROOM"},all_sources={ROOM=true,COMBAT=false},personal_option="keep"},personal="untouched"},function(f,hud)
+      local toggle=route=="Main API" and function(wanted) return hud:setChatVisible(wanted) end or function(wanted) return f.optionsActionCallback("chat_visibility",nil,wanted) end
+      assert(hud.chat:capture("ROOM","before hiding")); assert(hud.chat:setFilter("ROOM"))
+      local before=chatRuntimeSnapshot(f,hud); local shown=hud.current_layout; local layouts=#f.layouts
+      eq(f.viewChatVisible,true); assert(shown.chat_height>0)
+      f.onChatSettingsSave=function(candidate)
+        eq(candidate.visible,false); eq(hud.settings.chat.visible,true); eq(f.viewChatVisible,true); eq(#f.layouts,layouts)
+      end
+      local saved,err=toggle(false)
+      eq(saved,false); eq(err,nil); eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.visible,false)
+      eq(hud.settings.chat.visible,false); eq(DGHUD.user_settings.chat.visible,false); eq(f.viewChatVisible,false)
+      eq(f.savedChatSettings.tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,false)
+      eq(hud.settings.chat.enabled,true); eq(hud.settings.chat.personal_option,"keep"); eq(DGHUD.user_settings.personal,"untouched")
+      assert(#f.layouts>layouts); eq(hud.current_layout.chat_height,0); eq(hud.current_layout.console_top,hud.current_layout.header_height)
+      assert(hud.current_layout.console_top<shown.console_top); eq(f.set_borders[2],hud.current_layout.console_top)
+      assertChatRuntimeUnchanged(f,hud,before); eq(hud.chat:entries()[1].message,"before hiding")
+      f.triggers[before.trigger]('Ocinaiya says, "captured while hidden."')
+      eq(#hud.chat:entries(),2); eq(hud.chat:entries()[2].message,"captured while hidden."); eq(f.chatStorageAppends,2)
+      layouts=#f.layouts
+      f.onChatSettingsSave=function(candidate)
+        eq(candidate.visible,true); eq(hud.settings.chat.visible,false); eq(f.viewChatVisible,false); eq(#f.layouts,layouts)
+      end
+      saved,err=toggle(true)
+      eq(saved,true); eq(err,nil); eq(f.chatSettingsSaves,2); eq(f.savedChatSettings.visible,true)
+      eq(hud.settings.chat.visible,true); eq(DGHUD.user_settings.chat.visible,true); eq(f.viewChatVisible,true)
+      assert(#f.layouts>layouts); eq(hud.current_layout.chat_height,shown.chat_height); eq(f.set_borders[2],shown.console_top)
+      assertChatRuntimeUnchanged(f,hud,before); eq(#hud.chat:entries(),2); eq(f.chatStorageAppends,2)
+    end)
+  end)
+
+  test("failed chat visibility "..route.." preserves the prior state in both directions",function()
+    for _,prior in ipairs({false,true}) do
+      withChatVisibilityRuntime({chat={visible=prior,tab_order={"STAFF","ALL"},all_sources={ROOM=true,COMBAT=false},personal_option="keep"}},function(f,hud)
+        assert(f:saveChatSettings(hud.settings.chat)); assert(hud.chat:capture("ROOM","retained after failure"))
+        local before=chatRuntimeSnapshot(f,hud); local settings,user,saved=hud.settings.chat,DGHUD.user_settings.chat,f.savedChatSettings
+        local layout=hud.current_layout; local layouts,sets,renders=#f.layouts,f.chatVisibilitySets,f.chatRenders
+        local borders=table.concat(f.set_borders,",")
+        f.failChatSettingsSave="disk full"
+        f.onChatSettingsSave=function(candidate)
+          eq(candidate.visible,not prior); eq(settings.visible,prior); eq(user.visible,prior); eq(f.viewChatVisible,prior); eq(#f.layouts,layouts)
+        end
+        local result,err
+        if route=="Main API" then result,err=hud:setChatVisible(not prior) else result,err=f.optionsActionCallback("chat_visibility",nil,not prior) end
+        eq(result,nil); assert(tostring(err):find("disk full",1,true))
+        eq(hud.settings.chat,settings); eq(settings.visible,prior); eq(DGHUD.user_settings.chat,user); eq(user.visible,prior)
+        eq(f.savedChatSettings,saved); eq(saved.visible,prior); eq(saved.tab_order[1],"STAFF"); eq(saved.all_sources.COMBAT,false)
+        eq(settings.tab_order[1],"STAFF"); eq(settings.all_sources.COMBAT,false); eq(settings.personal_option,"keep")
+        eq(f.viewChatVisible,prior); eq(f.chatVisibilitySets,sets); eq(hud.current_layout,layout); eq(#f.layouts,layouts)
+        eq(table.concat(f.set_borders,","),borders); eq(f.chatRenders,renders); eq(#hud.chat:entries(),1)
+        eq(hud.chat:entries()[1].message,"retained after failure"); assertChatRuntimeUnchanged(f,hud,before)
+      end)
+    end
+  end)
+end
+
+test("hidden chat tab reorders and ALL source saves retain visibility and reject failed changes",function()
+  withChatVisibilityRuntime({chat={visible=false,tab_order={"ALL","ROOM","STAFF"},all_sources={ROOM=true,COMBAT=false}}},function(f,hud)
+    assert(hud.chat:capture("ROOM","kept while hidden"))
+    local before=chatRuntimeSnapshot(f,hud); local layout=hud.current_layout; local layouts=#f.layouts
+    local order={"STAFF","ALL","ROOM"}; assert(f.chatOrderCallback(order))
+    eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,false)
+    eq(f.optionsActionCallback("chat_all_source","COMBAT",true),true)
+    eq(f.chatSettingsSaves,2); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,true)
+    eq(f.optionsActionCallback("chat_all_source","ROOM",false),false)
+    eq(f.chatSettingsSaves,3); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.all_sources.ROOM,false)
+    local saved=f.savedChatSettings; local sources=hud.settings.chat.all_sources
+    f.failChatSettingsSave="disk full"
+    local result,err=f.chatOrderCallback({"ROOM","ALL","STAFF"})
+    eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.tab_order,order); eq(DGHUD.user_settings.chat.tab_order,order)
+    result,err=f.optionsActionCallback("chat_all_source","ROOM",true)
+    eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.all_sources,sources); eq(sources.ROOM,false)
+    eq(DGHUD.user_settings.chat.all_sources.ROOM,false); eq(f.viewChatAllSources.ROOM,false); eq(f.savedChatSettings,saved)
+    eq(hud.settings.chat.visible,false); eq(DGHUD.user_settings.chat.visible,false); eq(f.viewChatVisible,false)
+    eq(hud.current_layout,layout); eq(#f.layouts,layouts); assertChatRuntimeUnchanged(f,hud,before)
+    assert(hud.chat:setFilter("ROOM")); eq(hud.chat:entries()[1].message,"kept while hidden")
+  end)
+end)
+
+test("hidden chat startup and resize retain capture and restore history when shown",function()
+  withChatVisibilityRuntime({chat={visible=false}},function(f,hud)
+    eq(hud.settings.chat.enabled,true); eq(f.viewChatVisible,false); eq(hud.current_layout.chat_height,0)
+    eq(hud.current_layout.console_top,hud.current_layout.header_height)
+    assert(hud.chat:capture("ROOM","captured from hidden startup"))
+    local before=chatRuntimeSnapshot(f,hud)
+    for _,size in ipairs({{760,700},{1000,650},{1920,1080}}) do
+      f.width,f.height=size[1],size[2]; f.callbacks["sysWindowResizeEvent"]()
+      eq(hud.current_layout.chat_height,0); eq(f.set_borders[2],hud.current_layout.header_height); eq(f.viewChatVisible,false)
+      assertChatRuntimeUnchanged(f,hud,before)
+    end
+    eq(f.chatSettingsSaves,nil); eq(f.optionsActionCallback("chat_visibility",nil,true),true)
+    assert(hud.current_layout.chat_height>0); eq(hud.chat:entries()[1].message,"captured from hidden startup")
+    eq(f.renderedChat.entries[1].message,"captured from hidden startup"); assertChatRuntimeUnchanged(f,hud,before)
+  end)
+end)
+
+
+-- Exercise the actual entry script, settings resolver, and Main lifecycle without
+-- loading Mudlet widgets or touching a profile's persisted files.
+local function withChatVisibilityEntry(persisted,run)
+  local savedGlobal,savedHome,savedTimer=rawget(_G,"DGHUD"),rawget(_G,"getMudletHomeDir"),rawget(_G,"tempTimer")
+  local savedLoaded,savedPreload={},{}
+  for name,value in pairs(package.loaded) do savedLoaded[name]=value end
+  local f=fake(); f.savedChatSettings=Settings.merge({},persisted)
+  local defaults=Settings.merge(require("defaults"),{view_contract=string.rep("a",64)})
+  local Updater=require("updater")
+  local stubs={
+    defaults=function() return defaults end,
+    settings=function() return Settings end,
+    main=function() return Main end,
+    updater=function() return Updater end,
+    chat_storage=function() return {mudletApi=function() return {} end} end,
+    mudlet_adapter=function() return {
+      new=function() return f end,
+      loadChatSettings=function() f.chatSettingsLoads=(f.chatSettingsLoads or 0)+1; return MudletAdapter.chatSettingsSnapshot(f.savedChatSettings) end,
+    } end,
+  }
+  for name,loader in pairs(stubs) do savedPreload[name]=package.preload[name]; package.preload[name]=loader end
+  local ok,err=xpcall(function()
+    DGHUD=nil; getMudletHomeDir=function() return "/profile" end; tempTimer=nil
+    run(f,defaults)
+  end,debug.traceback)
+  if DGHUD and DGHUD.shutdown then pcall(DGHUD.shutdown) end
+  for name in pairs(package.loaded) do if savedLoaded[name]==nil then package.loaded[name]=nil end end
+  for name,value in pairs(savedLoaded) do package.loaded[name]=value end
+  for name in pairs(stubs) do package.preload[name]=savedPreload[name] end
+  rawset(_G,"DGHUD",savedGlobal); rawset(_G,"getMudletHomeDir",savedHome); rawset(_G,"tempTimer",savedTimer)
+  if not ok then error(err,0) end
+end
+
+test("entry loads persisted hidden chat and public reload keeps it hidden with history",function()
+  withChatVisibilityEntry({visible=false,tab_order={"STAFF","ALL","ROOM"},all_sources={ROOM=true,COMBAT=false}},function(f)
+    DGHUD={user_settings={personal="untouched",chat={visible=true,personal_option="keep"}}}
+    dofile("src/entry.lua")
+    eq(DGHUD.user_settings.chat.visible,false); eq(DGHUD.settings.chat.visible,false); eq(f.viewChatVisible,false)
+    eq(DGHUD.controller.current_layout.chat_height,0); eq(DGHUD.settings.chat.enabled,true)
+    eq(DGHUD.settings.chat.tab_order[1],"STAFF"); eq(DGHUD.settings.chat.all_sources.COMBAT,false)
+    eq(DGHUD.settings.chat.personal_option,"keep"); eq(DGHUD.settings.personal,"untouched")
+    assert(DGHUD.chat.capture("ROOM","kept across hidden reload"))
+    local controller=DGHUD.controller; local trigger=controller.chat.trigger; local triggers=f:count(f.triggers)
+    assert(DGHUD.reload())
+    eq(DGHUD.controller,controller); eq(DGHUD.settings.chat.visible,false); eq(DGHUD.updater.settings.chat.visible,false)
+    eq(f.viewChatVisible,false); eq(controller.current_layout.chat_height,0); eq(f.triggers[trigger],nil)
+    eq(f:count(f.triggers),triggers); eq(controller.chat:entries()[1].message,"kept across hidden reload")
+    eq(f.chatStorageAppends,1); eq(f.chatSettingsSaves,nil)
+    eq(f.optionsActionCallback("chat_visibility",nil,true),true); assert(DGHUD.reload())
+    eq(DGHUD.settings.chat.visible,true); eq(f.viewChatVisible,true); assert(controller.current_layout.chat_height>0)
+    eq(f.optionsActionCallback("chat_visibility",nil,false),false); assert(DGHUD.reload())
+    eq(DGHUD.settings.chat.visible,false); eq(f.viewChatVisible,false); eq(controller.current_layout.chat_height,0)
+    eq(controller.chat:entries()[1].message,"kept across hidden reload"); eq(f.chatStorageAppends,1); eq(f.chatSettingsSaves,2)
+  end)
+end)
+
+test("entry upgrades legacy chat preferences without visibility to shown capture",function()
+  withChatVisibilityEntry({tab_order={"STAFF","ALL"},all_sources={COMBAT=false}},function(f)
+    dofile("src/entry.lua")
+    eq(DGHUD.settings.chat.visible,true); eq(f.viewChatVisible,true); eq(DGHUD.settings.chat.enabled,true)
+    assert(DGHUD.controller.current_layout.chat_height>0); eq(DGHUD.settings.chat.tab_order[1],"STAFF")
+    eq(DGHUD.settings.chat.all_sources.COMBAT,false); eq(f.chatSettingsSaves,nil)
+    assert(DGHUD.chat.capture("ROOM","legacy capture still active")); eq(#DGHUD.controller.chat:entries(),1)
+  end)
+end)
+
+for _,reuse in ipairs({true,false}) do
+  test("entry upgrade honors persisted hidden chat with a "..(reuse and "reused" or "rebuilt").." view",function()
+    withChatVisibilityEntry({visible=false,tab_order={"STAFF","ALL"},all_sources={ROOM=true,COMBAT=false}},function(f,defaults)
+      dofile("src/entry.lua")
+      assert(DGHUD.chat.capture("QUEST","kept through hidden upgrade")); assert(DGHUD.chat.setFilter("QUEST"))
+      local retiring=DGHUD.controller; local view=retiring.view; local trigger=retiring.chat.trigger
+      local triggers,loads,appends=f:count(f.triggers),f.loadRecentCalls,f.chatStorageAppends
+      -- A stale live preference and view must not override the saved false.
+      DGHUD.user_settings.chat.visible=true; view:setChatVisible(true)
+      if not reuse then defaults.view_contract=string.rep("c",64) end
+      local lease=MudletAdapter.markUpdateHandoff(DGHUD,defaults.view_schema,defaults.view_contract)
+      eq(lease~=nil,reuse)
+      dofile("src/entry.lua")
+      local replacement=DGHUD.controller
+      eq(replacement==retiring,false); eq(replacement.view==view,reuse); eq(f.viewCreates,reuse and 1 or 2)
+      eq(f.viewAdoptions or 0,reuse and 1 or 0); eq(f.deleted,reuse and 0 or 1)
+      eq(DGHUD.settings.chat.visible,false); eq(DGHUD.user_settings.chat.visible,false); eq(f.viewChatVisible,false)
+      eq(replacement.current_layout.chat_height,0); eq(f.set_borders[2],replacement.current_layout.header_height)
+      eq(DGHUD.settings.chat.enabled,true); eq(replacement.chat.started,true); eq(f.triggers[trigger],nil); eq(f:count(f.triggers),triggers)
+      eq(replacement.chat.filter,"QUEST"); eq(replacement.chat:entries()[1].message,"kept through hidden upgrade")
+      eq(f.loadRecentCalls,loads); eq(f.chatStorageAppends,appends); eq(f.chatSettingsLoads,2); eq(f.chatSettingsSaves,nil)
+      eq(DGHUD.settings.chat.tab_order[1],"STAFF"); eq(DGHUD.settings.chat.all_sources.COMBAT,false)
+      assert(DGHUD.chat.capture("QUEST","captured after hidden upgrade")); eq(#replacement.chat:entries(),2)
+      eq(f.optionsActionCallback("chat_visibility",nil,true),true); eq(f.viewChatVisible,true); assert(replacement.current_layout.chat_height>0)
+      eq(replacement.chat:entries()[1].message,"kept through hidden upgrade"); eq(f.savedChatSettings.visible,true)
+    end)
+  end)
+end
+
 test("resize preserves chat controller history and trigger ownership",function()
   local f=fake(); local hud=Main.new(f,{layout={},chat={height_percent=.25}}); hud:start(); assert(hud.chat:capture("QUEST","kept"))
   local controller=hud.chat; local trigger=controller.trigger; local runtime=f:count(f.triggers)

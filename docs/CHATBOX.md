@@ -2,7 +2,9 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-The chatbox stays above the normal game display. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
+The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
+
+To hide it completely, open **OPTIONS → CHAT SETTINGS** and set **SHOW CHATBOX: OFF**. The main game display expands into the freed space. Chat capture and saved history continue while hidden; this does not turn off logging. Return to the same setting and switch it **ON** to see your messages again. Your choice is saved for the profile and survives character changes, restarts, and HUD updates. It does not change your tab order or SHOW IN ALL choices.
 
 Chat history belongs to the Mudlet profile, not to one character. Switching characters in the same profile keeps the same history.
 

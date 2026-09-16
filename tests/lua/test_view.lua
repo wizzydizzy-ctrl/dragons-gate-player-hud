@@ -166,7 +166,7 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
     function item:move(x,y) self.x=x; self.y=y end
     function item:resize(width,height) self.width=width; self.height=height end
     function item:get_width() return self.width end
-    function item:show() self.visible=true end
+    function item:show() self.visible=true; self.showCalls=(self.showCalls or 0)+1 end
     function item:hide() self.visible=false end
     function item:raise() self.raised=true end
     function item:delete() self.deleted=true end
@@ -227,12 +227,124 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   return geyser
 end
 
-local function chatView(glyphWidth,scrollbarWidth,measureFails)
+local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible)
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
-  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true}})
+  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible}})
   Geyser=original
   return view
 end
+
+local function chatWidgets(view)
+  local widgets={view.chat_container,view.chat_bg,view.chat_tabs,view.chat_output}
+  for _,button in ipairs(view.chat_buttons or {}) do widgets[#widgets+1]=button end
+  return widgets
+end
+local function checkChatVisible(view,wanted)
+  for _,widget in ipairs(chatWidgets(view)) do eq(widget.visible,wanted) end
+end
+
+test("chat visibility defaults on and applies saved off before initial layout",function()
+  local view=chatView(); eq(view.chat_visible,true); checkChatVisible(view,true)
+  view=chatView(nil,nil,nil,false); eq(view.chat_visible,false); checkChatVisible(view,false)
+  eq(view.chat_container.height,0); eq(view.chat_output.height,0)
+  view:renderChat({{category="ROOM",line="Captured while hidden"}},{"ROOM"},"ROOM")
+  checkChatVisible(view,false); eq(#view.chat_entries,1); eq(#view.chat_output.echoes,1)
+  eq(view:setChatVisible(true),true); checkChatVisible(view,true); eq(#view.chat_buttons>0,true)
+  eq(view.chat_active_filter,"ROOM"); eq(#view.chat_entries,1)
+end)
+
+test("chat visibility toggle accepts saved false and stays reachable through Options",function()
+  local view=chatView(); local calls={}
+  view:setOptionsActionCallback(function(action,key,wanted)
+    calls[#calls+1]={action=action,key=key,wanted=wanted}; return wanted
+  end)
+  view:applyLayout(require("layout").compute(320,260)); view:renderChat({},{"QUEST"},"ALL")
+  view.color_toggle.click(); view.option_action_buttons.chat_settings.click()
+  local button=view.chat_settings_visibility
+  eq(button.parent,view.chat_settings_content); eq(button.visible,true)
+  assert(button.message:find("SHOW CHATBOX: ON",1,true))
+  assert(view.chat_settings_text.message:find("Capture and history continue",1,true))
+  assert(view.chat_settings_text.message:find("main console",1,true))
+  eq(button.click(),false); eq(#calls,1); eq(calls[1].action,"chat_visibility"); eq(calls[1].key,nil); eq(calls[1].wanted,false)
+  checkChatVisible(view,false); eq(view.chat_settings_panel.visible,true)
+  assert(button.message:find("SHOW CHATBOX: OFF",1,true))
+  view.chat_settings_close.click(); eq(button.visible,false); eq(view.color_toggle.visible,true)
+  view.color_toggle.click(); eq(view.option_action_buttons.chat_settings.visible,true)
+  view.option_action_buttons.chat_settings.click(); eq(button.visible,true); checkChatVisible(view,false)
+  eq(button.click(),true); eq(#calls,2); eq(calls[2].wanted,true)
+  checkChatVisible(view,true); assert(button.message:find("SHOW CHATBOX: ON",1,true))
+  eq(view.chat_settings_panel.visible,true)
+end)
+
+test("failed chat visibility saves keep the prior state and show the error",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:renderChat({},{},"ALL")
+  view:setOptionsActionCallback(function(action,key,wanted)
+    eq(action,"chat_visibility"); eq(key,nil); eq(wanted,view.chat_visible==false)
+    return nil,"disk <full>"
+  end)
+  for _,visible in ipairs({true,false}) do
+    view:setChatVisible(visible); view:showChatSettings()
+    local ok,err=view.chat_settings_visibility.click()
+    eq(ok,nil); eq(err,"disk <full>"); eq(view.chat_visible,visible); checkChatVisible(view,visible)
+    eq(view.chat_settings_panel.visible,true); eq(view.chat_settings_visibility.visible,true)
+    assert(view.chat_settings_visibility.message:find("SHOW CHATBOX: "..(visible and "ON" or "OFF"),1,true))
+    assert(view.chat_settings_status.message:find("disk &lt;full&gt;",1,true))
+  end
+  view:setOptionsActionCallback(nil)
+  local ok,err=view.chat_settings_visibility.click()
+  eq(ok,nil); assert(err:find("unavailable",1,true)); checkChatVisible(view,false)
+  assert(view.chat_settings_status.message:find("unavailable",1,true))
+end)
+
+test("hidden chat never shows widgets during resize tab rendering or full HUD updates",function()
+  local Layout=require("layout"); local view=chatView()
+  view:applyLayout(Layout.compute(320,260)); view:renderChat({},{"QUEST","EVENTS"},"ALL")
+  assert(view.chat_overflow_button); eq(view:setChatVisible(false),false)
+  local widgets=chatWidgets(view); for _,widget in ipairs(widgets) do widget.showCalls=0 end
+  local entries={{category="ESP",line="First hidden message"},{category="SECIAN",line="Second hidden message"}}
+  for _,size in ipairs({{1920,1080},{320,260},{1000,700},{760,700},{1920,1080}}) do
+    -- The view must also resist a stale visible layout while setting sync runs.
+    view:applyLayout(Layout.compute(size[1],size[2]))
+    view:renderChat(entries,{"ESP","SECIAN","QUEST"},"SECIAN")
+    view:renderChatTabs(view.chat_categories,view.chat_active_filter)
+    view:update(require("state").normalize({}))
+    checkChatVisible(view,false); eq(view.chat_container.height,0); eq(view.chat_output.height,0)
+    eq(view.color_toggle.visible,true); eq(#view.chat_entries,2); eq(#view.chat_output.echoes,2)
+    for _,widget in ipairs(widgets) do eq(widget.showCalls,0); eq(widget.deleted,nil) end
+  end
+  eq(view:setChatVisible(true),true); checkChatVisible(view,true)
+  eq(view.chat_container.height,view.layout.chat_height); eq(view.chat_active_filter,"SECIAN")
+  eq(view.chat_filter_order[#view.chat_filter_order],"QUEST"); eq(#view.chat_entries,2)
+  local found=false; for _,button in ipairs(view.chat_buttons) do if button.category=="SECIAN" then found=true end end
+  eq(found,true)
+end)
+
+test("explicit hidden layout overrides visibility sync and survives rendering",function()
+  local Layout=require("layout"); local view=chatView(); local layout=Layout.compute(1200,800)
+  layout.chat_visible=false; layout.chat_height=0; layout.chat_output_height=0; layout.console_top=layout.header_height
+  view:applyLayout(layout); checkChatVisible(view,false)
+  view:setChatVisible(true); view:renderChat({{category="ROOM",line="Still captured"}},{},"ALL")
+  checkChatVisible(view,false); eq(layout.chat_height,0); eq(layout.chat_output_height,0); eq(layout.console_top,layout.header_height)
+  view:renderChatTabs({"EVENTS","CUSTOM"},"CUSTOM"); checkChatVisible(view,false)
+  eq(View.validateReusable(view,view.settings),true)
+  view:applyLayout(Layout.compute(1200,800)); checkChatVisible(view,true)
+  eq(#view.chat_entries,1); eq(#view.chat_buttons>0,true)
+  eq(view.chat_active_filter,"CUSTOM"); eq(view.chat_filter_order[#view.chat_filter_order],"CUSTOM")
+  local found=false; for _,button in ipairs(view.chat_buttons) do if button.category=="CUSTOM" then found=true end end
+  eq(found,true)
+end)
+
+test("preserved view adoption reapplies saved chat visibility after showing the root",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:renderChat({{category="ROOM",line="Kept"}},{},"ALL")
+  view:showChatSettings(); local output=view.chat_output
+  function view.root:show() self.visible=true; for _,widget in ipairs(chatWidgets(view)) do widget:show() end end
+  local settings={view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme=view.settings.theme,chat={visible=false}}
+  eq(view:prepareForReuse(settings),true); checkChatVisible(view,false)
+  eq(View.validateReusable(view,settings),true)
+  eq(view.chat_settings_visibility.visible,false); eq(view.chat_output,output); eq(#view.chat_entries,1)
+  view:applyLayout(require("layout").compute(1200,800)); checkChatVisible(view,false)
+  settings.chat.visible=true; eq(view:prepareForReuse(settings),true); checkChatVisible(view,true)
+end)
 
 test("view has no standalone wealth widget",function()
   local view=chatView(); eq(view.wealth,nil)
@@ -870,6 +982,11 @@ test("chat settings controls never overlap or leave the panel on short compact w
     eq(view.chat_settings_title.y+view.chat_settings_title.height<=view.chat_settings_content.y,true)
     eq(view.chat_settings_content.y+view.chat_settings_content.height<=view.chat_settings_close.y,true)
     eq(view.chat_settings_close.y+view.chat_settings_close.height<=panel.height,true)
+    eq(view.chat_settings_visibility.y,0); eq(view.chat_settings_visibility.visible,true)
+    eq(view.chat_settings_visibility.width<=view.chat_settings_content.width,true)
+    eq(view.chat_settings_visibility.height>=36,true)
+    eq(view.chat_settings_text.y>=view.chat_settings_visibility.y+view.chat_settings_visibility.height,true)
+    eq(view.chat_settings_sources_caption.y>=view.chat_settings_text.y+view.chat_settings_text.height,true)
     local buttons={}; for _,key in ipairs(view.chat_all_source_order) do local button=view.chat_all_source_buttons[key]; buttons[#buttons+1]=button; eq(button.x>=0,true); eq(button.y>=0,true); eq(button.x+button.width<=view.chat_settings_content.width,true); eq(button.width>0,true); eq(button.height>0,true) end
     for first=1,#buttons do for second=first+1,#buttons do local a,b=buttons[first],buttons[second]; local overlap=a.x<b.x+b.width and b.x<a.x+a.width and a.y<b.y+b.height and b.y<a.y+a.height; eq(overlap,false) end end
     eq(view.chat_settings_clear_visible.y>=view.chat_all_source_buttons.COMBAT.y+view.chat_all_source_buttons.COMBAT.height,true)
@@ -891,7 +1008,7 @@ test("reusable view validation rejects missing responsive list tab structures",f
 end)
 test("reusable view validation rejects damaged structural widgets and controls",function()
   local View=require("view")
-  for _,name in ipairs({"clock_header","attribute_strip","mapper","chat_settings_clear_saved"}) do
+  for _,name in ipairs({"clock_header","attribute_strip","mapper","chat_settings_clear_saved","chat_settings_visibility"}) do
     local view=chatView(); view[name]=nil
     local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find(name,1,true))
   end

@@ -4,6 +4,12 @@
 
 The **OPTIONS** button is at the far left of the header. The current DGHUD version is shown beside it. Click **OPTIONS** to open a short menu of sections.
 
+## Chat Settings
+
+Open **OPTIONS → CHAT SETTINGS → SHOW CHATBOX** to show or completely hide the top-center chatbox. It starts **ON**. Turning it **OFF** expands the main display without deleting history or stopping chat capture. You can reopen Chat Settings through OPTIONS even while chat is hidden. This preference survives character changes, restarts, and HUD updates.
+
+The same window controls which sources appear in ALL and provides separate history-clearing buttons. See the [Chatbox Guide](CHATBOX.md).
+
 ## Keybindings
 
 Open **OPTIONS → KEYBINDINGS** to enable or customize the number pad. Standard movement follows the keypad compass: 8 north, 9 northeast, 6 east, 3 southeast, 2 south, 1 southwest, 4 west, and 7 northwest. Numpad 5 sends `look`, `+` sends `up`, and `-` sends `down`. The remaining keypad keys are editable and begin blank.
