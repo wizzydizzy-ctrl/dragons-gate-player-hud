@@ -22,6 +22,7 @@ test("restart ignores only the HUD temporary keys Mudlet is still retiring",func
   local additions=f.next; manager:start(); manager:start(); eq(manager:status().active,11); eq(f.next,additions); eq(#manager:status().conflicts,0)
   local changed=manager:snapshot(); changed.commands["8"]="swim north"; manager:configure(changed); eq(manager:status().active,11)
   changed=manager:snapshot(); changed.commands["8"]="north"; manager:configure(changed); eq(manager:status().active,11); eq(#manager:status().conflicts,0)
+  manager:stop(); local replacement=Keybindings.new(f,config); replacement:start(); eq(replacement:status().active,11); eq(#replacement:status().conflicts,0)
 end)
 test("failed key removal stays visible and prevents a duplicate install",function()
   local f=fake(); local config=assert(Keybindings.validate(Keybindings.defaults)); config.enabled=true; local manager=Keybindings.new(f,config); manager:start()

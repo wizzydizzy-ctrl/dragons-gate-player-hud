@@ -38,6 +38,7 @@ if updateReinstallPending and previous and type(previous.controller)=="table" th
   previous.controller.map_collections=nil
 end
 if previous and previous.shutdown then pcall(previous.shutdown) end
+local keybindingRetiredIds=previous and type(previous.controller)=="table" and previous.controller.keybinding_retired_ids or nil
 local chat=previous and type(previous.chat)=="table" and previous.chat or {}
 chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
@@ -79,7 +80,9 @@ end
 local applied,applyErr=applyUserSettings()
 if not applied then error(applyErr) end
 DGHUD.chatStorageApi=Storage.mudletApi(getMudletHomeDir(),"DGHUDData")
-DGHUD.controller=Main.new(Adapter.new(),DGHUD.settings,viewHandoff,chatHandoff)
+local adapter=Adapter.new()
+if type(keybindingRetiredIds)=="table" then adapter._dghudRetiredKeyIds=keybindingRetiredIds end
+DGHUD.controller=Main.new(adapter,DGHUD.settings,viewHandoff,chatHandoff)
 DGHUD.updater=Updater.new(DGHUD.controller.adapter,DGHUD.settings)
 DGHUD.controller.updater=DGHUD.updater
 Main.installChatApi(DGHUD)

@@ -21,7 +21,12 @@ local function sameConfig(first,second)
   return true
 end
 local function configuredCount(config) local count=0; if config.enabled then for _,key in ipairs(Keybindings.order) do if config.commands[key]~="" then count=count+1 end end end; return count end
-function Keybindings.new(adapter,config) local valid,err=Keybindings.validate(config or Keybindings.defaults); if not valid then error(err,0) end; return setmetatable({adapter=adapter,config=valid,ids={},retiredIds={},conflicts={},applied=nil},Keybindings) end
+function Keybindings.new(adapter,config)
+  local valid,err=Keybindings.validate(config or Keybindings.defaults); if not valid then error(err,0) end
+  local retiredIds=adapter._dghudRetiredKeyIds
+  if type(retiredIds)~="table" then retiredIds={}; adapter._dghudRetiredKeyIds=retiredIds end
+  return setmetatable({adapter=adapter,config=valid,ids={},retiredIds=retiredIds,conflicts={},applied=nil},Keybindings)
+end
 function Keybindings:snapshot() return copy(self.config) end
 function Keybindings:stop()
   local removed,failed={},{ }

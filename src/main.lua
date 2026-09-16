@@ -1228,7 +1228,12 @@ function Main:shutdown()
   local chat=self.chat; self.chat=nil; if chat then chat:shutdown() end
   local colorizer=self.colorizer; self.colorizer=nil; if colorizer then colorizer:shutdown() end
   local roller=self.roller; self.roller=nil; if roller then roller:shutdown() end
-  local keybindings=self.keybindings; self.keybindings=nil; if keybindings then keybindings:stop() end
+  local keybindings=self.keybindings; self.keybindings=nil
+  if keybindings then
+    local stopped,stopErrors=keybindings:stop()
+    self.keybinding_retired_ids=keybindings.retiredIds
+    if not stopped then self:captureFailure("keybindings",stopErrors,{operation="shutdown"}) end
+  end
   if self.collector then self.collector:shutdown(); self.collector=nil end
   if self.walker then self.walker:shutdown(); self.walker=nil end; self.generated_command=nil; self:removeMapClickHook()
   if self.special_transition then self:callSpecialTransition("shutdown"); self.special_transition=nil end
