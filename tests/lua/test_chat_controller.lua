@@ -80,6 +80,15 @@ test("GUIDE assistance cancellations flow through the owned trigger into staff c
   eq(f.storageAppends,1)
 end)
 
+test("GUIDE assistance handling assignments flow through the owned trigger into staff chat",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("STAFF"))
+  local line="[GUIDE] Aeron is handling Marcelline Willowsby's assist.  (0 more pending.)"
+  f:line(line)
+  local entries=controller:entries()
+  eq(#entries,1); eq(entries[1].category,"STAFF"); eq(entries[1].speaker,"Aeron"); eq(entries[1].target,"Marcelline Willowsby"); eq(entries[1].line,line)
+  eq(f.storageAppends,1)
+end)
+
 test("wrapped GM bug reports flow through the owned trigger as one staff entry",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("STAFF"))
   local first="[GM] Vaeltherion [forhekset] reports a bug in room 10532: Traveling Drag-al Merchants have spawned in the hunting area .. and all the mobs are gone. And I can't"

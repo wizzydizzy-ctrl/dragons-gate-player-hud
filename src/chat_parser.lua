@@ -88,6 +88,13 @@ local function parseAssistanceCancellation(line,character,now)
   return builtIn("STAFF","just canceled "..pronoun.." assistance request.",{speaker=speaker},character,now,line)
 end
 
+local function parseAssistanceHandling(line,character,now)
+  local speaker,target,pending=line:match("^%[GUIDE%] "..activeName.." is handling "..activeName.."'s assist%.%s+%((%d+) more pending%.%)$")
+  if not speaker then return nil end
+  local message="is handling "..target.."'s assist ("..pending.." more pending)."
+  return builtIn("STAFF",message,{speaker=speaker,target=target},character,now,line)
+end
+
 local combatKinds={attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true}
 local function parseCombat(line,character,now)
   local segments=OutputColorizer.parse(line)
@@ -164,6 +171,8 @@ function Parser.parse(line,character,now)
   if assistance then return assistance end
   local cancellation=parseAssistanceCancellation(line,character,now)
   if cancellation then return cancellation end
+  local handling=parseAssistanceHandling(line,character,now)
+  if handling then return handling end
   local staffVoice=parseStaffVoice(line,character,now)
   if staffVoice then return staffVoice end
   for _,rule in ipairs(rules) do
