@@ -17,13 +17,24 @@ function Keybindings.validate(config)
 end
 function Keybindings.new(adapter,config) local valid,err=Keybindings.validate(config or Keybindings.defaults); if not valid then error(err,0) end; return setmetatable({adapter=adapter,config=valid,ids={},conflicts={}},Keybindings) end
 function Keybindings:snapshot() return copy(self.config) end
-function Keybindings:stop() for _,id in pairs(self.ids) do pcall(self.adapter.removeKeyBinding,self.adapter,id) end; self.ids={}; return true end
+function Keybindings:stop()
+  local removed,failed={},{ }
+  for key,id in pairs(self.ids) do
+    local called,ok,err=pcall(self.adapter.removeKeyBinding,self.adapter,id)
+    if called and ok then self.ids[key]=nil; removed[id]=true; removed[tostring(id)]=true
+    else failed[key]=called and (err or "Mudlet rejected key removal") or tostring(ok) end
+  end
+  if next(failed) then return nil,failed,removed end
+  return true,nil,removed
+end
 function Keybindings:start()
-  self:stop(); self.conflicts={}; if not self.config.enabled then return true,self:status() end
+  local stopped,removeErrors,removedIds=self:stop(); self.conflicts={}
+  if not stopped then for key,why in pairs(removeErrors) do self.conflicts[key]="could not remove previous binding: "..tostring(why) end; return true,self:status() end
+  if not self.config.enabled then return true,self:status() end
   local blocked={}
-  for _,key in ipairs(Keybindings.order) do local command=self.config.commands[key]; if command~="" then local used,why=self.adapter:isKeyBindingUsed(key); if used then blocked[key]=why or "already assigned" end end end
+  for _,key in ipairs(Keybindings.order) do local command=self.config.commands[key]; if command~="" then local used,why=self.adapter:isKeyBindingUsed(key,nil,removedIds); if used then blocked[key]=why or "already assigned" end end end
   if next(blocked) then self.conflicts=blocked; return true,self:status() end
-  for _,key in ipairs(Keybindings.order) do local command=self.config.commands[key]; if command~="" then local sentCommand=command; local id,err=self.adapter:addKeyBinding(key,function() return self.adapter:sendCommand(sentCommand) end); if not id then self:stop(); self.conflicts[key]=err or "could not install"; return true,self:status() end; self.ids[key]=id end end
+  for _,key in ipairs(Keybindings.order) do local command=self.config.commands[key]; if command~="" then local sentCommand=command; local id,err=self.adapter:addKeyBinding(key,function() return self.adapter:sendCommand(sentCommand) end); if not id then local rolledBack,rollbackErrors=self:stop(); self.conflicts[key]=err or "could not install"; if not rolledBack then for rollbackKey,rollbackErr in pairs(rollbackErrors) do self.conflicts[rollbackKey]="could not remove partial binding: "..tostring(rollbackErr) end end; return true,self:status() end; self.ids[key]=id end end
   return true,self:status()
 end
 function Keybindings:status() local active=0; for _ in pairs(self.ids) do active=active+1 end; local conflicts={}; for _,key in ipairs(Keybindings.order) do if self.conflicts[key] then conflicts[#conflicts+1]="Numpad "..(Keybindings.labels[key] or key).." ("..self.conflicts[key]..")" end end; return {enabled=self.config.enabled,active=active,conflicts=conflicts} end

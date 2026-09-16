@@ -724,20 +724,26 @@ end
 function Adapter.loadKeybindingSettings()
   local loader=loadfile(keybindingSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if not ok then return nil end; return Adapter.keybindingSettingsSnapshot(value)
 end
-function Adapter:isKeyBindingUsed(key,api)
+function Adapter:isKeyBindingUsed(key,api,ignoredIds)
   api=api or _G; local codes=type(api.mudlet)=="table" and api.mudlet.key or nil; local modifiers=type(api.mudlet)=="table" and api.mudlet.keymodifier or nil
   if type(codes)~="table" or type(modifiers)~="table" or codes[key]==nil or modifiers.Keypad==nil then return true,"keypad is unavailable" end
   if type(api.findItems)~="function" or type(api.getKeyCode)~="function" then return true,"collision detection is unavailable" end
-  local ok,items=pcall(api.findItems,"","keybinding",false); if not ok or type(items)~="table" then return true,"collision detection failed" end
-  for _,id in pairs(items) do local read,code,modifier=pcall(api.getKeyCode,id); if not read then return true,"collision detection failed" end; if code==codes[key] and modifier==modifiers.Keypad then return true,"already assigned in Mudlet" end end
+  local ok,items=pcall(api.findItems,"","keybind",false); if not ok or type(items)~="table" then return true,"collision detection failed" end
+  for _,id in pairs(items) do
+    if not (type(ignoredIds)=="table" and (ignoredIds[id] or ignoredIds[tostring(id)])) then
+      local read,code,modifier=pcall(api.getKeyCode,id)
+      if not read or code==nil or modifier==nil then return true,"collision detection failed" end
+      if code==codes[key] and modifier==modifiers.Keypad then return true,"already assigned in Mudlet" end
+    end
+  end
   return false
 end
 function Adapter:addKeyBinding(key,callback,api)
   api=api or _G; local codes=type(api.mudlet)=="table" and api.mudlet.key or nil; local modifiers=type(api.mudlet)=="table" and api.mudlet.keymodifier or nil
   if type(api.tempKey)~="function" or type(codes)~="table" or type(modifiers)~="table" or codes[key]==nil or modifiers.Keypad==nil then return nil,"keypad binding API is unavailable" end
-  local ok,id=pcall(api.tempKey,modifiers.Keypad,codes[key],callback); if not ok or id==nil then return nil,ok and "Mudlet rejected the binding" or tostring(id) end; return id
+  local ok,id=pcall(api.tempKey,modifiers.Keypad,codes[key],callback); if not ok or type(id)~="number" or id<=0 then return nil,ok and "Mudlet rejected the binding" or tostring(id) end; return id
 end
-function Adapter:removeKeyBinding(id,api) api=api or _G; if type(api.killKey)~="function" then return nil,"key removal API is unavailable" end; local ok,result=pcall(api.killKey,id); if not ok then return nil,tostring(result) end; return result~=false end
+function Adapter:removeKeyBinding(id,api) api=api or _G; if type(api.killKey)~="function" then return nil,"key removal API is unavailable" end; local ok,result,err=pcall(api.killKey,id); if not ok then return nil,tostring(result) end; if result~=true then return nil,tostring(err or "Mudlet rejected key removal") end; return true end
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end
