@@ -119,6 +119,15 @@ function Adapter.markUpdateHandoff(hud,destinationSchema,destinationContract)
   local existingValid=contract~=nil and type(existing)=="table" and tonumber(existing.schema)==destination and existing.contract==contract and type(existing.settings_contract)=="string" and #existing.settings_contract==64 and type(existing.view)=="table" and existing.view.root~=nil and existing.view.view_contract==contract and existing.view.view_settings_contract==existing.settings_contract
   if controller then
     controller.update_handoff=true
+    local keybindings=type(controller.keybindings)=="table" and controller.keybindings or nil
+    if keybindings then
+      local retired=type(keybindings.retiredIds)=="table" and keybindings.retiredIds or {}
+      keybindings.retiredIds=retired
+      for _,id in pairs(type(keybindings.ids)=="table" and keybindings.ids or {}) do
+        retired[id]=true; retired[tostring(id)]=true
+      end
+      controller.keybinding_retired_ids=retired
+    end
     if type(controller.chat)=="table" and type(controller.chat.handoff)=="function" then
       local captured,snapshot=pcall(controller.chat.handoff,controller.chat)
       if captured and type(snapshot)=="table" then hud._chat_handoff=snapshot end

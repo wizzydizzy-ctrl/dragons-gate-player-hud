@@ -242,10 +242,11 @@ test("explicit migration read errors fail closed instead of looking like EOF",fu
   lfs,io.open=oldLfs,oldOpen; if not ok then error(err,0) end
 end)
 test("update handoff retains only an exact contracted view lease",function()
-  local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local view={root={},view_contract=contract,view_settings_contract=settingsContract}; local snapshot={schema=1,character_key="dace",filter="ALL",entries={{message="kept"}}}
-  local hud={settings={view_schema=1,view_contract=contract,view_settings_contract=settingsContract},controller={view=view,chat={handoff=function() return snapshot end}}}
+  local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local view={root={},view_contract=contract,view_settings_contract=settingsContract}; local snapshot={schema=1,character_key="dace",filter="ALL",entries={{message="kept"}}}; local retired={[6]=true}
+  local hud={settings={view_schema=1,view_contract=contract,view_settings_contract=settingsContract},controller={view=view,chat={handoff=function() return snapshot end},keybindings={ids={north=7},retiredIds=retired}}}
   local lease=Adapter.markUpdateHandoff(hud,1,contract); eq(lease.view,view); eq(lease.settings_contract,settingsContract); eq(hud.controller.update_handoff,true)
   eq(hud._chat_handoff,snapshot)
+  eq(hud.controller.keybinding_retired_ids,retired); eq(retired[6],true); eq(retired[7],true); eq(retired["7"],true)
   eq(Adapter.markUpdateHandoff(hud,2,contract),nil)
   eq(Adapter.markUpdateHandoff(hud,1,nil),nil)
 end)

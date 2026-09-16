@@ -331,6 +331,25 @@ function Main:scheduleClockTick()
   if not id then return nil,err or "clock timer could not be created" end
   self.clock_timer=id; return true
 end
+function Main:scheduleKeybindingRetry()
+  local manager=self.keybindings
+  if self.keybinding_retry_timer or not manager then return false end
+  local status=manager:status()
+  if status.enabled~=true or status.active>0 or #status.conflicts==0 then return false end
+  local callback=function()
+    self.keybinding_retry_timer=nil
+    if not self.started or self.keybindings~=manager then return end
+    local ok,err=pcall(manager.start,manager)
+    if not ok then self:captureFailure("keybindings",err,{operation="deferred_start"}) end
+  end
+  local called,id,err=pcall(self.adapter.schedule,self.adapter,0.05,callback)
+  if not called or not id then
+    self:captureFailure("keybindings",called and (err or "retry timer could not be created") or id,{operation="deferred_schedule"})
+    return false
+  end
+  self.keybinding_retry_timer=id
+  return true
+end
 function Main:characterName()
   if self.character_entry_name and self.character_entry_name~="" then return self.character_entry_name end
   return self.last_state and self.last_state.character and self.last_state.character.full_name or nil
@@ -1195,7 +1214,7 @@ function Main:start()
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud refresh$",function() return self:refreshCharacterData() end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud text(?:\\s+(.*))?$",function(value) return self:setDisplayTextSize(aliasArgument(value) or "status") end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^rr(?:\\s+(.*))?$",function(value) return self.roller:command(aliasArgument(value) or "help") end)
-  self.runtime_registration_complete=true; self.started=true; local data=self.adapter:getGMCP(); if self:mapperEnabled() and data and data.Room and data.Room.Info then local mapped=self.automapper:onRoom(data.Room.Info); if mapped and tonumber(data.Room.Info.num) then self.managed_rooms[tonumber(data.Room.Info.num)]=true end end; self:refresh(); self:scheduleRoundtimeTick(); self:scheduleClockTick()
+  self.runtime_registration_complete=true; self.started=true; local data=self.adapter:getGMCP(); if self:mapperEnabled() and data and data.Room and data.Room.Info then local mapped=self.automapper:onRoom(data.Room.Info); if mapped and tonumber(data.Room.Info.num) then self.managed_rooms[tonumber(data.Room.Info.num)]=true end end; self:refresh(); self:scheduleRoundtimeTick(); self:scheduleClockTick(); self:scheduleKeybindingRetry()
   local chatStarted,chatErr=self:startChat(); if not chatStarted then error(chatErr,0) end
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line) self:callSpecialTransition("onLine",line) end)
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line)
@@ -1225,6 +1244,7 @@ function Main:shutdown()
     self.clock_timer=nil
   end
   if self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
+  if self.keybinding_retry_timer then self.adapter:cancelTimer(self.keybinding_retry_timer); self.keybinding_retry_timer=nil end
   local chat=self.chat; self.chat=nil; if chat then chat:shutdown() end
   local colorizer=self.colorizer; self.colorizer=nil; if colorizer then colorizer:shutdown() end
   local roller=self.roller; self.roller=nil; if roller then roller:shutdown() end

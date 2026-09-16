@@ -1070,6 +1070,33 @@ test("repeated reload cancels each candidate once and retains unrelated runtime"
   hud:shutdown(); eq(tracker:pending(),nil); eq(f.timer_cancels[ownedTimer],1)
   eq(f.aliases[personalAlias]~=nil,true); eq(f.events[personalEvent]~=nil,true); eq(f.timers[personalTimer]~=nil,true)
 end)
+test("runtime retries keypad activation after Mudlet retires replaced package keys",function()
+  local f=fake(); f.keyUsed=true; f.keyIds={}; f.keyRemoved={}
+  function f:isKeyBindingUsed() return self.keyUsed,self.keyUsed and "old HUD key still visible" or nil end
+  function f:addKeyBinding(key,callback) self.next=self.next+1; self.keyIds[key]={id=self.next,callback=callback}; return self.next end
+  function f:removeKeyBinding(id) self.keyRemoved[id]=true; return true end
+  function f:saveKeybindingSettings() return true end
+  local hud=Main.new(f,{layout={},keybindings={enabled=true}}); assert(hud:start())
+  eq(hud.keybindings:status().active,0); eq(#hud.keybindings:status().conflicts,11)
+  local retry=hud.keybinding_retry_timer; eq(retry~=nil,true); eq(f.timer_delays[retry],0.05)
+  f.keyUsed=false; f:fireTimer(); eq(hud.keybindings:status().active,11); eq(#hud.keybindings:status().conflicts,0); eq(hud.keybinding_retry_timer,nil)
+  hud:shutdown()
+end)
+test("runtime cancels the deferred keypad retry during shutdown",function()
+  local f=fake();
+  function f:isKeyBindingUsed() return true,"old HUD key still visible" end
+  function f:saveKeybindingSettings() return true end
+  local hud=Main.new(f,{layout={},keybindings={enabled=true}}); assert(hud:start())
+  local retry=hud.keybinding_retry_timer; eq(retry~=nil,true); hud:shutdown(); eq(f.timer_cancels[retry],1); eq(f.timers[retry],nil)
+end)
+test("runtime bounded keypad retry preserves genuine personal conflicts",function()
+  local f=fake();
+  function f:isKeyBindingUsed() return true,"personal key" end
+  function f:saveKeybindingSettings() return true end
+  local hud=Main.new(f,{layout={},keybindings={enabled=true}}); assert(hud:start())
+  f:fireTimer(); eq(hud.keybindings:status().active,0); eq(#hud.keybindings:status().conflicts,11); eq(hud.keybinding_retry_timer,nil); eq(f:count(f.timers),0)
+  hud:shutdown()
+end)
 test("runtime confirms a generated special transition",function()
   local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={}}); assert(hud:start())
   assert(hud.walker.adapter:sendCommand("go arch")); f.callbacks["sysDataSendRequest"](nil,"go arch")
