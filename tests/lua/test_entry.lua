@@ -89,13 +89,13 @@ test("persisted roller settings override stale live values during package replac
   end)
 end)
 
-test("persisted display text size overrides a stale live preference",function()
+test("persisted display settings override stale live preferences",function()
   withEntryStubs(function(context)
     context.defaults.display={side_text_scale=1}
-    context.install("mudlet_adapter",function() return {loadDisplaySettings=function() return {side_text_scale=.9} end,new=function() return context.adapter end} end)
-    DGHUD={user_settings={display={side_text_scale=1.1}},shutdown=function() return true end}
+    context.install("mudlet_adapter",function() return {loadDisplaySettings=function() return {side_text_scale=.9,auto_wrap=false} end,new=function() return context.adapter end} end)
+    DGHUD={user_settings={display={side_text_scale=1.1,auto_wrap=true}},shutdown=function() return true end}
     dofile("src/entry.lua")
-    eq(DGHUD.user_settings.display.side_text_scale,.9); eq(DGHUD.settings.display.side_text_scale,.9)
+    eq(DGHUD.user_settings.display.side_text_scale,.9); eq(DGHUD.settings.display.side_text_scale,.9); eq(DGHUD.user_settings.display.auto_wrap,false); eq(DGHUD.settings.display.auto_wrap,false)
   end)
 end)
 
@@ -114,6 +114,14 @@ test("replacement entry carries a preserved compatible view into the new control
     DGHUD={user_settings={},_update_reinstall_pending=true,_view_handoff=handoff,controller={map_collections={}},shutdown=function() return true end}
     dofile("src/entry.lua")
     eq(DGHUD.controller.view_handoff,handoff); eq(DGHUD._view_handoff,nil)
+  end)
+end)
+test("replacement entry carries the original manual wrap baseline",function()
+  withEntryStubs(function()
+    local retiring={map_collections={},original_main_console_wrap=141}
+    DGHUD={user_settings={display={side_text_scale=1,auto_wrap=true}},_update_reinstall_pending=true,controller=retiring,shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.controller.original_main_console_wrap,141); eq(DGHUD._main_wrap_baseline,nil)
   end)
 end)
 test("replacement entry carries live chat history and filter into the new controller",function()

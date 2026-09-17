@@ -106,7 +106,7 @@ local function fake()
   function f:sendCommand(command) self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command; return true end
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
-  function f:saveDisplaySettings(config) self.savedDisplaySettings={side_text_scale=config.side_text_scale}; return true end
+  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings={side_text_scale=config.side_text_scale,auto_wrap=config.auto_wrap}; return true end
   function f:saveChatSettings(config)
     self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1
     if self.onChatSettingsSave then self.onChatSettingsSave(config) end
@@ -456,9 +456,26 @@ test("HUD text size cycles persistently without changing center console geometry
   local f=fake(); local hud=Main.new(f,{layout={},display={side_text_scale=1,future_preference="kept"}}); assert(hud:start())
   local normal=hud.current_layout.body_font; local consoleWidth=hud.current_layout.console_width; local wrap=hud.main_console_wrap_columns
   local textAlias=assert(aliasCallback(f,"^dghud text(?:\\s+(.*))?$")); eq(textAlias({"","small"}),"small")
-  eq(f.savedDisplaySettings.side_text_scale,.9); eq(hud.settings.display.future_preference,"kept"); eq(hud.current_layout.body_font<normal,true); eq(hud.current_layout.console_width,consoleWidth); eq(hud.main_console_wrap_columns,wrap); eq(f.displayTextReport,"Small")
+  eq(f.savedDisplaySettings.side_text_scale,.9); eq(f.savedDisplaySettings.auto_wrap,true); eq(hud.settings.display.future_preference,"kept"); eq(hud.current_layout.body_font<normal,true); eq(hud.current_layout.console_width,consoleWidth); eq(hud.main_console_wrap_columns,wrap); eq(f.displayTextReport,"Small")
   eq(f.optionsActionCallback("text_size"),"normal"); eq(f.savedDisplaySettings.side_text_scale,1); eq(hud.current_layout.body_font,normal)
   local ok,err=textAlias({"","tiny"}); eq(ok,nil); assert(err:find("Usage:",1,true)); eq(f.commandErrors[#f.commandErrors],err)
+end)
+
+test("automatic main-window wrap toggle restores manual control and persists",function()
+  local f=fake(); f.profile_main_wrap=111; local hud=Main.new(f,{layout={},display={side_text_scale=1,auto_wrap=true}}); assert(hud:start())
+  assert(f.main_wrap_columns~=111); eq(f.optionsActionCallback("auto_main_wrap"),false); eq(f.savedDisplaySettings.auto_wrap,false); eq(f.main_wrap_columns,111); eq(hud.settings.display.auto_wrap,false)
+  f.main_wrap_columns=137; local measurements=#f.main_wrap_measurements; local sets=f.main_wrap_sets; f.callbacks["sysWindowResizeEvent"](); eq(f.main_wrap_columns,137); eq(#f.main_wrap_measurements,measurements); eq(f.main_wrap_sets,sets)
+  assert(hud:shutdown()); eq(f.main_wrap_columns,137)
+  local manual=Main.new(f,{layout={},display={side_text_scale=1,auto_wrap=false}}); assert(manual:start()); eq(f.main_wrap_columns,137); f.callbacks["sysWindowResizeEvent"](); eq(f.main_wrap_columns,137)
+  local manualSets=f.main_wrap_sets; assert(manual:setDisplayTextSize("small")); eq(f.savedDisplaySettings.auto_wrap,false); eq(f.main_wrap_sets,manualSets); eq(f.main_wrap_columns,137)
+  assert(manual:reload()); eq(f.main_wrap_sets,manualSets); eq(f.main_wrap_columns,137)
+  eq(f.optionsActionCallback("auto_main_wrap"),true); eq(f.savedDisplaySettings.auto_wrap,true); assert(f.main_wrap_columns~=137); eq(f.optionsActionCallback("auto_main_wrap"),false); eq(f.main_wrap_columns,137)
+  assert(manual:shutdown()); eq(f.main_wrap_columns,137)
+end)
+
+test("failed automatic wrap persistence leaves the active mode unchanged",function()
+  local f=fake(); local hud=Main.new(f,{layout={},display={side_text_scale=1,auto_wrap=true}}); assert(hud:start()); f.failDisplaySettingsSave="disk full"; local before=f.main_wrap_columns
+  local ok,err=hud:setMainConsoleAutoWrap(false); eq(ok,nil); assert(err:find("disk full",1,true)); eq(hud:mainConsoleAutoWrapEnabled(),true); eq(f.main_wrap_columns,before)
 end)
 
 test("Mudlet cleanup adapter contains refresh exceptions and creates opaque tokens from secure bytes",function()
@@ -569,7 +586,7 @@ test("layout diagnostic reports only responsive measurements and compatibility i
   local callback=assert(aliasCallback(f,"^dghud layout$")); local status=callback()
   eq(status.window_width,1024); eq(status.window_height,600); eq(status.mode,"medium")
   eq(status.left_width,190); eq(status.right_width,190); eq(status.center_width,634)
-  eq(status.right_lists_mode,"tabbed"); eq(status.text_preset,"normal")
+  eq(status.right_lists_mode,"tabbed"); eq(status.text_preset,"normal"); eq(status.wrap_mode,"automatic")
   eq(status.view_schema,4); eq(status.view_contract,string.rep("a",12)); eq(f.layoutReport,status)
   eq(status.character,nil); eq(status.room,nil); eq(status.inventory,nil)
 end)

@@ -562,7 +562,7 @@ function Adapter:reportDisplayTextScale(name) cecho("\n<gold>[DGHUD]<reset> HUD 
 function Adapter:reportLayoutStatus(status)
   status=type(status)=="table" and status or {}
   cecho("\n<gold>[DGHUD Layout]<reset> "..tostring(status.window_width or 0).."x"..tostring(status.window_height or 0).."  mode=<white>"..tostring(status.mode or "unknown").."<reset>  rails="..tostring(status.left_width or 0).."/"..tostring(status.right_width or 0).."  center="..tostring(status.center_width or 0).."\n")
-  cecho("<gold>[DGHUD Layout]<reset> lists="..tostring(status.right_lists_mode or "hidden").."  fonts="..tostring(status.body_font or 0).."/"..tostring(status.list_font or 0).."/"..tostring(status.chat_font or 0).."  text="..tostring(status.text_preset or "normal").."  wrap="..tostring(status.wrap_columns or 0).."\n")
+  cecho("<gold>[DGHUD Layout]<reset> lists="..tostring(status.right_lists_mode or "hidden").."  fonts="..tostring(status.body_font or 0).."/"..tostring(status.list_font or 0).."/"..tostring(status.chat_font or 0).."  text="..tostring(status.text_preset or "normal").."  wrap="..tostring(status.wrap_mode or "automatic")..":"..tostring(status.wrap_columns or 0).."\n")
   cecho("<gold>[DGHUD Layout]<reset> view schema="..tostring(status.view_schema or 0).." contract="..tostring(status.view_contract or "unavailable").."\n")
   return status
 end
@@ -661,13 +661,15 @@ local function displaySettingsPath() return Adapter.dataBase().."/display-settin
 function Adapter.displaySettingsSnapshot(config)
   local scale=tonumber(type(config)=="table" and config.side_text_scale)
   if not scale or scale<.8 or scale>1.2 then return nil,"HUD text scale must be between 0.8 and 1.2" end
-  return {side_text_scale=scale}
+  local autoWrap=config.auto_wrap
+  if autoWrap==nil then autoWrap=true elseif type(autoWrap)~="boolean" then return nil,"automatic main-window wrap must be a boolean" end
+  return {side_text_scale=scale,auto_wrap=autoWrap}
 end
 function Adapter:saveDisplaySettings(config)
   local snapshot,snapshotErr=Adapter.displaySettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
   local base=Adapter.dataBase(); lfs.mkdir(base); local destination=displaySettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
-  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f }\n",snapshot.side_text_scale)); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true

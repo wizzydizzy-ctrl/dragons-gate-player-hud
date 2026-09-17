@@ -283,7 +283,7 @@ function Main:setDisplayTextSize(action)
   local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
   if action=="status" or action=="" then if self.view and self.view.setDisplayTextSize then self.view:setDisplayTextSize(current) end; if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(current:gsub("^%l",string.upper)) end; return current end
   local scale=displayTextPresets[action]; if not scale then return failed("Usage: dghud text [small|normal|large|status]") end
-  local candidate={side_text_scale=scale}
+  local candidate={side_text_scale=scale,auto_wrap=not (self.settings.display and self.settings.display.auto_wrap==false)}
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return failed("Could not save HUD text size: "..tostring(err)) end end
   self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}; self.settings.display.side_text_scale=scale
   local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.side_text_scale=scale end
@@ -292,10 +292,37 @@ function Main:setDisplayTextSize(action)
   if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(action:gsub("^%l",string.upper)) end
   return action
 end
+function Main:mainConsoleAutoWrapEnabled()
+  return not (self.settings.display and self.settings.display.auto_wrap==false)
+end
+function Main:setMainConsoleAutoWrap(enabled)
+  if type(enabled)~="boolean" then return nil,"automatic main-window wrap must be a boolean" end
+  local current=self:mainConsoleAutoWrapEnabled()
+  if current==enabled then return enabled end
+  local display=self.settings.display or {}
+  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=enabled}
+  if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return nil,"Could not save automatic main-window wrap: "..tostring(err) end end
+  if enabled and self.adapter.getMainConsoleWrap then
+    local read,value=pcall(self.adapter.getMainConsoleWrap,self.adapter)
+    if read and tonumber(value) and tonumber(value)>=1 then self.original_main_console_wrap=math.floor(tonumber(value)) end
+  end
+  self.settings.display=display; display.auto_wrap=enabled
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.auto_wrap=enabled end
+  if not enabled then
+    if self.original_main_console_wrap and self.adapter.setMainConsoleWrap then pcall(self.adapter.setMainConsoleWrap,self.adapter,self.original_main_console_wrap) end
+    self.main_console_wrap_columns=nil
+  end
+  if self.view and self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(enabled) end
+  self:applyResponsiveLayout(self.last_state)
+  return enabled
+end
 function Main:layoutStatus()
   local layout=self.current_layout or self:applyResponsiveLayout(self.last_state)
   local contract=tostring(self.settings and self.settings.view_contract or "")
   if #contract>12 then contract=contract:sub(1,12) end
+  local wrapColumns=tonumber(self.main_console_wrap_columns)
+  if not wrapColumns and self.adapter.getMainConsoleWrap then local read,value=pcall(self.adapter.getMainConsoleWrap,self.adapter); if read then wrapColumns=tonumber(value) end end
   return {
     window_width=tonumber(layout.window_width) or 0,
     window_height=tonumber(layout.window_height) or 0,
@@ -309,7 +336,8 @@ function Main:layoutStatus()
     list_font=tonumber(layout.list_font) or 0,
     chat_font=tonumber(layout.chat_font) or 0,
     text_preset=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale),
-    wrap_columns=tonumber(self.main_console_wrap_columns) or 0,
+    wrap_columns=wrapColumns or 0,
+    wrap_mode=self:mainConsoleAutoWrapEnabled() and "automatic" or "manual",
     view_schema=tonumber(self.settings and self.settings.view_schema) or 0,
     view_contract=contract~="" and contract or "unavailable",
   }
@@ -482,7 +510,7 @@ function Main:applyResponsiveLayout(state)
   -- Mudlet stores main-console wrapping as a fixed profile column count.
   -- Recompute it from the actual center display on every responsive layout
   -- pass so profiles with different legacy wrapAt values behave identically.
-  if self.adapter.mainConsoleWrapColumns and self.adapter.setMainConsoleWrap then
+  if self:mainConsoleAutoWrapEnabled() and self.adapter.mainConsoleWrapColumns and self.adapter.setMainConsoleWrap then
     local measured,columns=pcall(self.adapter.mainConsoleWrapColumns,self.adapter,layout.console_width,layout.main_wrap_scrollbar_allowance)
     if measured and columns then
       local applied,result=pcall(self.adapter.setMainConsoleWrap,self.adapter,columns)
@@ -1023,6 +1051,7 @@ function Main:start()
       local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
       return self:setDisplayTextSize(({small="normal",normal="large",large="small"})[current])
     end
+    if action=="auto_main_wrap" then return self:setMainConsoleAutoWrap(not self:mainConsoleAutoWrapEnabled()) end
     local command=({roller_start="start",roller_stop="stop",roller_status="status",roller_show="show",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
@@ -1030,6 +1059,7 @@ function Main:start()
   if self.view.setChatVisible then self.view:setChatVisible(not (self.settings.chat and self.settings.chat.visible==false)) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
+  if self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(self:mainConsoleAutoWrapEnabled()) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
@@ -1262,7 +1292,7 @@ function Main:shutdown()
   for _,id in ipairs(self.runtime.events) do self.adapter:killEvent(id) end; for _,id in ipairs(self.runtime.aliases) do self.adapter:killAlias(id) end; for _,id in ipairs(self.runtime.triggers or {}) do self.adapter:killTrigger(id) end
   self.runtime={events={},aliases={},triggers={}}; if self.view and not preserveView then self.view:delete() end; self.view=nil
   if self.original_borders and not preserveView then self.adapter:setBorders(self.original_borders[1],self.original_borders[2],self.original_borders[3],self.original_borders[4]) end; self.original_borders=nil
-  if not updateHandoff and self.original_main_console_wrap and self.adapter.setMainConsoleWrap then pcall(self.adapter.setMainConsoleWrap,self.adapter,self.original_main_console_wrap) end
+  if not updateHandoff and self:mainConsoleAutoWrapEnabled() and self.original_main_console_wrap and self.adapter.setMainConsoleWrap then pcall(self.adapter.setMainConsoleWrap,self.adapter,self.original_main_console_wrap) end
   self.character_entry_started=false; self.character_entry_name=nil; self.original_main_console_wrap=nil; self.main_console_wrap_columns=nil; self.runtime_registration_complete=false; self.view_adopted=nil; self.started=false; return true
 end
 function Main:reload() self:shutdown(); return self:start() end

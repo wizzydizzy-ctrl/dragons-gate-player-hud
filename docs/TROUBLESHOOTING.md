@@ -68,13 +68,15 @@ The lists retain all parsed rows even when only part of the list fits.
 
 ## Text wraps differently after resizing
 
-DGHUD calculates wrap columns from the actual main-display and chatbox pixel widths. Run:
+DGHUD calculates wrap columns from the actual main-display and chatbox pixel widths while **OPTIONS → AUTO MAIN WRAP** is on. Turn it off if you want Mudlet's profile preference to control the main game window instead. Chatbox wrapping remains responsive either way.
+
+For automatic wrapping, run:
 
 ```text
 dghud reload
 ```
 
-If the main console still appears unusually narrow or wide, resize the window by a small amount to fire Mudlet's resize event. Run `dghud layout` and include that safe output with a support report if it remains wrong.
+If the main console still appears unusually narrow or wide, resize the window by a small amount to fire Mudlet's resize event. Run `dghud layout` and include that safe output with a support report if it remains wrong. Its wrap field reports `automatic` or `manual`.
 
 ## A panel disappears in a small window
 

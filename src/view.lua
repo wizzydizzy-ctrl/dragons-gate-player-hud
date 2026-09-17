@@ -352,8 +352,8 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","refresh_data","auto_update","text_size","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","refresh_data","auto_update","text_size","auto_main_wrap","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
@@ -1299,6 +1299,13 @@ function View:setDisplayTextSize(name)
   if button then button.option_text="HUD TEXT: "..name:upper() end
   if self.color_menu_visible then self:renderColorOptions() end
   return name
+end
+function View:setMainConsoleAutoWrap(enabled)
+  self.main_console_auto_wrap=enabled~=false
+  local button=self.option_action_buttons and self.option_action_buttons.auto_main_wrap
+  if button then button.option_text="AUTO MAIN WRAP: "..(self.main_console_auto_wrap and "ON" or "OFF") end
+  if self.color_menu_visible then self:renderColorOptions() end
+  return self.main_console_auto_wrap
 end
 function View:setFeedbackCallback(callback) self.feedback_callback=type(callback)=="function" and callback or nil; return true end
 function View:setCopyTextCallback(callback) self.copy_text_callback=type(callback)=="function" and callback or nil; return true end

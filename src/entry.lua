@@ -2,6 +2,7 @@ local previous=rawget(_G,"DGHUD")
 local userSettings=previous and previous.user_settings
 local updateReinstallPending=previous and previous._update_reinstall_pending
 local viewHandoff=previous and previous._view_handoff
+local mainWrapBaseline=previous and (previous._main_wrap_baseline or (type(previous.controller)=="table" and previous.controller.original_main_console_wrap))
 local function copyChatEntries(entries)
   local source=type(entries)=="table" and entries or {}; local result={}; local first=math.max(1,#source-999)
   for index=first,#source do
@@ -43,7 +44,7 @@ local chat=previous and type(previous.chat)=="table" and previous.chat or {}
 chat.capture=function() return nil,"chatbox is not running" end
 chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
-DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending,_view_handoff=viewHandoff,_chat_handoff=chatHandoff}
+DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending,_view_handoff=viewHandoff,_chat_handoff=chatHandoff,_main_wrap_baseline=mainWrapBaseline}
 local moduleNames={"defaults","keybindings","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
@@ -83,6 +84,7 @@ DGHUD.chatStorageApi=Storage.mudletApi(getMudletHomeDir(),"DGHUDData")
 local adapter=Adapter.new()
 if type(keybindingRetiredIds)=="table" then adapter._dghudRetiredKeyIds=keybindingRetiredIds end
 DGHUD.controller=Main.new(adapter,DGHUD.settings,viewHandoff,chatHandoff)
+if tonumber(mainWrapBaseline) and tonumber(mainWrapBaseline)>=1 then DGHUD.controller.original_main_console_wrap=math.floor(tonumber(mainWrapBaseline)) end
 DGHUD.updater=Updater.new(DGHUD.controller.adapter,DGHUD.settings)
 DGHUD.controller.updater=DGHUD.updater
 Main.installChatApi(DGHUD)
@@ -100,6 +102,7 @@ local started,startErr=DGHUD.start()
 if not started then error("DGHUD startup failed: "..tostring(startErr or "unknown error"),0) end
 DGHUD._view_handoff=nil
 DGHUD._chat_handoff=nil
+DGHUD._main_wrap_baseline=nil
 local installedController=DGHUD.controller
 local function maintainRecoveryCompanion()
   local hud=rawget(_G,"DGHUD")

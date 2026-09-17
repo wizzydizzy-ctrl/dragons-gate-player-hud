@@ -80,6 +80,12 @@ dghud text status
 
 The setting is saved and survives updates.
 
+## Main-window word wrap
+
+**AUTO MAIN WRAP** defaults to **ON**. In that mode, DGHUD recalculates Mudlet's main game-window wrap width whenever the window is resized so room text follows the usable center display.
+
+Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap manually. Once it is off, DGHUD stops changing that value during resizing, reloads, and updates. Set your preferred wrap normally in Mudlet's profile preferences; the OFF choice is saved outside the package and survives updates.
+
 ## Color Settings
 
 **COLOR SETTINGS** opens individual toggles for room titles, exits, currency, races, professions, travel objects, combat warnings, recovery, spell threats, discoveries, and illumination.
@@ -121,7 +127,7 @@ These submissions do not require a GitHub account or browser. See [Support, Priv
 
 ## Resizing and responsive behavior
 
-DGHUD recalculates panel sizes, font-aware spacing, chat wrapping, game-console wrapping, list scrollbars, map height, and resource bars when the Mudlet window changes size.
+DGHUD recalculates panel sizes, font-aware spacing, chat wrapping, list scrollbars, map height, and resource bars when the Mudlet window changes size. Main game-console wrapping also follows the window while **AUTO MAIN WRAP** is on.
 
 At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. On shorter or narrower desktop windows, **Inventory**, **Runes**, and **Skills** become three tabs sharing the available space; no list is discarded. At compact widths the side rails hide, but those same three scrollable tabs move into a compact strip above the chatbox. On an exceptionally short window, normal game output takes priority and the optional strip returns automatically when enough height is available.
 
