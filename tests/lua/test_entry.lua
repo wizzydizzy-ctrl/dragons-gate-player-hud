@@ -98,6 +98,16 @@ test("persisted display settings override stale live preferences",function()
     eq(DGHUD.user_settings.display.side_text_scale,.9); eq(DGHUD.settings.display.side_text_scale,.9); eq(DGHUD.user_settings.display.auto_wrap,false); eq(DGHUD.settings.display.auto_wrap,false)
   end)
 end)
+test("persisted mapper submap choices override stale nested live values",function()
+  withEntryStubs(function(context)
+    context.defaults.mapper={schema=2,enabled=true,transition_submaps={gate=false,portal=false,door=false,arch=false,path=false,other=false}}
+    context.install("mudlet_adapter",function() return {loadMapperSettings=function() return {schema=2,enabled=true,transition_submaps={gate=false,portal=false,door=true,arch=false,path=false,other=false}} end,new=function() return context.adapter end} end)
+    DGHUD={user_settings={mapper={transition_submaps={gate=true,door=false},personal_option="keep"}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.user_settings.mapper.transition_submaps.gate,false); eq(DGHUD.user_settings.mapper.transition_submaps.door,true)
+    eq(DGHUD.settings.mapper.transition_submaps.gate,false); eq(DGHUD.settings.mapper.transition_submaps.door,true); eq(DGHUD.settings.mapper.personal_option,"keep")
+  end)
+end)
 
 test("replacement handoff bypasses legacy map serialization before shutdown",function()
   withEntryStubs(function()

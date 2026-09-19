@@ -1066,7 +1066,7 @@ test("runtime contains mapper failure after confirmation and clears transition s
   hud:shutdown()
 end)
 test("runtime continues from an ensured special destination after edge persistence fails",function()
-  local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local f=fake(); f.gmcp=gmcpRoom(100); local hud=Main.new(f,{layout={},mapper={transition_submaps={gate=true}}}); assert(hud:start())
   f.callbacks["sysDataSendRequest"](nil,"go gate"); f.failSpecialMap="return"; f.gmcp=gmcpRoom(900); f.callbacks["gmcp.Room.Info"]()
   eq(#f.map.special,0); eq(hud.automapper:currentRoom(),900); eq(f.map.current,900)
   eq(f.map.rooms[900].partition,"special:900")

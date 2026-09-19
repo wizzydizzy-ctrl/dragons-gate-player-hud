@@ -50,6 +50,15 @@ test("display text settings accept only a bounded side-panel scale",function()
   value,err=Adapter.displaySettingsSnapshot({side_text_scale="large"}); eq(value,nil); assert(err:find("between 0.8 and 1.2",1,true))
   value,err=Adapter.displaySettingsSnapshot({side_text_scale=1,auto_wrap="no"}); eq(value,nil); assert(err:find("must be a boolean",1,true))
 end)
+test("legacy mapper settings default missing submap choices off and preserve explicit true",function()
+  local oldLoadfile,oldHome=loadfile,rawget(_G,"getMudletHomeDir"); getMudletHomeDir=function() return "/profile" end
+  local ok,result=pcall(function()
+    loadfile=function() return function() return {enabled=true,transition_submaps={door=true,gate=false}} end end
+    local value=assert(Adapter.loadMapperSettings()); eq(value.schema,2); eq(value.transition_submaps.door,true); eq(value.transition_submaps.gate,false)
+    for _,key in ipairs({"portal","arch","path","other"}) do eq(value.transition_submaps[key],false) end
+  end)
+  loadfile=oldLoadfile; rawset(_G,"getMudletHomeDir",oldHome); if not ok then error(result,0) end
+end)
 test("chat settings snapshot sanitizes persistent tab order as data",function()
   local value=assert(Adapter.chatSettingsSnapshot({tab_order={" staff ","ALL","STAFF","OWN","<BAD>","ROOM\nESP"},all_sources={ROOM=true,COMBAT=false}}))
   eq(table.concat(value.tab_order,","),"STAFF,ALL")

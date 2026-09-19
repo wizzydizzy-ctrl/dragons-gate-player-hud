@@ -99,7 +99,7 @@ See [Color Highlighting](COLOR_HIGHLIGHTING.md).
 **MAP SETTINGS** contains:
 
 - automapping on or off;
-- separate-submap choices for gates, portals, doors, arches, paths, and other special travel;
+- opt-in separate-submap choices for gates, portals, doors, arches, paths, and other special travel; all default to OFF;
 - map height and zoom settings;
 - walking and special-travel timeouts;
 - area and subarea naming;

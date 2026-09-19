@@ -36,8 +36,16 @@ end)
 
 test("mapper settings merge without removing user overrides",function()
   local merged=Settings.merge(defaults,{mapper={walk_timeout=20,personal_option="keep"},personal="untouched"})
-  eq(merged.mapper.enabled,true); eq(merged.mapper.walk_timeout,20); eq(merged.mapper.minimum_height,90); eq(merged.mapper.schema,1)
+  eq(merged.mapper.enabled,true); eq(merged.mapper.walk_timeout,20); eq(merged.mapper.minimum_height,90); eq(merged.mapper.schema,2)
   eq(merged.mapper.personal_option,"keep"); eq(merged.personal,"untouched")
+end)
+
+test("special submap creation defaults off while explicit choices survive resolution",function()
+  local fresh=Settings.resolve(defaults,{})
+  for _,key in ipairs({"gate","portal","door","arch","path","other"}) do eq(fresh.mapper.transition_submaps[key],false) end
+  local resolved=Settings.resolve(defaults,{mapper={transition_submaps={door=true}}})
+  eq(resolved.mapper.transition_submaps.door,true)
+  for _,key in ipairs({"gate","portal","arch","path","other"}) do eq(resolved.mapper.transition_submaps[key],false) end
 end)
 
 test("mapper settings survive migration with unknown nested values",function()

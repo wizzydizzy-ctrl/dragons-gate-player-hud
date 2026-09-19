@@ -12,6 +12,8 @@ local vectors={
   s={0,-1,0},sw={-1,-1,0},w={-1,0,0},nw={-1,1,0},
   up={0,0,1},down={0,0,-1},["in"]={0,0,0},out={0,0,0},
 }
+local planar={"n","e","s","w","ne","se","sw","nw"}
+local planar_set={n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true}
 
 function Model.direction(value)
   local command=tostring(value or ""):lower():match("^%s*(.-)%s*$")
@@ -28,6 +30,25 @@ function Model.destination(origin,direction)
   if not vector then return nil end
   origin=origin or {}
   return {x=(origin.x or 0)+vector[1],y=(origin.y or 0)+vector[2],z=(origin.z or 0)+vector[3]}
+end
+
+function Model.specialPlacementDirections(exits,arrivalDirection)
+  local result,seen,advertised,ordinary={},{},{},{}
+  for _,value in ipairs(exits or {}) do
+    local direction=Model.direction(value)
+    if direction then advertised[direction]=true; if planar_set[direction] then ordinary[#ordinary+1]=direction end end
+  end
+  local function add(value)
+    local direction=Model.direction(value)
+    if direction and planar_set[direction] and not advertised[direction] and not seen[direction] then
+      seen[direction]=true
+      result[#result+1]=direction
+    end
+  end
+  add(arrivalDirection)
+  if #ordinary==1 then add(Model.opposite(ordinary[1])) end
+  for _,direction in ipairs(planar) do add(direction) end
+  return result
 end
 
 function Model.normalizeRoom(info)

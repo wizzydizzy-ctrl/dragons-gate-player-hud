@@ -635,7 +635,7 @@ function Adapter:saveMapperSettings(config)
   local base=Adapter.dataBase(); lfs.mkdir(base); local destination=mapperSettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
   local function n(key,default) return tonumber(config and config[key]) or default end; local transitions=config and config.transition_submaps or {}
-  local body=string.format("return { enabled=%s, minimum_height=%g, height_percent=%g, maximum_height=%g, zoom_step=%g, zoom_min=%g, zoom_max=%g, walk_timeout=%g, special_timeout=%g, transition_submaps={gate=%s,portal=%s,door=%s,arch=%s,path=%s,other=%s} }\n",tostring(not (config and config.enabled==false)),n("minimum_height",90),n("height_percent",.4),n("maximum_height",380),n("zoom_step",2.5),n("zoom_min",3),n("zoom_max",60),n("walk_timeout",12),n("special_timeout",12),tostring(transitions.gate~=false),tostring(transitions.portal~=false),tostring(transitions.door~=false),tostring(transitions.arch~=false),tostring(transitions.path~=false),tostring(transitions.other~=false))
+  local body=string.format("return { schema=2, enabled=%s, minimum_height=%g, height_percent=%g, maximum_height=%g, zoom_step=%g, zoom_min=%g, zoom_max=%g, walk_timeout=%g, special_timeout=%g, transition_submaps={gate=%s,portal=%s,door=%s,arch=%s,path=%s,other=%s} }\n",tostring(not (config and config.enabled==false)),n("minimum_height",90),n("height_percent",.4),n("maximum_height",380),n("zoom_step",2.5),n("zoom_min",3),n("zoom_max",60),n("walk_timeout",12),n("special_timeout",12),tostring(transitions.gate==true),tostring(transitions.portal==true),tostring(transitions.door==true),tostring(transitions.arch==true),tostring(transitions.path==true),tostring(transitions.other==true))
   local wrote,writeErr=file:write(body); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup)
@@ -643,7 +643,10 @@ function Adapter:saveMapperSettings(config)
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
 end
 function Adapter.loadMapperSettings()
-  local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if ok and type(value)=="table" and type(value.enabled)=="boolean" then return value end; return nil
+  local loader=loadfile(mapperSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if not ok or type(value)~="table" or type(value.enabled)~="boolean" then return nil end
+  local source=type(value.transition_submaps)=="table" and value.transition_submaps or {}; value.transition_submaps={}
+  for _,key in ipairs({"gate","portal","door","arch","path","other"}) do value.transition_submaps[key]=source[key]==true end
+  value.schema=2; return value
 end
 local function updateSettingsPath() return Adapter.dataBase().."/update-settings.lua" end
 function Adapter:saveUpdateSettings(config)

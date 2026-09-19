@@ -21,7 +21,7 @@ It understands:
 
 Revisiting a room updates the existing mapped room instead of creating a duplicate.
 
-Special travel normally creates a separate submap so doors, gates, and portals do not distort the regular area map. The return connection is learned after you travel back through it.
+Special travel stays on the current map by default. A newly discovered destination is placed beside the room you left; the mapper prefers continuing in your direction of travel, avoids ordinary exits and occupied coordinates, and then chooses the next deterministic adjacent space. Existing rooms keep their saved coordinates. If a travel type should begin a separate submap, enable it under **Options → Map Settings**. Gates, portals, doors, arches, paths, and other special travel can each be enabled independently. The return connection is learned after you travel back through it.
 
 ## Map controls
 
@@ -89,7 +89,7 @@ Map Settings lets you decide whether each travel type creates a separate submap:
 - Paths
 - Other special travel
 
-Leave a setting **ON** when that travel type should lead to a separate map. Turn it **OFF** when it should continue drawing on the current map.
+All six settings default to **OFF**. Turn a setting **ON** only when that travel type should lead to a separate map.
 
 Changing this setting affects newly discovered destinations. It does not move rooms that were already mapped.
 

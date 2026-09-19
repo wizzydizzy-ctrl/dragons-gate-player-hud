@@ -700,6 +700,11 @@ test("map settings popup is responsive and submits transition choices",function(
   view:applyLayout(require("layout").compute(1000,700)); eq(view.map_settings_panel.visible,true); eq(view.map_settings_panel.x>=0,true); eq(view.map_settings_panel.x+view.map_settings_panel.width<=1000,true)
   eq(view.map_settings_draft.portal,false); view.map_settings_fields.minimum_height.input.text="120"; assert(view:saveMapSettings()); eq(received.minimum_height,"120"); eq(received.transition_submaps.portal,false); eq(view.map_settings_visible,false)
 end)
+test("map settings treat every missing submap choice as off",function()
+  local view=chatView(); view:showMapSettings({transition_submaps={}})
+  local values=view:mapSettingsValues()
+  for _,key in ipairs({"gate","portal","door","arch","path","other"}) do eq(view.map_settings_draft[key],false); eq(values.transition_submaps[key],false) end
+end)
 test("map naming buttons apply names and show the native mapper label",function()
   local view=chatView(); local calls={}
   view:setMapSettingsActionCallback(function(action,value)

@@ -52,3 +52,13 @@ test("finds the nearest free coordinate deterministically",function()
   local desired=Model.nearestFree({x=3,y=2,z=1},function() return false end)
   eq(desired.x,3); eq(desired.y,2); eq(desired.z,1)
 end)
+
+test("special placement continues forward and avoids advertised ordinary exits",function()
+  local directions=Model.specialPlacementDirections({"south"},"north")
+  eq(directions[1],"n"); eq(#directions,7)
+  for _,direction in ipairs(directions) do assert(direction~="s") end
+  local inferred=Model.specialPlacementDirections({"south"})
+  eq(inferred[1],"n")
+  local multiple=Model.specialPlacementDirections({"west","south","east"})
+  eq(multiple[1],"n")
+end)

@@ -1,6 +1,7 @@
 local Main=require("main")
 local Defaults=require("defaults")
 local MapperModel=require("mapper_model")
+local Settings=require("settings")
 
 local function count(values) local n=0; for _ in pairs(values) do n=n+1 end; return n end
 local function stable(value)
@@ -202,13 +203,17 @@ end
 local function observeCommand(f,command)
   fire(f,"sysDataSendRequest",command)
 end
+local function submapSettings()
+  return Settings.merge(Defaults,{mapper={transition_submaps={gate=true,portal=true,door=true,arch=true,path=true,other=true}}})
+end
 
-test("HUD release defaults are ready for version 0.3.56",function()
-  eq(Defaults.version,"0.3.56"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
+test("HUD release defaults are ready for version 0.3.57",function()
+  eq(Defaults.version,"0.3.57"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
   eq(Defaults.chat.all_sources.COMBAT,false); eq(Defaults.chat.all_sources.ROOM,true); eq(Defaults.chat.all_sources.STAFF,true)
   eq(Defaults.theme.hp,"#ba5147"); eq(Defaults.theme.fatigue,"#b08f18")
   eq(Defaults.time.speed,2); eq(Defaults.time.sunrise_hour,6); eq(Defaults.time.sunset_hour,18)
-  eq(Defaults.mapper.minimum_height,90); eq(Defaults.mapper.schema,1)
+  eq(Defaults.mapper.minimum_height,90); eq(Defaults.mapper.schema,2)
+  for _,key in ipairs({"gate","portal","door","arch","path","other"}) do eq(Defaults.mapper.transition_submaps[key],false) end
   eq(Defaults.roller.schema,3); eq(Defaults.roller.target_total,53); eq(Defaults.roller.hard_stop,62); eq(Defaults.roller.reroll_delay,.1); eq(Defaults.roller.arrange_mode,"manual"); eq(Defaults.roller.minimum_greats,nil); eq(Defaults.roller.minimum_good_plus,nil); eq(Defaults.roller.min_stats.APP,5)
 end)
 
@@ -216,7 +221,7 @@ test("special submaps persist canonical rooms zoom and mixed walking end to end"
   local world={rooms={},stubs={},links={},special={},areas={},zoom={},creations={},sent={}}
   local f=runtime(world)
   f.gmcp.Room.Info={num=100,name="Room 100",area=1,environment="Plain",flags={"outdoor"},exits={}}
-  local hud=Main.new(f,Defaults); assert(hud:start())
+  local hud=Main.new(f,submapSettings()); assert(hud:start())
 
   observeCommand(f,"  Go Door  "); arrive(f,900,{"north"})
   observeCommand(f,"north"); arrive(f,901,{"south"})
@@ -311,7 +316,7 @@ end
 test("cleanup preview cancellation expiry and success preserve personal map bytes end to end",function()
   local world=cleanupWorld(); local before=personalBytes(world); local f=runtime(world)
   f.gmcp.Room.Info={num=1,name="Safe room",area=1,environment="Plain",flags={},exits={}}
-  local hud=Main.new(f,Defaults); assert(hud:start())
+  local hud=Main.new(f,submapSettings()); assert(hud:start())
   local unchanged=stable(world); local safeRoom=stable(world.rooms[1]); local safeArea=stable(world.area_records[10])
   local preview=assert(findAlias(f,"^dghud map clear submap (\\d+)$")({"","900"}))
   eq(table.concat(preview.room_ids,","),"900,901"); eq(stable(world),unchanged)

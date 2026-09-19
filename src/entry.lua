@@ -61,7 +61,15 @@ if type(userSettings)~="table" then userSettings={} end
 if userSettings.update==nil then local persisted=Adapter.loadUpdateSettings and Adapter.loadUpdateSettings(); if type(persisted)=="table" then userSettings.update=persisted end end
 do local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end
 local persistedMapper=Adapter.loadMapperSettings and Adapter.loadMapperSettings()
-if type(persistedMapper)=="table" then userSettings.mapper=type(userSettings.mapper)=="table" and userSettings.mapper or {}; for key,value in pairs(persistedMapper) do if userSettings.mapper[key]==nil then userSettings.mapper[key]=value end end end
+if type(persistedMapper)=="table" then
+  userSettings.mapper=type(userSettings.mapper)=="table" and userSettings.mapper or {}
+  for key,value in pairs(persistedMapper) do
+    if key=="transition_submaps" and type(value)=="table" then
+      userSettings.mapper.transition_submaps=type(userSettings.mapper.transition_submaps)=="table" and userSettings.mapper.transition_submaps or {}
+      for category,enabled in pairs(value) do userSettings.mapper.transition_submaps[category]=enabled==true end
+    elseif userSettings.mapper[key]==nil then userSettings.mapper[key]=value end
+  end
+end
 local persistedDisplay=Adapter.loadDisplaySettings and Adapter.loadDisplaySettings()
 if type(persistedDisplay)=="table" then userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}; for key,value in pairs(persistedDisplay) do userSettings.display[key]=value end end
 local persistedChat=Adapter.loadChatSettings and Adapter.loadChatSettings()

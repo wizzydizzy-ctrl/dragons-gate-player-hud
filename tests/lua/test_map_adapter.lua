@@ -356,7 +356,7 @@ test("fresh automapper retry places an owner-only special destination in its des
     if rejectProvisional and id==900 and key=="dghud.state" and value=="provisional" then return nil,"provisional state rejected" end
     return nativeUserData(id,key,value)
   end
-  local first=Automapper.new(Model,Adapter.new(api),function(kind,message) statuses[#statuses+1]={kind=kind,message=message} end)
+  local first=Automapper.new(Model,Adapter.new(api),function(kind,message) statuses[#statuses+1]={kind=kind,message=message} end,{other=true})
   assert(first:onRoom(gmcpRoom(100,1,"Outside")))
   assert(first:onSpecialTransition({from=100,to=900,command="go gate",kind="special"}))
   rejectProvisional=true
@@ -372,7 +372,7 @@ test("fresh automapper retry places an owner-only special destination in its des
   eq(stillInterrupted.area,-1); eq(stillInterrupted.coordinates.x,0); eq(stillInterrupted.coordinates.y,0); eq(stillInterrupted.coordinates.z,0)
   eq(first:currentRoom(),nil); eq(api.special[100],nil)
 
-  local retried=Automapper.new(Model,Adapter.new(api),function() end)
+  local retried=Automapper.new(Model,Adapter.new(api),function() end,{other=true})
   assert(retried:onRoom(gmcpRoom(100,1,"Outside")))
   assert(retried:onSpecialTransition({from=100,to=900,command="go gate",kind="special"}))
   assert(retried:onRoom(gmcpRoom(900,1,"Inside")))

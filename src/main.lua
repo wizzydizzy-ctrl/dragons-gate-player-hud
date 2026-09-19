@@ -548,7 +548,7 @@ function Main:configureMapper(values)
   for key,range in pairs(rules) do local n=tonumber(values[key]); if not n or n<range[1] or n>range[2] then return nil,key.." must be between "..range[1].." and "..range[2] end; candidate[key]=n end
   if candidate.zoom_min>=candidate.zoom_max then return nil,"maximum zoom must be greater than minimum zoom" end
   if candidate.maximum_height<candidate.minimum_height then return nil,"maximum map height must be at least the minimum height" end
-  candidate.enabled=values.enabled~=false; candidate.transition_submaps={}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do candidate.transition_submaps[key]=not (values.transition_submaps and values.transition_submaps[key]==false) end
+  candidate.enabled=values.enabled~=false; candidate.transition_submaps={}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do candidate.transition_submaps[key]=values.transition_submaps and values.transition_submaps[key]==true or false end
   if self.adapter.saveMapperSettings then local ok,err=self.adapter:saveMapperSettings(candidate); if not ok then return nil,"Could not save mapper settings: "..tostring(err) end end
   self.settings.mapper=candidate; local root=rawget(_G,"DGHUD"); if root then root.user_settings=root.user_settings or {}; root.user_settings.mapper=candidate end
   if self.automapper then self.automapper.transition_submaps=candidate.transition_submaps end; if self.special_transition then self.special_transition.timeout_seconds=candidate.special_timeout end; if self.walker then self.walker.timeout_seconds=candidate.walk_timeout end
