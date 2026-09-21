@@ -1,6 +1,14 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("input alignment is opt-in and saved choices survive settings resolution",function()
+  eq(defaults.display.align_input,false)
+  eq(Settings.resolve(defaults,{}).display.align_input,false)
+  local resolved=Settings.resolve(defaults,{display={align_input=true,auto_wrap=false}})
+  eq(resolved.display.align_input,true); eq(resolved.display.auto_wrap,false)
+  eq(Settings.resolve(defaults,resolved).display.align_input,true)
+end)
+
 test("chat visibility defaults on for fresh and legacy settings",function()
   eq(defaults.chat.visible,true)
   for _,user in ipairs({{}, {schema=0,chat={tab_order={"STAFF","ALL"},all_sources={COMBAT=false},personal_option="keep"}}, {schema=1,chat={timestamps=false}}}) do

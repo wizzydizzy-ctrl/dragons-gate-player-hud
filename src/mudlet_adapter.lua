@@ -231,6 +231,140 @@ function Adapter:setMainConsoleWrap(columns,api)
   if not ok or result==false then return nil,ok and "main-console wrap was rejected" or tostring(result) end
   return columns
 end
+local inputStyleLimit=262144
+-- A deliberately small data grammar: never execute a recovery file as Lua.
+-- Hex preserves arbitrary stylesheet bytes, including quotes and line endings.
+function Adapter.inputLayoutBaselineSource(baseline)
+  if type(baseline)~="table" or type(baseline.style)~="string" or #baseline.style>inputStyleLimit or type(baseline.compact_input)~="boolean" then return nil,"invalid main input baseline" end
+  local hex=baseline.style:gsub(".",function(byte) return string.format("%02x",string.byte(byte)) end)
+  return 'return {schema=1,compact_input='..tostring(baseline.compact_input)..',style_hex="'..hex..'"}\n'
+end
+function Adapter.parseInputLayoutBaseline(source)
+  if type(source)~="string" or #source>inputStyleLimit*2+100 then return nil,"invalid main input baseline file" end
+  local compact,hex=source:match('^return {schema=1,compact_input=(%a+),style_hex="([0-9a-f]*)"}\n$')
+  if (compact~="true" and compact~="false") or not hex or #hex%2~=0 or #hex>inputStyleLimit*2 then return nil,"invalid main input baseline file" end
+  return {compact_input=compact=="true",style=(hex:gsub("..",function(pair) return string.char(tonumber(pair,16)) end))}
+end
+local function inputBaselinePath(api)
+  if type(api.getMudletHomeDir)~="function" then return nil,"main input baseline profile directory is unavailable" end
+  local home=api.getMudletHomeDir()
+  if type(home)~="string" or home=="" then return nil,"main input baseline profile directory is unavailable" end
+  return Adapter.dataBase(home).."/input-layout-baseline.lua"
+end
+function Adapter.loadMainInputBaseline(api)
+  api=api or _G
+  local path,err=inputBaselinePath(api); if not path then return nil,err end
+  local file,openErr,code=(api.io or io).open(path,"rb")
+  if not file then if code==2 then return nil end; return nil,openErr or "could not read main input baseline" end
+  local source,readErr=file:read(inputStyleLimit*2+101); local closed,closeErr=file:close()
+  if not source then return nil,readErr or "empty main input baseline file" end
+  if not closed then return nil,closeErr or "could not close main input baseline" end
+  return Adapter.parseInputLayoutBaseline(source)
+end
+function Adapter.saveMainInputBaseline(baseline,api)
+  api=api or _G
+  -- An existing backup always wins: live settings may already be aligned after
+  -- a crash or package replacement. Never recapture those as the original.
+  local existing,loadErr=Adapter.loadMainInputBaseline(api)
+  if existing or loadErr then return existing,loadErr end
+  local source,sourceErr=Adapter.inputLayoutBaselineSource(baseline); if not source then return nil,sourceErr end
+  local path,pathErr=inputBaselinePath(api); if not path then return nil,pathErr end
+  local fs=api.lfs or lfs; if type(fs)~="table" then return nil,"main input baseline filesystem is unavailable" end
+  local base=path:match("^(.*)/[^/]+$")
+  if fs.attributes(base,"mode")~="directory" then local made,err=fs.mkdir(base); if not made then return nil,err or "could not create main input baseline directory" end end
+  local file,openErr=(api.io or io).open(path..".tmp","wb"); if not file then return nil,openErr end
+  local system=api.os or os
+  local wrote,writeErr=file:write(source); local closed,closeErr=file:close()
+  if not wrote or not closed then system.remove(path..".tmp"); return nil,writeErr or closeErr or "could not write main input baseline" end
+  local installed,installErr=system.rename(path..".tmp",path)
+  if not installed then system.remove(path..".tmp"); return nil,installErr or "could not install main input baseline" end
+  return {style=baseline.style,compact_input=baseline.compact_input}
+end
+local function readMainInput(api)
+  local style,styleErr=api.getCmdLineStyleSheet("main")
+  if type(style)~="string" then return nil,styleErr or "could not read main input stylesheet" end
+  local compact,compactErr=api.getConfig("compactInputLine")
+  if type(compact)~="boolean" then return nil,compactErr or "could not read compact input setting" end
+  return {style=style,compact_input=compact}
+end
+local function setInputValue(api,name,...)
+  local called,result,err=pcall(api[name],...)
+  if not called then return nil,name..": "..tostring(result) end
+  if result~=true then return nil,name..": "..tostring(err or "change was rejected") end
+  return true
+end
+local function applyMainInput(api,target,before)
+  local called,ok,err=pcall(function()
+    if before.compact_input~=target.compact_input then
+      local changed,why=setInputValue(api,"setConfig","compactInputLine",target.compact_input); if not changed then return nil,why end
+    end
+    -- Changing compact mode can itself alter the native widget's style.
+    if api.getCmdLineStyleSheet("main")~=target.style then
+      local changed,why=setInputValue(api,"setCmdLineStyleSheet","main",target.style); if not changed then return nil,why end
+    end
+    local after,why=readMainInput(api); if not after then return nil,why end
+    if after.style~=target.style or after.compact_input~=target.compact_input then return nil,"main input layout did not accept the change" end
+    return true
+  end)
+  if called and ok then return true end
+  local message=tostring(called and err or ok)
+  -- Even a throwing setter may have changed state. Keep the durable original
+  -- until an explicit successful OFF; roll this failed call back best-effort.
+  local compactOK,compactErr=setInputValue(api,"setConfig","compactInputLine",before.compact_input)
+  local styleOK,styleErr=setInputValue(api,"setCmdLineStyleSheet","main",before.style)
+  if not compactOK or not styleOK then message=message.."; rollback failed: "..tostring(compactErr or styleErr) end
+  return nil,message
+end
+function Adapter:setMainInputAlignment(enabled,layout,api,retainBaseline)
+  if type(enabled)~="boolean" then return nil,"main input alignment must be a boolean" end
+  -- Native setters can synchronously emit resize events. The outer operation
+  -- owns the change and verifies it before returning; nested layout calls defer.
+  if self._main_input_alignment_busy then return true end
+  api=api or _G
+  self._main_input_alignment_busy=true
+  local called,result,err=pcall(function()
+    local left,right
+    if enabled then
+      left=type(layout)=="table" and tonumber(layout.console_left); right=type(layout)=="table" and tonumber(layout.console_right)
+      if not left or not right or left~=left or right~=right or left<0 or right<0 or left==math.huge or right==math.huge then return nil,"main input alignment requires finite nonnegative console margins" end
+      left=math.floor(left+.5); right=math.floor(right+.5)
+    end
+    local baseline=self._main_input_baseline
+    if not self._main_input_baseline_loaded then
+      local loadErr; baseline,loadErr=Adapter.loadMainInputBaseline(api)
+      if loadErr then return nil,loadErr end
+      self._main_input_baseline=baseline
+      self._main_input_baseline_loaded=true
+    end
+    -- A saved recovery record counts as ownership, even in a new runtime.
+    if not enabled and not baseline then return true end
+    for _,name in ipairs({"getCmdLineStyleSheet","setCmdLineStyleSheet","getConfig","setConfig"}) do
+      if type(api[name])~="function" then return nil,"main input alignment API "..name.." is unavailable" end
+    end
+    local before,readErr=readMainInput(api); if not before then return nil,readErr end
+    if not baseline then
+      local saveErr; baseline,saveErr=Adapter.saveMainInputBaseline(before,api)
+      if not baseline then return nil,saveErr end
+      self._main_input_baseline=baseline
+    end
+    local target=baseline
+    if enabled then target={compact_input=true,style=baseline.style..string.format("\nQPlainTextEdit { margin-left:%.0fpx; margin-right:%.0fpx; }",left,right)} end
+    local applied,applyErr=applyMainInput(api,target,before); if not applied then return nil,applyErr end
+    -- A settings transaction can restore the native layout before committing
+    -- OFF to disk. Keep both originals until it commits, so a failed settings
+    -- save can re-enable alignment without needing another filesystem write.
+    if not enabled and retainBaseline~=true then
+      local path,pathErr=inputBaselinePath(api); if not path then return nil,pathErr end
+      local removed,removeErr,code=(api.os or os).remove(path)
+      if not removed and code~=2 then return nil,removeErr or "could not remove restored main input baseline" end
+      self._main_input_baseline=nil
+    end
+    return true
+  end)
+  self._main_input_alignment_busy=nil
+  if not called then return nil,"main input alignment failed: "..tostring(result) end
+  return result,err
+end
 function Adapter:suppressDefaultMapInfo(api)
   api=api or _G
   if type(api.disableMapInfo)~="function" then return true end
@@ -666,13 +800,15 @@ function Adapter.displaySettingsSnapshot(config)
   if not scale or scale<.8 or scale>1.2 then return nil,"HUD text scale must be between 0.8 and 1.2" end
   local autoWrap=config.auto_wrap
   if autoWrap==nil then autoWrap=true elseif type(autoWrap)~="boolean" then return nil,"automatic main-window wrap must be a boolean" end
-  return {side_text_scale=scale,auto_wrap=autoWrap}
+  local alignInput=config.align_input
+  if alignInput==nil then alignInput=false elseif type(alignInput)~="boolean" then return nil,"main input alignment must be a boolean" end
+  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput}
 end
 function Adapter:saveDisplaySettings(config)
   local snapshot,snapshotErr=Adapter.displaySettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
   local base=Adapter.dataBase(); lfs.mkdir(base); local destination=displaySettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
-  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true

@@ -86,6 +86,12 @@ The setting is saved and survives updates.
 
 Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap manually. Once it is off, DGHUD stops changing that value during resizing, reloads, and updates. Set your preferred wrap normally in Mudlet's profile preferences; the OFF choice is saved outside the package and survives updates.
 
+## Align command input
+
+Turn **OPTIONS → ALIGN INPUT: ON** to line up the command input with both edges of the main game display. It follows the window as you resize it. The default is **OFF**, and your choice survives updates and restarts independently of automatic word wrap.
+
+This keeps Mudlet's native input, command history, current draft, and aliases. While enabled, Mudlet's compact-input mode hides its bottom search/status controls to make room. Turn the option **OFF** to restore the prior input styling and controls. Requires Mudlet 5.0 or newer.
+
 ## Color Settings
 
 **COLOR SETTINGS** opens individual toggles for room titles, exits, currency, races, professions, travel objects, combat warnings, recovery, spell threats, discoveries, and illumination.

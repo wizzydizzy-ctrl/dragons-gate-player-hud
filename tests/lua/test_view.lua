@@ -408,7 +408,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,notice=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,11); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,12); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -419,6 +419,59 @@ test("color options menu exposes current and future feature toggles",function()
   view.color_option_buttons.exits.click(); eq(calls[#calls].key,"exits"); eq(calls[#calls].value,true); eq(view.color_settings_visible,true)
   view.color_option_buttons.damage.click(); eq(calls[#calls].key,"damage"); eq(calls[#calls].value,false)
   view.color_option_buttons.enabled.click(); eq(calls[#calls].key,"enabled"); eq(view.color_enabled,false)
+end)
+
+test("main input alignment defaults off immediately after automatic main wrap",function()
+  local view=chatView(); local button=view.option_action_buttons.align_main_input
+  eq(view.main_input_aligned,false); eq(button.option_text,"ALIGN INPUT: OFF")
+  eq(button.tooltip,"Align input with main display. Temporarily hides Mudlet's bottom search/status controls while enabled. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
+  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,text_size,auto_main_wrap,align_main_input,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
+  view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
+  eq(button.visible,true); assert(button.message:find("ALIGN INPUT: OFF",1,true))
+  local wrap=view.option_action_buttons.auto_main_wrap
+  eq(button.y,wrap.y+wrap.height)
+end)
+
+test("main input alignment setter refreshes hidden and open menus independently of wrap",function()
+  local view=chatView(); local button=view.option_action_buttons.align_main_input
+  view:setMainConsoleAutoWrap(false)
+  eq(view:setMainInputAligned(true),true); eq(view.main_input_aligned,true)
+  eq(button.option_text,"ALIGN INPUT: ON"); eq(view.color_menu_visible,false)
+  view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
+  assert(button.message:find("ALIGN INPUT: ON",1,true))
+  eq(view:setMainInputAligned(false),false); eq(view.main_input_aligned,false)
+  assert(button.message:find("ALIGN INPUT: OFF",1,true)); eq(view.color_menu_visible,true)
+  eq(view.main_console_auto_wrap,false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF")
+  local tooltip=button.tooltip
+  view:setMainInputAligned(true); view:applyLayout(require("layout").compute(320,260))
+  assert(button.message:find("ALIGN INPUT: ON",1,true)); eq(button.tooltip,tooltip)
+end)
+
+test("main input alignment clicks delegate toggling to the options callback",function()
+  local view=chatView(); local calls={}; local aligned=false
+  view:setOptionsActionCallback(function(action,...)
+    calls[#calls+1]=action; eq(select("#",...),0); eq(view.color_menu_visible,false)
+    aligned=not aligned; return view:setMainInputAligned(aligned)
+  end)
+  view:applyLayout(require("layout").compute(1200,800))
+  for _,wanted in ipairs({true,false}) do
+    view.color_toggle.click(); eq(view.option_action_buttons.align_main_input.click(),wanted)
+    eq(calls[#calls],"align_main_input"); eq(view.main_input_aligned,wanted)
+    view.color_toggle.click(); assert(view.option_action_buttons.align_main_input.message:find(wanted and "ALIGN INPUT: ON" or "ALIGN INPUT: OFF",1,true))
+    view.color_toggle.click()
+  end
+  eq(#calls,2)
+end)
+
+test("main input alignment keeps its state when the options action is unavailable or fails",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
+  local ok,err=view.option_action_buttons.align_main_input.click()
+  eq(ok,nil); eq(err,"options action is unavailable"); eq(view.main_input_aligned,false)
+  view:setMainInputAligned(true)
+  view:setOptionsActionCallback(function(action) eq(action,"align_main_input"); return nil,"Could not save alignment" end)
+  view.color_toggle.click(); ok,err=view.option_action_buttons.align_main_input.click()
+  eq(ok,nil); eq(err,"Could not save alignment"); eq(view.main_input_aligned,true)
+  eq(view.option_action_buttons.align_main_input.option_text,"ALIGN INPUT: ON")
 end)
 
 test("chat settings separates visible clearing from confirmed saved-history deletion",function()
@@ -459,7 +512,15 @@ test("open options menu remains flush left through responsive resizing",function
     local layout=require("layout").compute(size[1],size[2]); view:applyLayout(layout)
     eq(view.color_menu_visible,true); eq(view.color_menu.x,0)
     eq(view.color_menu.x>=0,true); eq(view.color_menu.y+view.color_menu.height<=size[2],true)
-    for _,key in ipairs(view.option_action_order) do local button=view.option_action_buttons[key]; eq(button.x>=0,true); eq(button.x+button.width<=view.options_scroll.width,true) end
+    local bottom=0
+    for _,key in ipairs(view.option_action_order) do
+      local button=view.option_action_buttons[key]
+      eq(button.parent,view.options_scroll); eq(button.visible,true)
+      eq(button.x>=0,true); eq(button.x+button.width<=view.options_scroll.width,true)
+      eq(button.y,bottom); eq(button.height>=30,true); bottom=button.y+button.height
+    end
+    eq(view.options_scroll.content_height,bottom)
+    if size[2]<=120 then eq(view.options_scroll.content_height>view.options_scroll.height,true) end
   end
 end)
 

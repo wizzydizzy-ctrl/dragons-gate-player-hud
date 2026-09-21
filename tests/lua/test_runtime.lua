@@ -15,6 +15,13 @@ local function fake()
     return math.max(1,math.floor((pixelWidth-(allowance or 0))/10))
   end
   function f:setMainConsoleWrap(columns) if self.main_wrap_columns~=columns then self.main_wrap_columns=columns; self.main_wrap_sets=(self.main_wrap_sets or 0)+1 end; return columns end
+  function f:setMainInputAlignment(enabled,layout,api,retainBaseline)
+    if self.failInputAlignment then return nil,self.failInputAlignment end
+    self.retainedInputBaseline=retainBaseline==true
+    self.inputAligned=enabled
+    if enabled then self.inputLeft=layout.console_left; self.inputRight=layout.console_right; self.inputWidth=layout.console_width end
+    return true
+  end
   function f:createView(settings) f.viewCreates=(f.viewCreates or 0)+1; local view={root={},view_contract=settings and settings.view_contract,view_settings_contract=settings and settings.view_settings_contract,
     validateReusable=function(self,candidateSettings) return self.view_contract==candidateSettings.view_contract and self.view_settings_contract==candidateSettings.view_settings_contract end,
     update=function(self,state) self.state=state; f.viewUpdates=(f.viewUpdates or 0)+1 end,
@@ -28,6 +35,7 @@ local function fake()
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
     setOptionsActionCallback=function(self,callback) f.optionsActionCallback=callback end,
+    setMainInputAligned=function(self,enabled) f.viewInputAligned=enabled end,
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
@@ -106,7 +114,7 @@ local function fake()
   function f:sendCommand(command) self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command; return true end
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
-  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings={side_text_scale=config.side_text_scale,auto_wrap=config.auto_wrap}; return true end
+  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings={side_text_scale=config.side_text_scale,auto_wrap=config.auto_wrap,align_input=config.align_input}; return true end
   function f:saveChatSettings(config)
     self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1
     if self.onChatSettingsSave then self.onChatSettingsSave(config) end
@@ -476,6 +484,65 @@ end)
 test("failed automatic wrap persistence leaves the active mode unchanged",function()
   local f=fake(); local hud=Main.new(f,{layout={},display={side_text_scale=1,auto_wrap=true}}); assert(hud:start()); f.failDisplaySettingsSave="disk full"; local before=f.main_wrap_columns
   local ok,err=hud:setMainConsoleAutoWrap(false); eq(ok,nil); assert(err:find("disk full",1,true)); eq(hud:mainConsoleAutoWrapEnabled(),true); eq(f.main_wrap_columns,before)
+end)
+
+test("input alignment defaults off and options toggles it persistently",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  eq(hud:mainInputAligned(),false); eq(f.viewInputAligned,false); eq(f.inputAligned,false)
+  eq(f.optionsActionCallback("align_main_input"),true); eq(f.savedDisplaySettings.align_input,true); eq(f.viewInputAligned,true)
+  eq(f.inputLeft,hud.current_layout.console_left); eq(f.inputRight,hud.current_layout.console_right)
+  assert(hud:setDisplayTextSize("small")); eq(f.savedDisplaySettings.align_input,true)
+  eq(hud:setMainConsoleAutoWrap(false),false); eq(f.savedDisplaySettings.align_input,true)
+  assert(hud:reload()); eq(f.inputAligned,true); eq(f.viewInputAligned,true)
+  local cold=Main.new(fake(),{layout={},display=f.savedDisplaySettings}); assert(cold:start()); eq(cold:mainInputAligned(),true); cold:shutdown()
+  eq(f.optionsActionCallback("align_main_input"),false); eq(f.savedDisplaySettings.align_input,false); eq(f.inputAligned,false); eq(f.viewInputAligned,false)
+  hud:shutdown(); eq(f.inputAligned,false)
+end)
+
+test("native input alignment follows console gutters at responsive breakpoints",function()
+  local f=fake(); local hud=Main.new(f,{layout={},display={align_input=true}}); assert(hud:start())
+  for _,size in ipairs({{1920,1080},{1400,900},{1399,900},{800,600},{799,600},{2560,1440}}) do
+    f.width,f.height=size[1],size[2]; f.callbacks.sysWindowResizeEvent()
+    eq(f.inputLeft,hud.current_layout.console_left); eq(f.inputRight,hud.current_layout.console_right); eq(f.inputWidth,hud.current_layout.console_width)
+  end
+  hud.update_handoff=true; hud.update_preserve_view=true; hud:shutdown(); eq(f.inputAligned,false)
+end)
+
+test("failed input alignment persistence and native API leave previous choice intact",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  f.failDisplaySettingsSave="disk full"; local ok,err=hud:setMainInputAligned(true)
+  eq(ok,nil); assert(err:find("disk full",1,true)); eq(hud:mainInputAligned(),false); eq(f.inputAligned,false); eq(f.viewInputAligned,false)
+  f.failDisplaySettingsSave=nil; assert(hud:setMainInputAligned(true))
+  f.failDisplaySettingsSave="disk full"; eq(hud:setMainInputAligned(false),nil); eq(hud:mainInputAligned(),true); eq(f.inputAligned,true)
+  f.failDisplaySettingsSave=nil; eq(hud:setMainInputAligned(false),false)
+  f.failInputAlignment="unsupported"; ok,err=hud:setMainInputAligned(true); eq(ok,nil); assert(err:find("unsupported",1,true)); eq(hud:mainInputAligned(),false)
+  eq(hud:setMainInputAligned("on"),nil)
+end)
+
+test("unsupported input alignment never prevents default HUD startup",function()
+  local f=fake(); f.setMainInputAlignment=false; local hud=Main.new(f,{layout={}}); assert(hud:start()); eq(hud:healthCheck(),true)
+  local ok,err=hud:setMainInputAligned(true); eq(ok,nil); assert(err:find("Mudlet 5.0",1,true)); eq(hud:mainInputAligned(),false); hud:shutdown()
+end)
+
+test("input restore is scoped to HUD uninstall and stays restored through resize",function()
+  local f=fake(); local hud=Main.new(f,{package_name="DragonsGateHUD",layout={},display={align_input=true}}); assert(hud:start())
+  f.callbacks.sysUninstallPackage("sysUninstallPackage","MyPersonalPackage"); eq(f.inputAligned,true)
+  f.callbacks.sysUninstallPackage("sysUninstallPackage","DragonsGateHUD"); eq(f.inputAligned,false); eq(hud:mainInputAligned(),true)
+  f.callbacks.sysWindowResizeEvent(); eq(f.inputAligned,false)
+  assert(hud:reload()); eq(f.inputAligned,true)
+end)
+
+test("input shutdown restoration failures are reported without blocking cleanup",function()
+  local f=fake(); local hud=Main.new(f,{layout={},display={align_input=true}}); assert(hud:start()); f.failInputAlignment="native restore refused"
+  assert(hud:shutdown()); eq(hud.started,false); eq(f:count(f.events),0); eq(f:count(f.aliases),0)
+  assert(f.commandErrors[#f.commandErrors]:find("Could not restore native input",1,true)); assert(f.commandErrors[#f.commandErrors]:find("retained for recovery",1,true))
+end)
+
+test("input OFF retains rollback baseline until preference save commits",function()
+  local f=fake(); local hud=Main.new(f,{layout={},display={align_input=true}}); assert(hud:start())
+  local save=f.saveDisplaySettings
+  function f:saveDisplaySettings(config) eq(self.retainedInputBaseline,true); return save(self,config) end
+  eq(hud:setMainInputAligned(false),false); eq(f.retainedInputBaseline,false); eq(f.inputAligned,false)
 end)
 
 test("Mudlet cleanup adapter contains refresh exceptions and creates opaque tokens from secure bytes",function()

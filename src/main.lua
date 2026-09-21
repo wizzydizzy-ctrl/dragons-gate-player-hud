@@ -283,7 +283,7 @@ function Main:setDisplayTextSize(action)
   local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
   if action=="status" or action=="" then if self.view and self.view.setDisplayTextSize then self.view:setDisplayTextSize(current) end; if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(current:gsub("^%l",string.upper)) end; return current end
   local scale=displayTextPresets[action]; if not scale then return failed("Usage: dghud text [small|normal|large|status]") end
-  local candidate={side_text_scale=scale,auto_wrap=not (self.settings.display and self.settings.display.auto_wrap==false)}
+  local candidate={side_text_scale=scale,auto_wrap=not (self.settings.display and self.settings.display.auto_wrap==false),align_input=self:mainInputAligned()}
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return failed("Could not save HUD text size: "..tostring(err)) end end
   self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}; self.settings.display.side_text_scale=scale
   local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.side_text_scale=scale end
@@ -300,7 +300,7 @@ function Main:setMainConsoleAutoWrap(enabled)
   local current=self:mainConsoleAutoWrapEnabled()
   if current==enabled then return enabled end
   local display=self.settings.display or {}
-  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=enabled}
+  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=enabled,align_input=self:mainInputAligned()}
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return nil,"Could not save automatic main-window wrap: "..tostring(err) end end
   if enabled and self.adapter.getMainConsoleWrap then
     local read,value=pcall(self.adapter.getMainConsoleWrap,self.adapter)
@@ -314,6 +314,45 @@ function Main:setMainConsoleAutoWrap(enabled)
     self.main_console_wrap_columns=nil
   end
   if self.view and self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(enabled) end
+  self:applyResponsiveLayout(self.last_state)
+  return enabled
+end
+function Main:mainInputAligned()
+  return self.settings.display and self.settings.display.align_input==true or false
+end
+function Main:applyMainInputAlignment(enabled,layout,retainBaseline)
+  if not self.adapter.setMainInputAlignment then
+    if enabled then return nil,"Input alignment requires Mudlet 5.0 or newer." end
+    return true
+  end
+  local called,applied,err=pcall(self.adapter.setMainInputAlignment,self.adapter,enabled,layout or self.current_layout,nil,retainBaseline)
+  if not called then return nil,tostring(applied) end
+  return applied,err
+end
+function Main:setMainInputAligned(enabled)
+  local function failed(message)
+    if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end
+    return nil,message
+  end
+  if type(enabled)~="boolean" then return failed("input alignment must be a boolean") end
+  local current=self:mainInputAligned()
+  if enabled==current then return enabled end
+  local applied,err=self:applyMainInputAlignment(enabled,nil,not enabled)
+  if not applied then return failed("Could not align input: "..tostring(err)) end
+  local display=self.settings.display or {}
+  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=enabled}
+  if self.adapter.saveDisplaySettings then
+    local saved,saveErr=self.adapter:saveDisplaySettings(candidate)
+    if not saved then
+      local restored,restoreErr=self:applyMainInputAlignment(current)
+      return failed("Could not save input alignment: "..tostring(saveErr)..(restored and "" or "; could not restore previous input: "..tostring(restoreErr)))
+    end
+  end
+  self.settings.display=display; display.align_input=enabled
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.align_input=enabled end
+  self.input_alignment_error=nil
+  if self.view and self.view.setMainInputAligned then self.view:setMainInputAligned(enabled) end
   self:applyResponsiveLayout(self.last_state)
   return enabled
 end
@@ -507,6 +546,11 @@ function Main:applyResponsiveLayout(state)
   local width,height=self.adapter:getWindowSize(); local layout=Layout.compute(width,height,self.settings.chat,self.settings.mapper,vitals,self.settings.display); self.current_layout=layout
   self.layout_vitals_signature=((vitals and vitals.psi and vitals.psi.visible) and "1" or "0")..((vitals and vitals.web and vitals.web.visible) and "1" or "0")
   self.adapter:setBorders(layout.console_left or layout.left,layout.top,layout.console_right or layout.right,layout.bottom)
+  local aligned,alignmentErr=self:applyMainInputAlignment(self:mainInputAligned() and not self.input_alignment_suspended,layout)
+  if not aligned and alignmentErr~=self.input_alignment_error then
+    self.input_alignment_error=alignmentErr
+    if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,"Input alignment: "..tostring(alignmentErr)) end
+  elseif aligned then self.input_alignment_error=nil end
   -- Mudlet stores main-console wrapping as a fixed profile column count.
   -- Recompute it from the actual center display on every responsive layout
   -- pass so profiles with different legacy wrapAt values behave identically.
@@ -919,6 +963,7 @@ function Main:removeMapClickHook()
 end
 function Main:start()
   if self.started then return true end
+  self.input_alignment_suspended=false
   if self.original_main_console_wrap==nil and self.adapter.getMainConsoleWrap then
     local read,current=pcall(self.adapter.getMainConsoleWrap,self.adapter)
     if read and tonumber(current) and tonumber(current)>=1 then self.original_main_console_wrap=math.floor(tonumber(current)) end
@@ -1052,6 +1097,7 @@ function Main:start()
       return self:setDisplayTextSize(({small="normal",normal="large",large="small"})[current])
     end
     if action=="auto_main_wrap" then return self:setMainConsoleAutoWrap(not self:mainConsoleAutoWrapEnabled()) end
+    if action=="align_main_input" then return self:setMainInputAligned(not self:mainInputAligned()) end
     local command=({roller_start="start",roller_stop="stop",roller_status="status",roller_show="show",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
@@ -1060,6 +1106,7 @@ function Main:start()
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
   if self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(self:mainConsoleAutoWrapEnabled()) end
+  if self.view.setMainInputAligned then self.view:setMainInputAligned(self:mainInputAligned()) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
@@ -1177,6 +1224,10 @@ function Main:start()
   end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.disconnect,function() self.character_entry_started=false; self.character_entry_name=nil; if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end; self:callSpecialTransition("cancel","disconnect"); self.automapper:onDisconnect(); self.walker:stop("disconnected") end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysWindowResizeEvent",function() self:applyResponsiveLayout() end)
+  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysUninstallPackage",function(_,packageName)
+    if packageName~=(self.settings.package_name or "DragonsGateHUD") then return end
+    self:restoreMainInputAlignment()
+  end)
   local function aliasArgument(value) if type(value)=="table" then return value[2] end; return value or (type(_G.matches)=="table" and _G.matches[2]) end
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
@@ -1259,7 +1310,18 @@ function Main:start()
   if not startupOk then pcall(function() self:shutdown() end); return nil,startupErr end
   return true
 end
+function Main:restoreMainInputAlignment()
+  self.input_alignment_suspended=true
+  local restored,err=self:applyMainInputAlignment(false)
+  if not restored and self.adapter.reportCommandError then
+    pcall(self.adapter.reportCommandError,self.adapter,"Could not restore native input: "..tostring(err)..". Its original settings are retained for recovery.")
+  end
+  return restored,err
+end
 function Main:shutdown()
+  -- Restore the existing native input, including its stylesheet and utility
+  -- controls, even during replacement. Never replace its history or draft.
+  self:restoreMainInputAlignment()
   -- Package replacement does not alter Mudlet's native map.  Serializing and
   -- hashing that map here can take several seconds (or much longer for large
   -- maps), while the newly installed HUD is waiting to activate.  Defer the

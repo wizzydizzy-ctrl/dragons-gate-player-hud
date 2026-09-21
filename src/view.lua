@@ -324,7 +324,7 @@ function View:renderVersion()
   return true
 end
 function View.new(settings)
-  local self=setmetatable({settings=settings,geyser=Geyser,direction_buttons={},utility_buttons={},exit_available={}},View); local t=settings.theme
+  local self=setmetatable({settings=settings,geyser=Geyser,direction_buttons={},utility_buttons={},exit_available={},main_input_aligned=false},View); local t=settings.theme
   self.view_contract=settings.view_contract
   self.view_settings_contract=settings.view_settings_contract
   local available={}; if type(rawget(_G,"getAvailableFonts"))=="function" then local ok,value=pcall(getAvailableFonts); if ok and type(value)=="table" then available=value end end
@@ -352,10 +352,12 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","refresh_data","auto_update","text_size","auto_main_wrap","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","refresh_data","auto_update","text_size","auto_main_wrap","align_main_input","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
+  local alignInputButton=self.option_action_buttons.align_main_input
+  if alignInputButton.setToolTip then pcall(alignInputButton.setToolTip,alignInputButton,"Align input with main display. Temporarily hides Mudlet's bottom search/status controls while enabled. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference.") end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
   self.color_toggle:setClickCallback(function() return self:setColorMenuVisible(not self.color_menu_visible) end)
   self.color_menu_scrim:setClickCallback(function() return self:setColorMenuVisible(false) end)
@@ -1306,6 +1308,13 @@ function View:setMainConsoleAutoWrap(enabled)
   if button then button.option_text="AUTO MAIN WRAP: "..(self.main_console_auto_wrap and "ON" or "OFF") end
   if self.color_menu_visible then self:renderColorOptions() end
   return self.main_console_auto_wrap
+end
+function View:setMainInputAligned(enabled)
+  self.main_input_aligned=enabled==true
+  local button=self.option_action_buttons and self.option_action_buttons.align_main_input
+  if button then button.option_text="ALIGN INPUT: "..(self.main_input_aligned and "ON" or "OFF") end
+  if self.color_menu_visible then self:renderColorOptions() end
+  return self.main_input_aligned
 end
 function View:setFeedbackCallback(callback) self.feedback_callback=type(callback)=="function" and callback or nil; return true end
 function View:setCopyTextCallback(callback) self.copy_text_callback=type(callback)=="function" and callback or nil; return true end
