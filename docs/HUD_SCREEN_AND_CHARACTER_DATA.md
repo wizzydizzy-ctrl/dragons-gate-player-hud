@@ -21,9 +21,9 @@ Enter `time` whenever you want to resynchronize it.
 
 ## Main display and command input
 
-In **OPTIONS**, **ALIGN INPUT: OFF** appears immediately after **AUTO MAIN WRAP**. Its tooltip begins **Align input with main display** and explains the temporary change to Mudlet's bottom controls. Input alignment is optional and off by default; click the row to turn it on or off. When on, Mudlet's main command input aligns with both edges of the main display.
+In **OPTIONS**, **ALIGN INPUT: OFF** appears immediately after **AUTO MAIN WRAP**. Its tooltip describes **Align input with main display (left edge only)**. Input alignment is optional and off by default; click the row to turn it on or off. When on, Mudlet's main command input follows the main display's left edge as the window is resized. The input ends before the native Search and status controls, which stay visible together on the right. Search remains on the right; the input is not aligned to the full width of the main display.
 
-Alignment temporarily enables Mudlet's compact input mode, hiding the bottom search/status controls. Your normal native command input remains available with the same draft, command history, and alias behavior. Turning alignment **OFF** restores the previous input stylesheet and compact-input preference, so the search/status controls return to their previous visibility.
+Your normal native command input remains available with the same draft, command history, and alias behavior. Turning alignment **OFF** restores the previous input stylesheet and compact-input preference, so the Search and status controls return to their previous visibility. Your alignment choice survives updates and restarts.
 
 Input alignment is independent of **AUTO MAIN WRAP**, which controls line wrapping in the main display.
 

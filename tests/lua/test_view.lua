@@ -424,7 +424,7 @@ end)
 test("main input alignment defaults off immediately after automatic main wrap",function()
   local view=chatView(); local button=view.option_action_buttons.align_main_input
   eq(view.main_input_aligned,false); eq(button.option_text,"ALIGN INPUT: OFF")
-  eq(button.tooltip,"Align input with main display. Temporarily hides Mudlet's bottom search/status controls while enabled. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
+  eq(button.tooltip,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
   eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,text_size,auto_main_wrap,align_main_input,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(button.visible,true); assert(button.message:find("ALIGN INPUT: OFF",1,true))

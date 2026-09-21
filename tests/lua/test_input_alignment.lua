@@ -1,7 +1,7 @@
 local Adapter=require("mudlet_adapter")
 local margins={console_left=212,console_right=284}
-local function aligned(style,left,right)
-  return style..string.format("\nQPlainTextEdit { margin-left:%dpx; margin-right:%dpx; }",left,right)
+local function aligned(style,left)
+  return style..string.format("\nQPlainTextEdit { margin-left:%dpx; }",left)
 end
 local function fakeInput(compact,style)
   local h={files={},path="/profile/DGHUDData/input-layout-baseline.lua",style=style or "QPlainTextEdit { color: #abcdef; }",compact=compact==true,calls={},writes=0,renames=0,removes=0,reads=0}
@@ -92,34 +92,74 @@ test("main input OFF without ownership performs no mutations or native calls",fu
 end)
 
 test("main input ON persists original before mutation and resizes without accumulating CSS",function()
-  local h=fakeInput(); local original=h.style; local adapter=Adapter.new()
-  h.onSet=function() local backup=assert(Adapter.parseInputLayoutBaseline(h.files[h.path])); eq(backup.style,original); eq(backup.compact_input,false) end
+  local h=fakeInput(true); local original=h.style; local adapter=Adapter.new()
+  h.onSet=function() local backup=assert(Adapter.parseInputLayoutBaseline(h.files[h.path])); eq(backup.style,original); eq(backup.compact_input,true) end
   eq(adapter:setMainInputAlignment(true,margins,h.api),true)
-  eq(h.style,aligned(original,212,284)); eq(h.compact,true); eq(h.writes,1); eq(h.renames,1); eq(h.files[h.path..".tmp"],nil)
+  eq(h.style,aligned(original,212)); eq(h.compact,false); eq(h.writes,1); eq(h.renames,1); eq(h.files[h.path..".tmp"],nil)
+  eq(h.calls[1][1],"compact"); eq(h.calls[1][2],false)
   local calls=#h.calls
   local reads=h.reads
   eq(adapter:setMainInputAlignment(true,margins,h.api),true); eq(#h.calls,calls); eq(h.reads,reads)
-  eq(adapter:setMainInputAlignment(true,{console_left=0,console_right=0},h.api),true)
-  eq(h.style,aligned(original,0,0)); eq(h.writes,1)
-  eq(adapter:setMainInputAlignment(false,nil,h.api),true); eq(h.style,original); eq(h.compact,false); eq(h.files[h.path],nil)
+  eq(adapter:setMainInputAlignment(true,{console_left=0},h.api),true)
+  eq(h.style,aligned(original,0)); eq(h.writes,1)
+  eq(adapter:setMainInputAlignment(false,nil,h.api),true); eq(h.style,original); eq(h.compact,true); eq(h.files[h.path],nil)
   calls=#h.calls; reads=h.reads; eq(adapter:setMainInputAlignment(false,nil,h.api),true); eq(#h.calls,calls); eq(h.reads,reads)
 end)
 
 test("main input restores original compact true and recaptures after a completed OFF",function()
   local h=fakeInput(true,""); local adapter=Adapter.new()
-  assert(adapter:setMainInputAlignment(true,margins,h.api)); assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,""); eq(h.compact,true)
+  assert(adapter:setMainInputAlignment(true,margins,h.api)); eq(h.compact,false); assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,""); eq(h.compact,true)
   h.style="new personal style"; h.compact=false
   assert(adapter:setMainInputAlignment(true,margins,h.api)); assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,"new personal style"); eq(h.compact,false)
 end)
 
 test("main input recovers ORIGINAL after restart whether startup is ON or OFF",function()
-  for _,resume in ipairs({true,false}) do
-    local h=fakeInput(); local original=h.style
-    assert(Adapter.new():setMainInputAlignment(true,margins,h.api)); local backup=h.files[h.path]
-    local restarted=Adapter.new()
-    eq(restarted:setMainInputAlignment(resume,margins,h.api),true)
-    if resume then eq(h.files[h.path],backup); eq(h.writes,1); assert(restarted:setMainInputAlignment(false,nil,h.api)) end
-    eq(h.style,original); eq(h.compact,false); eq(h.files[h.path],nil)
+  for _,originalCompact in ipairs({true,false}) do
+    for _,resume in ipairs({true,false}) do
+      local h=fakeInput(originalCompact); local original=h.style
+      assert(Adapter.new():setMainInputAlignment(true,margins,h.api)); local backup=h.files[h.path]; eq(h.compact,false)
+      local restarted=Adapter.new()
+      eq(restarted:setMainInputAlignment(resume,margins,h.api),true)
+      if resume then eq(h.compact,false); eq(h.files[h.path],backup); eq(h.writes,1); assert(restarted:setMainInputAlignment(false,nil,h.api)) end
+      eq(h.style,original); eq(h.compact,originalCompact); eq(h.files[h.path],nil)
+    end
+  end
+end)
+
+test("left-only input alignment ignores the right margin and retains native noncompact mode",function()
+  local h=fakeInput(false,"QPlainTextEdit { color: #abcdef; margin-right:9px; }"); local original=h.style; local adapter=Adapter.new()
+  assert(adapter:setMainInputAlignment(true,{console_left=212},h.api))
+  eq(h.style,aligned(original,212)); eq(h.compact,false); eq(#h.calls,1); eq(h.calls[1][1],"style")
+  local reads,writes=h.reads,h.writes
+  for _,right in ipairs({0,999,-1,math.huge,0/0,false,"ignored",{}}) do
+    eq(adapter:setMainInputAlignment(true,{console_left=212,console_right=right},h.api),true)
+    eq(h.style,aligned(original,212)); eq(h.compact,false); eq(#h.calls,1)
+  end
+  local leftOnly=setmetatable({console_left=212},{__index=function(_,key) error("unexpected layout read: "..tostring(key)) end})
+  assert(adapter:setMainInputAlignment(true,leftOnly,h.api)); eq(#h.calls,1); eq(h.reads,reads); eq(h.writes,writes)
+  assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,false)
+end)
+
+test("persisted v0.3.58 two-margin compact input migrates using the ORIGINAL backup",function()
+  for _,originalCompact in ipairs({true,false}) do
+    for _,resume in ipairs({true,false}) do
+      local original="QPlainTextEdit { color: #abcdef; }"
+      local legacyStyle=original.."\nQPlainTextEdit { margin-left:212px; margin-right:284px; }"
+      local h=fakeInput(true,legacyStyle)
+      -- Model a crash while v0.3.58 was aligned: native state persists, and
+      -- its existing recovery file contains the pre-alignment original.
+      local backup=assert(Adapter.inputLayoutBaselineSource({style=original,compact_input=originalCompact}))
+      h.files[h.path]=backup
+      local adapter=Adapter.new()
+      eq(adapter:setMainInputAlignment(resume,{console_left=190},h.api),true)
+      if resume then
+        eq(h.style,aligned(original,190)); eq(h.style:find("margin-right",1,true),nil); eq(h.compact,false)
+        eq(h.files[h.path],backup); eq(h.writes,0); eq(h.renames,0); eq(h.removes,0)
+        local calls=#h.calls; assert(adapter:setMainInputAlignment(true,{console_left=190,console_right=999},h.api)); eq(#h.calls,calls)
+        assert(adapter:setMainInputAlignment(false,nil,h.api))
+      end
+      eq(h.style,original); eq(h.compact,originalCompact); eq(h.files[h.path],nil); eq(h.writes,0); eq(h.renames,0)
+    end
   end
 end)
 
@@ -155,12 +195,12 @@ test("main input never mutates native state if atomic backup creation fails",fun
   end
 end)
 
-test("main input requires valid native getters setters and finite layout",function()
+test("main input requires valid native getters setters and a finite nonnegative left margin",function()
   for _,name in ipairs({"getCmdLineStyleSheet","getConfig","setCmdLineStyleSheet","setConfig"}) do
     local h=fakeInput(); h.api[name]=nil
     local result,err=Adapter.new():setMainInputAlignment(true,margins,h.api); eq(result,nil); assert(err:find(name,1,true)); eq(#h.calls,0); eq(h.writes,0)
   end
-  for _,layout in ipairs({{}, {console_left=-1,console_right=2}, {console_left=0/0,console_right=0}, {console_left=math.huge,console_right=0}}) do
+  for _,layout in ipairs({{}, {console_left=-1}, {console_left=0/0}, {console_left=math.huge}}) do
     local h=fakeInput(); eq(Adapter.new():setMainInputAlignment(true,layout,h.api),nil); eq(#h.calls,0); eq(h.writes,0)
   end
   local h=fakeInput(); eq(Adapter.new():setMainInputAlignment("false",margins,h.api),nil); eq(h.reads,0)
@@ -169,23 +209,24 @@ test("main input requires valid native getters setters and finite layout",functi
 end)
 
 test("main input contains reentrant native setter calls and releases guard",function()
-  local h=fakeInput(); local adapter=Adapter.new(); local reentries=0
+  local h=fakeInput(true); local adapter=Adapter.new(); local reentries=0
   h.onSet=function()
     reentries=reentries+1
     eq(adapter:setMainInputAlignment(true,margins,h.api),true)
     eq(adapter:setMainInputAlignment(false,nil,h.api),true)
   end
-  assert(adapter:setMainInputAlignment(true,margins,h.api)); eq(reentries,2)
-  assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(adapter._main_input_alignment_busy,nil)
+  assert(adapter:setMainInputAlignment(true,margins,h.api)); eq(reentries,2); eq(h.compact,false)
+  assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(reentries,4); eq(h.compact,true); eq(adapter._main_input_alignment_busy,nil)
 end)
 
 test("main input failed setters roll back partial changes and retain recoverable baseline",function()
   for _,setter in ipairs({"compact","style"}) do
     for _,mode in ipairs({"nil","false","throw"}) do
-      local h=fakeInput(); local original=h.style; local adapter=Adapter.new()
+      local h=fakeInput(true); local original=h.style; local adapter=Adapter.new()
       h.setterFailure=setter; h.failureMode=mode; h.failOnce=true
       local result,err=adapter:setMainInputAlignment(true,margins,h.api)
-      eq(result,nil); assert(err:find("setter failed",1,true)); eq(h.style,original); eq(h.compact,false); assert(h.files[h.path]); eq(adapter._main_input_alignment_busy,nil)
+      eq(result,nil); assert(err:find("setter failed",1,true)); eq(h.style,original); eq(h.compact,true); assert(h.files[h.path]); eq(adapter._main_input_alignment_busy,nil)
+      eq(h.calls[1][1],"compact"); eq(h.calls[1][2],false)
       assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.files[h.path],nil)
     end
   end
@@ -193,35 +234,36 @@ end)
 
 test("main input failed OFF or backup removal keeps original for retry",function()
   for _,failure in ipairs({"style","compact","remove"}) do
-    local h=fakeInput(); local original=h.style; local adapter=Adapter.new()
-    assert(adapter:setMainInputAlignment(true,margins,h.api)); local backup=h.files[h.path]
+    local h=fakeInput(true); local original=h.style; local adapter=Adapter.new()
+    assert(adapter:setMainInputAlignment(true,margins,h.api)); local backup=h.files[h.path]; eq(h.compact,false)
     if failure=="remove" then h.diskFailure=failure else h.setterFailure=failure; h.failOnce=true end
     local result,err=adapter:setMainInputAlignment(false,nil,h.api); eq(result,nil); eq(type(err),"string"); eq(h.files[h.path],backup)
-    h.diskFailure=nil; assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,false); eq(h.files[h.path],nil)
+    if failure=="remove" then eq(h.style,original); eq(h.compact,true) else eq(h.style,aligned(original,212)); eq(h.compact,false) end
+    h.diskFailure=nil; assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,true); eq(h.files[h.path],nil)
   end
 end)
 
 test("retained main input OFF permits rollback ON without writes when disk persistence fails",function()
   for _,failure in ipairs({"open","write","rename"}) do
-    local h=fakeInput(); local original=h.style; local adapter=Adapter.new()
+    local h=fakeInput(true); local original=h.style; local adapter=Adapter.new()
     assert(adapter:setMainInputAlignment(true,margins,h.api))
     local backup=h.files[h.path]; local baseline=adapter._main_input_baseline
     local reads,writes,renames,removes=h.reads,h.writes,h.renames,h.removes
     h.diskFailure=failure
     eq(adapter:setMainInputAlignment(false,nil,h.api,true),true)
-    eq(h.style,original); eq(h.compact,false); eq(h.files[h.path],backup); eq(adapter._main_input_baseline,baseline)
+    eq(h.style,original); eq(h.compact,true); eq(h.files[h.path],backup); eq(adapter._main_input_baseline,baseline)
     -- The caller's settings save failed: roll the visible change back to ON.
     eq(adapter:setMainInputAlignment(true,margins,h.api),true)
-    eq(h.style,aligned(original,212,284)); eq(h.compact,true)
+    eq(h.style,aligned(original,212)); eq(h.compact,false)
     eq(h.files[h.path],backup); eq(adapter._main_input_baseline,baseline)
     eq(h.reads,reads); eq(h.writes,writes); eq(h.renames,renames); eq(h.removes,removes)
     h.diskFailure=nil
-    assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,false); eq(h.files[h.path],nil)
+    assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,true); eq(h.files[h.path],nil)
   end
 end)
 
 test("normal main input OFF finalizes a retained baseline without repeating native changes",function()
-  local h=fakeInput(); local original=h.style; local adapter=Adapter.new()
+  local h=fakeInput(true); local original=h.style; local adapter=Adapter.new()
   assert(adapter:setMainInputAlignment(true,margins,h.api))
   assert(adapter:setMainInputAlignment(false,nil,h.api,true))
   local calls,reads,writes,renames,removes=#h.calls,h.reads,h.writes,h.renames,h.removes
@@ -229,7 +271,7 @@ test("normal main input OFF finalizes a retained baseline without repeating nati
   eq(h.removes,removes); assert(h.files[h.path]); assert(adapter._main_input_baseline)
   -- The caller's settings save succeeded: a normal OFF releases ownership.
   eq(adapter:setMainInputAlignment(false,nil,h.api),true)
-  eq(h.style,original); eq(h.compact,false); eq(h.files[h.path],nil); eq(adapter._main_input_baseline,nil)
+  eq(h.style,original); eq(h.compact,true); eq(h.files[h.path],nil); eq(adapter._main_input_baseline,nil)
   eq(#h.calls,calls); eq(h.reads,reads); eq(h.writes,writes); eq(h.renames,renames); eq(h.removes,removes+1)
   assert(adapter:setMainInputAlignment(false,nil,h.api,true)); eq(#h.calls,calls); eq(h.reads,reads); eq(h.removes,removes+1)
 end)
@@ -241,19 +283,19 @@ test("retained main input baseline remains recoverable after restart",function()
   local writes,renames=h.writes,h.renames; h.diskFailure="write"
   local restarted=Adapter.new()
   assert(restarted:setMainInputAlignment(true,margins,h.api))
-  eq(h.style,aligned("personal style",212,284)); eq(h.files[h.path],backup); eq(h.writes,writes); eq(h.renames,renames)
+  eq(h.style,aligned("personal style",212)); eq(h.compact,false); eq(h.files[h.path],backup); eq(h.writes,writes); eq(h.renames,renames)
   assert(restarted:setMainInputAlignment(false,nil,h.api)); eq(h.style,"personal style"); eq(h.compact,true); eq(h.files[h.path],nil)
 end)
 
 test("main input repairs drift and reapplies original style after compact reset",function()
-  local h=fakeInput(); local original=h.style; local adapter=Adapter.new(); h.resetStyleOnCompact=true
-  assert(adapter:setMainInputAlignment(true,margins,h.api)); h.style="drift"; h.compact=false
-  assert(adapter:setMainInputAlignment(true,margins,h.api)); eq(h.style,aligned(original,212,284)); eq(h.writes,1)
-  assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,false)
+  local h=fakeInput(true); local original=h.style; local adapter=Adapter.new(); h.resetStyleOnCompact=true
+  assert(adapter:setMainInputAlignment(true,margins,h.api)); eq(h.compact,false); h.style="drift"; h.compact=true
+  assert(adapter:setMainInputAlignment(true,margins,h.api)); eq(h.style,aligned(original,212)); eq(h.compact,false); eq(h.writes,1)
+  assert(adapter:setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,true)
 end)
 
 test("main input reports rollback failure without discarding the recovery record",function()
-  local h=fakeInput(); local original=h.style; local adapter=Adapter.new(); h.setterFailure="style"
+  local h=fakeInput(true); local original=h.style; local adapter=Adapter.new(); h.setterFailure="style"
   local result,err=adapter:setMainInputAlignment(true,margins,h.api); eq(result,nil); assert(err:find("rollback failed",1,true)); assert(h.files[h.path])
-  h.setterFailure=nil; assert(Adapter.new():setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,false)
+  h.setterFailure=nil; assert(Adapter.new():setMainInputAlignment(false,nil,h.api)); eq(h.style,original); eq(h.compact,true)
 end)

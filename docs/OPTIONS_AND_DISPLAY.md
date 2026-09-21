@@ -88,9 +88,9 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 ## Align command input
 
-Turn **OPTIONS → ALIGN INPUT: ON** to line up the command input with both edges of the main game display. It follows the window as you resize it. The default is **OFF**, and your choice survives updates and restarts independently of automatic word wrap.
+Turn **OPTIONS → ALIGN INPUT: ON** to line up the command input's **left edge** with the main game display. It follows the window as you resize it. The input ends before Mudlet's native Search and status controls, which stay visible together on the right. Search remains on the right; this does not align the input to the full width of the main display. The default is **OFF**, and your choice survives updates and restarts independently of automatic word wrap.
 
-This keeps Mudlet's native input, command history, current draft, and aliases. While enabled, Mudlet's compact-input mode hides its bottom search/status controls to make room. Turn the option **OFF** to restore the prior input styling and controls. Requires Mudlet 5.0 or newer.
+This keeps Mudlet's native input, command history, current draft, and aliases. Turn the option **OFF** to restore the prior input stylesheet and compact-input preference, including the previous visibility of Search and status controls. Requires Mudlet 5.0 or newer.
 
 ## Color Settings
 

@@ -357,7 +357,7 @@ function View.new(settings)
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   local alignInputButton=self.option_action_buttons.align_main_input
-  if alignInputButton.setToolTip then pcall(alignInputButton.setToolTip,alignInputButton,"Align input with main display. Temporarily hides Mudlet's bottom search/status controls while enabled. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference.") end
+  if alignInputButton.setToolTip then pcall(alignInputButton.setToolTip,alignInputButton,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference.") end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
   self.color_toggle:setClickCallback(function() return self:setColorMenuVisible(not self.color_menu_visible) end)
   self.color_menu_scrim:setClickCallback(function() return self:setColorMenuVisible(false) end)

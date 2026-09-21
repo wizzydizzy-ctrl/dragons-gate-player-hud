@@ -19,7 +19,7 @@ local function fake()
     if self.failInputAlignment then return nil,self.failInputAlignment end
     self.retainedInputBaseline=retainBaseline==true
     self.inputAligned=enabled
-    if enabled then self.inputLeft=layout.console_left; self.inputRight=layout.console_right; self.inputWidth=layout.console_width end
+    if enabled then self.inputLeft=layout.console_left end
     return true
   end
   function f:createView(settings) f.viewCreates=(f.viewCreates or 0)+1; local view={root={},view_contract=settings and settings.view_contract,view_settings_contract=settings and settings.view_settings_contract,
@@ -490,7 +490,7 @@ test("input alignment defaults off and options toggles it persistently",function
   local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
   eq(hud:mainInputAligned(),false); eq(f.viewInputAligned,false); eq(f.inputAligned,false)
   eq(f.optionsActionCallback("align_main_input"),true); eq(f.savedDisplaySettings.align_input,true); eq(f.viewInputAligned,true)
-  eq(f.inputLeft,hud.current_layout.console_left); eq(f.inputRight,hud.current_layout.console_right)
+  eq(f.inputLeft,hud.current_layout.console_left)
   assert(hud:setDisplayTextSize("small")); eq(f.savedDisplaySettings.align_input,true)
   eq(hud:setMainConsoleAutoWrap(false),false); eq(f.savedDisplaySettings.align_input,true)
   assert(hud:reload()); eq(f.inputAligned,true); eq(f.viewInputAligned,true)
@@ -499,11 +499,11 @@ test("input alignment defaults off and options toggles it persistently",function
   hud:shutdown(); eq(f.inputAligned,false)
 end)
 
-test("native input alignment follows console gutters at responsive breakpoints",function()
+test("native input left alignment follows the console gutter at responsive breakpoints",function()
   local f=fake(); local hud=Main.new(f,{layout={},display={align_input=true}}); assert(hud:start())
   for _,size in ipairs({{1920,1080},{1400,900},{1399,900},{800,600},{799,600},{2560,1440}}) do
     f.width,f.height=size[1],size[2]; f.callbacks.sysWindowResizeEvent()
-    eq(f.inputLeft,hud.current_layout.console_left); eq(f.inputRight,hud.current_layout.console_right); eq(f.inputWidth,hud.current_layout.console_width)
+    eq(f.inputLeft,hud.current_layout.console_left)
   end
   hud.update_handoff=true; hud.update_preserve_view=true; hud:shutdown(); eq(f.inputAligned,false)
 end)

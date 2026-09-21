@@ -323,11 +323,11 @@ function Adapter:setMainInputAlignment(enabled,layout,api,retainBaseline)
   api=api or _G
   self._main_input_alignment_busy=true
   local called,result,err=pcall(function()
-    local left,right
+    local left
     if enabled then
-      left=type(layout)=="table" and tonumber(layout.console_left); right=type(layout)=="table" and tonumber(layout.console_right)
-      if not left or not right or left~=left or right~=right or left<0 or right<0 or left==math.huge or right==math.huge then return nil,"main input alignment requires finite nonnegative console margins" end
-      left=math.floor(left+.5); right=math.floor(right+.5)
+      left=type(layout)=="table" and tonumber(layout.console_left)
+      if not left or left~=left or left<0 or left==math.huge then return nil,"main input alignment requires a finite nonnegative left console margin" end
+      left=math.floor(left+.5)
     end
     local baseline=self._main_input_baseline
     if not self._main_input_baseline_loaded then
@@ -348,7 +348,9 @@ function Adapter:setMainInputAlignment(enabled,layout,api,retainBaseline)
       self._main_input_baseline=baseline
     end
     local target=baseline
-    if enabled then target={compact_input=true,style=baseline.style..string.format("\nQPlainTextEdit { margin-left:%.0fpx; margin-right:%.0fpx; }",left,right)} end
+    -- Search and status share one native pane on the right. Keep that pane
+    -- visible and align only the input's left edge; its right edge stays native.
+    if enabled then target={compact_input=false,style=baseline.style..string.format("\nQPlainTextEdit { margin-left:%.0fpx; }",left)} end
     local applied,applyErr=applyMainInput(api,target,before); if not applied then return nil,applyErr end
     -- A settings transaction can restore the native layout before committing
     -- OFF to disk. Keep both originals until it commits, so a failed settings
