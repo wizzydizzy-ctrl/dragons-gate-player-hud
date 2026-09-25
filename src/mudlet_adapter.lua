@@ -995,7 +995,31 @@ function Adapter:activateInstalledHUD()
   return true
 end
 function Adapter:reportUpdateCheckFailure(message) cecho("\n<yellow>[DGHUD Update]<reset> Version check failed: "..tostring(message).."; refreshing character data. A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_check",stage="check"}) end end
-function Adapter:reportUpdateFailure(message) cecho("\n<red>[DGHUD Update]<reset> Update failed: "..tostring(message)..". A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n"); local controller=DGHUD and DGHUD.controller; if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_install",stage="install"}) end end
+function Adapter.isSafeUpgradeConflict(message)
+  local prefix="persistent data preflight failed; nothing was removed: "
+  local reason="persistent destination differs; run the DGHUD safe-upgrade bridge"
+  return type(message)=="string" and message:sub(1,#prefix)==prefix
+    and message:sub(-#reason)==reason and not message:find("; rollback failed:",1,true)
+end
+function Adapter:reportUpdateFailure(message)
+  if Adapter.isSafeUpgradeConflict(message) then
+    -- Advice only: do not execute commands or weaken the data-preservation
+    -- preflight. Fixed official URLs cannot inject code from error text/settings.
+    local edition=(self.settings and self.settings.edition) or require("defaults").edition
+    local repository=edition=="staff" and "dragons-gate-staff-hud" or "dragons-gate-player-hud"
+    local command='lua installPackage("https://github.com/wizzydizzy-ctrl/'..repository..'/releases/latest/download/DGHUDMigration.mpackage")'
+    cecho("\n<yellow>[DGHUD Update]<reset> Update stopped safely. Nothing was deleted.\n"
+      .."Stop the autoroller, then type this and press Enter:\n<white>dghud safe update<reset>\n"
+      ..'\nIf Mudlet says "unknown command", paste this instead:\n<white>'..command.."<reset>\n"
+      .."If nothing starts, run <white>dghud safe update<reset> again.\n"
+      .."Wait for the repair to finish, then check your Autoroller settings.\n")
+  else
+    cecho("\n<red>[DGHUD Update]<reset> Update failed: "..tostring(message)..". A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n")
+  end
+  -- Keep the original reason in diagnostics, not in the customer instructions.
+  local controller=DGHUD and DGHUD.controller
+  if controller and controller.captureFailure then controller:captureFailure("updater",message,{operation="update_install",stage="install"}) end
+end
 function Adapter:updateClock()
   if type(getEpoch)=="function" then return tonumber(getEpoch()) or os.time() end
   return os.time()
@@ -1133,7 +1157,12 @@ function Adapter:startUpdate(updater,done,validatedManifest,validatedManifestRaw
   local function schedule(delay,fn) local id; id=tempTimer(delay,function() for i,value in ipairs(timers) do if value==id then table.remove(timers,i); break end end; fn() end); timers[#timers+1]=id; return id end
   local function disarmTimeout() if timeoutId then killTimer(timeoutId); timeoutId=nil end end
   local function cleanup() for _,id in ipairs(ids) do killAnonymousEventHandler(id) end; ids={}; for _,id in ipairs(timers) do killTimer(id) end; timers={}; disarmTimeout(); updater:release() end
-  local function fail(message) if finished then return end; finished=true; cleanup(); cecho("\n<red>[DGHUD Update]<reset> "..tostring(message).."\n"); if done then done(nil,message) end end
+  local function fail(message)
+    if finished then return end; finished=true; cleanup()
+    -- The updater callback prints the actionable conflict message once.
+    if not (done and Adapter.isSafeUpgradeConflict(message)) then cecho("\n<red>[DGHUD Update]<reset> "..tostring(message).."\n") end
+    if done then done(nil,message) end
+  end
   local function armTimeout() disarmTimeout(); timeoutId=tempTimer(policy.timeout_seconds or 30,function() timeoutId=nil; if updater.lock then fail("download timed out") end end) end
   local function request(path,url)
     expectedPath=path; expectedUrl=url; updater.expected_path=path; armTimeout()

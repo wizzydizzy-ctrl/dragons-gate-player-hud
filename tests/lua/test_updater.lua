@@ -422,6 +422,7 @@ end)
 local function replacementHarness(options,body)
   options=options or {}; local globalNames={"lfs","yajl","getMudletHomeDir","registerAnonymousEventHandler","killAnonymousEventHandler","tempTimer","killTimer","downloadFile","getPackages","uninstallPackage","installPackage","cecho","DGHUD","getMudletVersion"}
   globalNames[#globalNames+1]="getEpoch"
+  for _,name in ipairs({"send","sendAll","expandAlias","DGHUDMigration","DGHUDRecovery"}) do globalNames[#globalNames+1]=name end
   local saved={}; for _,name in ipairs(globalNames) do saved[name]=_G[name] end
   local originalOpen,originalRename,originalRemove=io.open,os.rename,os.remove; local h={files={},downloads={},handlers={},timers={},nextID=0,active=true,uninstalls=0,installs={},result=nil,targetUninstallBusy=tonumber(options.targetUninstallBusy) or 0,rollbackUninstallBusy=tonumber(options.rollbackUninstallBusy) or 0}
   local installedVersion=options.legacyRollbackManifest and "0.3.32" or "0.2.83"
@@ -469,11 +470,20 @@ local function replacementHarness(options,body)
       return true
     end
     h.messages={}; h.now=0; getEpoch=function() return h.now end
-    cecho=function(message) h.messages[#h.messages+1]=message end; DGHUD={settings={version=rollback.version},controller={},shutdown=function() end,healthCheck=function() return true end}
+    h.failures={}; h.executions=0; h.completions=0
+    local function executed() h.executions=h.executions+1 end
+    send=executed; sendAll=executed; expandAlias=executed; DGHUDMigration={run=executed}; DGHUDRecovery={run=executed}
+    cecho=function(message) h.messages[#h.messages+1]=message end
+    DGHUD={settings={version=rollback.version},controller={captureFailure=function(self,category,message,context)
+      eq(self,DGHUD.controller); h.failures[#h.failures+1]={category=category,message=message,context=context}
+    end},shutdown=function() end,healthCheck=function() return true end}
     function h:done(path,payload) self.files[path]=payload; self.handlers.sysDownloadDone(nil,path) end
     function h:error(url,message) self.handlers.sysDownloadError(nil,message or "download failed",url) end
     function h:run(delay) for id,timer in pairs(self.timers) do if timer.delay==delay then self.timers[id]=nil; timer.fn(); if self.pendingVersion then DGHUD={settings={version=self.pendingVersion},healthCheck=function() return true end}; self.pendingVersion=nil end; return true end end return false end
-    h.adapter=Adapter.new(); h.updater=Updater.new(h.adapter,harnessSettings); assert(h.updater:update(function(success,message) h.result={success,message} end,options.manifest,options.manifestRaw))
+    h.adapter=Adapter.new(); h.updater=Updater.new(h.adapter,harnessSettings)
+    if not options.manualStart then
+      assert(h.updater:update(function(success,message) h.completions=h.completions+1; h.result={success,message} end,options.manifest,options.manifestRaw))
+    end
     body(h)
   end)
   restore(); if not ok then error(err,0) end
@@ -482,6 +492,184 @@ local function deliverTarget(h)
   h:done(h.downloads[1].path,"target")
   h:done(h.downloads[2].path,"new-package")
 end
+
+local safeUpgradePrefix="persistent data preflight failed; nothing was removed: "
+local safeUpgradeReason="persistent destination differs; run the DGHUD safe-upgrade bridge"
+local safeUpgradeConflict=safeUpgradePrefix.."/profile/DragonsGateHUD/roller-settings.lua: "..safeUpgradeReason
+local otherUpdateErrors={
+  "disk full",
+  safeUpgradePrefix.."disk read failed",
+  safeUpgradePrefix.."could not write copied data",
+  "download timed out",
+  "could not stage rollback package: disk full",
+  "could not install HUD package; rollback failed: could not restore rollback package",
+  "rollback data preflight failed; nothing was removed: "..safeUpgradeReason,
+  "could not install HUD package; rollback failed: "..safeUpgradeConflict,
+  safeUpgradeConflict.."; rollback failed: "..safeUpgradeReason,
+  "quoted error: "..safeUpgradeConflict,
+  " "..safeUpgradeConflict,
+  "\n"..safeUpgradeConflict,
+  safeUpgradeReason,
+  safeUpgradePrefix..safeUpgradeReason..".",
+  safeUpgradePrefix..safeUpgradeReason.." ",
+  safeUpgradePrefix..safeUpgradeReason.."\n",
+  safeUpgradePrefix..safeUpgradeReason.." (previous attempt)",
+  safeUpgradePrefix.."persistent destination differs",
+  safeUpgradePrefix.."persistent destination differs; run the DGHUD safe-upgrade bridges",
+}
+local function assertFailureDiagnostic(h,message)
+  eq(#h.failures,1)
+  eq(h.failures[1].category,"updater"); eq(h.failures[1].message,message)
+  eq(h.failures[1].context.operation,"update_install"); eq(h.failures[1].context.stage,"install")
+end
+local function assertSafeUpgradeAdvice(output,edition)
+  local command='lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-'..edition..'-hud/releases/latest/download/DGHUDMigration.mpackage")'
+  assert(output:find("Nothing was deleted.",1,true))
+  -- A committed marker can suppress bridge autorun, so the retry advice repeats the command.
+  assert(output:find("If nothing starts, run <white>dghud safe update<reset> again.",1,true))
+  local _,commandMentions=output:gsub("dghud safe update","")
+  eq(commandMentions,2)
+  local _,friendlyBlocks=output:gsub("Update stopped safely%. Nothing was deleted%.","")
+  eq(friendlyBlocks,1)
+  assert(output:find('unknown command',1,true))
+  assert(output:find(command,1,true))
+  eq(output:find(safeUpgradePrefix,1,true),nil)
+  eq(output:find(safeUpgradeReason,1,true),nil)
+  eq(output:find("Update failed:",1,true),nil)
+  eq(output:find("REPORT A PROBLEM",1,true),nil)
+  local otherEdition=edition=="staff" and "player" or "staff"
+  eq(output:find("dragons-gate-"..otherEdition.."-hud",1,true),nil)
+end
+local function assertNoRecoveryExecution(h)
+  eq(h.executions,0); eq(#h.installs,0); eq(h.uninstalls,0)
+end
+
+test("safe-upgrade classifier accepts the exact persistent conflict with optional path context",function()
+  eq(Adapter.isSafeUpgradeConflict(safeUpgradePrefix..safeUpgradeReason),true)
+  eq(Adapter.isSafeUpgradeConflict(safeUpgradeConflict),true)
+end)
+test("safe-upgrade classifier rejects unrelated failures and prefix suffix or rollback lookalikes",function()
+  for _,message in ipairs(otherUpdateErrors) do
+    assert(Adapter.isSafeUpgradeConflict(message)==false,"misclassified: "..message)
+  end
+end)
+test("safe-upgrade classifier rejects nonstring values without coercion",function()
+  eq(Adapter.isSafeUpgradeConflict(nil),false)
+  for _,message in ipairs({false,true,0,{},function() end,setmetatable({},{__tostring=function() return safeUpgradeConflict end})}) do
+    eq(Adapter.isSafeUpgradeConflict(message),false)
+  end
+  eq(Adapter.isSafeUpgradeConflict(""),false)
+end)
+
+for _,edition in ipairs({"player","staff"}) do
+  test("safe-upgrade advice uses the fixed official "..edition.." URL and retains raw diagnostics",function()
+    replacementHarness({manualStart=true},function(h)
+      h.adapter.settings={edition=edition,github={owner='untrusted.example");send("injected")--',repository="untrusted-hud"}}
+      local message=safeUpgradePrefix.."https://untrusted.example/legacy.lua: "..safeUpgradeReason
+      h.adapter:reportUpdateFailure(message)
+      eq(#h.messages,1); assertSafeUpgradeAdvice(h.messages[1],edition)
+      eq(h.messages[1]:find("untrusted",1,true),nil)
+      assertFailureDiagnostic(h,message)
+      assertNoRecoveryExecution(h); eq(#h.downloads,0); eq(next(h.timers),nil); eq(next(h.handlers),nil); eq(next(h.files),nil)
+    end)
+  end)
+end
+
+test("safe-upgrade advice falls back to this repository edition when adapter edition is absent",function()
+  replacementHarness({manualStart=true},function(h)
+    local expectedEdition="player"
+    eq(require("defaults").edition,expectedEdition)
+    for _,settings in ipairs({false,{},{github={owner="untrusted",repository="untrusted-hud"}}}) do
+      h.adapter.settings=settings or nil; h.messages={}; h.failures={}
+      h.adapter:reportUpdateFailure(safeUpgradeConflict)
+      eq(#h.messages,1); assertSafeUpgradeAdvice(h.messages[1],expectedEdition)
+      assertFailureDiagnostic(h,safeUpgradeConflict)
+    end
+    assertNoRecoveryExecution(h); eq(#h.downloads,0); eq(next(h.timers),nil)
+  end)
+end)
+test("safe-upgrade advice remains available without a diagnostics controller",function()
+  replacementHarness({manualStart=true},function(h)
+    for _,hud in ipairs({false,{},{controller={}}}) do
+      DGHUD=hud or nil; h.messages={}
+      h.adapter:reportUpdateFailure(safeUpgradeConflict)
+      eq(#h.messages,1); assertSafeUpgradeAdvice(h.messages[1],"player")
+    end
+    eq(#h.failures,0); assertNoRecoveryExecution(h); eq(#h.downloads,0); eq(next(h.timers),nil)
+  end)
+end)
+test("nonmatching update failures retain the original display and diagnostic without recovery advice",function()
+  replacementHarness({manualStart=true},function(h)
+    for _,message in ipairs(otherUpdateErrors) do
+      h.messages={}; h.failures={}
+      h.adapter:reportUpdateFailure(message)
+      eq(#h.messages,1)
+      eq(h.messages[1],"\n<red>[DGHUD Update]<reset> Update failed: "..message..". A privacy-safe report is ready under Map Library > REPORT A PROBLEM.\n")
+      eq(h.messages[1]:find("Nothing was deleted.",1,true),nil)
+      eq(h.messages[1]:find("dghud safe update",1,true),nil)
+      eq(h.messages[1]:find("DGHUDMigration.mpackage",1,true),nil)
+      assertFailureDiagnostic(h,message)
+    end
+    assertNoRecoveryExecution(h); eq(#h.downloads,0); eq(next(h.timers),nil)
+  end)
+end)
+test("persistent conflict during an update reports friendly advice once and returns the raw failure",function()
+  local reason="/profile/DragonsGateHUD/roller-settings.lua: "..safeUpgradeReason
+  replacementHarness({prepareWarning=reason},function(h)
+    deliverTarget(h); h:done(h.downloads[3].path,"rollback"); h:done(h.downloads[4].path,"old-package")
+    eq(h.completions,1); eq(h.result[1],nil); eq(h.result[2],safeUpgradeConflict)
+    assertFailureDiagnostic(h,safeUpgradeConflict)
+    assertSafeUpgradeAdvice(table.concat(h.messages),"player")
+    local adviceCount=0
+    for _,message in ipairs(h.messages) do if message:find("Nothing was deleted.",1,true) then adviceCount=adviceCount+1 end end
+    eq(adviceCount,1); assertNoRecoveryExecution(h); eq(#h.downloads,4); eq(h.active,true)
+    eq(h.updater.lock,nil); eq(h.updater.expected_path,nil); eq(next(h.timers),nil)
+  end)
+end)
+test("startUpdate suppresses the raw conflict only when a callback receives it unchanged",function()
+  replacementHarness({manualStart=true,prepareWarning=safeUpgradeReason},function(h)
+    local calls=0; local result
+    assert(h.updater:acquire("update"))
+    assert(h.adapter:startUpdate(h.updater,function(...) calls=calls+1; result={n=select("#",...),...} end))
+    deliverTarget(h); h:done(h.downloads[3].path,"rollback"); h:done(h.downloads[4].path,"old-package")
+    eq(calls,1); eq(result.n,2); eq(result[1],nil); eq(result[2],safeUpgradePrefix..safeUpgradeReason)
+    local output=table.concat(h.messages)
+    eq(output:find(safeUpgradeReason,1,true),nil); eq(output:find("Nothing was deleted.",1,true),nil)
+    eq(#h.failures,0); assertNoRecoveryExecution(h); eq(h.active,true)
+    eq(h.updater.lock,nil); eq(next(h.timers),nil)
+  end)
+end)
+test("startUpdate without a callback keeps the raw persistent conflict visible",function()
+  replacementHarness({manualStart=true,prepareWarning=safeUpgradeReason},function(h)
+    assert(h.updater:acquire("update")); assert(h.adapter:startUpdate(h.updater))
+    deliverTarget(h); h:done(h.downloads[3].path,"rollback"); h:done(h.downloads[4].path,"old-package")
+    local expected="\n<red>[DGHUD Update]<reset> "..safeUpgradePrefix..safeUpgradeReason.."\n"
+    eq(h.messages[#h.messages],expected)
+    local rawCount=0
+    for _,message in ipairs(h.messages) do if message==expected then rawCount=rawCount+1 end end
+    eq(rawCount,1); eq(table.concat(h.messages):find("Nothing was deleted.",1,true),nil)
+    eq(#h.failures,0); assertNoRecoveryExecution(h); eq(h.active,true)
+    eq(h.updater.lock,nil); eq(next(h.timers),nil)
+  end)
+end)
+test("startUpdate keeps nonmatching raw failures visible with a callback",function()
+  for _,message in ipairs(otherUpdateErrors) do
+    replacementHarness({manualStart=true},function(h)
+      local calls=0; local result
+      assert(h.updater:acquire("update"))
+      assert(h.adapter:startUpdate(h.updater,function(...) calls=calls+1; result={n=select("#",...),...} end))
+      h.messages={}
+      h:error(h.downloads[1].url,message)
+      eq(calls,1); eq(result.n,2); eq(result[1],nil); eq(result[2],message)
+      eq(#h.messages,1); eq(h.messages[1],"\n<red>[DGHUD Update]<reset> "..message.."\n")
+      h:error(h.downloads[1].url,message)
+      eq(calls,1); eq(#h.messages,1)
+      eq(#h.failures,0); assertNoRecoveryExecution(h)
+      eq(h.updater.lock,nil); eq(next(h.timers),nil)
+    end)
+  end
+end)
+
 test("update can bootstrap a checksum-verified exact legacy rollback manifest",function()
   replacementHarness({legacyRollbackManifest=true},function(h)
     deliverTarget(h); h:done(h.downloads[3].path,"rollback"); h:done(h.downloads[4].path,"old-package")
