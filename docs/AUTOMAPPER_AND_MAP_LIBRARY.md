@@ -91,6 +91,8 @@ Spur - Town Square
 
 Names are friendly labels only. The game's permanent room numbers remain unchanged.
 
+If you manually move a mapped room to another area in Mudlet, newly discovered rooms reached from it follow that room's **current area**. You do not need to clear or restart the mapper. Rooms already mapped elsewhere keep their existing area and position. An explicitly enabled separate-submap option still applies to newly discovered special-travel destinations.
+
 ## Special-travel settings
 
 Map Settings lets you decide whether each travel type creates a separate submap:

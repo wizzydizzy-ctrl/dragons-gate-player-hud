@@ -33,9 +33,12 @@ function Layout.lowerPanelGeometry(layout,psiVisible,webVisible,roundtimeActive)
     roundtime_visible=roundtime>0,roundtime_y=roundtime_y,roundtime_height=roundtime}
 end
 function Layout.detailsPlacement() return "right" end
--- Heading plus four table rows. Reserve one additional line because Qt's HTML
--- table metrics can exceed the nominal font line height on Windows.
-function Layout.detailsCardRows(columns) return 6 end
+function Layout.detailsColumns(contentWidth,font)
+  return contentWidth>=font*16 and 2 or 1
+end
+-- Narrow cards put stance and roundtime values on their own lines and retain
+-- OR, DR and posture. Include one spare line for Qt's rich-text metrics.
+function Layout.detailsCardRows(columns) return columns==1 and 11 or 6 end
 function Layout.detailsFit(rail_bottom,inventory_y,details_height,minimum_inventory_height)
   return (tonumber(rail_bottom) or 0)-(tonumber(details_height) or 0)-12-(tonumber(inventory_y) or 0)>=(tonumber(minimum_inventory_height) or 0)
 end
@@ -92,7 +95,9 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals,di
   local baseRowGap=clamp(baseBody*.7,11,15)
   local baseEquipmentFont=clamp(baseBody-3,13,18)
   local baseInventoryFont=clamp(baseBody-2,14,20)
-  local baseListFont=clamp(baseInventoryFont-4,10,14)
+  -- Geyser.Label:setFontSize uses points. Keep rail lists readable without
+  -- changing the separate, height-constrained compact header band.
+  local baseListFont=clamp(baseInventoryFont-4,layout.mode=="compact" and 10 or 13,14)
   local baseCompassFont=clamp(baseBody,16,22)
   local baseUtilityFont=clamp(baseBody-4,12,18)
   layout.side_text_scale=textScale
@@ -105,12 +110,13 @@ local function metrics(width,height,layout,chatSettings,mapperSettings,vitals,di
   layout.attribute_strip_font=clamp(layout.console_width/100,10,14)
   layout.panel_padding=clamp(basePanelPadding*textScale,8,26); layout.gauge_height=clamp(layout.small_font+10,34,54); layout.row_gap=clamp(baseRowGap*textScale,8,18)
   layout.equipment_padding=clamp(layout.panel_padding*.7,6,16)
-  layout.combat_font=clamp(layout.equipment_font-1,9,20); layout.combat_line_height=layout.combat_font+3; layout.combat_padding=clamp(layout.equipment_padding-1,5,14)
+  layout.combat_font=clamp(math.max(13,baseEquipmentFont-1)*textScale,12,20); layout.combat_line_height=layout.combat_font+5; layout.combat_padding=clamp(layout.equipment_padding-1,5,14)
+  layout.details_columns=Layout.detailsColumns(layout.right-layout.panel_padding*2-layout.combat_padding*2,layout.combat_font)
   layout.title_height=layout.heading_font+30
   layout.room_height=layout.heading_font+layout.body_font*6+54; layout.exit_height=layout.small_font+16
   layout.identity_height=layout.heading_font+layout.body_font*7+56
   layout.inventory_font=clamp(baseInventoryFont*textScale,11,23); layout.inventory_row_height=layout.inventory_font+10
-  layout.list_font=clamp(baseListFont*textScale,9,17); layout.list_title_font=layout.list_font+3; layout.list_row_height=math.ceil(layout.list_font*1.3); layout.list_visible_rows=5
+  layout.list_font=clamp(baseListFont*textScale,layout.mode=="compact" and 9 or 12,17); layout.list_title_font=layout.list_font+3; layout.list_row_height=math.ceil(layout.list_font*1.3); layout.list_visible_rows=5
   layout.list_padding=clamp(layout.panel_padding*.5,4,12)
   layout.list_horizontal_scrollbar_height=clamp(layout.list_font+3,16,20)
   layout.details_line_height=layout.body_font+6; layout.compass_font=clamp(baseCompassFont*textScale,13,27); layout.compass_cell=layout.compass_font+14

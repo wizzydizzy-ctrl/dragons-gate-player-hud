@@ -8,7 +8,7 @@ The **OPTIONS** button is at the far left of the header. The current DGHUD versi
 
 Open **OPTIONS → CHAT SETTINGS → SHOW CHATBOX** to show or completely hide the top-center chatbox. It starts **ON**. Turning it **OFF** expands the main display without deleting history or stopping chat capture. You can reopen Chat Settings through OPTIONS even while chat is hidden. This preference survives character changes, restarts, and HUD updates.
 
-The same window controls which sources appear in ALL and provides separate history-clearing buttons. See the [Chatbox Guide](CHATBOX.md).
+The same window controls which sources appear in ALL, provides separate history-clearing buttons, and offers per-tab sound alerts. Under **SOUND ALERTS**, choose each tab's sound, turn it on or off, or click **PREVIEW**. Staff alerts start on; the other tabs start off. See the [Chatbox Guide](CHATBOX.md).
 
 ## Keybindings
 
@@ -134,6 +134,8 @@ These submissions do not require a GitHub account or browser. See [Support, Priv
 ## Resizing and responsive behavior
 
 DGHUD recalculates panel sizes, font-aware spacing, chat wrapping, list scrollbars, map height, and resource bars when the Mudlet window changes size. Main game-console wrapping also follows the window while **AUTO MAIN WRAP** is on.
+
+In Mudlet MultiView, these sizes use the individual profile pane, not the entire application window. On narrow panes, Combat stacks its fields so OR, DR, position, and posture remain visible. Inventory, Runes, and Skills start at the top of their scrollable space; long names and columns remain available through horizontal scrolling.
 
 At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. On shorter or narrower desktop windows, **Inventory**, **Runes**, and **Skills** become three tabs sharing the available space; no list is discarded. At compact widths the side rails hide, but those same three scrollable tabs move into a compact strip above the chatbox. On an exceptionally short window, normal game output takes priority and the optional strip returns automatically when enough height is available.
 

@@ -140,14 +140,22 @@ function View.detailsContent(combat,attributes,t,layout,vitals)
   local timing="Roundtime <b>"..(roundtime==0 and "READY" or esc(roundtime)).."</b>"; local defense=combat.dr~=nil and "DR <b>"..esc(combat.dr).."</b>" or ""
   local posture=vitals.sitting and "Sitting" or (vitals.standing and "Standing" or nil)
   local position="Position <b>"..esc(vitals.position~=nil and vitals.position or "—").."</b>"
+  local font=layout.combat_font or math.max(12,(layout.equipment_font or layout.inventory_font or layout.body_font or 14)-2)
+  if layout.details_columns==1 then
+    local lines={armor,"Stance<br><b>"..esc(combat.stance or "—").."</b>",
+      "OR <b>"..esc(combat.or_rating~=nil and combat.or_rating or "—").."</b>",
+      "Roundtime<br><b>"..(roundtime==0 and "READY" or esc(roundtime)).."</b>",
+      "DR <b>"..esc(combat.dr~=nil and combat.dr or "—").."</b>",position}
+    if posture then lines[#lines+1]="<b>"..posture.."</b>" end
+    return View.withFont("<span style='color:"..t.accent.."'><b>COMBAT</b></span><br>"..table.concat(lines,"<br>"),font)
+  end
   local function right(value) return value~="" and value or "&nbsp;" end
-  local rows="<table width='100%' cellspacing='0' cellpadding='0'>"..
+  local rows="<table width='100%' cellspacing='0' cellpadding='0' style='font-size:"..font.."px'>"..
     "<tr><td>"..armor.."</td><td align='right'>&nbsp;</td></tr>"..
     "<tr><td>"..stance.."</td><td align='right'>"..right(offense).."</td></tr>"..
     "<tr><td>"..timing.."</td><td align='right'>"..right(defense).."</td></tr>"..
     "<tr><td>"..position.."</td><td align='right'>"..right(posture and "<b>"..posture.."</b>" or "").."</td></tr></table>"
-  local baseFont=layout.combat_font or layout.equipment_font or layout.inventory_font or layout.body_font or 12
-  return View.withFont("<span style='color:"..t.accent.."'><b>COMBAT</b></span><br>"..rows,math.max(8,baseFont-2))
+  return View.withFont("<span style='color:"..t.accent.."'><b>COMBAT</b></span><br>"..rows,font)
 end
 function View.attributeStripContent(attributes,t,layout)
   local parts={}; attributes=attributes or {}
@@ -386,6 +394,7 @@ function View.new(settings)
   self:createChatSoundControls()
   self.chat_settings_visibility=label("DGHUD.ChatSettings.Visibility",self.chat_settings_content)
   self.chat_settings_visibility:setClickCallback(function()
+    if self.disposed or not self.root then return nil,"HUD view is unavailable." end
     local wanted=self.chat_visible==false
     local saved,err
     if self.options_action_callback then saved,err=self.options_action_callback("chat_visibility",nil,wanted)
@@ -405,10 +414,12 @@ function View.new(settings)
   self.chat_settings_status=label("DGHUD.ChatSettings.Status",self.chat_settings_content,"background:transparent;color:"..t.muted..";")
   self.chat_settings_close=label("DGHUD.ChatSettings.Close",self.chat_settings_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
   self.chat_settings_clear_visible:setClickCallback(function()
+    if self.disposed or not self.root then return nil,"HUD view is unavailable." end
     if not self.options_action_callback then return nil,"chat clearing is unavailable" end
     local ok,count=self.options_action_callback("chat_clear_visible"); self.chat_settings_status_text=ok and ("Cleared "..tostring(count or 0).." visible chat entries. Saved history was kept.") or tostring(count or "Could not clear the chatbox."); self:renderChatSettings(); return ok,count
   end)
   self.chat_settings_clear_saved:setClickCallback(function()
+    if self.disposed or not self.root then return nil,"HUD view is unavailable." end
     if not self.chat_settings_clear_pending then self.chat_settings_clear_pending=true; self.chat_settings_status_text="Permanent deletion requires one more click. This cannot be undone."; self:renderChatSettings(); return true end
     if not self.options_action_callback then return nil,"saved chat clearing is unavailable" end
     local ok,count=self.options_action_callback("chat_clear_saved"); self.chat_settings_clear_pending=false; self.chat_settings_status_text=ok and ("Permanently removed "..tostring(count or 0).." saved chat log files.") or tostring(count or "Could not clear saved chat history."); self:renderChatSettings(); return ok,count
@@ -814,7 +825,7 @@ function View:layoutCompactLists(layout,top)
   local inventory_rows=self.last_state and self.last_state.inventory and #(self.last_state.inventory.items or {}) or 0; local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0; local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
   if active=="inventory" then
     local vitals=self.last_state and self.last_state.vitals or {}; local footer_capacity=math.max(4,math.floor(list_w/math.max(1,self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font))))); self.inventory_footer_capacity=footer_capacity
-    local footer_lines=View.inventoryFooterLines(vitals,t,footer_capacity); local footer_h=math.max(layout.list_row_height,math.ceil((layout.list_font+2)*1.3))*#footer_lines+3; local inner_h=math.max(1,card_h-rp*2)
+    local footer_lines=View.inventoryFooterLines(vitals,t,footer_capacity); local footer_h=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/math.max(1,layout.list_font)),math.ceil((layout.list_font+2)*1.3))*#footer_lines+3; local inner_h=math.max(1,card_h-rp*2)
     if inner_h<footer_h+math.max(1,layout.list_row_height) then footer_h=0 end
     local viewport_h=math.max(1,inner_h-footer_h)
     place(self.inventory,card_x,card_y,card_w,card_h); self.inventory_title:hide(); place(self.inventory_output,list_x,card_y+rp,list_w,viewport_h)
@@ -836,7 +847,7 @@ function View:applyLayout(layout)
   self.clock_header:setStyleSheet("background:transparent;color:"..t.text..";padding:8px "..p.."px;text-align:right;")
   self.attribute_strip:setStyleSheet("background:transparent;color:"..t.text..";padding:10px 12px;font-size:"..layout.attribute_strip_font.."px;")
   self.identity:setStyleSheet("background:"..t.panel..";border-right:1px solid "..t.border..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:"..p.."px;font-size:"..layout.body_font.."px;")
-  self.details:setStyleSheet("background:"..t.panel..";border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";padding:"..(layout.combat_padding or layout.equipment_padding or p).."px;font-size:"..(layout.combat_font or layout.equipment_font or layout.body_font).."px;")
+  self.details:setStyleSheet("background:"..t.panel..";border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";padding:"..(layout.combat_padding or layout.equipment_padding or p).."px;font-size:"..(layout.combat_font or layout.equipment_font or layout.body_font).."px;qproperty-alignment: 'AlignTop | AlignLeft';")
   self.left:setStyleSheet("background:"..t.panel..";border-left:1px solid "..t.border..";color:"..t.text..";padding:"..p.."px;font-size:"..layout.body_font.."px;")
   self.equipment:setStyleSheet("background:#101713;border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";padding:"..(layout.equipment_padding or p).."px;font-size:"..(layout.equipment_font or layout.body_font).."px;")
   for _,card in ipairs({self.inventory,self.runes,self.skills}) do card:setStyleSheet("background:#101713;border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";padding:"..(layout.list_padding or p).."px;font-size:"..layout.body_font.."px;") end
@@ -866,7 +877,8 @@ function View:applyLayout(layout)
   layout.list_viewport_height=measured and measured>0 and math.ceil(measured) or fallback
   layout.list_row_height=layout.list_viewport_height/5
   self.list_row_height=layout.list_row_height
-  for _,content in ipairs({self.inventory_content,self.runes_content,self.skills_content}) do content:setStyleSheet("background:#101713;color:"..t.text..";font-family:'"..self.list_font_family.."';font-size:"..layout.list_font.."px;") end
+  -- QLabel otherwise vertically centers short lists in their tall scroll area.
+  for _,content in ipairs({self.inventory_content,self.runes_content,self.skills_content}) do content:setStyleSheet("background:#101713;color:"..t.text..";font-family:'"..self.list_font_family.."';font-size:"..layout.list_font.."px;qproperty-alignment: 'AlignTop | AlignLeft';") end
   self.right_title:setStyleSheet("background:transparent;color:"..t.accent..";font-size:"..layout.lower_body_font.."px;font-weight:700;padding:"..lp.."px;")
   self.room:setStyleSheet("background:#101a16;border:1px solid #385044;border-radius:7px;color:"..t.text..";padding:"..lp.."px;font-size:"..layout.lower_body_font.."px;")
   self.bottom:setStyleSheet("background:#151713;border-top:1px solid "..t.border..";color:"..t.muted..";padding:9px "..p.."px;font-size:"..layout.small_font.."px;")
@@ -934,17 +946,18 @@ function View:applyLayout(layout)
     local identity_bottom=top+layout.identity_height
     if lower_y-identity_bottom>=equipment_h+20 then place(self.equipment,p,identity_bottom+10,layout.left-p*2,equipment_h) else self.equipment:hide() end
     local details_placement=Layout.detailsPlacement()
-    layout.details_columns=2
     self.details:hide()
     local combat_padding=layout.combat_padding or equipment_padding
+    layout.details_columns=Layout.detailsColumns(card_w-combat_padding*2,layout.combat_font or layout.equipment_font or layout.body_font)
     local right_details_h=(layout.combat_line_height or layout.details_line_height)*Layout.detailsCardRows(layout.details_columns)+combat_padding*2+4
     local combat_y=top+p
     place(self.details,card_x,combat_y,card_w,right_details_h)
+    if self.last_state then self.details:echo(View.detailsContent(self.last_state.combat,self.last_state.attributes,t,layout,self.last_state.vitals)) end
     local inventory_y=combat_y+right_details_h+10; local rail_bottom=(layout.window_height or 800)-side_bottom-12
     local title_h=layout.list_row_height+4
     local footer_character_width=self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font)); local footer_capacity=math.max(4,math.floor(list_w/math.max(1,footer_character_width)))
     local footer_lines=View.inventoryFooterLines(self.last_state and self.last_state.vitals or {},t,footer_capacity); self.inventory_footer_rows=#footer_lines; self.inventory_footer_capacity=footer_capacity
-    local footer_line_height=math.max(layout.list_row_height,math.ceil((layout.list_font+2)*1.3)); local footer_h=footer_line_height*self.inventory_footer_rows+6
+    local footer_line_height=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/math.max(1,layout.list_font)),math.ceil((layout.list_font+2)*1.3)); local footer_h=footer_line_height*self.inventory_footer_rows+6
     local inventory_scroll_h=self.inventory_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
     local runes_scroll_h=self.runes_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
     local skills_scroll_h=self.skills_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
@@ -1444,6 +1457,7 @@ local chatSoundExplanation="Staff ON; other tabs OFF. Choose a sound, Preview, c
 local chatSoundDetails="Staff alerts start ON; others OFF. One sound per new message. Preview works even when OFF. Mudlet/media mute still applies. Specific enabled tabs win, then PRIVATE for private messages, then ALL when included. ALL is a fallback; it never adds a second alert. Rapid bursts are limited to one ding per second per tab."
 local chatSoundRowControls={"caption","enabled","previous","choice","next","preview"}
 function View:createChatSoundControls()
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   self.chat_sounds=Sounds.defaults(); self.chat_sound_rows={}; self.chat_sound_order={}
   local t=self.settings.theme
   local textStyle="background:transparent;color:"..t.text..";"
@@ -1460,6 +1474,7 @@ function View:createChatSoundControls()
   self:syncChatSoundRows()
 end
 function View:syncChatSoundRows()
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   local order,seen={},{}
   local function add(value)
     local key=Sounds.tabKey(value)
@@ -1472,7 +1487,10 @@ function View:syncChatSoundRows()
   local changed=table.concat(order,"\n")~=table.concat(self.chat_sound_order or {},"\n")
   self.chat_sound_order=order
   for key,row in pairs(self.chat_sound_rows) do
-    if not seen[key] then for _,name in ipairs(chatSoundRowControls) do row[name]:delete() end; self.chat_sound_rows[key]=nil end
+    if not seen[key] then
+      self.chat_sound_rows[key]=nil
+      for _,name in ipairs(chatSoundRowControls) do row[name]:delete() end
+    end
   end
   local t=self.settings.theme
   for _,key in ipairs(order) do
@@ -1485,10 +1503,16 @@ function View:syncChatSoundRows()
         row[name]=label("DGHUD.ChatSettings.Sounds.Row."..self.chat_sound_row_serial,self.chat_settings_content,style,self.geyser)
         row[name]:hide()
       end
-      row.enabled:setClickCallback(function() return self:changeChatSound("chat_sound_enabled",key,not self:chatSoundSetting(key).enabled) end)
-      row.previous:setClickCallback(function() return self:cycleChatSound(key,-1) end)
-      row.next:setClickCallback(function() return self:cycleChatSound(key,1) end)
-      row.preview:setClickCallback(function() return self:changeChatSound("chat_sound_preview",key,self:chatSoundSetting(key).sound) end)
+      local function currentRow(callback)
+        return function()
+          if self.disposed or not self.root or self.chat_sound_rows[key]~=row then return nil,"Chat sound control is unavailable." end
+          return callback()
+        end
+      end
+      row.enabled:setClickCallback(currentRow(function() return self:changeChatSound("chat_sound_enabled",key,not self:chatSoundSetting(key).enabled) end))
+      row.previous:setClickCallback(currentRow(function() return self:cycleChatSound(key,-1) end))
+      row.next:setClickCallback(currentRow(function() return self:cycleChatSound(key,1) end))
+      row.preview:setClickCallback(currentRow(function() return self:changeChatSound("chat_sound_preview",key,self:chatSoundSetting(key).sound) end))
       for name,tip in pairs({caption=key,enabled="Turn "..key.." sound alerts ON or OFF",previous="Previous sound for "..key,next="Next sound for "..key,preview="Preview "..key.." sound, even when alerts are OFF"}) do
         if row[name].setToolTip then row[name]:setToolTip(tip) end
       end
@@ -1501,14 +1525,19 @@ function View:chatSoundSetting(tab)
   return self.chat_sounds.tabs[tab] or {enabled=false,sound="all"}
 end
 function View:setChatSounds(config)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   local normalized,err=Sounds.validate(config==nil and Sounds.defaults() or config)
   if not normalized then return nil,err end
   self.chat_sounds=viewCopy(normalized)
-  self:syncChatSoundRows()
-  if self.chat_settings_visible and self.layout then self:layoutChatSettings(self.layout) else self:renderChatSounds() end
+  -- Saving a preference must not paint a closed dialog or touch its labels.
+  if self.chat_settings_visible and not self.root.hidden and not self.root.auto_hidden then
+    self:syncChatSoundRows()
+    if self.layout then self:layoutChatSettings(self.layout) end
+  end
   return true
 end
 function View:cycleChatSound(tab,step)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   if not self.chat_sound_rows[tab] then return nil,"Unknown chat sound tab." end
   local current=self:chatSoundSetting(tab).sound; local index=1
   for i,entry in ipairs(Sounds.catalog) do if entry.id==current then index=i; break end end
@@ -1516,6 +1545,7 @@ function View:cycleChatSound(tab,step)
   return self:changeChatSound("chat_sound_choice",tab,entry.id)
 end
 function View:changeChatSound(action,tab,value)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   local function fail(err)
     err=tostring(err or "Could not save sound settings.")
     self.chat_sound_status_text=err; self.chat_settings_status_text=err; self:renderChatSettings()
@@ -1532,6 +1562,7 @@ function View:changeChatSound(action,tab,value)
   if not self.options_action_callback then return fail("Sound settings are unavailable.") end
   -- Only the owner persists or plays audio. False is a successful saved OFF.
   local ok,saved,err=pcall(self.options_action_callback,action,tab,value)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   if not ok then return fail(saved) end
   if saved==nil then return fail(err) end
   if action=="chat_sound_preview" then
@@ -1561,6 +1592,8 @@ function View:changeChatSound(action,tab,value)
   return saved
 end
 function View:layoutChatSounds(width,y,font)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  if not self.chat_settings_visible then return y end
   local gap,h=6,math.max(32,width>=460 and font+18 or font*2+8)
   place(self.chat_sound_caption,0,y,width,26); y=y+30
   local chars=math.max(1,math.floor(width/(font*.65)))
@@ -1585,6 +1618,8 @@ function View:layoutChatSounds(width,y,font)
   return y+gap
 end
 function View:renderChatSounds(font)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  if not self.chat_settings_visible or not self.layout or self.root.hidden or self.root.auto_hidden then return true end
   font=font or self.chat_settings_font or 11
   self.chat_sound_caption:echo(View.withFont("<b>SOUND ALERTS</b>",font+1))
   self.chat_sound_explanation:echo(View.withFont(chatSoundExplanation,font))
@@ -1617,6 +1652,7 @@ function View:chatSettingsWidgets()
   return widgets
 end
 function View:layoutChatSettings(layout)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   local widgets=self:chatSettingsWidgets(); if not self.chat_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(740,math.max(1,width-margin*2)),math.min(740,math.max(1,height-margin*2)); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(layout.mode=="compact" and 9 or 10,math.min(14,(layout.body_font or 14)-2)); local pad=math.max(6,math.min(14,math.floor(math.min(pw,ph)*.03))); local gap=6; local title_h=math.max(24,font+14); local close_h=math.max(26,font+14); local close_y=math.max(pad,ph-pad-close_h); local content_y=pad+title_h+gap; local content_h=math.max(1,close_y-gap-content_y); local inner_w=math.max(1,pw-pad*2); self.chat_settings_compact_copy=pw<430
   place(self.chat_settings_overlay,0,0,"100%","100%"); place(self.chat_settings_panel,x,y,pw,ph); place(self.chat_settings_bg,0,0,"100%","100%"); place(self.chat_settings_title,pad,pad,pw-pad*2,title_h); place(self.chat_settings_content,pad,content_y,inner_w,content_h); place(self.chat_settings_close,math.max(pad,pw-pad-110),close_y,math.min(110,pw-pad*2),close_h)
@@ -1630,6 +1666,8 @@ function View:layoutChatSettings(layout)
   self:renderChatSettings(font); View.raiseCards(widgets); return true
 end
 function View:renderChatSettings(font)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  if not self.chat_settings_visible or not self.layout or self.root.hidden or self.root.auto_hidden then return true end
   font=font or self.chat_settings_font
   self:renderChatSounds(font)
   local visible=self.chat_visible~=false; local t=self.settings.theme
@@ -1639,14 +1677,17 @@ function View:renderChatSettings(font)
 end
 function View:setChatAllSources(sources) self.chat_all_sources={}; for _,key in ipairs(self.chat_all_source_order or {}) do self.chat_all_sources[key]=not (type(sources)=="table" and sources[key]==false) end; if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:showChatSettings()
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  self.chat_settings_visible=false
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end
   self.chat_sound_status_text=nil
   local config=self.settings.chat and self.settings.chat.sounds
   local ok,err=self:setChatSounds(config==nil and self.chat_sounds or config)
   if not ok then self.chat_sound_status_text=tostring(err) end
+  self:syncChatSoundRows()
   self.chat_settings_visible=true; self.chat_settings_clear_pending=false; self.chat_settings_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutChatSettings(self.layout) end; return true
 end
-function View:hideChatSettings() self.chat_settings_visible=false; self.chat_settings_clear_pending=false; for _,widget in ipairs(self:chatSettingsWidgets()) do widget:hide() end; return true end
+function View:hideChatSettings() if self.disposed or not self.root then return nil,"HUD view is unavailable." end; self.chat_settings_visible=false; self.chat_settings_clear_pending=false; for _,widget in ipairs(self:chatSettingsWidgets()) do widget:hide() end; return true end
 function View:keybindingWidgets() local widgets={self.keybindings_overlay,self.keybindings_panel,self.keybindings_bg,self.keybindings_title,self.keybindings_content,self.keybindings_text,self.keybindings_enable,self.keybindings_defaults,self.keybindings_status,self.keybindings_save,self.keybindings_cancel}; for _,field in pairs(self.keybinding_fields or {}) do widgets[#widgets+1]=field.caption; widgets[#widgets+1]=field.input end; return widgets end
 function View:layoutKeybindingSettings(layout)
   local widgets=self:keybindingWidgets(); if not self.keybindings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
@@ -1829,6 +1870,7 @@ function View:setKeybindingSettingsCallback(callback) self.keybindings_settings_
 function View:setMapSettingsCallback(callback) self.map_settings_callback=type(callback)=="function" and callback or nil; return true end
 function View:setMapSettingsActionCallback(callback) self.map_settings_action_callback=type(callback)=="function" and callback or nil; return true end
 function View:selectOptionsAction(action)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   self:setColorMenuVisible(false)
   if action=="command_help" then return self:showHelp() end
   if action=="chat_settings" then return self:showChatSettings() end
@@ -2193,7 +2235,7 @@ function View:update(s)
   self.room:echo(View.withFont("<span style='color:"..t.accent..";font-size:"..layout.lower_heading_font.."px'><b>"..esc(s.room.name).."</b></span><br><span style='color:"..t.muted.."'>Room "..esc(s.room.num or "—").." · Area "..esc(s.room.area or "—").."</span><br><br>"..esc(s.room.environment).."<br>Players &nbsp; <b>"..#s.room.players.."</b><br>Flags &nbsp; "..esc(table.concat(s.room.flags,", ")),layout.lower_body_font))
   self.compact:echo(View.withFont("<span style='color:"..t.accent.."'><b>"..esc(s.room.name).."</b></span> &nbsp; EXITS "..esc(table.concat(s.room.exits,", ")).." &nbsp; · &nbsp; <span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(v.gold or 0).."gp</b></span> <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(v.silver or 0).."sp</b></span>",layout.body_font))
   self.bottom:echo(View.withFont("EXITS &nbsp; <b>"..esc(table.concat(s.room.exits,", ")).."</b> &nbsp;&nbsp; | &nbsp;&nbsp; CARRY &nbsp; <b>"..v.carry.current.." / "..v.carry.maximum.."</b> &nbsp;&nbsp; | &nbsp;&nbsp; ROUND &nbsp; <b>"..(v.roundtime==0 and "READY" or v.roundtime).."</b>",layout.small_font))
-  if self.layout then self:applyLayout(self.layout); self.details:echo(View.detailsContent(s.combat,s.attributes,t,self.layout,v)); self:renderInventory(s); self:renderRunes(s); self:renderSkills(s); self:renderNavigation(s.room.exits) end
+  if self.layout then self:applyLayout(self.layout); self:renderInventory(s); self:renderRunes(s); self:renderSkills(s); self:renderNavigation(s.room.exits) end
 end
 function View:updateClock(clock)
   local layout=self.layout or {mode="wide",body_font=16,heading_font=20}; local t=self.settings.theme
@@ -2232,6 +2274,7 @@ local plainReusableWidgets=nameSet({
 })
 local inputReusableWidgets=nameSet({"map_settings_area_name","map_settings_subarea_name","feedback_summary","feedback_details","map_library_search"})
 function View.validateReusable(candidate,settings)
+  if type(candidate)=="table" and candidate.disposed then return nil,"preserved HUD view is disposed" end
   if type(candidate)~="table" or not reusableWidget(candidate.root) or type(candidate.root.delete)~="function" then return nil,"preserved HUD view is unavailable" end
   local expected=type(settings)=="table" and settings.view_contract or nil
   local expectedSettings=type(settings)=="table" and settings.view_settings_contract or nil
@@ -2323,9 +2366,20 @@ function View:prepareForReuse(settings)
   return true
 end
 function View:delete()
+  local root=self._pending_delete_root or self.root
+  if self.disposed and not root then return true end
+  -- Native deletion may deliver callbacks before it returns. Retire this view
+  -- first so retained closures cannot save preferences or repaint old labels.
+  self.disposed=true; self.chat_settings_visible=false
+  for key,value in pairs(self) do if type(key)=="string" and key:match("_callback$") and type(value)=="function" then self[key]=nil end end
   -- Rejected or partially constructed views may lack editor widgets. Their
   -- root still needs deleting before the replacement uses the same names.
-  pcall(self.hideColorSettings,self); self.color_style_callback=nil
-  if self.root then self.root:delete(); self.root=nil end
+  if self.root then pcall(self.hideColorSettings,self) end; self.color_style_callback=nil
+  -- Preserve the cleanup handle if native deletion throws part way through.
+  -- The view stays retired, but a caller can safely retry the remaining cleanup.
+  self.root=nil; self._pending_delete_root=root
+  if root then root:delete() end
+  self._pending_delete_root=nil
+  return true
 end
 return View

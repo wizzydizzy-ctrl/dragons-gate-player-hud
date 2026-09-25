@@ -126,6 +126,173 @@ local function gmcpRoom(id,area,name,exits)
   return {num=id,name=name or ("Room "..id),area=area or 1,environment="Plain",flags={"indoor"},exits=exits or {}}
 end
 
+test("new directional rooms follow a manually moved source without claiming its area",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); local mapper=Automapper.new(Model,map)
+  assert(mapper:onRoom(gmcpRoom(100))); local original=api.rooms[100].area
+  local personal=assert(api.addAreaName("My new area")); api.areaUser[personal].notes="personal"
+  assert(api.setRoomArea(100,personal)); assert(api.setRoomCoordinates(100,4,5,1))
+  eq(api.rooms[100].user["dghud.partition"],"1")
+  mapper:onOutgoing("north"); assert(mapper:onRoom(gmcpRoom(101)))
+  eq(api.rooms[101].area,personal); eq(api.rooms[101].x,4); eq(api.rooms[101].y,6); eq(api.rooms[101].z,1)
+  eq(api.rooms[101].user["dghud.partition"],"area:"..personal)
+  eq(api.rooms[100].area,personal); eq(api.rooms[100].y,5); eq(api.rooms[100].user["dghud.partition"],"1")
+  eq(api.rooms[100].exits.n,101); eq(api.areas["Dragons Gate - 1"],original)
+  eq(api.areaUser[personal].notes,"personal"); eq(api.areaUser[personal]["dghud.owner"],nil); eq(api.areaUser[personal]["dghud.partition"],nil)
+  eq(api.nextArea,3); eq(#api.deletedRooms,0); eq(#api.deletedAreas,0)
+
+  local reloaded=Automapper.new(Model,Adapter.new(api))
+  assert(reloaded:onRoom(gmcpRoom(101))); reloaded:onOutgoing("east"); assert(reloaded:onRoom(gmcpRoom(102,2)))
+  eq(api.rooms[102].area,personal); eq(api.rooms[102].x,5); eq(api.rooms[102].y,6); eq(api.nextArea,3)
+end)
+
+test("new rooms use the actual renamed owned area instead of the source cached partition",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); local mapper=Automapper.new(Model,map)
+  assert(mapper:onRoom(gmcpRoom(100))); local actual=assert(map:ensureArea("special:500"))
+  assert(api.setAreaName(actual,"My renamed submap")); assert(api.setRoomArea(100,actual))
+  eq(map:effectivePartition(100),"special:500")
+  mapper:onOutgoing("east"); assert(mapper:onRoom(gmcpRoom(101)))
+  eq(api.rooms[101].area,actual); eq(api.rooms[101].user["dghud.partition"],"special:500"); eq(api.nextArea,3)
+end)
+
+test("queued expansion rechecks the actual area of each source after manual moves",function()
+  local api=fakeMapApi(); local mapper=Automapper.new(Model,Adapter.new(api))
+  assert(mapper:onRoom(gmcpRoom(100))); mapper:onOutgoing("north"); mapper:onOutgoing("east")
+  local first=assert(api.addAreaName("First manual area")); assert(api.setRoomArea(100,first))
+  assert(mapper:onRoom(gmcpRoom(101))); eq(api.rooms[101].area,first)
+  local second=assert(api.addAreaName("Second manual area")); assert(api.setRoomArea(101,second))
+  assert(mapper:onRoom(gmcpRoom(102))); eq(api.rooms[102].area,second); eq(api.rooms[101].area,second)
+  eq(api.rooms[100].area,first); eq(api.nextArea,4)
+end)
+
+test("untracked same-game-area expansion inherits a manually selected area",function()
+  local api=fakeMapApi(); local mapper=Automapper.new(Model,Adapter.new(api))
+  assert(mapper:onRoom(gmcpRoom(100))); local actual=assert(api.addAreaName("Manual same-map area"))
+  assert(api.setRoomArea(100,actual)); assert(mapper:onRoom(gmcpRoom(101)))
+  eq(api.rooms[101].area,actual); eq(api.rooms[100].exits.n,nil); eq(api.nextArea,3)
+end)
+
+test("special movement inherits manual areas unless its category explicitly enables a submap",function()
+  for _,enabled in ipairs({false,true}) do
+    local api=fakeMapApi(); local mapper=Automapper.new(Model,Adapter.new(api),nil,{door=enabled})
+    assert(mapper:onRoom(gmcpRoom(100))); local actual=assert(api.addAreaName("Manual portal area"))
+    assert(api.setRoomArea(100,actual)); assert(api.setRoomCoordinates(100,4,5,1))
+    assert(mapper:onSpecialTransition({from=100,to=900,command="go door",category="door",kind="special"}))
+    assert(mapper:onRoom(gmcpRoom(900,2)))
+    if enabled then
+      eq(api.rooms[900].area,api.areas["Dragons Gate - Submap 900"]); assert(api.rooms[900].area~=actual)
+      eq(api.rooms[900].x,0); eq(api.rooms[900].y,0); eq(api.nextArea,4)
+    else
+      eq(api.rooms[900].area,actual); eq(api.rooms[900].x,4); eq(api.rooms[900].y,6); eq(api.nextArea,3)
+    end
+    eq(api.special[100]["go door"],900); eq(api.rooms[100].area,actual); eq(next(api.areaUser[actual]),nil)
+  end
+end)
+
+test("known destinations retain manual area and coordinates for ordinary and special arrivals",function()
+  for _,special in ipairs({false,true}) do
+    local api=fakeMapApi(); local map=Adapter.new(api); local mapper=Automapper.new(Model,map,nil,{door=true})
+    assert(map:ensureRoom(descriptor(900,"1"),{x=8,y=9,z=2},"special:900"))
+    local actual=assert(api.addAreaName("Known manual destination")); assert(api.setRoomArea(900,actual))
+    assert(mapper:onRoom(gmcpRoom(100)))
+    if special then assert(mapper:onSpecialTransition({from=100,to=900,command="go door",category="door",kind="special"})) else mapper:onOutgoing("north") end
+    assert(mapper:onRoom(gmcpRoom(900)))
+    eq(api.rooms[900].area,actual); eq(api.rooms[900].x,8); eq(api.rooms[900].y,9); eq(api.rooms[900].z,2)
+    eq(api.rooms[900].user["dghud.partition"],"special:900")
+    mapper:onOutgoing("north"); assert(mapper:onRoom(gmcpRoom(901)))
+    eq(api.rooms[901].area,actual); eq(api.rooms[901].y,10); eq(api.nextArea,4)
+  end
+end)
+
+test("manual-area coordinate collisions preserve existing personal and HUD room positions",function()
+  local api=fakeMapApi(); local map=Adapter.new(api); local mapper=Automapper.new(Model,map)
+  assert(mapper:onRoom(gmcpRoom(100))); assert(map:ensureRoom(descriptor(200,"1"),{x=0,y=1,z=0}))
+  local actual=assert(api.addAreaName("My arranged map"))
+  api.areaUser[actual]["dghud.owner"]="OtherMapper"; api.areaUser[actual].notes="keep this area"
+  assert(api.setRoomArea(100,actual)); assert(api.setRoomArea(200,actual))
+  api.rooms[201]={area=actual,x=0,y=2,z=0,user={},name="Personal room",exits={},stubs={}}
+  mapper:onOutgoing("north"); assert(mapper:onRoom(gmcpRoom(101)))
+  eq(api.rooms[101].area,actual); assert(api.rooms[101].x~=0 or api.rooms[101].y~=1)
+  eq(api.rooms[200].x,0); eq(api.rooms[200].y,1); eq(api.rooms[201].x,0); eq(api.rooms[201].y,2)
+  eq(api.rooms[201].name,"Personal room"); eq(next(api.rooms[201].user),nil); eq(api.nextArea,3)
+  eq(api.areaUser[actual]["dghud.owner"],"OtherMapper"); eq(api.areaUser[actual].notes,"keep this area")
+  eq(api.areaUser[actual]["dghud.partition"],nil); eq(#api.deletedRooms,0); eq(#api.deletedAreas,0)
+end)
+
+test("manual-area inheritance works with missing room and area partition metadata",function()
+  local api=fakeMapApi(); local map=Adapter.new(api)
+  assert(map:ensureRoom(descriptor(100,"1"),{x=4,y=5,z=1}))
+  local actual=assert(api.addAreaName("Hand made area")); assert(api.setRoomArea(100,actual))
+  api.rooms[100].user["dghud.partition"]=nil; api.rooms[100].user["dghud.game_area"]=nil
+  local getAreaUserData=api.getAreaUserData
+  api.getAreaUserData=function(id,key)
+    local value=getAreaUserData(id,key)
+    if value==nil then return nil,"no user data with key '"..key.."'" end
+    return value
+  end
+  local mapper=Automapper.new(Model,Adapter.new(api))
+  assert(mapper:onRoom(gmcpRoom(100))); mapper:onOutgoing("north"); assert(mapper:onRoom(gmcpRoom(101)))
+  eq(api.rooms[100].area,actual); eq(api.rooms[100].x,4); eq(api.rooms[100].y,5)
+  eq(api.rooms[100].user["dghud.partition"],"area:"..actual); eq(api.rooms[101].area,actual)
+  eq(api.rooms[101].user["dghud.partition"],"area:"..actual); eq(next(api.areaUser[actual]),nil); eq(api.nextArea,3)
+end)
+
+test("source area without partition metadata is resolved live rather than from the cached old partition",function()
+  for _,name in ipairs({"Dragons Gate - Castle","Renamed owned area"}) do
+    local api=fakeMapApi(); local map=Adapter.new(api); local mapper=Automapper.new(Model,map)
+    assert(mapper:onRoom(gmcpRoom(100)))
+    local actual=assert(api.addAreaName(name)); api.areaUser[actual]["dghud.owner"]="DragonsGateHUD"
+    assert(api.setRoomArea(100,actual)); mapper:onOutgoing("north"); assert(mapper:onRoom(gmcpRoom(101)))
+    local expected=name=="Dragons Gate - Castle" and "Castle" or ("area:"..actual)
+    eq(api.rooms[101].area,actual); eq(api.rooms[101].user["dghud.partition"],expected)
+    eq(api.rooms[100].user["dghud.partition"],"1"); eq(api.nextArea,3)
+  end
+end)
+
+test("source-area lookup failures never fall back to the old partition or create rooms",function()
+  for _,failure in ipairs({"getRoomArea","getAreaTable","getAreaUserData","missing area","invalid area","invalid area table","unowned source","missing source"}) do
+    local api=fakeMapApi(); local mapper=Automapper.new(Model,Adapter.new(api))
+    assert(mapper:onRoom(gmcpRoom(100))); local actual=assert(api.addAreaName("My area"))
+    assert(api.setRoomArea(100,actual)); mapper:onOutgoing("north")
+    if failure=="missing area" then api.areas["My area"]=nil
+    elseif failure=="invalid area" then api.rooms[100].area=-1
+    elseif failure=="invalid area table" then api.getAreaTable=function() return false end
+    elseif failure=="unowned source" then api.rooms[100].user["dghud.owner"]="OtherMapper"
+    elseif failure=="missing source" then api.rooms[100]=nil
+    else api.fail[failure]=true end
+    local mutations=0
+    for _,method in ipairs({"addRoom","deleteRoom","addAreaName","deleteArea","setAreaUserData","setRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","setExit","setExitStub","centerview"}) do
+      local native=api[method]; api[method]=function(...) mutations=mutations+1; return native(...) end
+    end
+    local ok,err=mapper:onRoom(gmcpRoom(101)); eq(ok,nil); assert(type(err)=="string" and err~="")
+    eq(mutations,0); eq(api.rooms[101],nil); eq(api.nextArea,3); eq(next(api.areaUser[actual]),nil)
+  end
+end)
+
+test("inheriting a personal area requires a valid owned placed source room",function()
+  for _,source in ipairs({0,999,100,200}) do
+    local api=fakeMapApi(); local actual=assert(api.addAreaName("Personal area"))
+    api.rooms[100]={area=actual,x=0,y=0,z=0,user={},exits={},stubs={}}
+    api.rooms[200]={area=actual,x=0,y=0,z=0,user={["dghud.owner"]="DragonsGateHUD",["dghud.state"]="provisional"},exits={},stubs={}}
+    local ok,err=Adapter.new(api):ensureRoom(descriptor(101),{},"1",source)
+    eq(ok,nil); assert(type(err)=="string" and err~=""); eq(api.rooms[101],nil); eq(api.nextArea,2)
+    eq(next(api.areaUser[actual]),nil); eq(#api.deletedRooms,0); eq(#api.deletedAreas,0)
+  end
+end)
+
+test("interrupted inherited placement can retry in a manual area after adapter reload",function()
+  for _,failure in ipairs({"setRoomArea","setRoomCoordinates"}) do
+    local api=fakeMapApi(); local mapper=Automapper.new(Model,Adapter.new(api))
+    assert(mapper:onRoom(gmcpRoom(100))); local actual=assert(api.addAreaName("Personal retry area"))
+    assert(api.setRoomArea(100,actual)); mapper:onOutgoing("north"); api.fail[failure]=true
+    local ok,err=mapper:onRoom(gmcpRoom(101)); eq(ok,nil); eq(err,failure.." rejected")
+    eq(api.rooms[101].user["dghud.state"],"provisional")
+    api.fail[failure]=nil; mapper=Automapper.new(Model,Adapter.new(api))
+    assert(mapper:onRoom(gmcpRoom(100))); mapper:onOutgoing("north"); assert(mapper:onRoom(gmcpRoom(101)))
+    eq(api.rooms[101].area,actual); eq(api.rooms[101].y,1); eq(api.rooms[101].user["dghud.state"],"ready")
+    eq(api.nextArea,3); eq(next(api.areaUser[actual]),nil); eq(#api.deletedRooms,0); eq(#api.deletedAreas,0)
+  end
+end)
+
 test("creates a fully tagged room and finalizes readiness last",function()
   local api=fakeMapApi(); local calls={}; local native=api.setRoomUserData
   api.setRoomUserData=function(id,k,v) calls[#calls+1]=k; return native(id,k,v) end

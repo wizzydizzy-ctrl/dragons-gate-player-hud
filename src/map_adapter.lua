@@ -695,16 +695,38 @@ local function partitionForArea(self,area)
   return partition
 end
 
-function MapAdapter:effectivePartition(roomID)
+-- Same-map expansion follows the owned source's live native area, not its
+-- historical partition tag or the adapter's partition cache. This does not
+-- claim a user-created area, rename it, or authorize relocating existing rooms.
+function MapAdapter:sourceArea(roomID)
+  roomID=positiveInteger(roomID)
+  if not roomID then return nil,"source room ID must be a positive integer" end
   local record,recordErr=self:roomRecord(roomID)
   if record==nil then return nil,recordErr end
   if not record.exists then return nil,"room "..tostring(roomID).." does not exist" end
   if not record.owned then return nil,"room "..tostring(roomID).." is not owned by DragonsGateHUD" end
-  if record.partition then return record.partition end
-  return partitionForArea(self,record.area)
+  if record.placement_needed then return nil,"source room placement is incomplete" end
+  local area=positiveInteger(record.area)
+  if not area then return nil,"source room has no valid mapper area" end
+  local areas,areasErr=read(self.api,"getAreaTable")
+  if areas==nil then return nil,areasErr or "source mapper area lookup failed" end
+  if type(areas)~="table" then return nil,"Mudlet mapper API getAreaTable returned invalid data" end
+  for _,id in pairs(areas) do if positiveInteger(id)==area then return area end end
+  return nil,"source mapper area does not exist"
 end
 
-function MapAdapter:ensureRoom(room,coordinates,partitionKey)
+function MapAdapter:effectivePartition(roomID)
+  local area,err=self:sourceArea(roomID)
+  if not area then return nil,err end
+  return partitionForArea(self,area)
+end
+
+local function placementArea(self,partitionKey,sourceRoomID)
+  if sourceRoomID~=nil then return self:sourceArea(sourceRoomID) end
+  return self:ensureArea(partitionKey)
+end
+
+function MapAdapter:ensureRoom(room,coordinates,partitionKey,sourceRoomID)
   if type(room)~="table" or room.id==nil then return nil,"room ID is required" end
   coordinates=coordinates or {}
   local ready,readyErr=requireCapabilities(self.api,{"roomExists","addRoom","deleteRoom","getAreaTable","addAreaName","deleteArea","setAreaUserData","getAreaUserData","setRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","getRoomUserData","getRoomArea","getRoomCoordinates"})
@@ -730,7 +752,7 @@ function MapAdapter:ensureRoom(room,coordinates,partitionKey)
   local area=record.area
   if needsPlacement then
     local areaErr
-    area,areaErr=self:ensureArea(effectiveKey)
+    area,areaErr=placementArea(self,effectiveKey,sourceRoomID)
     if area==nil then return nil,areaErr end
   end
   local createdThisCall=false
@@ -1059,8 +1081,8 @@ function MapAdapter:coordinates(roomID)
   return {x=x,y=y,z=z}
 end
 
-function MapAdapter:roomsAt(areaKey,x,y,z)
-  local area,areaErr=self:ensureArea(areaKey)
+function MapAdapter:roomsAt(areaKey,x,y,z,sourceRoomID)
+  local area,areaErr=placementArea(self,areaKey,sourceRoomID)
   if area==nil then return nil,areaErr end
   local rooms,err=invoke(self.api,"getRoomsByPosition",area,x,y,z)
   if rooms==nil then return nil,err end
@@ -1071,12 +1093,12 @@ local function coordinateKey(x,y,z)
   return tostring(x)..","..tostring(y)..","..tostring(z)
 end
 
-function MapAdapter:reserveDirectionalCoordinate(areaKey,desired,direction,protectedRoomID)
+function MapAdapter:reserveDirectionalCoordinate(areaKey,desired,direction,protectedRoomID,sourceRoomID)
   local vector=MapperModel.destination({x=0,y=0,z=0},direction)
   if not vector or vector.x==0 and vector.y==0 and vector.z==0 then return nil,"direction cannot expand mapper coordinates" end
   local ready,readyErr=requireCapabilities(self.api,{"getAreaRooms1","getRoomUserData","getRoomCoordinates","setRoomCoordinates"})
   if not ready then return nil,readyErr end
-  local area,areaErr=self:ensureArea(areaKey); if area==nil then return nil,areaErr end
+  local area,areaErr=placementArea(self,areaKey,sourceRoomID); if area==nil then return nil,areaErr end
   local roomIDs,roomsErr=self:roomsInArea(area); if roomIDs==nil then return nil,roomsErr end
   local records,occupied={},{}
   local blocked=false
@@ -1089,6 +1111,15 @@ function MapAdapter:reserveDirectionalCoordinate(areaKey,desired,direction,prote
     if x==desired.x and y==desired.y and z==desired.z then blocked=true end
   end
   if not blocked then return {x=desired.x,y=desired.y,z=desired.z} end
+  if sourceRoomID~=nil then
+    local owner,ownerErr=read(self.api,"getAreaUserData",area,"dghud.owner")
+    if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
+    if owner~=self.owner then
+      -- Personal areas may contain hand-arranged or foreign rooms. Find space
+      -- for the new room without shifting any existing coordinates.
+      return MapperModel.nearestFree(desired,function(x,y,z) return occupied[coordinateKey(x,y,z)]~=nil end),0
+    end
+  end
   local function outward(record)
     local xOut=vector.x<0 and record.x<=desired.x or vector.x>0 and record.x>=desired.x or false
     local yOut=vector.y<0 and record.y<=desired.y or vector.y>0 and record.y>=desired.y or false

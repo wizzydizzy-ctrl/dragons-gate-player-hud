@@ -163,11 +163,43 @@ test("equipment card typography and padding are smaller than standard cards",fun
     eq(r.equipment_padding<r.panel_padding,true)
   end
 end)
-test("scrollable list text is three pixels smaller while headings stay readable",function()
+test("scrollable rail lists keep a readable point size while headings stay larger",function()
   for _,size in ipairs({{1000,900},{1920,1080},{3840,2160}}) do
     local r=Layout.compute(size[1],size[2])
-    eq(r.list_font>=10,true); eq(r.list_font<=14,true)
+    eq(r.list_font>=13,true); eq(r.list_font<=14,true)
     eq(r.list_title_font,r.list_font+3)
+  end
+end)
+test("multiview layout follows logical pane dimensions and stacks narrow Combat",function()
+  for _,width in ipairs({800,900,960,1000,1075,1100}) do
+    for _,height in ipairs({600,1000}) do
+      local r=Layout.compute(width,height)
+      eq(r.window_width,width); eq(r.window_height,height); eq(r.mode,"medium")
+      eq(r.details_columns,1); eq(r.list_font,13); eq(r.combat_font>=13,true)
+      eq(r.console_left+r.console_width+r.console_right,width)
+      eq(r.console_width>=500,true); eq(r.right_lists_mode,"tabbed")
+      local small=Layout.compute(width,height,nil,nil,nil,{side_text_scale=.8})
+      eq(small.list_font>=12,true); eq(small.combat_font>=12,true)
+    end
+  end
+  for _,width in ipairs({1920,2560,3840}) do
+    local r=Layout.compute(width,1080)
+    eq(r.details_columns,2); eq(r.right_lists_mode,"stacked")
+  end
+end)
+test("Combat switches columns using padded seventeen-percent rail width rather than pane width",function()
+  for _,font in ipairs({12,13,15,20}) do
+    eq(Layout.detailsColumns(font*16-1,font),1)
+    eq(Layout.detailsColumns(font*16,font),2)
+    eq(Layout.detailsColumns(font*16+1,font),2)
+  end
+  for _,width in ipairs({800,900,960,1000,1075,1100,1400,1920,2560,3840}) do
+    for _,scale in ipairs({.8,1,1.2}) do
+      local r=Layout.compute(width,1000,nil,nil,nil,{side_text_scale=scale})
+      local contentWidth=r.right-r.panel_padding*2-r.combat_padding*2
+      eq(r.details_columns,Layout.detailsColumns(contentWidth,r.combat_font))
+      eq(r.list_font>=12,true); eq(r.combat_font>=12,true)
+    end
   end
 end)
 test("header clock font fits the narrow medium identity rail",function()
@@ -200,6 +232,7 @@ test("combat details stay in the right rail",function()
   eq(Layout.detailsPlacement(120,26,300),"right")
 end)
 test("combat details reserve armor stance roundtime and position rows",function()
+  eq(Layout.detailsCardRows(1),11)
   eq(Layout.detailsCardRows(2),6)
   eq(Layout.detailsCardRows(4),6)
 end)

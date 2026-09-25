@@ -157,6 +157,16 @@ test("combat position displays posture with sitting taking defensive precedence"
   eq(standing:find("Position",1,true)~=nil,true); eq(standing:find("Standing",1,true)~=nil,true)
   eq(sitting:find("Sitting",1,true)~=nil,true); eq(sitting:find("Standing",1,true),nil)
 end)
+test("narrow Combat stacks every field with readable explicit sizing and escaped values",function()
+  local layout=require("layout").compute(960,1000)
+  local html=View.detailsContent({body_armor=100,stance="Aggressive",or_rating=125,dr=315},nil,{accent="#d8ae53"},layout,{roundtime=12,position=-1,standing=true})
+  eq(html:find("<table",1,true),nil); assert(html:find("font-size:13px",1,true))
+  for _,text in ipairs({"COMBAT","Armor <b>100%</b>","Stance<br><b>Aggressive</b>","OR <b>125</b>","Roundtime<br><b>12</b>","DR <b>315</b>","Position <b>-1</b>","Standing"}) do assert(html:find(text,1,true),text) end
+  local _,breaks=html:gsub("<br>",""); eq(breaks+2<=require("layout").detailsCardRows(1),true)
+  local escaped=View.detailsContent({stance="<bad&stance>"},nil,{accent="#d8ae53"},layout,{})
+  assert(escaped:find("&lt;bad&amp;stance&gt;",1,true)); eq(escaped:find("<bad",1,true),nil)
+  assert(escaped:find("OR <b>—</b>",1,true)); assert(escaped:find("DR <b>—</b>",1,true)); assert(escaped:find("READY",1,true))
+end)
 
 local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   glyphWidth=tonumber(glyphWidth) or 6
@@ -772,6 +782,7 @@ test("chat sound toggles send each tab and accept saved false only after persist
 end)
 test("chat sound selectors cycle the catalog in both directions with exact payloads",function()
   local Sounds=require("chat_sounds"); local view=chatView(); local calls={}
+  view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
   view:setOptionsActionCallback(function(action,tab,value)
     eq(action,"chat_sound_choice"); assert(Sounds.get(value)); calls[#calls+1]={tab,value}; return value
   end)
@@ -786,6 +797,7 @@ test("chat sound selectors cycle the catalog in both directions with exact paylo
 end)
 test("chat sound previews work while OFF and never save or toggle settings",function()
   local view=chatView(); local calls={}; local saved=view.settings.chat.sounds
+  view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
   view:setOptionsActionCallback(function(action,tab,value)
     calls[#calls+1]={action,tab,value}; return true
   end)
@@ -857,6 +869,7 @@ test("chat sound controls reject unknown sounds tabs and malformed callback resu
 end)
 test("chat sound custom rows canonicalize actual tabs and default OFF with Soft Bell",function()
   local view=chatView(); view.settings.chat.tab_order={"QUEST LOG","OWN","WHISPER","<BAD>"}
+  view:applyLayout(require("layout").compute(1200,800))
   view:renderChat({},{"QUEST LOG","EVENTS-2","OWN","WHISPER","<BAD>",string.rep("A",33)},"ALL")
   view:showChatSettings(); eq(#view.chat_sound_order,11)
   eq(view.chat_sound_rows.OWN,nil); eq(view.chat_sound_rows.WHISPER,nil); eq(view.chat_sound_rows["<BAD>"],nil)
@@ -947,7 +960,7 @@ test("chat sound startup and resize accept Geyser px constraints through pixel g
     view:setOptionsActionCallback(function() calls=calls+1; return true end)
     for _,key in ipairs(view.chat_sound_order) do
       local caption=view.chat_sound_rows[key].caption
-      eq(caption.width,"10px"); eq(caption:get_width(),10); eq(caption.width_reads>1,true)
+      eq(caption.width,"10px"); eq(caption.width_reads,nil); eq(caption:get_width(),10); eq(caption.message,nil)
     end
     for _,size in ipairs({{1920,1080},{320,260},{1200,800}}) do
       view:applyLayout(require("layout").compute(size[1],size[2])); view:showChatSettings()
@@ -965,6 +978,7 @@ test("chat sound startup and resize accept Geyser px constraints through pixel g
 end)
 test("chat sound caption width safely falls back when pixel getters are unavailable",function()
   local view=chatView(); local caption=view.chat_sound_rows.STAFF.caption
+  view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
   caption.width="100%" -- Raw constraints must never be used for arithmetic.
   caption.get_width=function() return 14 end
   view:renderChatSounds(); eq(caption.message:find("STAFF",1,true),nil)
@@ -972,6 +986,126 @@ test("chat sound caption width safely falls back when pixel getters are unavaila
     caption.get_width=getter
     view:renderChatSounds(); assert(caption.message:find("STAFF",1,true))
   end
+end)
+test("hidden sound settings cache updates without painting until the dialog is shown",function()
+  local original=Geyser; local geyser=fakeGeyser(); local newLabel=geyser.Label.new; local nativeCalls,echoes=0,0
+  function geyser.Label:new(cons,parent)
+    local item=newLabel(self,cons,parent)
+    if cons.name:match("^DGHUD%.ChatSettings%.Sounds%.") then
+      for _,name in ipairs({"echo","setStyleSheet","setToolTip","move","resize","show","hide","delete","get_width"}) do
+        local method=item[name]
+        item[name]=function(self,...)
+          nativeCalls=nativeCalls+1; if name=="echo" then echoes=echoes+1 end
+          return method(self,...)
+        end
+      end
+    end
+    return item
+  end
+  Geyser=geyser
+  local ok,err=xpcall(function()
+    local settings=require("settings").resolve(require("defaults"),{})
+    local view=View.new(settings); eq(echoes,0)
+    local before=nativeCalls
+    assert(view:setChatSounds(settings.chat.sounds)); assert(view:renderChatSounds()); assert(view:renderChatSettings())
+    eq(nativeCalls,before); eq(echoes,0)
+    view:applyLayout(require("layout").compute(1200,800)); eq(echoes,0)
+    assert(view:showChatSettings()); eq(echoes,60)
+    view:hideChatSettings(); before=nativeCalls
+    local config=require("chat_sounds").defaults(); config.tabs.STAFF.enabled=false; config.tabs.STAFF.sound="room"; config.volume=30
+    settings.chat.sounds=config -- Main updates its saved settings before notifying View.
+    assert(view:setChatSounds(config)); assert(view:renderChatSounds()); assert(view:renderChatSettings())
+    eq(nativeCalls,before); eq(echoes,60); eq(view.chat_sounds.tabs.STAFF.enabled,false)
+    assert(view:showChatSettings()); eq(echoes,120)
+    assert(view.chat_sound_rows.STAFF.enabled.message:find("OFF",1,true)); assert(view.chat_sound_rows.STAFF.choice.message:find("Room Chime",1,true))
+    assert(view.chat_sound_volume.message:find("30%",1,true))
+    view.root.hidden=true; before=nativeCalls
+    assert(view:setChatSounds(config)); assert(view:renderChatSounds()); assert(view:renderChatSettings()); eq(nativeCalls,before)
+    view.root.hidden=nil; view.root.auto_hidden=true
+    assert(view:setChatSounds(config)); assert(view:renderChatSounds()); assert(view:renderChatSettings()); eq(nativeCalls,before)
+    view.root.auto_hidden=nil
+    view.root.hidden=nil; view:renderChatSounds(); eq(echoes,180)
+  end,debug.traceback)
+  Geyser=original; assert(ok,err)
+end)
+test("disposed and rootless sound views reject setters rendering layout and retired callbacks",function()
+  for _,dispose in ipairs({true,false}) do
+    local view=chatView(); local calls=0; local layout=require("layout").compute(1200,800)
+    view:applyLayout(layout); view:showChatSettings()
+    view:setOptionsActionCallback(function() calls=calls+1; return true end)
+    local callbacks={view.chat_sound_rows.STAFF.enabled.click,view.chat_sound_rows.STAFF.previous.click,view.chat_sound_rows.STAFF.next.click,view.chat_sound_rows.STAFF.preview.click,view.chat_sound_volume_down.click,view.chat_sound_volume_up.click,view.option_action_buttons.chat_settings.click,view.chat_settings_close.click,view.chat_settings_visibility.click,view.chat_settings_clear_visible.click,view.chat_settings_clear_saved.click}
+    local root=view.root; local rootDelete=root.delete
+    function root:delete()
+      eq(view.disposed,true); eq(view.root,nil); eq(view.options_action_callback,nil)
+      for _,callback in ipairs(callbacks) do eq(callback(),nil) end
+      return rootDelete(self)
+    end
+    if dispose then assert(view:delete()); assert(view:delete()) else view.root=nil end
+    local config=view.chat_sounds; local nativeCalls=0
+    for _,widget in ipairs(view:chatSettingsWidgets()) do
+      for _,name in ipairs({"echo","setStyleSheet","setToolTip","move","resize","show","hide","delete","get_width"}) do
+        widget[name]=function() nativeCalls=nativeCalls+1; error("retired native widget touched") end
+      end
+    end
+    for _,invoke in ipairs({
+      function() return view:setChatSounds({volume=20}) end,
+      function() return view:renderChatSounds() end,
+      function() return view:syncChatSoundRows() end,
+      function() return view:createChatSoundControls() end,
+      function() return view:showChatSettings() end,
+      function() return view:hideChatSettings() end,
+      function() return view:layoutChatSettings(layout) end,
+      function() return view:layoutChatSounds(600,0,12) end,
+      function() return view:renderChatSettings() end,
+      function() return view:cycleChatSound("STAFF",1) end,
+      function() return view:changeChatSound("chat_sound_preview","STAFF","staff") end,
+    }) do local accepted,why=invoke(); eq(accepted,nil); assert(why:find("unavailable",1,true)) end
+    for _,callback in ipairs(callbacks) do eq(callback(),nil) end
+    eq(view.chat_sounds,config); eq(nativeCalls,0); eq(calls,0)
+    eq(View.validateReusable(view,view.settings),nil)
+  end
+end)
+test("failed native view deletion keeps a cleanup handle without reviving callbacks",function()
+  local view=chatView(); local root=view.root; local nativeDelete=root.delete; local calls=0
+  local callback=view.chat_sound_rows.STAFF.enabled.click
+  function root:delete()
+    calls=calls+1; eq(view.disposed,true); eq(view.root,nil); eq(callback(),nil)
+    if calls==1 then error("native cleanup interrupted") end
+    return nativeDelete(self)
+  end
+  local ok,why=pcall(view.delete,view); eq(ok,false); assert(why:find("native cleanup interrupted",1,true))
+  eq(view._pending_delete_root,root); eq(View.validateReusable(view,view.settings),nil)
+  assert(view:delete()); eq(calls,2); eq(view._pending_delete_root,nil)
+  assert(view:delete()); eq(calls,2)
+end)
+test("a save callback that disposes the view cannot resume painting retired controls",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
+  local before=view.chat_sounds; local calls=0
+  view:setOptionsActionCallback(function()
+    calls=calls+1; view:delete()
+    for _,widget in ipairs(view:chatSettingsWidgets()) do
+      widget.echo=function() error("post-save echo after disposal") end
+      widget.setStyleSheet=function() error("post-save style after disposal") end
+    end
+    return false
+  end)
+  local saved,err=view.chat_sound_rows.STAFF.enabled.click()
+  eq(saved,nil); assert(err:find("unavailable",1,true)); eq(calls,1); eq(view.chat_sounds,before)
+end)
+test("removed custom sound rows retire callbacks before native deletion and recreation",function()
+  local view=chatView(); view:renderChat({},{"QUEST"},"ALL")
+  local old=view.chat_sound_rows.QUEST; local calls=0
+  view:setOptionsActionCallback(function() calls=calls+1; return true end)
+  local remove=old.caption.delete
+  function old.caption:delete()
+    eq(view.chat_sound_rows.QUEST,nil)
+    eq(old.enabled.click(),nil); eq(old.previous.click(),nil); eq(old.next.click(),nil); eq(old.preview.click(),nil)
+    return remove(self)
+  end
+  view:renderChat({},{},"ALL"); view:renderChat({},{"QUEST"},"ALL")
+  eq(view.chat_sound_rows.QUEST==old,false)
+  eq(old.enabled.click(),nil); eq(old.preview.click(),nil); eq(calls,0)
+  eq(view.chat_sound_rows.QUEST.enabled.click(),true); eq(calls,1)
 end)
 test("chat sound show hide resize redraw and reuse never trigger playback",function()
   local Sounds=require("chat_sounds"); local config=Sounds.defaults(); config.tabs.ROOM.enabled=true
@@ -1258,6 +1392,43 @@ test("narrow list panes preserve readable fonts and overflow horizontally",funct
   eq(view.skills_content.width>view.skills_output.width,true)
   eq(view.skills_output.height>=layout.list_viewport_height+layout.list_horizontal_scrollbar_height,true)
   eq(view.skills_content.height,view.skills_output.height)
+end)
+test("multiview panes retain all Combat fields and top-aligned readable scrollable lists",function()
+  local Layout=require("layout")
+  local state={character={full_name="Test",physical={}},attributes={},combat={body_armor=100,stance="Aggressive",or_rating=125,dr=315},equipment={items={}},inventory={items={{name="Torch",weight=.1}}},runes={items={{name="Force",remaining=10}}},skills={items={{name="Biting",level=4,remain=105}}},vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},carry={current=25.7,maximum=255,percent=10.1},psi={visible=false},web={visible=false},gold=12345,silver=98765,roundtime=12,position=-1,standing=true},room={name="Room",players={},flags={},exits={}}}
+  for _,width in ipairs({800,900,960,1000,1075,1100}) do
+    for _,height in ipairs({600,1000}) do
+      local view=chatView(8); local layout=Layout.compute(width,height)
+      view.last_state=state; view:applyLayout(layout); view:update(state)
+      eq(layout.details_columns,1); eq(view.details.visible,true)
+      eq(view.details.message:find("<table",1,true),nil)
+      for _,value in ipairs({"100%","Aggressive","125","315","12","-1","Standing"}) do assert(view.details.message:find(value,1,true),value) end
+      eq(view.details.y+view.details.height<=view.right_list_tabs.inventory.y,true)
+      eq(view.details.width+layout.panel_padding*2,layout.right)
+      assert(view.details.style:find("qproperty-alignment: 'AlignTop | AlignLeft'",1,true))
+      for _,key in ipairs({"inventory","runes","skills"}) do
+        view.right_list_tabs[key].click()
+        local card,output,content=view[key],view[key.."_output"],view[key.."_content"]
+        eq(card.visible,true); eq(output.visible,true); eq(content.visible,true)
+        eq(content.fontSize,13); eq(view.list_measure.fontSize,content.fontSize)
+        assert(content.style:find("qproperty-alignment: 'AlignTop | AlignLeft'",1,true))
+        eq(content.x,0); eq(content.y,0); eq(content.width>output.width,true)
+        eq(output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+        eq(output.y+output.height<=card.y+card.height,true)
+        eq(card.y+card.height<=height-12,true)
+        if key=="inventory" then
+          eq(output.y+output.height<=view.inventory_footer.y,true)
+          for _,value in ipairs({"12345gp","98765sp","25.7","255","10.1%"}) do assert(view.inventory_footer.message:find(value,1,true),value) end
+        end
+      end
+      -- Resize alone must repaint the Combat structure without waiting for GMCP.
+      view:applyLayout(Layout.compute(1920,1080)); eq(view.layout.details_columns,2)
+      assert(view.details.message:find("<table",1,true))
+      view:applyLayout(Layout.compute(width,height)); eq(view.layout.details_columns,1)
+      eq(view.details.message:find("<table",1,true),nil)
+      assert(view.inventory_content.style:find("AlignTop | AlignLeft",1,true))
+    end
+  end
 end)
 test("map settings toolbar label remains bounded at the medium breakpoint",function()
   local layout=require("layout").compute(1000,700); local view=chatView(7)
@@ -1552,6 +1723,44 @@ test("crossing responsive breakpoints repeatedly restores every desktop card",fu
       for _,widget in ipairs({view.identity,view.details,view.right}) do eq(widget.visible,true) end
       if layout.right_lists_mode=="tabbed" then for _,key in ipairs({"inventory","runes","skills"}) do view.right_list_tabs[key].click(); eq(view[key].visible,true); eq(view[key.."_output"].visible,true) end else for _,widget in ipairs({view.inventory,view.inventory_title,view.inventory_output,view.inventory_content,view.runes,view.runes_title,view.runes_output,view.runes_content,view.skills,view.skills_title,view.skills_output,view.skills_content}) do eq(widget.visible,true) end end
     end
+  end
+end)
+test("rail footer rows scale measured point-font height in tabbed and stacked layouts",function()
+  for _,case in ipairs({{960,1000,6},{1920,1080,13}}) do
+    for _,measuredRow in ipairs({20,26}) do
+      local layout=require("layout").compute(case[1],case[2]); local view=chatView(case[3])
+      view.list_measure.getSizeHint=function() return case[3]*10,measuredRow*5 end
+      view.last_state={vitals={psi={visible=false},web={visible=false},gold=3,silver=9,carry={current=174.4,maximum=354,percent=49.3}},equipment={items={}},inventory={items={{name="Torch",weight=.1}}}}
+      view:applyLayout(layout)
+      eq(layout.list_font,13); eq(layout.list_row_height,measuredRow); eq(view.inventory_footer.fontSize,15)
+      eq(view.inventory_footer_rows,3); eq(view.inventory_footer.visible,true)
+      local expected=math.ceil(measuredRow*15/13)
+      eq(view.inventory_footer.height,expected*3+6)
+      eq(view.inventory_output.y+view.inventory_output.height<=view.inventory_footer.y,true)
+      eq(view.inventory_footer.y+view.inventory_footer.height<=view.inventory.y+view.inventory.height,true)
+      assert(view.inventory_footer.message:find("49.3%",1,true))
+    end
+  end
+end)
+test("compact footer scales measured line height before deciding whether it fits",function()
+  for _,measuredRow in ipairs({15,17}) do
+    local layout=require("layout").compute(320,700); local view=chatView(13)
+    view.list_measure.getSizeHint=function() return 130,measuredRow*5 end
+    local vitals={psi={visible=false},web={visible=false},gold=3,silver=9,carry={current=174.4,maximum=354,percent=49.3}}
+    view.last_state={vitals=vitals,equipment={items={}},inventory={items={{name="Torch",weight=.1}}}}
+    view:applyLayout(layout)
+    eq(layout.list_font,10); eq(layout.list_row_height,measuredRow); eq(view.inventory_footer.fontSize,12)
+    local lines=View.inventoryFooterLines(vitals,view.settings.theme,view.inventory_footer_capacity); eq(#lines,3)
+    if measuredRow==15 then
+      eq(view.inventory_footer.visible,true)
+      eq(view.inventory_footer.height,math.ceil(measuredRow*12/10)*3+3)
+      eq(view.inventory_output.y+view.inventory_output.height<=view.inventory_footer.y,true)
+      assert(view.inventory_footer.message:find("49.3%",1,true))
+    else
+      eq(view.inventory_footer.visible,false)
+    end
+    eq(view.inventory_output.height>=measuredRow,true)
+    eq(view.inventory_output.y+view.inventory_output.height<=view.inventory.y+view.inventory.height,true)
   end
 end)
 test("chat settings controls never overlap or leave the panel on short compact windows",function()

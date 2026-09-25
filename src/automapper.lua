@@ -84,27 +84,27 @@ function Automapper:partitionFor(room,record)
   if self.pending and self.pending.kind=="special" and self.pending.new_submap==false and self.pending.from~=room.id then
     local origin,err=self:roomRecord(self.pending.from); if not origin then return nil,err end
     if not origin.exists or not origin.owned then return nil,"special transition origin is not owned by DragonsGateHUD" end
-    return origin.partition or self.map:effectivePartition(self.pending.from)
+    local partition,partitionErr=self.map:effectivePartition(self.pending.from)
+    return partition,partitionErr,self.pending.from
   end
   if self.pending and self.pending.direction and self.pending.from~=room.id then
     local origin,originErr=self:roomRecord(self.pending.from)
     if origin==nil then return nil,originErr end
-    if origin.exists and origin.owned then
-      local originPartition=origin.partition
-      if not originPartition then originPartition,originErr=self.map:effectivePartition(self.pending.from) end
-      if originPartition==nil and originErr then return nil,originErr end
-      if originPartition~=nil then return originPartition end
-    end
+    if not origin.exists or not origin.owned then return nil,"directional transition origin is not owned by DragonsGateHUD" end
+    local originPartition
+    originPartition,originErr=self.map:effectivePartition(self.pending.from)
+    if originPartition==nil and originErr then return nil,originErr end
+    if originPartition~=nil then return originPartition,nil,self.pending.from end
   end
   if self.current_id and self.current_id~=room.id and not self.pending then
     local origin,originErr=self:roomRecord(self.current_id)
     if origin==nil then return nil,originErr end
     if origin.exists and origin.owned then
       if origin.game_area==room.area_key then
-        local originPartition=origin.partition
-        if not originPartition then originPartition,originErr=self.map:effectivePartition(self.current_id) end
+        local originPartition
+        originPartition,originErr=self.map:effectivePartition(self.current_id)
         if originPartition==nil and originErr then return nil,originErr end
-        if originPartition~=nil then return originPartition end
+        if originPartition~=nil then return originPartition,nil,self.current_id end
       end
       return "isolated:"..tostring(room.id)
     end
@@ -113,7 +113,7 @@ function Automapper:partitionFor(room,record)
   return room.area_key
 end
 
-function Automapper:specialCoordinates(room,partition)
+function Automapper:specialCoordinates(room,partition,sourceRoomID)
   local origin,originErr=self.map:coordinates(self.pending.from)
   if not origin then return nil,originErr or "special transition origin coordinates are unavailable" end
   local occupancyErr
@@ -127,7 +127,7 @@ function Automapper:specialCoordinates(room,partition)
   end
   local function occupied(coordinates)
     if blocked[coordinateKey(coordinates)] then return true end
-    local rooms,err=self.map:roomsAt(partition,coordinates.x,coordinates.y,coordinates.z)
+    local rooms,err=self.map:roomsAt(partition,coordinates.x,coordinates.y,coordinates.z,sourceRoomID)
     if rooms==nil then occupancyErr=err or "room occupancy lookup failed"; return true end
     for _,id in pairs(rooms) do if tonumber(id)~=room.id then return true end end
     return false
@@ -143,7 +143,7 @@ function Automapper:specialCoordinates(room,partition)
   return coordinates
 end
 
-function Automapper:coordinatesFor(room,partition,record)
+function Automapper:coordinatesFor(room,partition,record,sourceRoomID)
   if not record or not record.placement_needed then
     if record and record.coordinates then return record.coordinates end
     local existing,existingErr=self.map:coordinates(room.id)
@@ -151,7 +151,7 @@ function Automapper:coordinatesFor(room,partition,record)
     if existingErr then return nil,existingErr end
   end
   if self.pending and self.pending.kind=="special" and self.pending.new_submap==false then
-    return self:specialCoordinates(room,partition)
+    return self:specialCoordinates(room,partition,sourceRoomID)
   end
   local desired={x=0,y=0,z=0}
   if self.pending then
@@ -159,13 +159,13 @@ function Automapper:coordinatesFor(room,partition,record)
     desired=origin and self.model.destination(origin,self.pending.direction) or desired
   end
   if self.pending and self.pending.direction and type(self.map.reserveDirectionalCoordinate)=="function" then
-    local reserved,reserveErr=self.map:reserveDirectionalCoordinate(partition,desired,self.pending.direction,self.pending.from)
+    local reserved,reserveErr=self.map:reserveDirectionalCoordinate(partition,desired,self.pending.direction,self.pending.from,sourceRoomID)
     if reserved then return reserved end
     if reserveErr then return nil,reserveErr end
   end
   local occupancyErr
   local coordinates=self.model.nearestFree(desired,function(x,y,z)
-    local occupied,err=self.map:roomsAt(partition,x,y,z)
+    local occupied,err=self.map:roomsAt(partition,x,y,z,sourceRoomID)
     if occupied==nil then occupancyErr=err or "room occupancy lookup failed"; return false end
     for _,id in pairs(occupied) do if tonumber(id)~=room.id then return true end end
     return false
@@ -233,12 +233,12 @@ function Automapper:onRoom(raw)
       return failUnensuredRoom(self,room,sameOrigin,"invalid_room",err)
     end
   end
-  local partition,partitionErr=self:partitionFor(room,record)
+  local partition,partitionErr,sourceRoomID=self:partitionFor(room,record)
   if not partition then return failUnensuredRoom(self,room,sameOrigin,"invalid_room",partitionErr) end
   local coordinates,coordinatesErr
-  if specialArrival and self.pending.new_submap==true and (not record.exists or record.placement_needed) then coordinates={x=0,y=0,z=0} else coordinates,coordinatesErr=self:coordinatesFor(room,partition,record) end
+  if specialArrival and self.pending.new_submap==true and (not record.exists or record.placement_needed) then coordinates={x=0,y=0,z=0} else coordinates,coordinatesErr=self:coordinatesFor(room,partition,record,sourceRoomID) end
   if not coordinates then return failUnensuredRoom(self,room,sameOrigin,"invalid_room",coordinatesErr) end
-  local ensured,ensureErr=self.map:ensureRoom(room,coordinates,partition)
+  local ensured,ensureErr=self.map:ensureRoom(room,coordinates,partition,sourceRoomID)
   if not ensured then
     local kind=tostring(ensureErr):find("not owned",1,true) and "ownership_conflict" or "invalid_room"
     return failUnensuredRoom(self,room,sameOrigin,kind,ensureErr)
