@@ -965,6 +965,47 @@ test("visual zoom direction hides Mudlet numeric inversion and clamps per area",
   api.zoom[7]=3; eq(map:zoom(100,"larger",2.5,3,60),3)
 end)
 
+test("repeated mapper plus and minus clicks affect only the current area",function()
+  local api=fakeMapApi(); api.rooms[100]={area=7,user={["dghud.owner"]="DragonsGateHUD"}}
+  api.rooms[200]={area=8,user={["dghud.owner"]="DragonsGateHUD"}}
+  api.areaUser[7]={["dghud.owner"]="DragonsGateHUD"}; api.areaUser[8]={["dghud.owner"]="DragonsGateHUD"}
+  api.zoom[7]=20; api.zoom[8]=31
+  local map=Adapter.new(api)
+  eq(map:zoom(100,"larger",2.5,3,60),17.5)
+  eq(map:zoom(100,"larger",2.5,3,60),15)
+  eq(map:zoom(100,"smaller",2.5,3,60),17.5)
+  eq(api.zoom[7],17.5); eq(api.zoom[8],31); eq(api.refreshed,3)
+end)
+
+test("mapper minus and plus clicks stop at their configured zoom limits",function()
+  local api=fakeMapApi(); api.rooms[100]={area=7,user={["dghud.owner"]="DragonsGateHUD"}}; api.areaUser[7]={["dghud.owner"]="DragonsGateHUD"}; api.zoom[7]=59
+  local map=Adapter.new(api)
+  eq(map:zoom(100,"smaller",2.5,3,60),60)
+  eq(map:zoom(100,"smaller",2.5,3,60),60)
+  eq(map:zoom(100,"larger",2.5,3,60),57.5)
+  api.zoom[7]=4
+  eq(map:zoom(100,"larger",2.5,3,60),3)
+  eq(map:zoom(100,"larger",2.5,3,60),3)
+  eq(api.zoom[7],3); eq(api.refreshed,5)
+end)
+
+test("invalid mapper zoom inputs leave the native zoom untouched",function()
+  local api=fakeMapApi(); api.rooms[100]={area=7,user={["dghud.owner"]="DragonsGateHUD"}}; api.areaUser[7]={["dghud.owner"]="DragonsGateHUD"}; api.zoom[7]=20
+  local map=Adapter.new(api)
+  for _,case in ipairs({
+    {"center",2.5,3,60,"map zoom direction must be larger or smaller"},
+    {"larger",0,3,60,"map zoom step must be positive"},
+    {"smaller",math.huge,3,60,"map zoom step must be positive"},
+    {"larger",2.5,3,2,"map zoom bounds are invalid"},
+  }) do
+    local value,err=map:zoom(100,case[1],case[2],case[3],case[4])
+    eq(value,nil); eq(err,case[5]); eq(api.zoom[7],20); eq(api.refreshed,0)
+  end
+  api.zoom[7]="invalid"
+  local value,err=map:zoom(100,"larger",2.5,3,60)
+  eq(value,nil); eq(err,"current map zoom is invalid"); eq(api.zoom[7],"invalid"); eq(api.refreshed,0)
+end)
+
 test("zoom enforces Mudlet's absolute minimum over a lower configured minimum",function()
   local api=fakeMapApi(); api.rooms[100]={area=7,user={["dghud.owner"]="DragonsGateHUD"}}; api.areaUser[7]={["dghud.owner"]="DragonsGateHUD"}; api.zoom[7]=4
   eq(Adapter.new(api):zoom(100,"larger",2.5,1,60),3)
@@ -997,6 +1038,32 @@ test("zoom refuses an unowned area even when the room is HUD owned",function()
   eq(value,nil); eq(e,"mapper area 7 is not owned by DragonsGateHUD")
   value,e=map:zoom(100,"larger",2.5,3,60)
   eq(value,nil); eq(e,"mapper area 7 is not owned by DragonsGateHUD"); eq(api.zoom[7],20)
+end)
+
+test("HUD-owned room zooms in an untagged area despite Mudlet's missing owner-key error",function()
+  local api=fakeMapApi(); api.rooms[100]={area=2,user={["dghud.owner"]="DragonsGateHUD"}}; api.areas["Personal area"]=2; api.areaUser[2]={}; api.zoom[2]=20
+  local nativeGet=api.getAreaUserData
+  function api.getAreaUserData(id,key)
+    local value,err=nativeGet(id,key)
+    if value~=nil or err~=nil then return value,err end
+    return nil,"no user data with key '"..key.."' in areaID "..id
+  end
+  local map=Adapter.new(api)
+  eq(map:currentZoom(100),20)
+  eq(map:zoom(100,"larger",2.5,3,60),17.5)
+  eq(api.zoom[2],17.5); eq(api.refreshed,1); eq(next(api.areaUser[2]),nil)
+
+  api.fail.getAreaUserData=true
+  local value,err=map:zoom(100,"smaller",2.5,3,60)
+  eq(value,nil); eq(err,"getAreaUserData rejected"); eq(api.zoom[2],17.5); eq(api.refreshed,1)
+  api.fail.getAreaUserData=nil
+
+  api.areaUser[2]["dghud.owner"]="PersonalMapper"
+  value,err=map:currentZoom(100)
+  eq(value,nil); eq(err,"mapper area 2 is not owned by DragonsGateHUD")
+  value,err=map:zoom(100,"smaller",2.5,3,60)
+  eq(value,nil); eq(err,"mapper area 2 is not owned by DragonsGateHUD")
+  eq(api.zoom[2],17.5); eq(api.refreshed,1)
 end)
 
 test("reload resolves persisted owned area before checking occupied coordinates",function()

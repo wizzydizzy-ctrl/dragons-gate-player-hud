@@ -1191,8 +1191,10 @@ function MapAdapter:currentZoom(roomID)
   local area,areaErr=read(self.api,"getRoomArea",room)
   if area==nil then return nil,areaErr or ("room "..tostring(room).." has no mapper area") end
   local areaOwner,areaOwnerErr=read(self.api,"getAreaUserData",area,"dghud.owner")
-  if areaOwner==nil and areaOwnerErr~=nil then return nil,areaOwnerErr end
-  if areaOwner~=self.owner then return nil,"mapper area "..tostring(area).." is not owned by DragonsGateHUD" end
+  -- A HUD room may be moved into a manually created area with no owner tag.
+  -- Zoom changes only that area's view scale; explicit foreign ownership stays protected.
+  if areaOwner==nil and areaOwnerErr~=nil and not absentUserData(areaOwnerErr) then return nil,areaOwnerErr end
+  if areaOwner~=nil and areaOwner~=self.owner then return nil,"mapper area "..tostring(area).." is not owned by DragonsGateHUD" end
   local zoom,zoomErr=read(self.api,"getMapZoom",area)
   if zoom==nil then return nil,zoomErr or ("mapper area "..tostring(area).." has no zoom value") end
   return zoom,area
