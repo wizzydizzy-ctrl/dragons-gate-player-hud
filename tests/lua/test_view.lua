@@ -1065,11 +1065,41 @@ test("disposed and rootless sound views reject setters rendering layout and reti
     eq(View.validateReusable(view,view.settings),nil)
   end
 end)
+test("showing the HUD repaints chat settings changed while its root was hidden",function()
+  local original=Geyser; local geyser=fakeGeyser(); local newContainer=geyser.Container.new
+  function geyser.Container:new(cons,parent)
+    local item=newContainer(self,cons,parent)
+    if cons.name=="DGHUD.Root" then
+      function item:show(automatic)
+        if automatic then self.auto_hidden=false else self.hidden=false end
+        self.visible=not (self.hidden or self.auto_hidden)
+      end
+    end
+    return item
+  end
+  Geyser=geyser
+  local ok,err=xpcall(function()
+    for _,automatic in ipairs({false,true}) do
+      local settings=require("settings").resolve(require("defaults"),{})
+      local view=View.new(settings); view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
+      assert(view.chat_sound_rows.STAFF.enabled.message:find("ON",1,true))
+      if automatic then view.root.auto_hidden=true else view.root.hidden=true end
+      local config=require("chat_sounds").defaults(); config.tabs.STAFF.enabled=false
+      settings.chat.sounds=config; assert(view:setChatSounds(config)); eq(view.chat_settings_dirty,true)
+      assert(view.chat_sound_rows.STAFF.enabled.message:find("ON",1,true))
+      view.root:show(automatic)
+      assert(view.chat_sound_rows.STAFF.enabled.message:find("OFF",1,true)); eq(view.chat_settings_dirty,false)
+      local root=view.root; view:delete(); eq(root:show(),nil)
+    end
+  end,debug.traceback)
+  Geyser=original; assert(ok,err)
+end)
 test("failed native view deletion keeps a cleanup handle without reviving callbacks",function()
   local view=chatView(); local root=view.root; local nativeDelete=root.delete; local calls=0
   local callback=view.chat_sound_rows.STAFF.enabled.click
   function root:delete()
     calls=calls+1; eq(view.disposed,true); eq(view.root,nil); eq(callback(),nil)
+    local again,why=view:delete(); eq(again,nil); assert(why:find("already running",1,true))
     if calls==1 then error("native cleanup interrupted") end
     return nativeDelete(self)
   end

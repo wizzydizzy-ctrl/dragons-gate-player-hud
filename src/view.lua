@@ -341,6 +341,15 @@ function View.new(settings)
   local available={}; if type(rawget(_G,"getAvailableFonts"))=="function" then local ok,value=pcall(getAvailableFonts); if ok and type(value)=="table" then available=value end end
   self.list_font_family=View.monospaceFont(available)
   self.root=Geyser.Container:new({name="DGHUD.Root",x=0,y=0,width="100%",height="100%"})
+  local rootShow=self.root.show
+  self.root.show=function(root,...)
+    if self.disposed or root~=self.root then return nil,"HUD view is unavailable." end
+    local result=rootShow(root,...)
+    if self.chat_settings_dirty and self.chat_settings_visible and self.layout and not root.hidden and not root.auto_hidden then
+      self:syncChatSoundRows(); self:layoutChatSettings(self.layout)
+    end
+    return result
+  end
   self.header=label("DGHUD.Header",self.root,"background:"..t.background..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:10px 18px;")
   self.color_toggle=label("DGHUD.Header.ColorToggle",self.root,"background:#17231c;border:1px solid "..t.jade..";border-radius:4px;color:"..t.jade..";font-weight:700;")
   self:ensureVersionLabel(); self:renderVersion()
@@ -1529,6 +1538,7 @@ function View:setChatSounds(config)
   local normalized,err=Sounds.validate(config==nil and Sounds.defaults() or config)
   if not normalized then return nil,err end
   self.chat_sounds=viewCopy(normalized)
+  self.chat_settings_dirty=true
   -- Saving a preference must not paint a closed dialog or touch its labels.
   if self.chat_settings_visible and not self.root.hidden and not self.root.auto_hidden then
     self:syncChatSoundRows()
@@ -1667,13 +1677,14 @@ function View:layoutChatSettings(layout)
 end
 function View:renderChatSettings(font)
   if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  self.chat_settings_dirty=true
   if not self.chat_settings_visible or not self.layout or self.root.hidden or self.root.auto_hidden then return true end
   font=font or self.chat_settings_font
   self:renderChatSounds(font)
   local visible=self.chat_visible~=false; local t=self.settings.theme
   self.chat_settings_visibility:setStyleSheet("background:"..(visible and "#173526" or "#252b28")..";border:2px solid "..t.accent..";border-radius:5px;color:"..(visible and "#c8f2d5" or t.text)..";font-weight:700;")
   self.chat_settings_visibility:echo(View.withFont("<center><b>SHOW CHATBOX: "..(visible and "ON" or "OFF").."</b></center>",(font or 11)+2))
-  font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. Dedicated tabs and saved history are unchanged." or "Choose which message sources appear in the ALL tab. Turning one off does not disable capture, delete history, or hide it from its dedicated tab."; self.chat_settings_text:echo(View.withFont("Hide the chatbox to expand the main console. Capture and history continue.<br><br>"..explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); return true
+  font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. Dedicated tabs and saved history are unchanged." or "Choose which message sources appear in the ALL tab. Turning one off does not disable capture, delete history, or hide it from its dedicated tab."; self.chat_settings_text:echo(View.withFont("Hide the chatbox to expand the main console. Capture and history continue.<br><br>"..explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); self.chat_settings_dirty=false; return true
 end
 function View:setChatAllSources(sources) self.chat_all_sources={}; for _,key in ipairs(self.chat_all_source_order or {}) do self.chat_all_sources[key]=not (type(sources)=="table" and sources[key]==false) end; if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:showChatSettings()
@@ -2366,6 +2377,7 @@ function View:prepareForReuse(settings)
   return true
 end
 function View:delete()
+  if self._delete_in_progress then return nil,"HUD cleanup is already running." end
   local root=self._pending_delete_root or self.root
   if self.disposed and not root then return true end
   -- Native deletion may deliver callbacks before it returns. Retire this view
@@ -2378,7 +2390,12 @@ function View:delete()
   -- Preserve the cleanup handle if native deletion throws part way through.
   -- The view stays retired, but a caller can safely retry the remaining cleanup.
   self.root=nil; self._pending_delete_root=root
-  if root then root:delete() end
+  if root then
+    self._delete_in_progress=true
+    local ok,err=pcall(root.delete,root)
+    self._delete_in_progress=nil
+    if not ok then error(err,0) end
+  end
   self._pending_delete_root=nil
   return true
 end
