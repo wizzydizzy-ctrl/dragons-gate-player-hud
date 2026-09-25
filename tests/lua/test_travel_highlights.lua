@@ -35,6 +35,34 @@ test("wrapped room presence maps object and here words to their original rows",f
   eq(split[3].source_line:sub(split[3].start,split[3].start+split[3].length-1),"here")
 end)
 
+test("capitalized Walk in a room name does not discard a wrapped object list",function()
+  local lines={
+    "Merchant Walk comes to an abrupt end at a massive moonsilver gate. The towering walls of Spur on either side of the gates force all to pass by the guards who are ",
+    "constantly on the watch for thieves and bandits. Just beyond the gates one can glimpse the bustling Merchant District of Spur.  A gilded oak sign and an open stone ",
+    "gate are here.",
+  }
+  local parser=Travel.new(true)
+  eq(parser:onLine(lines[1]),nil)
+  eq(parser:onLine(lines[2]),nil)
+  local parts=assert(parser:onLine(lines[3]))
+  for index,wanted in ipairs({
+    {"presence",-1,"A gilded oak sign"},
+    {"portal",-1,"an open stone"},
+    {"portal",0,"gate"},
+    {"presence_phrase",0,"are here"},
+  }) do
+    local part=assert(parts[index])
+    eq(part.kind,wanted[1]); eq(part.line_offset or 0,wanted[2])
+    eq(part.source_line:sub(part.start,part.start+part.length-1),wanted[3])
+  end
+  eq(#parts,4)
+  for _,line in ipairs({
+    "You Walk north. A gate is here.",
+    "Someone Walks east. A gate is here.",
+    "Someone Says hello. A gate is here.",
+  }) do eq(Travel.parsePresence(line),nil) end
+end)
+
 local function phrases(line,expected)
   local parts=Travel.parse(line)
   if #expected==0 then eq(parts,nil); return end

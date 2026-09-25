@@ -412,6 +412,23 @@ test("ordinary room objects paint muted subjects and a brighter terminal phrase"
   c:shutdown()
 end)
 
+test("Merchant Walk wraps its sign and gate before the colored are here suffix",function()
+  local lines={
+    [100]="Merchant Walk comes to an abrupt end at a massive moonsilver gate. The towering walls of Spur on either side of the gates force all to pass by the guards who are ",
+    [101]="constantly on the watch for thieves and bandits. Just beyond the gates one can glimpse the bustling Merchant District of Spur.  A gilded oak sign and an open stone ",
+    [102]="gate are here.",
+  }
+  local f=colorSurface(lines); local c=Colorizer.new(f,true); assert(c:start())
+  for row=100,101 do f.cursor=row; eq(c:onLine(lines[row],row),false) end
+  f.cursor=102; assert(c:onLine(lines[102],102))
+  f:assertColor(101,"A gilded oak sign","136,190,153")
+  f:assertColor(101,"an open stone","55,190,200")
+  f:assertColor(102,"gate","55,190,200")
+  f:assertColor(102,"are here","255,220,90")
+  eq((f.painted[102] or {})[#lines[102]],nil)
+  c:shutdown()
+end)
+
 test("current-row travel color is painted before intersecting currency race and class styles",function()
   local prefix="A gold coin rests nearby. "
   local subject="A silver gate to the Human Cleric temple"

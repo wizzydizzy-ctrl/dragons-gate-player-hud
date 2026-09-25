@@ -33,14 +33,22 @@ local speech={say=true,says=true,ask=true,asks=true,shout=true,shouts=true,
 local movement={walk=true,walks=true,run=true,runs=true,enter=true,enters=true,
   leave=true,leaves=true,arrives=true,move=true,moves=true,climb=true,climbs=true,
   follow=true,follows=true}
+local walkNounVerbs={comes=true,ends=true,continues=true,leads=true}
 
 local function narrative(line)
-  local clause=line:lower():match("^%s*([^.!?]*)") or ""
-  local prefix={}
-  for word in clause:gmatch("%a+") do
-    if #prefix>0 and #prefix<=5 and (speech[word] or movement[word]) then return true end
+  local clause=line:match("^%s*([^.!?]*)") or ""
+  local words={}
+  for rawWord in clause:gmatch("%a+") do words[#words+1]=rawWord end
+  for index,rawWord in ipairs(words) do
+    local word=rawWord:lower()
+    -- "Merchant Walk comes..." names a place, while "You Walk north"
+    -- still describes movement. Keep the exception narrow so capitalized
+    -- movement and speech text cannot masquerade as a room-object list.
+    local following=words[index+1] and words[index+1]:lower()
+    local prior=words[index-1]
+    local namedWalk=word=="walk" and rawWord=="Walk" and prior and prior:match("^%u") and walkNounVerbs[following]
+    if index>1 and index<=6 and (speech[word] or (movement[word] and not namedWalk)) then return true end
     if word=="who" or word=="where" or word=="which" or word=="when" or word=="can" then return false end
-    prefix[#prefix+1]=word
   end
   return false
 end
