@@ -455,32 +455,72 @@ function Adapter:addColorizerTrigger(fn)
   -- new independently configurable categories from being silently excluded
   -- by an older registration prefilter.
   return tempRegexTrigger("^.*$",function()
-    fn(line or (type(getCurrentLine)=="function" and getCurrentLine() or ""))
+    fn(line or (type(getCurrentLine)=="function" and getCurrentLine() or ""),type(getLineNumber)=="function" and getLineNumber() or nil)
   end)
 end
 function Adapter:applyLineColors(segments,api)
   api=api or _G
   if type(segments)~="table" or type(api.selectSection)~="function" or type(api.setFgColor)~="function" then return nil,"Mudlet line-color API is unavailable" end
+  local originalLine=type(api.getLineNumber)=="function" and api.getLineNumber() or nil
+  local originalColumn=type(api.getColumnNumber)=="function" and api.getColumnNumber() or 0
+  local moved=false
+  local function utf16Units(text)
+    -- Native console text is valid UTF-8, but Mudlet selects by Qt UTF-16
+    -- positions. Each four-byte code point occupies two surrogate units.
+    local _,codePoints=text:gsub("[^\128-\191]","")
+    local _,supplementary=text:gsub("[\240-\244]","")
+    return codePoints+supplementary
+  end
   local ok,err=pcall(function()
     for _,item in ipairs(segments) do
       local color=item.color
       assert(type(item.start)=="number" and type(item.length)=="number" and type(color)=="table","invalid color segment")
-      local selected=api.selectSection(item.start-1,item.length)
+      assert(item.start>=1 and item.start%1==0 and item.length>=1 and item.length%1==0,"invalid color segment bounds")
+      local usable=true
+      if item.line_number~=nil then
+        assert(type(item.line_number)=="number" and item.line_number>=0 and item.line_number%1==0,"invalid color line")
+        if type(api.getLines)=="function" and item.source_line then
+          local lines=api.getLines(item.line_number,item.line_number+1)
+          usable=type(lines)=="table" and lines[1]==item.source_line
+        end
+        if usable and item.line_number~=originalLine then
+          -- A wrapped object's prior text must still match at its recorded
+          -- absolute row. Deleted/replaced lines are skipped, never recolored.
+          usable=originalLine~=nil and type(api.getLines)=="function" and type(api.moveCursor)=="function" and type(item.source_line)=="string"
+          if usable then usable=api.moveCursor(0,item.line_number)==true; moved=true end
+        elseif usable and moved and type(api.moveCursor)=="function" then
+          usable=api.moveCursor(0,originalLine)==true
+        end
+      elseif moved and type(api.moveCursor)=="function" then usable=api.moveCursor(0,originalLine)==true end
+      if usable then
+      local start,length=item.start-1,item.length
+      if item.source_line then
+        start=utf16Units(item.source_line:sub(1,item.start-1)); length=utf16Units(item.source_line:sub(item.start,item.start+item.length-1))
+      end
+      local selected=api.selectSection(start,length)
       if selected==false then error("Mudlet could not select the requested line segment") end
       if item.display_text and type(api.replace)=="function" then
         api.replace(item.display_text)
-        selected=api.selectSection(item.start-1,#item.display_text)
+        selected=api.selectSection(start,utf16Units(item.display_text))
         if selected==false then error("Mudlet could not select the formatted notice") end
       end
       api.setFgColor(color[1],color[2],color[3])
       if item.background and type(api.setBgColor)=="function" then api.setBgColor(item.background[1],item.background[2],item.background[3]) end
-      if item.bold and type(api.setBold)=="function" then api.setBold(true) end
-      if item.underline and type(api.setUnderline)=="function" then api.setUnderline(true) end
+      if item.bold~=nil and type(api.setBold)=="function" then api.setBold(item.bold==true) end
+      if item.underline~=nil and type(api.setUnderline)=="function" then api.setUnderline(item.underline==true) end
+      end
     end
     if type(api.deselect)=="function" then api.deselect() end
   end)
+  if moved and type(api.moveCursor)=="function" then pcall(api.moveCursor,originalColumn,originalLine) end
   if not ok then if type(api.deselect)=="function" then pcall(api.deselect) end; return nil,tostring(err) end
   return true
+end
+function Adapter:saveColorSettings(config)
+  return require("color_preferences").save(getMudletHomeDir(),config)
+end
+function Adapter.loadColorSettings()
+  return require("color_preferences").load(getMudletHomeDir())
 end
 function Adapter:killTrigger(id) return killTrigger(id) end
 function Adapter:epoch() return os.time() end

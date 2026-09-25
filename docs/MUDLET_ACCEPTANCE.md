@@ -1,5 +1,9 @@
 # Hybrid HUD, persistent chat, and special sub-map acceptance
 
+Color acceptance (0.3.60): open **OPTIONS → COLOR SETTINGS → TEXT STYLES**. Change Exit directions to a blue foreground with a dark background, bold and underline; Save and verify only directions on new output change. Change one race, disable one class style, and check repeated names on the same line. Verify all style entries are reachable by scrolling at compact and normal window sizes, a draft survives resizing, Cancel does not save, and Reset Default requires Save. Reload/update and cold-load the saved data to verify the choices persist. Revert test choices afterward.
+
+Feed synthetic local mixed lists into the real trigger path: a store/pawnshop/tavern with a fountain; a dark hole plus a torch split before “here.”; SHOP instructions followed by “An exit is here.”; an arch/door spanning lines; a dirt path alongside a lamp post. Confirm only travel phrases change, including prior lines, while chat, loot, and narrative mentions stay untouched. Inject a replaced old console line and verify it is skipped. Do not publish private logs as fixtures.
+
 Use only the disposable `Dragons Gate HUD` profile. Do not send representational game messages solely to create test traffic: use already-observed output or synthetic local lines in the disposable profile.
 
 Clock acceptance: after character entry, confirm the startup sequence ends with `time`. The header's Real Time must match the computer timezone and tick every second. Game Time must advance one minute per 30 real seconds, show `Daytime` from 6:00 AM through 5:59 PM and `Night` otherwise, and resynchronize after manually entering `time`. Resize through wide, medium, and compact modes and confirm both lines remain inside the header.

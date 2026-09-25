@@ -27,7 +27,9 @@ dghud colors damage toggle
 dghud colors spell off
 ```
 
-The setting is stored as `DGHUD.user_settings.colorization.enabled`. Integrations can read it with `Settings.colorEnabled(settings)` and update only that override with `Settings.setColorEnabled(DGHUD.user_settings, enabled)`.
+Open **OPTIONS → Color Settings → TEXT STYLES** to choose any output highlight, including exit labels, directions, shops/travel objects, each race/class, currency, and version notices. Choose text and optional background colors, bold/underline, or disable that individual style. **SAVE** applies the change to future output; **RESET** restores that style's defaults. Category toggles are on the **CATEGORIES** tab. These choices are saved per Mudlet profile and survive restarts and updates. Unrelated personal triggers remain untouched.
+
+Integrations can read `DGHUD.colors.getStyle("direction")` and save a validated override with `DGHUD.colors.setStyle("direction", {foreground="#74A9FF"})`. Use `DGHUD.colors.setEnabled(false)` for the master toggle; these APIs save the preference before changing the active display and return an error if saving fails.
 
 Run `dghud help` to open the scrollable, color-coded command guide. Everyday commands are green, descriptions are neutral, and potentially destructive package/map cleanup commands are red. The guide closes with its `× CLOSE` button and remains open and properly bounded during window resizing.
 

@@ -207,8 +207,8 @@ local function submapSettings()
   return Settings.merge(Defaults,{mapper={transition_submaps={gate=true,portal=true,door=true,arch=true,path=true,other=true}}})
 end
 
-test("HUD release defaults are ready for version 0.3.59",function()
-  eq(Defaults.version,"0.3.59"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
+test("HUD release defaults are ready for version 0.3.60",function()
+  eq(Defaults.version,"0.3.60"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
   eq(Defaults.chat.all_sources.COMBAT,false); eq(Defaults.chat.all_sources.ROOM,true); eq(Defaults.chat.all_sources.STAFF,true)
   eq(Defaults.theme.hp,"#ba5147"); eq(Defaults.theme.fatigue,"#b08f18")
   eq(Defaults.time.speed,2); eq(Defaults.time.sunrise_hour,6); eq(Defaults.time.sunset_hour,18)

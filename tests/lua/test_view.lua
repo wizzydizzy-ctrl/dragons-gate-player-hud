@@ -176,7 +176,8 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
     function item:setToolTip(value) self.tooltip=value end
     function item:print(value) self.text=tostring(value) end
     function item:getText() return self.text or "" end
-    function item:echo(value)
+    function item:echo(value,color)
+      self.echo_color=color
       if self.kind=="console" then
         self.echoes[#self.echoes+1]=value
         local first=self.lastLine+1
@@ -399,6 +400,256 @@ test("color options button renders overall enabled and disabled states",function
   local view=chatView(); view:applyLayout(require("layout").compute(1000,700))
   view:setColorEnabled(true); eq(view.color_enabled,true); eq(view.color_toggle.message:find("OPTIONS",1,true)~=nil,true); eq(view.color_toggle.style:find("#79b386",1,true)~=nil,true)
   view:setColorEnabled(false); eq(view.color_enabled,false); eq(view.color_toggle.message:find("OPTIONS",1,true)~=nil,true); eq(view.color_toggle.style:find("#75857c",1,true)~=nil,true)
+end)
+
+local ColorStyles=require("color_styles")
+local function colorEditor(config,id,width,height)
+  local view=chatView(); view:setColorStyles(config or {})
+  view:applyLayout(require("layout").compute(width or 1200,height or 800)); view:showColorSettings()
+  view.color_settings_styles_tab.click(); assert(view.color_style_rows[id or "room"].click())
+  return view
+end
+test("color style catalog includes every registry entry and selectable race and class groups",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,360)); view:showColorSettings()
+  view.color_settings_styles_tab.click(); eq(view.color_style_catalog.kind,"scrollbox")
+  eq(view.color_style_catalog.content_height>view.color_style_catalog.height,true)
+  for _,entry in ipairs(ColorStyles.entries()) do
+    local row=view.color_style_rows[entry.id]; assert(row,entry.id); eq(row.parent,view.color_style_catalog); eq(row.visible,true)
+    assert(row.click()); eq(view.color_style_selected,entry.id); eq(view.color_style_fields.foreground.input.text,ColorStyles.defaults(entry.id).foreground)
+    view.color_style_cancel.click()
+  end
+  for _,group in ipairs({"Races","Classes"}) do
+    view.color_style_group_buttons[group].click()
+    for _,entry in ipairs(ColorStyles.entries()) do eq(view.color_style_rows[entry.id].visible,entry.group==group) end
+  end
+  view.color_style_group_buttons.all.click(); eq(view.color_style_rows.darkness.visible,true)
+  view.color_settings_groups_tab.click(); for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
+  eq(view:selectColorStyle("not-a-style"),nil); eq(view:selectColorStyleGroup("not-a-group"),nil)
+end)
+test("color editor and catalog stay bounded at compact and wide sizes with scroll access",function()
+  local view=colorEditor({},"notice"); local field=view.color_style_fields.foreground.input
+  for _,size in ipairs({{320,260},{420,280},{560,360},{760,700},{1200,800},{1920,1080}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local panel=view.color_settings_panel
+    eq(panel.x>=0 and panel.y>=0,true); eq(panel.x+panel.width<=size[1] and panel.y+panel.height<=size[2],true)
+    eq(view.color_style_fields.foreground.input,field)
+    eq(view.color_style_content.kind,"scrollbox"); eq(view.color_style_content.height>=60,true)
+    for _,widget in ipairs(view.color_style_widgets) do
+      if widget.visible then
+        eq(widget.x>=0 and widget.y>=0,true)
+        eq(widget.x+widget.width<=widget.parent.width,true)
+        if widget.parent==panel then eq(widget.y+widget.height<=panel.height,true) end
+      end
+    end
+    eq(view.color_style_content.y+view.color_style_content.height<=view.color_style_save.y,true)
+    eq(view.color_style_status.y+view.color_style_status.height<=view.color_style_content.y,true)
+    eq(view.color_style_reset.x+view.color_style_reset.width<view.color_style_cancel.x,true)
+    eq(view.color_style_cancel.x+view.color_style_cancel.width<view.color_style_save.x,true)
+    if size[2]<400 then eq(view.color_style_content.content_height>view.color_style_content.height,true) end
+    view.color_style_cancel.click()
+    for _,entry in ipairs(ColorStyles.entries()) do local row=view.color_style_rows[entry.id]; eq(row.x+row.width<=view.color_style_catalog.width-18,true); eq(row.height>=28,true) end
+    view.color_style_rows.notice.click()
+  end
+end)
+test("color snapshots are detached and retain raw editor drafts through refresh and resize",function()
+  local config={enabled=true,room_color={12,34,56},styles={gold={foreground="#123456"}}}
+  local view=colorEditor(config); eq(view.color_style_fields.foreground.input.text,"#0C2238")
+  config.styles.gold.foreground="#ABCDEF"; eq(view.color_style_saved.gold.foreground,"#123456")
+  view.color_style_fields.foreground.input:print("unfinished hex")
+  view.color_style_fields.background.input:print("#112233"); view.color_style_toggles.background_enabled.click(); view.color_style_toggles.bold.click()
+  view:setColorStyles({enabled=true,room_enabled=false,styles={room={foreground="#654321"}}})
+  for _,size in ipairs({{320,260},{1920,1080},{420,360}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2])); eq(view.color_style_fields.foreground.input.text,"unfinished hex")
+    eq(view.color_style_fields.background.input.text,"#112233"); eq(view.color_style_draft.bold,true); eq(view.color_style_draft.background_enabled,true)
+  end
+  eq(view.color_style_saved.room.foreground,"#654321"); view.color_style_cancel.click(); view.color_style_rows.room.click()
+  eq(view.color_style_fields.foreground.input.text,"#654321"); assert(view.color_style_status.message:find("category is currently off",1,true))
+end)
+test("color hex validation rejects malformed text without saving or injecting preview styles",function()
+  local view=colorEditor(); local calls=0; view:setColorStyleCallback(function() calls=calls+1; return true end)
+  local original=view.color_style_saved.room.foreground; local preview=view.color_style_preview.style
+  for _,value in ipairs({"", "red", "#123", "#1234567", "#GGGGGG", "#123456;background:red", "<b>red</b>", "#123456\n#654321"}) do
+    view.color_style_fields.foreground.input:print(value); local ok,err=view.color_style_save.click()
+    eq(ok,nil); assert(err:find("Text color",1,true)); eq(calls,0); eq(view.color_style_saved.room.foreground,original)
+    eq(view.color_style_preview.style,preview); eq(view.color_style_status.visible,true)
+  end
+  view.color_style_fields.foreground.input.action("  #a1b2c3  "); eq(calls,0); assert(view.color_style_preview.style:find("#A1B2C3",1,true))
+  view.color_style_toggles.background_enabled.click(); view.color_style_fields.background.input:print("no")
+  local ok,err=view.color_style_save.click(); eq(ok,nil); assert(err:find("Highlight color",1,true)); eq(calls,0)
+  view.color_style_toggles.background_enabled.click(); assert(view.color_style_save.click()); eq(calls,1)
+  eq(view.color_style_saved.room.foreground,"#A1B2C3"); eq(view.color_style_saved.room.background,false)
+end)
+test("color palette previews foreground highlight emphasis and enabled state without applying",function()
+  local view=colorEditor(); local calls=0; view:setColorStyleCallback(function() calls=calls+1; return true end)
+  view.color_style_swatches[1].click(); eq(view.color_style_fields.foreground.input.text,"#FFFFFF")
+  view.color_style_palette_targets.background.click(); view.color_style_swatches[4].click()
+  eq(view.color_style_draft.background_enabled,true); eq(view.color_style_fields.background.input.text,"#000000"); eq(view.color_style_fields.background.input.visible,true)
+  view.color_style_toggles.bold.click(); view.color_style_toggles.underline.click()
+  assert(view.color_style_preview.style:find("background:#000000",1,true)); assert(view.color_style_preview.style:find("font-weight:bold",1,true)); assert(view.color_style_preview.style:find("text-decoration:underline",1,true))
+  view.color_style_toggles.enabled.click(); assert(view.color_style_status.message:find("This style is off",1,true))
+  assert(view.color_style_preview.style:find("font-weight:normal",1,true)); eq(calls,0)
+  eq(view.color_style_saved.room.foreground,ColorStyles.defaults("room").foreground)
+  view.color_style_cancel.click(); view.color_style_rows.room.click(); eq(view.color_style_draft.bold,false); eq(view.color_style_draft.enabled,true)
+end)
+test("color style save passes only a detached complete style and commits only after true",function()
+  local view=colorEditor({enabled=false,currency_enabled=false,styles={silver={foreground="#123456"}}},"gold")
+  local calls=0; view:setColorStyleCallback(function(id,style)
+    calls=calls+1; eq(id,"gold"); eq(style.foreground,"#ABCDEF"); eq(style.background,false); eq(style.bold,true); eq(style.underline,false); eq(style.enabled,true)
+    local count=0; for _ in pairs(style) do count=count+1 end; eq(count,5)
+    style.foreground="#000000"; return true
+  end)
+  view.color_style_fields.foreground.input:print("#abcdef"); view.color_style_toggles.bold.click(); assert(view.color_style_save.click())
+  eq(calls,1); eq(view.color_style_saved.gold.foreground,"#ABCDEF"); eq(view.color_styles_config.styles.gold.foreground,"#ABCDEF")
+  eq(view.color_style_saved.silver.foreground,"#123456"); eq(view.color_options.enabled,false); eq(view.color_options.currency,false)
+  assert(view.color_style_status.message:find("Saved.",1,true)); assert(view.color_style_status.message:find("All highlights",1,true))
+end)
+test("color failed callbacks preserve saved catalog snapshot and draft and escape errors",function()
+  local view=colorEditor(); local original=view.color_style_saved.room.foreground
+  view.color_style_fields.foreground.input:print("#ABCDEF")
+  view:setColorStyleCallback(function(id,style)
+    view:setColorStyles({styles={[id]=style}}); return nil,"disk <full>"
+  end)
+  local ok,err=view.color_style_save.click(); eq(ok,nil); assert(err:find("disk <full>",1,true))
+  eq(view.color_style_saved.room.foreground,original); eq(view.color_styles_config.styles,nil)
+  eq(view.color_style_fields.foreground.input.text,"#ABCDEF"); eq(view.color_settings_page,"editor")
+  assert(view.color_style_status.message:find("disk &lt;full&gt;",1,true)); eq(view.color_style_status.parent,view.color_settings_panel)
+  view:setColorStyleCallback(function() error("save failed") end); eq(view.color_style_save.click(),nil); eq(view.color_style_saved.room.foreground,original)
+  view:setColorStyleCallback(function() return "yes" end); eq(view.color_style_save.click(),nil)
+  view:setColorStyleCallback(nil); eq(view.color_style_save.click(),nil); eq(view.color_style_saved.room.foreground,original)
+  view:setColorStyleCallback(function(id,style) view:setColorStyles({styles={[id]=style}}); return true end)
+  assert(view.color_style_save.click()); eq(view.color_style_saved.room.foreground,"#ABCDEF"); eq(view.color_style_error,nil)
+end)
+test("reset selected default is a draft until saved and preserves other styles and categories",function()
+  local config={enabled=true,notice_enabled=false,styles={notice={foreground="#010203",background=false,bold=false,underline=false,enabled=false},gold={foreground="#112233"}}}
+  local view=colorEditor(config,"notice"); local calls=0; view:setColorStyleCallback(function() calls=calls+1; return true end)
+  assert(view.color_style_reset.click()); local default=ColorStyles.defaults("notice")
+  for _,key in ipairs({"foreground","background","bold","underline","enabled"}) do eq(view.color_style_draft[key],default[key]) end
+  eq(calls,0); eq(view.color_style_saved.notice.foreground,"#010203"); eq(view.color_style_saved.gold.foreground,"#112233")
+  view.color_style_cancel.click(); view.color_style_rows.notice.click(); eq(view.color_style_draft.foreground,"#010203")
+  view.color_style_reset.click(); assert(view.color_style_save.click()); eq(calls,1); eq(view.color_style_saved.notice.foreground,default.foreground)
+  eq(view.color_style_saved.gold.foreground,"#112233"); eq(view.color_options.notice,false)
+end)
+test("color editor hides every input swatch and action across modal transitions",function()
+  local transitions={
+    function(v) v:showHelp() end, function(v) v:showChatSettings() end,
+    function(v) v:showKeybindingSettings({}) end, function(v) v:showMapSettings({}) end,
+    function(v) v:showMapLibrary() end, function(v) v:showRollerSettings({}) end,
+    function(v) v:showFeedback() end, function(v) v:showSupport() end,
+    function(v) v:showLatentPsionAlert() end, function(v) v:setColorMenuVisible(true) end,
+    function(v) v.color_settings_close.click() end, function(v) v.color_settings_overlay.click() end,
+  }
+  for _,transition in ipairs(transitions) do
+    local view=colorEditor(); local calls=0; view:setColorStyleCallback(function() calls=calls+1; return true end)
+    view.color_style_fields.foreground.input:print("#123456"); transition(view)
+    eq(view.color_settings_visible,false); eq(view.color_style_draft,nil); eq(calls,0)
+    for _,widget in ipairs(view:colorSettingsWidgets()) do eq(widget.visible,false) end
+  end
+  local view=chatView(); for _,widget in ipairs(view.color_style_widgets) do eq(widget.visible,false) end
+  view:showKeybindingSettings({}); view:showColorSettings(); eq(view.keybindings_visible,false)
+end)
+test("color editor cleanup and reuse release drafts and save callbacks",function()
+  local view=colorEditor(); view:setColorStyleCallback(function() return true end)
+  assert(view:prepareForReuse(view.settings)); eq(view.color_style_callback,nil); eq(view.color_style_draft,nil)
+  for _,widget in ipairs(view:colorSettingsWidgets()) do eq(widget.visible,false) end
+  view:showColorSettings(); view:selectColorStyle("room"); view:delete(); eq(view.root,nil); eq(view.color_style_callback,nil)
+  for _,widget in ipairs(view:colorSettingsWidgets()) do eq(widget.visible,false) end
+end)
+test("reusable color editor rejects incomplete inputs catalog and palette",function()
+  local view=chatView(); view.color_style_fields.background.input.getText=nil; eq(View.validateReusable(view,view.settings),nil)
+  view=chatView(); view.color_style_rows.darkness=nil; eq(View.validateReusable(view,view.settings),nil)
+  view=chatView(); view.color_style_swatches[1].deleted=true; eq(View.validateReusable(view,view.settings),nil)
+  view=chatView(); view.color_style_group_order=nil; eq(View.validateReusable(view,view.settings),nil)
+  view=chatView(); view.color_style_toggle_order[1]=nil; eq(View.validateReusable(view,view.settings),nil)
+  view=chatView(); view.color_style_widgets[1]={}; eq(View.validateReusable(view,view.settings),nil)
+end)
+local function withColorViewAdapter(run)
+  local original=Geyser; Geyser=fakeGeyser()
+  local ok,err=xpcall(function()
+    local settings=require("settings").merge(require("defaults"),{view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT})
+    run(require("mudlet_adapter").new(),settings)
+  end,debug.traceback)
+  Geyser=original; if not ok then error(err,0) end
+end
+test("adapter cold view construction accepts saved color settings before the first layout",function()
+  withColorViewAdapter(function(adapter,settings)
+    local view=adapter:createView(settings)
+    eq(view.layout,nil); eq(type(view.map_center_callback),"function")
+    for _,widget in ipairs(view:colorSettingsWidgets()) do eq(widget.visible,false) end
+    assert(view:setColorStyles({enabled=true,races_enabled=false,styles={["race:human"]={foreground="#010203",background="#112233",bold=true,underline=true,enabled=true}}}))
+    assert(View.validateReusable(view,settings)); view:applyLayout(require("layout").compute(320,260)); view:update(require("state").normalize({}))
+    assert(view:showColorSettings()); assert(view:selectColorStyle("race:human"))
+    eq(view.color_style_fields.foreground.input.text,"#010203"); eq(view.color_style_fields.background.input.text,"#112233")
+    assert(view.color_style_status.message:find("category is currently off",1,true))
+    view:delete(); eq(view.root,nil)
+  end)
+end)
+test("adapter rejects an old view before rebinding methods and can construct its replacement",function()
+  withColorViewAdapter(function(adapter,settings)
+    local old=adapter:createView(settings); local root=old.root
+    for key in pairs(old) do if key:match("^color_style") then old[key]=nil end end
+    old.color_settings_groups_tab=nil; old.color_settings_styles_tab=nil; old.color_settings_status=nil
+    local oldMethods={delete=function(self) self.root:delete(); self.root=nil end}
+    local oldMetatable={__index=oldMethods}; setmetatable(old,oldMetatable)
+    local called,adopted,err=pcall(adapter.adoptView,adapter,old,settings)
+    eq(called,true); eq(adopted,nil); assert(err:find("missing color_settings",1,true)); eq(getmetatable(old),oldMetatable)
+    old:delete(); eq(root.deleted,true)
+    local replacement=adapter:createView(settings); assert(replacement~=old)
+    replacement:setColorStyles(settings.colorization); replacement:applyLayout(require("layout").compute(1200,800)); replacement:update(require("state").normalize({}))
+    assert(View.validateReusable(replacement,settings)); replacement:showColorSettings(); replacement:selectColorStyle("notice")
+    eq(replacement.color_style_fields.foreground.input.visible,true); replacement:delete()
+  end)
+end)
+test("rejected damaged view cleanup removes its root even when editor cleanup is incomplete",function()
+  withColorViewAdapter(function(adapter,settings)
+    local damaged=adapter:createView(settings); local root=damaged.root
+    damaged.color_option_buttons=nil
+    local called,adopted=pcall(adapter.adoptView,adapter,damaged,settings); eq(called,true); eq(adopted,nil)
+    assert(pcall(damaged.delete,damaged)); eq(root.deleted,true); eq(damaged.root,nil)
+    local replacement=adapter:createView(settings); assert(View.validateReusable(replacement,settings)); replacement:delete()
+  end)
+end)
+test("compatible view adoption keeps saved colors while discarding unsaved color edits",function()
+  withColorViewAdapter(function(adapter,settings)
+    local view=adapter:createView(settings); local root=view.root
+    view:setColorStyles({styles={room={foreground="#123456"}}}); view:applyLayout(require("layout").compute(420,280))
+    view:showColorSettings(); view:selectColorStyle("room"); view.color_style_fields.foreground.input:print("#ABCDEF")
+    view:setColorStyleCallback(function() error("retired callback") end)
+    local adopted=assert(adapter:adoptView(view,settings)); eq(adopted,view); eq(view.root,root); eq(root.deleted,nil)
+    eq(view.color_style_callback,nil); eq(view.color_style_draft,nil)
+    for _,widget in ipairs(view:colorSettingsWidgets()) do eq(widget.visible,false) end
+    view:showColorSettings(); view:selectColorStyle("room"); eq(view.color_style_fields.foreground.input.text,"#123456")
+    view:delete()
+  end)
+end)
+test("color preview explicitly renders chosen text color and emphasis under Geyser label wrapping",function()
+  local view=colorEditor({styles={room={foreground="#010203",background="#112233",bold=true,underline=true,enabled=true}}})
+  eq(view.color_style_preview.echo_color,"nocolor")
+  assert(view.color_style_preview.message:find("color:#010203",1,true))
+  assert(view.color_style_preview.message:find("<u><b>The town square</b></u>",1,true))
+  view.color_style_toggles.enabled.click()
+  assert(view.color_style_preview.message:find("color:"..view.settings.theme.text,1,true))
+  eq(view.color_style_preview.message:find("<b>",1,true),nil); eq(view.color_style_preview.message:find("<u>",1,true),nil)
+end)
+test("category persistence failures leave displayed switch state unchanged and show an error",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(320,260)); view:showColorSettings()
+  local before=view.color_option_buttons.damage.style
+  view:setColorOptionsCallback(function(key,wanted) eq(key,"damage"); eq(wanted,false); return nil,"disk <full>" end)
+  local ok,err=view.color_option_buttons.damage.click(); eq(ok,nil); eq(err,"disk <full>")
+  eq(view.color_options.damage,true); eq(view.color_option_buttons.damage.style,before); eq(view.color_settings_visible,true)
+  eq(view.color_settings_status.visible,true); eq(view.color_settings_status.parent,view.color_settings_panel)
+  assert(view.color_settings_status.message:find("disk &lt;full&gt;",1,true))
+  view:setColorToggleCallback(function() return nil,"not saved" end); eq(view.color_option_buttons.enabled.click(),nil); eq(view.color_enabled,true)
+  view:setColorOptionsCallback(function() error("not saved") end); eq(view.color_option_buttons.damage.click(),nil); eq(view.color_options.damage,true)
+  view:setColorOptionsCallback(function(_,wanted) return wanted end); eq(view.color_option_buttons.damage.click(),false)
+  eq(view.color_options.damage,false); eq(view.color_settings_error,nil)
+  local called; view:setColorOptionsCallback(function(key,wanted) called=key; return wanted end)
+  eq(view.color_option_buttons.mapper.click(),false); eq(called,"mapper"); eq(view.color_styles_config.mapper,nil)
+end)
+test("color snapshot respects group switches and legacy highlights without changing mapper",function()
+  local view=chatView(); view:setColorOptions({mapper=false})
+  view:setColorStyles({enabled=false,room_enabled=false,exits_enabled=false,highlights_enabled=false,illumination_enabled=true})
+  eq(view.color_options.mapper,false); eq(view.color_options.enabled,false); eq(view.color_options.room,false); eq(view.color_options.exits,false)
+  eq(view.color_options.attack,false); eq(view.color_options.notice,false); eq(view.color_options.illumination,true); eq(view.color_options.currency,true)
 end)
 
 test("color options menu exposes current and future feature toggles",function()

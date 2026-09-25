@@ -61,9 +61,9 @@ end)
 test("colors only travel-object clauses at the end of room prose",function()
   local line="The wall is cracked. An open sinister black iron gate is here."
   local parts=assert(Colorizer.parse(line)); eq(#parts,1); eq(parts[1].kind,"portal")
-  eq(line:sub(parts[1].start,parts[1].start+parts[1].length-1),"An open sinister black iron gate is here.")
+  eq(line:sub(parts[1].start,parts[1].start+parts[1].length-1),"An open sinister black iron gate")
   local plural=assert(Colorizer.parse("An arch and a portal to the temples are here.")); eq(plural[1].kind,"portal")
-  local padded=assert(Colorizer.parse("  An open gate is here.   ")); eq(padded[1].start,3); eq(padded[1].length,21)
+  local padded=assert(Colorizer.parse("  An open gate is here.   ")); eq(padded[1].start,3); eq(padded[1].length,12)
   eq(Colorizer.parse("A battered wooden chest is here."),nil)
   eq(Colorizer.parse("The door is old and covered in rust."),nil)
   eq(Colorizer.parse("A merchant blocking the gate is here."),nil)
@@ -172,4 +172,209 @@ test("Mudlet colorizer registration forwards every line to the conservative pars
   for _,sample in ipairs({"An open grey iron gate is here.","The hound claws at you!","Your head takes 8 points of impact damage!"," ** You are fully rested."}) do line=sample; callback() end
   eq(#received,4); eq(received[1],"An open grey iron gate is here."); eq(received[4]," ** You are fully rested.")
   tempRegexTrigger,line=previousTrigger,previousLine
+end)
+test("controller applies independently editable text styles without changing adjacent categories",function()
+  local f=fake(); local c=Colorizer.new(f,true,{styles={
+    direction={foreground="#ABCDEF",background="#112233",bold=true,underline=true},
+    ["race:human"]={foreground="#010203"},
+    ["class:fighter"]={enabled=false},
+    notice={foreground="#AABBCC",background=false,bold=false,underline=false},
+  }}); assert(c:start())
+  assert(c:onLine("Obvious paths: north east."))
+  eq(f.applied[1][1].kind,"label"); eq(f.applied[1][2].color[1],171)
+  eq(f.applied[1][2].background[2],34); eq(f.applied[1][2].bold,true); eq(f.applied[1][2].underline,true)
+  assert(c:onLine("Human Fighter and Human Cleric"))
+  eq(#f.applied[2],3); eq(f.applied[2][1].color[1],1); eq(f.applied[2][2].color[3],3)
+  assert(c:onLine("(There are new version notes.)"))
+  eq(f.applied[3][1].background,nil); eq(f.applied[3][1].bold,false); eq(f.applied[3][1].underline,false)
+  c:shutdown()
+end)
+
+test("wrapped travel matches use captured console rows even when other triggers insert output",function()
+  local f=fake(); local c=Colorizer.new(f,true); assert(c:start())
+  eq(c:onLine("A dark hole and a sputtering smoky torch are",100),false)
+  assert(c:onLine("here.",107))
+  local segment=f.applied[1][1]; eq(segment.line_number,100); eq(segment.source_line,"A dark hole and a sputtering smoky torch are")
+  eq(segment.source_line:sub(segment.start,segment.start+segment.length-1),"A dark hole")
+  c:setEnabled(false); c:setEnabled(true)
+  eq(c:onLine("here.",108),false)
+  c:shutdown()
+end)
+
+test("wrapped travel without trustworthy old row numbers is not applied to the current line",function()
+  local f=fake(); local c=Colorizer.new(f,true); assert(c:start())
+  c:onLine("A dark hole and a sputtering smoky torch are")
+  eq(c:onLine("here."),false); eq(#f.applied,0); c:shutdown()
+end)
+
+test("ANSI and Unicode retain exact travel byte spans for safe character selection",function()
+  local f=fake(); local c=Colorizer.new(f,true); assert(c:start())
+  assert(c:onLine("\27[36mCafé. An exit is here.\27[0m",20))
+  local segment=f.applied[1][1]; eq(segment.source_line,"Café. An exit is here.")
+  local selected
+  local api={getLineNumber=function() return 20 end,getColumnNumber=function() return 0 end,
+    getLines=function() return {"Café. An exit is here."} end,
+    selectSection=function(start,length) selected={start,length}; return true end,
+    setFgColor=function() end,deselect=function() end}
+  assert(MudletAdapter.new():applyLineColors({segment},api)); eq(selected[1],6); eq(selected[2],7)
+  c:shutdown()
+end)
+
+test("prior-line coloring verifies source text and restores the native cursor",function()
+  local cursor,selected,moves=107,{},{}
+  local lines={[100]="A dark hole and a torch are",[107]="here."}
+  local api={getLineNumber=function() return cursor end,getColumnNumber=function() return 3 end,
+    getLines=function(first) return {lines[first]} end,
+    moveCursor=function(x,y) moves[#moves+1]={x,y}; cursor=y; return true end,
+    selectSection=function(start,length) selected[#selected+1]={cursor,start,length}; return true end,
+    setFgColor=function() end,deselect=function() end}
+  local part={start=1,length=11,color={1,2,3},line_number=100,source_line=lines[100]}
+  assert(MudletAdapter.new():applyLineColors({part},api)); eq(#selected,1); eq(selected[1][1],100); eq(cursor,107)
+  eq(moves[#moves][1],3)
+  lines[100]="Another trigger replaced this line"
+  assert(MudletAdapter.new():applyLineColors({part},api)); eq(#selected,1); eq(cursor,107)
+  lines[100]=part.source_line; api.setFgColor=function() error("native failure") end
+  local ok,err=MudletAdapter.new():applyLineColors({part},api); eq(ok,nil); assert(err:find("native failure",1,true)); eq(cursor,107)
+end)
+
+test("emoji spans use UTF-16 units after ANSI stripping",function()
+  local samples={
+    {"🌟. An exit is here.",4,7},
+    {"🌟🌙. An exit is here.",6,7},
+    {"Café’s 🌟. An exit is here.",11,7},
+    {"🌟. A glowing 🌙 portal is here.",4,19},
+    {"A 👩‍🚀 portal is here.",0,14},
+  }
+  for _,sample in ipairs(samples) do
+    local f=fake(); local c=Colorizer.new(f,true); assert(c:start())
+    assert(c:onLine("\27[36m"..sample[1].."\27[0m",20))
+    local segment=f.applied[1][1]; eq(segment.source_line,sample[1])
+    local selected
+    local api={getLineNumber=function() return 20 end,getColumnNumber=function() return 0 end,
+      getLines=function(first,last) eq(first,20); eq(last,21); return {sample[1]} end,
+      selectSection=function(start,length) selected={start,length}; return true end,
+      setFgColor=function() end,deselect=function() end}
+    assert(MudletAdapter.new():applyLineColors({segment},api))
+    eq(selected[1],sample[2]); eq(selected[2],sample[3])
+    c:shutdown()
+  end
+end)
+
+test("emoji spans on earlier console rows preserve UTF-16 offsets and the cursor",function()
+  local f=fake(); local c=Colorizer.new(f,true); assert(c:start())
+  local source="🌟. A glowing 🌙 portal"
+  eq(c:onLine(source,100),false); assert(c:onLine("is here.",107))
+  local cursor,column,selected=107,4,nil
+  local api={getLineNumber=function() return cursor end,getColumnNumber=function() return column end,
+    getLines=function(first,last) eq(first,100); eq(last,101); return {source} end,
+    moveCursor=function(x,y) column,cursor=x,y; return true end,
+    selectSection=function(start,length) selected={cursor,start,length}; return true end,
+    setFgColor=function() end,deselect=function() end}
+  assert(MudletAdapter.new():applyLineColors(f.applied[1],api))
+  eq(selected[1],100); eq(selected[2],4); eq(selected[3],19)
+  eq(cursor,107); eq(column,4); c:shutdown()
+end)
+
+test("replacement text is reselected using UTF-16 start and length",function()
+  local source="🌟. A portal is here."
+  local selected,replaced={},nil
+  local api={getLineNumber=function() return 20 end,getColumnNumber=function() return 0 end,
+    getLines=function() return {source} end,
+    selectSection=function(start,length) selected[#selected+1]={start,length}; return true end,
+    replace=function(text) replaced=text end,setFgColor=function() end,deselect=function() end}
+  local item={start=assert(source:find("A portal",1,true)),length=8,source_line=source,
+    line_number=20,color={1,2,3},display_text="✨ New 🌟"}
+  assert(MudletAdapter.new():applyLineColors({item},api))
+  eq(replaced,"✨ New 🌟"); eq(#selected,2)
+  eq(selected[1][1],4); eq(selected[1][2],8)
+  eq(selected[2][1],4); eq(selected[2][2],8)
+end)
+
+-- Exercise controller ordering through the real adapter, keeping the final
+-- foreground of every selected character as well as the native paint order.
+local function colorSurface(lines)
+  local f=fake(); f.cursor=100; f.column=3; f.painted={}; f.paintCalls={}
+  local selection
+  local api={getLineNumber=function() return f.cursor end,getColumnNumber=function() return f.column end,
+    getLines=function(first,last) eq(last,first+1); return {lines[first]} end,
+    moveCursor=function(x,y) f.column,f.cursor=x,y; return true end,
+    selectSection=function(start,length)
+      assert(lines[f.cursor]); assert(start>=0 and start+length<=#lines[f.cursor])
+      selection={row=f.cursor,start=start,length=length}; return true
+    end,
+    setFgColor=function(r,g,b)
+      assert(selection); local color=table.concat({r,g,b},",")
+      f.paintCalls[#f.paintCalls+1]={row=selection.row,start=selection.start,length=selection.length,color=color}
+      f.painted[selection.row]=f.painted[selection.row] or {}
+      for index=selection.start+1,selection.start+selection.length do f.painted[selection.row][index]=color end
+    end,
+    deselect=function() selection=nil end}
+  function f:applyLineColors(segments)
+    self.applied[#self.applied+1]=segments
+    return MudletAdapter.new():applyLineColors(segments,api)
+  end
+  function f:assertColor(row,text,expected)
+    local first=assert(lines[row]:find(text,1,true))
+    for index=first,first+#text-1 do eq((self.painted[row] or {})[index],expected) end
+  end
+  return f
+end
+
+local overlapStyles={styles={
+  portal={foreground="#112233"},gold={foreground="#DDEEFF"},silver={foreground="#445566"},
+  ["race:human"]={foreground="#778899"},["class:cleric"]={foreground="#AABBCC"},
+}}
+
+test("current-row travel color is painted before intersecting currency race and class styles",function()
+  local prefix="A gold coin rests nearby. "
+  local subject="A silver gate to the Human Cleric temple"
+  local lines={[100]=prefix..subject.." is here."}
+  local f=colorSurface(lines); local c=Colorizer.new(f,true,overlapStyles); assert(c:start())
+  assert(c:onLine(lines[100],100))
+  eq(#f.paintCalls,5); eq(f.applied[1][1].kind,"portal")
+  eq(f.paintCalls[1].row,100); eq(f.paintCalls[1].start,#prefix)
+  eq(f.paintCalls[1].length,#subject); eq(f.paintCalls[1].color,"17,34,51")
+  f:assertColor(100,"gate","17,34,51")
+  f:assertColor(100,"gold","221,238,255")
+  f:assertColor(100,"silver","68,85,102")
+  f:assertColor(100,"Human","119,136,153")
+  f:assertColor(100,"Cleric","170,187,204")
+  f:assertColor(100,"is here.",nil)
+  eq(f.cursor,100); eq(f.column,3); c:shutdown()
+end)
+
+test("wrapped travel replays only intersecting prior-row overlays after all broad spans",function()
+  local prefix="A gold coin rests nearby. "
+  local subject="A silver gate to the Human Cleric temple"
+  local lines={[100]=prefix..subject.." and",[107]="a silver door are here."}
+  local f=colorSurface(lines); local c=Colorizer.new(f,true,overlapStyles); assert(c:start())
+  assert(c:onLine(lines[100],100))
+  eq(#f.applied[1],4) -- Initial currency/race/class colors precede travel confirmation.
+  f.paintCalls={}; f.cursor=107; f.column=4
+  assert(c:onLine(lines[107],107))
+  local parts=f.applied[2]; eq(#parts,6); eq(#f.paintCalls,6)
+  eq(parts[1].kind,"portal"); eq(parts[1].line_number,100)
+  eq(parts[2].kind,"portal"); eq(parts[2].line_number,107)
+  eq(f.paintCalls[1].start,#prefix); eq(f.paintCalls[1].length,#subject)
+  eq(f.paintCalls[1].color,"17,34,51"); eq(f.paintCalls[2].color,"17,34,51")
+  local replayed={}
+  for index=3,#parts do
+    local part=parts[index]; assert(part.kind~="portal")
+    if part.line_number==100 then
+      assert(part.kind=="silver" or part.kind=="races" or part.kind=="classes")
+      eq(part.source_line,lines[100]); replayed[part.kind]=(replayed[part.kind] or 0)+1
+    end
+  end
+  eq(replayed.silver,1); eq(replayed.races,1); eq(replayed.classes,1)
+  -- The gold outside the travel phrase retains its first-pass color without replay.
+  f:assertColor(100,"gold","221,238,255")
+  f:assertColor(100,"gate","17,34,51")
+  f:assertColor(100,"silver","68,85,102")
+  f:assertColor(100,"Human","119,136,153")
+  f:assertColor(100,"Cleric","170,187,204")
+  f:assertColor(100,"and",nil)
+  f:assertColor(107,"door","17,34,51")
+  f:assertColor(107,"silver","68,85,102")
+  f:assertColor(107,"are here.",nil)
+  eq(f.cursor,107); eq(f.column,4); c:shutdown()
 end)

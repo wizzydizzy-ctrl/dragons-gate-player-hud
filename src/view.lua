@@ -1,6 +1,7 @@
 local Navigation=require("navigation")
 local Layout=require("layout")
 local MapCatalog=require("map_catalog")
+local ColorStyles=require("color_styles")
 local View={}; View.__index=View
 function View.withFont(text,size) return "<span style='font-size:"..tonumber(size).."px'>"..text.."</span>" end
 function View.raiseCards(cards) for _,card in ipairs(cards or {}) do if card and card.raise then card:raise() end end end
@@ -12,6 +13,7 @@ end
 local function esc(v) return tostring(v or ""):gsub("&","&amp;"):gsub("<","&lt;"):gsub(">","&gt;") end
 local function safeText(v) return esc(tostring(v or ""):gsub("%c"," ")) end
 local function safeChatText(v) return tostring(v or ""):gsub("%c"," ") end
+local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 local function groupedNumber(value)
   local text=tostring(math.floor(tonumber(value) or 0)); local changed
   repeat text,changed=text:gsub("^(-?%d+)(%d%d%d)","%1,%2") until changed==0
@@ -344,6 +346,7 @@ function View.new(settings)
   self.color_settings_title=label("DGHUD.ColorSettings.Title",self.color_settings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.color_settings_content=Geyser.ScrollBox:new({name="DGHUD.ColorSettings.Content",x=14,y=48,width=592,height=410},self.color_settings_panel)
   self.color_settings_close=label("DGHUD.ColorSettings.Close",self.color_settings_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
+  self:createColorStyleEditor()
   self.color_option_buttons={}
   self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
   local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
@@ -1086,6 +1089,7 @@ function View:layoutLatentPsionAlert(layout)
   View.raiseCards(widgets); return true
 end
 function View:showLatentPsionAlert(message)
+  if self.color_settings_visible then self:hideColorSettings() end
   self.latent_alert_message=tostring(message or "Automatic rolling has stopped. Choose the profession yourself.")
   self.latent_alert_visible=true
   if self.layout then self:layoutLatentPsionAlert(self.layout) end
@@ -1113,12 +1117,324 @@ function View:layoutColorMenu(layout)
   local raised={self.color_menu_scrim,self.color_menu,self.color_menu_bg,self.options_scroll}; for _,item in ipairs(all) do raised[#raised+1]=self.option_action_buttons[item.key] end; raised[#raised+1]=self.color_toggle; View.raiseCards(raised)
   return true
 end
-function View:colorSettingsWidgets() local widgets={self.color_settings_overlay,self.color_settings_panel,self.color_settings_bg,self.color_settings_title,self.color_settings_content,self.color_settings_close}; for _,button in pairs(self.color_option_buttons) do widgets[#widgets+1]=button end; return widgets end
+local colorPalette={"#FFFFFF","#C0C0C0","#808080","#000000","#FF6860","#FFA34D","#FFD966","#79D98B","#56CFD2","#74A9FF","#B69CFF","#F29CCC"}
+function View:createColorStyleEditor()
+  local t=self.settings.theme
+  self.color_style_widgets={}; self.color_style_entries=ColorStyles.entries(); self.color_style_by_id={}; self.color_style_rows={}
+  self.color_style_groups={}; self.color_style_group_order={}; self.color_style_group_buttons={}; self.color_style_group="all"
+  self.color_styles_config={}; self.color_style_saved={}; self.color_settings_page="groups"
+  local function remember(widget) self.color_style_widgets[#self.color_style_widgets+1]=widget; widget:hide(); return widget end
+  local function text(key,parent,copy,callback)
+    local widget=remember(label("DGHUD.ColorStyles."..key,parent,"background:transparent;color:"..t.text..";",self.geyser))
+    widget.option_text=copy; if callback then widget:setClickCallback(callback) end; return widget
+  end
+  local function scroll(key)
+    return remember(self.geyser.ScrollBox:new({name="DGHUD.ColorStyles."..key,x=0,y=0,width=100,height=100},self.color_settings_panel))
+  end
+  self.color_settings_groups_tab=text("GroupsTab",self.color_settings_panel,"CATEGORIES",function() return self:showColorSettingsPage("groups") end)
+  self.color_settings_styles_tab=text("StylesTab",self.color_settings_panel,"TEXT STYLES",function() return self:showColorSettingsPage("styles") end)
+  self.color_settings_status=text("CategoryStatus",self.color_settings_panel,"")
+  self.color_style_catalog=scroll("Catalog"); self.color_style_content=scroll("Editor")
+  self.color_style_catalog_help=text("CatalogHelp",self.color_style_catalog,"Choose game text to edit its colors and highlights.")
+  local groups={}
+  for _,entry in ipairs(self.color_style_entries) do
+    self.color_style_by_id[entry.id]=entry; self.color_style_saved[entry.id]=viewCopy(ColorStyles.resolve({},entry.id))
+    local group=entry.group or "Other"
+    if not groups[group] then groups[group]={}; self.color_style_group_order[#self.color_style_group_order+1]=group end
+    groups[group][#groups[group]+1]=entry
+    self.color_style_rows[entry.id]=text("Entry."..entry.id,self.color_style_catalog,entry.label,function() return self:selectColorStyle(entry.id) end)
+  end
+  self.color_style_group_buttons.all=text("Group.All",self.color_style_catalog,"All",function() return self:selectColorStyleGroup("all") end)
+  for index,group in ipairs(self.color_style_group_order) do
+    self.color_style_groups[group]={entries=groups[group],heading=text("Heading."..index,self.color_style_catalog,group)}
+    self.color_style_group_buttons[group]=text("Group."..index,self.color_style_catalog,group,function() return self:selectColorStyleGroup(group) end)
+  end
+  self.color_style_heading=text("Heading",self.color_style_content,"")
+  self.color_style_help=text("Help",self.color_style_content,"Use a swatch or enter #RRGGBB, then press Enter to preview. Save applies this style.")
+  self.color_style_status=text("Status",self.color_settings_panel,"")
+  self.color_style_preview=text("Preview",self.color_style_content,"")
+  self.color_style_fields={}
+  for _,key in ipairs({"foreground","background"}) do
+    local field={caption=text(key..".Caption",self.color_style_content,key=="foreground" and "Text color" or "Highlight color")}
+    field.input=remember(input("DGHUD.ColorStyles."..key,self.color_style_content,self.geyser))
+    -- Enter is consumed by the editor; color text is never sent to the game.
+    field.input:setAction(function(value)
+      if not self.color_style_draft then return nil end
+      if value~=nil then field.input:print(tostring(value)) end
+      return self:previewColorStyle()
+    end)
+    self.color_style_fields[key]=field
+  end
+  self.color_style_toggle_order={"background_enabled","bold","underline","enabled"}; self.color_style_toggles={}
+  local toggles={background_enabled="Background highlight",bold="Bold",underline="Underline",enabled="Use this style"}
+  for _,key in ipairs(self.color_style_toggle_order) do
+    self.color_style_toggles[key]=text("Toggle."..key,self.color_style_content,toggles[key],function() return self:toggleColorStyle(key) end)
+  end
+  self.color_style_palette_targets={}
+  for _,key in ipairs({"foreground","background"}) do
+    self.color_style_palette_targets[key]=text("Palette."..key,self.color_style_content,key=="foreground" and "SWATCHES: TEXT" or "SWATCHES: HIGHLIGHT",function()
+      if not self.color_style_draft then return nil end
+      self.color_style_palette_target=key; self:renderColorStyle(); return true
+    end)
+  end
+  self.color_style_swatches={}
+  for index,color in ipairs(colorPalette) do
+    local swatch=text("Swatch."..index,self.color_style_content,color,function() return self:chooseColorStyleSwatch(color) end)
+    if swatch.setToolTip then swatch:setToolTip(color.." — apply to the selected text or highlight color") end
+    self.color_style_swatches[index]=swatch
+  end
+  self.color_style_reset=text("Reset",self.color_settings_panel,"RESET",function() return self:resetColorStyle() end)
+  self.color_style_reset:setToolTip("Reset only this style to its original colors. Save to apply.")
+  self.color_style_cancel=text("Cancel",self.color_settings_panel,"CANCEL",function() return self:cancelColorStyle() end)
+  self.color_style_save=text("Save",self.color_settings_panel,"SAVE",function() return self:saveColorStyle() end)
+end
+function View:colorSettingsWidgets()
+  local widgets={self.color_settings_overlay,self.color_settings_panel,self.color_settings_bg,self.color_settings_title,self.color_settings_content,self.color_settings_close}
+  for _,widget in ipairs(self.color_style_widgets or {}) do widgets[#widgets+1]=widget end
+  for _,button in pairs(self.color_option_buttons) do widgets[#widgets+1]=button end
+  return widgets
+end
 function View:layoutColorSettings(layout)
-  local widgets=self:colorSettingsWidgets(); if not self.color_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
-  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(640,width-margin*2),math.min(590,height-margin*2); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(10,math.min(14,(layout.body_font or 14)-2)); local columns=pw>=430 and 2 or 1; local gap=8; local cw=(pw-28-gap*(columns-1))/columns; local row=math.max(34,font+20); local rows=math.ceil(#self.color_option_order/columns)
-  place(self.color_settings_overlay,0,0,"100%","100%"); place(self.color_settings_panel,x,y,pw,ph); place(self.color_settings_bg,0,0,"100%","100%"); place(self.color_settings_title,14,10,pw-150,30); self.color_settings_title:echo(View.withFont("<b>COLOR SETTINGS</b>",font+3)); place(self.color_settings_close,pw-116,8,102,32); self.color_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); place(self.color_settings_content,14,48,pw-28,math.max(1,ph-64)); self.color_settings_content.content_height=rows*row
-  for index,key in ipairs(self.color_option_order) do local column=(index-1)%columns; local line=math.floor((index-1)/columns); place(self.color_option_buttons[key],column*(cw+gap),line*row,cw,row-4) end; self:renderColorOptions(); View.raiseCards(widgets); return true
+  local widgets=self:colorSettingsWidgets()
+  if self.color_style_draft then self:readColorStyleDraft() end
+  for _,widget in ipairs(widgets) do widget:hide() end
+  if not self.color_settings_visible then return true end
+  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800)
+  local margin=layout.mode=="compact" and 8 or 18
+  local pw,ph=math.min(720,math.max(1,width-margin*2)),math.min(680,math.max(1,height-margin*2))
+  local pad,gap=10,6; local inner=math.max(1,pw-pad*2); local body=math.max(1,inner-24)
+  local font=math.max(10,math.min(14,(layout.body_font or 14)-2)); self.color_style_font=font
+  place(self.color_settings_overlay,0,0,"100%","100%"); place(self.color_settings_panel,math.floor((width-pw)/2),math.floor((height-ph)/2),pw,ph)
+  place(self.color_settings_bg,0,0,"100%","100%"); place(self.color_settings_title,pad,8,math.max(1,inner-76),28)
+  self.color_settings_title:echo(View.withFont("<b>COLOR SETTINGS</b>",pw<360 and font or font+3))
+  place(self.color_settings_close,pw-pad-70,8,70,28); self.color_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font))
+  local tabWidth=(inner-gap)/2
+  for index,key in ipairs({"groups","styles"}) do
+    local tab=self["color_settings_"..key.."_tab"]; place(tab,pad+(index-1)*(tabWidth+gap),42,tabWidth,30)
+    self:renderColorStyleButton(tab,self.color_settings_page==key or (key=="styles" and self.color_settings_page=="editor"))
+  end
+  local top=self.color_settings_page=="styles" and 80 or 128
+  local footer=self.color_settings_page=="editor" and 48 or 10; local contentHeight=math.max(1,ph-top-footer)
+  if self.color_settings_page=="groups" then
+    place(self.color_settings_content,pad,top,inner,contentHeight)
+    place(self.color_settings_status,pad,78,inner,44)
+    self.color_settings_status:echo(View.withFont("<span style='color:"..(self.color_settings_error and self.settings.theme.hp or self.settings.theme.muted).."'>"..safeText(self.color_settings_error or "Switch whole categories on or off. Choose Text styles to change individual game-text colors.").."</span>",font))
+    local columns=body>=400 and 2 or 1; local cw=(body-gap*(columns-1))/columns; local row=math.max(34,font+20)
+    for index,key in ipairs(self.color_option_order) do place(self.color_option_buttons[key],((index-1)%columns)*(cw+gap),math.floor((index-1)/columns)*row,cw,row-4) end
+    self.color_settings_content.content_height=math.ceil(#self.color_option_order/columns)*row; self:renderColorOptions()
+  elseif self.color_settings_page=="styles" then
+    place(self.color_style_catalog,pad,top,inner,contentHeight); self:layoutColorStyleCatalog(body)
+  elseif self.color_style_draft then
+    place(self.color_style_status,pad,78,inner,44)
+    place(self.color_style_content,pad,top,inner,contentHeight); self:layoutColorStyleEditor(body)
+    local bw=(inner-gap*2)/3
+    for index,key in ipairs({"reset","cancel","save"}) do
+      local button=self["color_style_"..key]; place(button,pad+(index-1)*(bw+gap),ph-40,bw,30); self:renderColorStyleButton(button,key=="save")
+    end
+    self:renderColorStyle()
+  end
+  View.raiseCards(widgets); return true
+end
+function View:renderColorStyleButton(button,active)
+  local t=self.settings.theme
+  button:setStyleSheet("background:"..(active and "#193024" or "#111512")..";border:1px solid "..(active and t.jade or t.border)..";border-radius:4px;color:"..(active and t.jade or t.text)..";")
+  button:echo(View.withFont("<center>"..safeText(button.option_text).."</center>",self.color_style_font or 11),"nocolor")
+end
+function View:layoutColorStyleCatalog(width)
+  local font=self.color_style_font or 11; local gap=6; local columns=width>=480 and 3 or 2; local cw=(width-gap*(columns-1))/columns
+  place(self.color_style_catalog_help,0,0,width,40); self.color_style_catalog_help:echo(View.withFont(self.color_style_catalog_help.option_text,font))
+  local order={"all"}; for _,group in ipairs(self.color_style_group_order) do order[#order+1]=group end
+  for index,key in ipairs(order) do local button=self.color_style_group_buttons[key]; place(button,((index-1)%columns)*(cw+gap),46+math.floor((index-1)/columns)*36,cw,30); self:renderColorStyleButton(button,key==self.color_style_group) end
+  local y=46+math.ceil(#order/columns)*36+8
+  for _,group in ipairs(self.color_style_group_order) do
+    if self.color_style_group=="all" or self.color_style_group==group then
+      local section=self.color_style_groups[group]; place(section.heading,0,y,width,24); section.heading:echo(View.withFont("<b>"..safeText(group).."</b>",font)); y=y+28
+      for _,entry in ipairs(section.entries) do
+        local row=self.color_style_rows[entry.id]; place(row,0,y,width,32); y=y+36
+        local style=self.color_style_saved[entry.id] or entry.default
+        -- Only canonical colors enter rich text and CSS; catalog labels are escaped.
+        local color=ColorStyles.normalizeColor(style.foreground) or "#FFFFFF"
+        row:setStyleSheet("background:#111814;border:1px solid "..self.settings.theme.border..";border-radius:4px;color:"..self.settings.theme.text..";")
+        row:echo(View.withFont("<span style='color:"..color.."'>■</span> &nbsp; "..safeText(entry.label)..(style.enabled==false and " (off)" or "").." &nbsp; ›",font))
+      end
+    end
+  end
+  self.color_style_catalog.content_height=y
+end
+function View:layoutColorStyleEditor(width)
+  local font=self.color_style_font or 11; local gap=6; local y=0
+  local function row(widget,height) place(widget,0,y,width,height); y=y+height+gap end
+  row(self.color_style_heading,30); row(self.color_style_preview,52); row(self.color_style_help,56)
+  row(self.color_style_fields.foreground.caption,20); row(self.color_style_fields.foreground.input,30)
+  row(self.color_style_toggles.background_enabled,30)
+  if self.color_style_draft.background_enabled then row(self.color_style_fields.background.caption,20); row(self.color_style_fields.background.input,30) end
+  local targetWidth=(width-gap)/2
+  for index,key in ipairs({"foreground","background"}) do place(self.color_style_palette_targets[key],(index-1)*(targetWidth+gap),y,targetWidth,36) end
+  y=y+42
+  local columns=width>=400 and 12 or 6; local sw=(width-gap*(columns-1))/columns
+  for index,swatch in ipairs(self.color_style_swatches) do place(swatch,((index-1)%columns)*(sw+gap),y+math.floor((index-1)/columns)*32,sw,26) end
+  y=y+math.ceil(#self.color_style_swatches/columns)*32+gap
+  for _,key in ipairs({"bold","underline","enabled"}) do row(self.color_style_toggles[key],30) end
+  self.color_style_content.content_height=y
+  for _,field in pairs(self.color_style_fields) do field.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";color:"..self.settings.theme.text..";font-size:"..font.."px;") end
+end
+function View:setColorStyleCallback(callback) self.color_style_callback=type(callback)=="function" and callback or nil; return true end
+function View:setColorStyles(config)
+  config=viewCopy(type(config)=="table" and config or {})
+  -- A controller may publish a snapshot inside its save callback. Accept it
+  -- only when that callback confirms persistence, so a failure cannot repaint.
+  if self.color_style_saving then self.color_style_pending_config=config; return true end
+  self.color_styles_config=config
+  for _,entry in ipairs(self.color_style_entries) do self.color_style_saved[entry.id]=ColorStyles.resolve(config,entry.id) end
+  local options={enabled=config.enabled~=false}
+  for _,key in ipairs(self.color_option_order) do
+    if key~="mapper" and key~="enabled" then
+      local value=config[key.."_enabled"]
+      if value==nil and ({portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true,notice=true})[key] then value=config.highlights_enabled end
+      options[key]=value~=false
+    end
+  end
+  self:setColorOptions(options)
+  if self.color_settings_visible and self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
+function View:showColorSettingsPage(page)
+  if page~="groups" and page~="styles" then return nil,"Unknown color settings page." end
+  self.color_style_draft=nil; self.color_style_selected=nil; self.color_style_error=nil; self.color_style_note=nil
+  self.color_settings_page=page
+  if self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
+function View:selectColorStyleGroup(group)
+  if group~="all" and not self.color_style_groups[group] then return nil,"Unknown group." end
+  self.color_style_group=group
+  if self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
+function View:populateColorStyle(style)
+  self.color_style_draft=viewCopy(style)
+  self.color_style_draft.background_enabled=style.background~=false
+  self.color_style_draft.background_text=style.background or "#333333"
+  self.color_style_fields.foreground.input:print(style.foreground)
+  self.color_style_fields.background.input:print(self.color_style_draft.background_text)
+  self.color_style_preview_style=viewCopy(style)
+end
+function View:selectColorStyle(id)
+  if not self.color_style_by_id[id] then return nil,"Unknown text style." end
+  self.color_style_selected=id; self.color_style_error=nil; self.color_style_note=nil; self.color_style_palette_target="foreground"
+  self:populateColorStyle(self.color_style_saved[id]); self.color_settings_page="editor"
+  if self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
+function View:readColorStyleDraft()
+  local draft=self.color_style_draft; if not draft then return nil end
+  draft.foreground=self.color_style_fields.foreground.input:getText()
+  draft.background_text=self.color_style_fields.background.input:getText()
+  draft.background=draft.background_enabled and draft.background_text or false
+  return draft
+end
+function View:colorStyleValues()
+  local draft=self:readColorStyleDraft(); if not draft then return nil,"Choose a text style first." end
+  local foreground=ColorStyles.normalizeColor(tostring(draft.foreground):match("^%s*(.-)%s*$"))
+  if not foreground then return nil,"Text color: enter # and six color digits, such as #79D98B." end
+  local background=false
+  if draft.background_enabled then
+    background=ColorStyles.normalizeColor(tostring(draft.background_text):match("^%s*(.-)%s*$"))
+    if not background then return nil,"Highlight color: enter # and six color digits, such as #333333." end
+  end
+  return ColorStyles.validateStyle(self.color_style_selected,{foreground=foreground,background=background,bold=draft.bold,underline=draft.underline,enabled=draft.enabled})
+end
+function View:renderColorStyle()
+  local draft=self.color_style_draft; if not draft then return true end
+  local t=self.settings.theme; local font=self.color_style_font or 11; local entry=self.color_style_by_id[self.color_style_selected]
+  local style,validationError=self:colorStyleValues()
+  if style then self.color_style_preview_style=viewCopy(style) end
+  local preview=self.color_style_preview_style
+  self.color_style_heading:echo(View.withFont("<b>"..safeText(entry.label).."</b> · "..safeText(entry.group),font+1))
+  self.color_style_help:echo(View.withFont(self.color_style_help.option_text,font))
+  for _,field in pairs(self.color_style_fields) do field.caption:echo(View.withFont(field.caption.option_text.." (#RRGGBB)",font)) end
+  local samples={room="The town square",label="Obvious exits:",direction="north, east, up",gold="100 gold",silver="50 silver",portal="a shimmering portal",attack="An enemy attacks you!",damage="You take damage!",danger="Your way is blocked.",recovery="You feel refreshed.",upkeep="Your spell draws energy.",spell="A spell flashes nearby.",discovery="You discover a hidden treasure.",illumination="The room is illuminated.",darkness="The room is dark.",notice="An important game notice."}
+  local previewCSS="background:"..(preview.enabled and preview.background or "#080B0A")..";color:"..(preview.enabled and preview.foreground or t.text)..";border:1px solid "..t.border..";"
+  previewCSS=previewCSS.."font-weight:"..(preview.enabled and preview.bold and "bold" or "normal")..";text-decoration:"..(preview.enabled and preview.underline and "underline" or "none")..";"
+  self.color_style_preview:setStyleSheet(previewCSS)
+  -- Geyser's default echo wraps text in its own foreground color. Keep the
+  -- preview explicit so that Qt renders the chosen text color and emphasis.
+  local sample=safeText(samples[entry.id] or entry.label)
+  if preview.enabled and preview.bold then sample="<b>"..sample.."</b>" end
+  if preview.enabled and preview.underline then sample="<u>"..sample.."</u>" end
+  sample="<span style='color:"..(preview.enabled and preview.foreground or t.text).."'>"..sample.."</span>"
+  self.color_style_preview:echo(View.withFont("<center>"..sample.."</center>",font+2),"nocolor")
+  for _,key in ipairs(self.color_style_toggle_order) do
+    local button=self.color_style_toggles[key]; local enabled=draft[key]==true
+    self:renderColorStyleButton(button,enabled); button:echo(View.withFont("<center>"..button.option_text..": <b>"..(enabled and "ON" or "OFF").."</b></center>",font))
+  end
+  for key,button in pairs(self.color_style_palette_targets) do self:renderColorStyleButton(button,key==self.color_style_palette_target) end
+  for index,swatch in ipairs(self.color_style_swatches) do
+    swatch:setStyleSheet("background:"..colorPalette[index]..";border:2px solid "..t.border..";border-radius:3px;"); swatch:echo("")
+  end
+  local errorText=self.color_style_error or validationError
+  local message=errorText or self.color_style_note or "Preview only. Save applies this style. Cancel discards edits."
+  if not errorText then
+    if self.color_options.enabled==false then message=message.." All highlights are currently off."
+    elseif self.color_options[entry.feature]==false then message=message.." This category is currently off."
+    elseif draft.enabled==false then message=message.." This style is off." end
+  end
+  self.color_style_status:echo(View.withFont("<span style='color:"..(errorText and t.hp or t.muted).."'>"..safeText(message).."</span>",font))
+  if self.color_style_status.setToolTip then self.color_style_status:setToolTip(message) end
+  return style~=nil,validationError
+end
+function View:previewColorStyle()
+  if not self.color_style_draft then return nil,"Choose a text style first." end
+  self.color_style_error=nil; self.color_style_note=nil
+  return self:renderColorStyle()
+end
+function View:toggleColorStyle(key)
+  local draft=self:readColorStyleDraft(); if not draft or not self.color_style_toggles[key] then return nil,"Choose a text style first." end
+  draft[key]=not draft[key]; self.color_style_error=nil; self.color_style_note=nil
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderColorStyle() end
+  return true
+end
+function View:chooseColorStyleSwatch(color)
+  local draft=self:readColorStyleDraft(); color=ColorStyles.normalizeColor(color)
+  if not draft or not color then return nil,"Choose a valid color." end
+  local target=self.color_style_palette_target or "foreground"
+  self.color_style_fields[target].input:print(color)
+  if target=="background" then draft.background_enabled=true end
+  self.color_style_error=nil; self.color_style_note=nil
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderColorStyle() end
+  return true
+end
+function View:resetColorStyle()
+  if not self.color_style_selected then return nil,"Choose a text style first." end
+  self:populateColorStyle(ColorStyles.defaults(self.color_style_selected))
+  self.color_style_error=nil; self.color_style_note="Original style restored in the preview. Save to apply."
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderColorStyle() end
+  return true
+end
+function View:cancelColorStyle() return self:showColorSettingsPage("styles") end
+function View:saveColorStyle()
+  if self.color_style_saving then return nil,"A save is already in progress." end
+  local style,err=self:colorStyleValues()
+  if not style then self.color_style_error=err; self:renderColorStyle(); return nil,err end
+  if not self.color_style_callback then
+    self.color_style_error="Color saving is unavailable. Your changes have not been applied."; self:renderColorStyle(); return nil,self.color_style_error
+  end
+  local id=self.color_style_selected
+  self.color_style_saving=true; self.color_style_pending_config=nil
+  local ok,result,why=pcall(self.color_style_callback,id,viewCopy(style))
+  self.color_style_saving=false
+  local pending=self.color_style_pending_config; self.color_style_pending_config=nil
+  if not ok or result~=true then
+    self.color_style_error="Could not save. "..tostring((ok and why) or (not ok and result) or "Your changes have not been applied.")
+    self:renderColorStyle(); return nil,self.color_style_error
+  end
+  if pending then self:setColorStyles(pending) else
+    self.color_styles_config.styles=self.color_styles_config.styles or {}; self.color_styles_config.styles[id]=viewCopy(style)
+    self.color_style_saved[id]=viewCopy(style)
+  end
+  self:populateColorStyle(self.color_style_saved[id]); self.color_style_error=nil; self.color_style_note="Saved. This style will be used for new game text."
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderColorStyle() end
+  return true
 end
 function View:chatSettingsWidgets() local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_visibility,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}; for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end; return widgets end
 function View:layoutChatSettings(layout)
@@ -1336,8 +1652,13 @@ function View:selectOptionsAction(action)
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
 end
-function View:showColorSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; self.color_settings_visible=true; self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return true end
-function View:hideColorSettings() self.color_settings_visible=false; if self.layout then self:layoutColorSettings(self.layout) end; return true end
+function View:showColorSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); self:hideKeybindingSettings(); self:hideLatentPsionAlert(); if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; self.color_settings_visible=true; self.color_settings_error=nil; self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return true end
+function View:hideColorSettings()
+  self.color_settings_visible=false; self.color_style_draft=nil; self.color_style_selected=nil; self.color_style_error=nil; self.color_style_note=nil; self.color_settings_error=nil
+  if self.color_settings_page=="editor" then self.color_settings_page="styles" end
+  for _,widget in ipairs(self:colorSettingsWidgets()) do widget:hide() end
+  return true
+end
 function View:showFeedback()
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self:setColorMenuVisible(false); self.feedback_draft={kind="feedback"}; self.feedback_visible=true; self.feedback_sending=false; self.feedback_error=nil; self.feedback_result=nil
   if self.feedback_summary.print then self.feedback_summary:print("") end; if self.feedback_details.print then self.feedback_details:print("") end
@@ -1437,6 +1758,7 @@ function View:selectedMapLibraryEntry() return self.map_library_selected and sel
 function View:setMapLibraryImportPending(value,combine) self.map_library_import_pending=value==true; self.map_library_combine_pending=self.map_library_import_pending and combine==true; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
 function View:setColorMenuVisible(visible)
   self.color_menu_visible=visible==true
+  if self.color_menu_visible and self.color_settings_visible then self:hideColorSettings() end
   if self.color_menu_visible and self.roller_settings_visible then self:hideRollerSettings() end
   if self.layout then return self:layoutColorMenu(self.layout) end
   return true
@@ -1451,7 +1773,6 @@ function View:renderColorOptions()
   for _,button in pairs(self.option_action_buttons or {}) do button:setStyleSheet("background:#151d18;border:1px solid "..t.border..";border-radius:4px;color:"..t.accent..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.."</center>",font)) end
   return true
 end
-local function viewCopy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=viewCopy(item) end; return out end
 function View:showRollerSettings(config)
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
@@ -1516,12 +1837,17 @@ function View:setColorOptions(options)
 end
 function View:selectColorOption(key)
   if not self.color_option_buttons[key] then return nil,"unknown color option" end
-  local wanted=not (self.color_options[key]~=false); local result
-  if key=="enabled" and self.color_toggle_callback then result=self.color_toggle_callback(wanted)
-  elseif self.color_options_callback then result=self.color_options_callback(key,wanted) end
-  if type(result)=="boolean" then wanted=result end
+  local wanted=not (self.color_options[key]~=false); local ok,result,err
+  if key=="enabled" and self.color_toggle_callback then ok,result,err=pcall(self.color_toggle_callback,wanted)
+  elseif self.color_options_callback then ok,result,err=pcall(self.color_options_callback,key,wanted) end
+  if not ok or type(result)~="boolean" then
+    self.color_settings_error=tostring((ok and err) or (ok==false and result) or "Color settings could not be saved.")
+    if self.layout then self:layoutColorSettings(self.layout) end
+    return nil,self.color_settings_error
+  end
+  wanted=result; self.color_settings_error=nil
   self.color_options[key]=wanted; if key=="enabled" then self:setColorEnabled(wanted) else self:renderColorOptions() end
-  self:setColorMenuVisible(false); return wanted
+  self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return wanted
 end
 function View:setColorEnabled(enabled)
   self.color_enabled=enabled~=false
@@ -1689,6 +2015,7 @@ end
 local reusableWidgetNames={
   "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
+  "color_settings_groups_tab","color_settings_styles_tab","color_settings_status","color_style_catalog","color_style_content","color_style_catalog_help","color_style_heading","color_style_help","color_style_status","color_style_preview","color_style_reset","color_style_cancel","color_style_save",
   "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_visibility","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
   "keybindings_overlay","keybindings_panel","keybindings_bg","keybindings_title","keybindings_content","keybindings_text","keybindings_enable","keybindings_defaults","keybindings_status","keybindings_save","keybindings_cancel",
   "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
@@ -1709,6 +2036,7 @@ local function reusableConsole(value) return reusableWidget(value) and type(valu
 local function nameSet(values) local result={}; for _,name in ipairs(values) do result[name]=true end; return result end
 local plainReusableWidgets=nameSet({
   "root","color_menu","options_scroll","color_settings_panel","color_settings_content","chat_container","chat_tabs","chat_settings_panel","chat_settings_content","keybindings_panel","keybindings_content",
+  "color_style_catalog","color_style_content",
   "inventory_output","runes_output","skills_output","right","vitals_right","mapper","compass_area","utility_area","help_panel","help_output",
   "roller_panel","roller_content","latent_alert_panel","map_settings_panel","map_settings_content","feedback_panel","support_panel","map_library_panel","map_library_list","map_collection_list",
   "hp","fatigue","carry","psi","web","roundtime_bar",
@@ -1731,6 +2059,20 @@ function View.validateReusable(candidate,settings)
   for _,name in ipairs({"hp","fatigue","carry","psi","web","roundtime_bar"}) do local gauge=candidate[name]; if type(gauge.setValue)~="function" or not reusableStyledWidget(gauge.front) or not reusableStyledWidget(gauge.back) or not reusableStyledWidget(gauge.text) then return nil,"preserved HUD gauge is incomplete: "..name end end
   if type(candidate.color_options)~="table" then return nil,"preserved HUD color state is incomplete" end
   for _,name in ipairs(candidate.color_option_order or {}) do if type(candidate.color_options[name])~="boolean" then return nil,"preserved HUD color state is incomplete" end end
+  if type(candidate.color_style_widgets)~="table" or type(candidate.color_style_saved)~="table" or type(candidate.color_styles_config)~="table" or type(candidate.color_style_entries)~="table" or type(candidate.color_style_by_id)~="table" or type(candidate.color_style_group_order)~="table" or type(candidate.color_style_toggle_order)~="table" then return nil,"preserved HUD color editor is incomplete" end
+  for _,widget in ipairs(candidate.color_style_widgets) do if not reusableWidget(widget) then return nil,"preserved HUD color editor widget is incomplete" end end
+  for _,key in ipairs({"foreground","background"}) do
+    local field=type(candidate.color_style_fields)=="table" and candidate.color_style_fields[key]
+    if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD color inputs are incomplete" end
+    if type(candidate.color_style_palette_targets)~="table" or not reusableLabel(candidate.color_style_palette_targets[key]) then return nil,"preserved HUD color palette is incomplete" end
+  end
+  for index=1,#colorPalette do if type(candidate.color_style_swatches)~="table" or not reusableLabel(candidate.color_style_swatches[index]) then return nil,"preserved HUD color palette is incomplete" end end
+  for index,key in ipairs({"background_enabled","bold","underline","enabled"}) do if candidate.color_style_toggle_order[index]~=key or type(candidate.color_style_toggles)~="table" or not reusableLabel(candidate.color_style_toggles[key]) then return nil,"preserved HUD color toggles are incomplete" end end
+  if type(candidate.color_style_groups)~="table" or type(candidate.color_style_group_buttons)~="table" or not reusableLabel(candidate.color_style_group_buttons.all) then return nil,"preserved HUD color groups are incomplete" end
+  for _,entry in ipairs(ColorStyles.entries()) do
+    if type(candidate.color_style_rows)~="table" or not reusableLabel(candidate.color_style_rows[entry.id]) or not candidate.color_style_by_id[entry.id] or type(candidate.color_style_saved[entry.id])~="table" then return nil,"preserved HUD color catalog is incomplete" end
+    local group=candidate.color_style_groups[entry.group]; if type(group)~="table" or not reusableLabel(group.heading) or not reusableLabel(candidate.color_style_group_buttons[entry.group]) then return nil,"preserved HUD color groups are incomplete" end
+  end
   if type(candidate.right_list_tab_order)~="table" or type(candidate.right_list_tabs)~="table" then return nil,"preserved HUD list tabs are incomplete" end
   for index,name in ipairs({"inventory","runes","skills"}) do if candidate.right_list_tab_order[index]~=name or not reusableLabel(candidate.right_list_tabs[name]) then return nil,"preserved HUD list tabs are incomplete" end end
   if candidate.right_list_active~=nil and not candidate.right_list_tabs[candidate.right_list_active] then return nil,"preserved HUD active list tab is invalid" end
@@ -1761,6 +2103,7 @@ function View:prepareForReuse(settings)
   self.settings=settings or self.settings
   self:ensureVersionLabel(); self:renderVersion()
   self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
+  self.color_style_callback=nil; self.color_style_pending_config=nil; self.color_style_saving=false
   self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
   self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.keybindings_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
   self.map_zoom_callback=nil; self.map_clear_all_callback=nil
@@ -1781,5 +2124,10 @@ function View:prepareForReuse(settings)
   self:setChatVisible(self.settings.chat and self.settings.chat.visible)
   return true
 end
-function View:delete() if self.root then self.root:delete(); self.root=nil end end
+function View:delete()
+  -- Rejected or partially constructed views may lack editor widgets. Their
+  -- root still needs deleting before the replacement uses the same names.
+  pcall(self.hideColorSettings,self); self.color_style_callback=nil
+  if self.root then self.root:delete(); self.root=nil end
+end
 return View

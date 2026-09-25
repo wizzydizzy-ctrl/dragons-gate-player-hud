@@ -46,6 +46,7 @@ chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
 DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending,_view_handoff=viewHandoff,_chat_handoff=chatHandoff,_main_wrap_baseline=mainWrapBaseline}
 local moduleNames={"defaults","keybindings","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
+moduleNames[#moduleNames+1]="color_styles"; moduleNames[#moduleNames+1]="color_preferences"; moduleNames[#moduleNames+1]="travel_highlights"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")
@@ -58,6 +59,17 @@ if Adapter.prepareDataDirectory then
   if not called or not prepared or prepareMessage then pcall(cecho,"\n<yellow>[DGHUD]<reset> Persistent data preparation warning: "..tostring((not called and prepared) or prepareMessage or "filesystem is unavailable").."\n") end
 end
 if type(userSettings)~="table" then userSettings={} end
+if Adapter.loadColorSettings then
+  local called,persisted,colorErr=pcall(Adapter.loadColorSettings)
+  if called and type(persisted)=="table" then userSettings.colorization=persisted
+  elseif not called or colorErr then pcall(cecho,"\n<yellow>[DGHUD]<reset> Color settings could not be loaded; existing colors retained.\n")
+  elseif type(userSettings.colorization)=="table" and Adapter.saveColorSettings then
+    -- Migrate explicit pre-editor choices once, before a cold restart can
+    -- discard their old in-memory-only storage. Never overwrite a bad file.
+    local saved,value=pcall(Adapter.saveColorSettings,Adapter,userSettings.colorization)
+    if not saved or not value then pcall(cecho,"\n<yellow>[DGHUD]<reset> Existing color choices are active but could not be saved for restart.\n") end
+  end
+end
 if userSettings.update==nil then local persisted=Adapter.loadUpdateSettings and Adapter.loadUpdateSettings(); if type(persisted)=="table" then userSettings.update=persisted end end
 do local persisted=Adapter.loadRollerSettings and Adapter.loadRollerSettings(); if type(persisted)=="table" then userSettings.roller=persisted end end
 local persistedMapper=Adapter.loadMapperSettings and Adapter.loadMapperSettings()

@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-DGHUD can highlight selected game output while leaving ordinary room prose and chat unchanged. Highlights change color only; they do not hide or rewrite the words.
+DGHUD can highlight selected game output while leaving ordinary room prose unchanged. Travel highlighting changes only the object phrase, not the surrounding description or nearby loot. Important version notices also receive an “IMPORTANT - PLEASE READ” heading.
 
 All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTINGS** to switch them individually.
 
@@ -16,7 +16,7 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 | Currency | `gold`, `silver`, `gp`, and `sp` in applicable display output. | Gold and silver |
 | Races | Known race names wherever the race matcher applies. | Race palette |
 | Classes | Known profession names wherever the class matcher applies. | Profession palette |
-| Travel Objects | Door, gate, arch, portal, stairs, ladder, trapdoor, bridge, tunnel, passage, entrance, or exit phrases in travel-object lines. | Cyan |
+| Travel Objects | Doors, gates, arches, portals, stairs, ladders, trapdoors, bridges, tunnels, passages, entrances, exits, paths, holes, stores, shops, pawnshops, and taverns in confirmed object listings. | Cyan |
 | Attacks on You | Recognized attacks aimed at you. | Red |
 | Damage to You | `Your ... takes ... points of ... damage!` | Bright red |
 | Danger / Blocks | Blocked movement and recognized hard warnings. | Amber |
@@ -25,15 +25,24 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 | Spell Threats | Recognized room-wide or incoming casts. | Purple |
 | Discovery / Loot | Recognized discovery messages. | Gold |
 | Illuminated Areas | Both illuminated and not-illuminated room status. | Yellow for illuminated; blue-gray for dark |
+| Important Game Notices | New version-notes announcements. | Gold text, dark red highlight, bold and underline |
 
 ## Using the settings box
 
 1. Click **OPTIONS**.
 2. Click **COLOR SETTINGS**.
-3. Click a category to switch it on or off.
-4. Close the panel when finished.
+3. In **CATEGORIES**, click a category to switch it on or off. These switches save immediately.
+4. In **TEXT STYLES**, choose a group and then the text you want to customize.
+5. Choose a color swatch or enter a six-digit hex color such as `#74A9FF`. Press Enter to preview typed colors; nothing is sent to the game.
+6. Choose **SWATCHES: TEXT** or **SWATCHES: HIGHLIGHT** to decide which color the swatches change. Turn Highlight on for a colored background, or off for text-only coloring.
+7. Set Bold, Underline, and the individual style's On/Off choice.
+8. Click **SAVE** to apply. **CANCEL** discards unsaved edits. **RESET** restores the original style in the preview; click Save to keep it.
 
-Selections are saved and survive `dghud reload` and package updates.
+**Example: change exits to blue.** Open Text Styles, select **Exit directions**, choose blue, then Save. The `Obvious exits:` / `Obvious paths:` label is a separate style, so it can stay red or use another color.
+
+Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, and important notices all have separate editable styles. The category and master switches must also be on for a style to appear.
+
+Selections apply to **new output**, not previously printed lines. Use `look` to see a room description again. Saved choices survive HUD reloads, package updates, character changes, and Mudlet restarts within the same profile. They are stored as validated data in `DGHUDData/color-settings.dat`, outside the replaceable package. A failed save shows an error and does not apply partial changes.
 
 The **MAPPER** control in the same settings panel shows or hides mapping without deleting map data.
 
@@ -60,7 +69,7 @@ dghud colors illumination status
 Valid feature names are:
 
 ```text
-room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination
+room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice
 ```
 
 The `highlights` feature groups travel objects, attacks, damage, danger, recovery, costs, spells, discovery, and illumination. Race, profession, room-title, exit, and currency switches remain independently controllable.
@@ -75,6 +84,9 @@ Obvious paths: north east west.
 This area is illuminated.
 This area is not illuminated.
 An open sinister black iron gate is here.
+A store, a pawnshop, a tavern, and a fountain are here.
+A dark hole and a sputtering smoky torch are
+here.
 The dark hound claws at you!
 Your head takes 8 points of impact damage!
 You cannot move in that direction.
@@ -88,6 +100,8 @@ The matchers are deliberately restrained:
 
 - A random NPC sentence containing `says` is not treated as a combat alert.
 - Every sentence ending with `is here` is not treated as a travel object.
+- In mixed lists, the shop, hole, door, or other recognized travel phrase is colored; ordinary torches, fountains, and loot remain unchanged.
+- A confirmed travel-object listing may span up to four server lines. Quoted speech, command echoes, and unrelated prose are not travel listings.
 - Attacks on another character are not highlighted as attacks on you.
 - Ordinary uses of words such as `full`, `rested`, or `satisfied` do not become recovery notices.
 

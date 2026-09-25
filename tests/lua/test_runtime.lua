@@ -32,6 +32,8 @@ local function fake()
     setChatOrderCallback=function(self,callback) f.chatOrderCallback=callback end,
     setColorToggleCallback=function(self,callback) f.colorToggleCallback=callback end,
     setColorOptionsCallback=function(self,callback) f.colorOptionsCallback=callback end,
+    setColorStyleCallback=function(self,callback) f.colorStyleCallback=callback end,
+    setColorStyles=function(self,config) f.viewColorStyles=config end,
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
     setOptionsActionCallback=function(self,callback) f.optionsActionCallback=callback end,
@@ -69,6 +71,10 @@ local function fake()
   end
   function f:applyLineColors(segments) self.coloredSegments=segments; return true end
   function f:reportColorizerStatus(enabled) self.reportedColorizer=enabled; return true end
+  function f:saveColorSettings(config)
+    if self.failColorSave then return nil,"disk full" end
+    self.savedColorSettings=require("settings").merge({},config); return true
+  end
   function f:killTrigger(id) self.killed[id]=true; self.triggers[id]=nil end
   function f:epoch() return self.epochValue or 100 end
   function f:localTime() return self.localTimeValue or "12:41:06 AM" end
@@ -1233,6 +1239,38 @@ test("repeated resize changes typography without growing runtime",function()
     eq(r.inventory_row_height>=r.inventory_font+8,true); eq(r.details_line_height>=r.body_font+4,true); eq(r.console_width>=math.floor(size[1]*.65),true); eq(f:count(f.events)+f:count(f.triggers)+f:count(f.aliases),runtime)
   end
 end)
+test("color style changes persist independently and save failures leave runtime intact",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local Styles=require("color_styles")
+  local selected=Styles.defaults("direction"); selected.foreground="#00FF00"; selected.background="#112233"; selected.bold=true
+  eq(f.colorStyleCallback("direction",selected),true)
+  eq(f.savedColorSettings.styles.direction.foreground,"#00FF00"); eq(f.viewColorStyles.styles.direction.background,"#112233")
+  local trigger=f.triggers[f.colorizerTrigger]; trigger("Obvious exits: east west.")
+  eq(f.coloredSegments[2].color[2],255); eq(f.coloredSegments[2].bold,true); eq(f.coloredSegments[2].background[1],17)
+  eq(f.coloredSegments[1].color[1],139)
+  local count=f.next; f.failColorSave=true
+  selected.foreground="#FF0000"
+  local ok,err=f.colorStyleCallback("direction",selected); eq(ok,nil); assert(err:find("disk full",1,true))
+  eq(hud.colorizer.styles.direction.foreground,"#00FF00"); eq(f.viewColorStyles.styles.direction.foreground,"#00FF00"); eq(f.next,count)
+  eq(hud:setColorFeature("exits",false),nil); eq(hud.colorizer:status().exits,true)
+  eq(hud:setColorizerEnabled(false),nil); eq(hud.colorizer_enabled,true)
+  eq(hud:setColorStyle("direction",{foreground="red; url(evil)"}),nil); eq(hud:setColorStyle("unknown",{}),nil)
+  f.failColorSave=false; eq(hud:setColorFeature("exits",false),false); eq(f.savedColorSettings.exits_enabled,false)
+  local cold=Main.new(fake(),{layout={},colorization=f.savedColorSettings}); assert(cold:start())
+  eq(cold.colorizer:status().exits,false); eq(cold.colorizer.styles.direction.foreground,"#00FF00")
+  cold:shutdown(); hud:shutdown()
+end)
+
+test("master color aliases report persistence failures without changing active colors",function()
+  for _,command in ipairs({"on","off","toggle"}) do
+    local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); f.failColorSave=true
+    local colors=assert(aliasCallback(f,"^dghud colors(?: (.*))?$"))
+    local ok,err=colors({"",command}); eq(ok,nil); assert(err:find("disk full",1,true))
+    eq(f.commandErrors[#f.commandErrors],err); eq(hud.colorizer_enabled,true); eq(hud.colorizer:status().enabled,true)
+    hud:shutdown()
+  end
+end)
+
 test("optional output colors toggle through one owned alias and public API",function()
   local f=fake(); local personal=f:addLineTrigger(function() end); local hud=Main.new(f,{layout={}}); assert(hud:start())
   DGHUD={controller=hud}; Main.installChatApi(DGHUD)

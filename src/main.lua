@@ -1,6 +1,8 @@
 package.loaded["output_colorizer"]=nil
 local State=require("state"); local Events=require("events"); local Layout=require("layout"); local View=require("view"); local Keybindings=require("keybindings"); local Parser=require("command_parser"); local Collector=require("command_collector"); local Clock=require("game_clock"); local ChatParser=require("chat_parser"); local ChatHistory=require("chat_history"); local ChatController=require("chat_controller"); local OutputColorizer=require("output_colorizer"); local PostureTracker=require("posture_tracker"); local NeedsTracker=require("needs_tracker"); local Autoroller=require("autoroller"); local MapperModel=require("mapper_model"); local MapAdapter=require("map_adapter"); local MapTransfer=require("map_transfer"); local MapCatalog=require("map_catalog"); local MapCollections=require("map_collections"); local Automapper=require("automapper"); local SpecialTransition=require("special_transition"); local MapWalker=require("map_walker"); local Cleanup=require("map_cleanup"); local MapDiagnostics=require("map_diagnostics"); local FailureReport=require("failure_report")
 local Main={}; Main.__index=Main
+local ColorStyles=require("color_styles")
+local Settings=require("settings")
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
@@ -211,29 +213,53 @@ function Main.installColorizerApi(namespace)
   api.toggle=function() local controller,colorizer=active(); if not colorizer then return nil,"colorizer is not running" end; return controller:setColorizerEnabled(not colorizer.enabled) end
   api.setFeature=function(name,value) local controller,colorizer=active(); if not colorizer then return nil,"colorizer is not running" end; return controller:setColorFeature(tostring(name or ""):lower(),value==true) end
   api.status=function() local _,colorizer=active(); if not colorizer then return nil,"colorizer is not running" end; return colorizer:status() end
+  api.getStyle=function(id) local controller=active(); if not controller then return nil,"colorizer is not running" end; return ColorStyles.resolve(controller.settings.colorization,id) end
+  api.setStyle=function(id,style) local controller=active(); if not controller then return nil,"colorizer is not running" end; return controller:setColorStyle(id,style) end
+  api.listStyles=ColorStyles.entries
   return api
 end
-function Main:setColorizerEnabled(enabled)
-  enabled=enabled==true; self.colorizer_enabled=enabled
-  if self.colorizer then self.colorizer:setEnabled(enabled) end
-  self.settings.colorization=type(self.settings.colorization)=="table" and self.settings.colorization or {}; self.settings.colorization.enabled=enabled
+function Main:commitColorSettings(candidate)
+  local normalized,err=require("color_preferences").snapshot(candidate)
+  if not normalized then return nil,err end
+  if self.adapter.saveColorSettings then
+    local called,saved,saveErr=pcall(self.adapter.saveColorSettings,self.adapter,normalized)
+    if not called or not saved then return nil,"Could not save color settings: "..tostring(called and saveErr or saved) end
+  end
+  self.settings.colorization=normalized; self.colorizer_enabled=normalized.enabled~=false
   local root=rawget(_G,"DGHUD")
-  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.colorization=type(root.user_settings.colorization)=="table" and root.user_settings.colorization or {}; root.user_settings.colorization.enabled=enabled end
-  if self.view and self.view.setColorEnabled then self.view:setColorEnabled(enabled) end
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.colorization=Settings.merge({},normalized) end
+  if self.colorizer then
+    local updated=OutputColorizer.new(self.adapter,self.colorizer_enabled,normalized)
+    self.colorizer.colors=updated.colors; self.colorizer.features=updated.features; self.colorizer.styles=updated.styles
+    self.colorizer:setEnabled(self.colorizer_enabled)
+  end
+  if self.view then
+    if self.view.setColorStyles then self.view:setColorStyles(normalized) end
+    if self.view.setColorOptions and self.colorizer then self.view:setColorOptions(colorOptions(self.colorizer:status()))
+    elseif self.view.setColorEnabled then self.view:setColorEnabled(self.colorizer_enabled) end
+  end
+  return true
+end
+function Main:setColorizerEnabled(enabled)
+  if type(enabled)~="boolean" then return nil,"color toggle must be a boolean" end
+  local candidate=Settings.merge({},self.settings.colorization or {}); candidate.enabled=enabled
+  local saved,err=self:commitColorSettings(candidate); if not saved then return nil,err end
   return enabled
 end
 function Main:setColorFeature(name,enabled)
   if not self.colorizer then return nil,"colorizer is not running" end
-  local result,err=self.colorizer:setFeature(name,enabled); if result==nil then return nil,err end
-  local key=name.."_enabled"; self.settings.colorization=type(self.settings.colorization)=="table" and self.settings.colorization or {}; self.settings.colorization[key]=result
-    if name=="highlights" then for _,feature in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do self.settings.colorization[feature.."_enabled"]=result end end
-  local root=rawget(_G,"DGHUD")
-  if root then
-    root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.colorization=type(root.user_settings.colorization)=="table" and root.user_settings.colorization or {}; root.user_settings.colorization[key]=result
-    if name=="highlights" then for _,feature in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do root.user_settings.colorization[feature.."_enabled"]=result end end
-  end
-  if self.view and self.view.setColorOptions then self.view:setColorOptions(colorOptions(self.colorizer:status())) end
-  return result
+  if type(enabled)~="boolean" then return nil,"color toggle must be a boolean" end
+  if name~="highlights" and self.colorizer.features[name]==nil then return nil,"unknown color feature" end
+  local candidate=Settings.merge({},self.settings.colorization or {}); candidate[name.."_enabled"]=enabled
+  if name=="highlights" then for _,feature in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do candidate[feature.."_enabled"]=enabled end end
+  local saved,err=self:commitColorSettings(candidate); if not saved then return nil,err end
+  return enabled
+end
+function Main:setColorStyle(id,style)
+  local validated,err=ColorStyles.validateStyle(id,style); if not validated then return nil,err end
+  local candidate=Settings.merge({},self.settings.colorization or {})
+  candidate.styles=type(candidate.styles)=="table" and candidate.styles or {}; candidate.styles[id]=validated
+  return self:commitColorSettings(candidate)
 end
 function Main:clockDisplay()
   local real
@@ -1062,12 +1088,14 @@ function Main:start()
     if self.view and self.view.showLatentPsionAlert then pcall(self.view.showLatentPsionAlert,self.view,message) end
   end)
   self.keybindings=Keybindings.new(self.adapter,self.settings.keybindings); self.keybindings:start()
-  if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
+  if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled,err=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
   if self.view.setColorOptionsCallback then self.view:setColorOptionsCallback(function(name,wanted)
     if name=="mapper" then return self:setMapperEnabled(wanted) end
     local feature=name=="room_titles" and "room" or name; local enabled,err=self:setColorFeature(feature,wanted); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled
   end) end
   local colorSettings=type(self.settings.colorization)=="table" and self.settings.colorization or {}
+  if self.view.setColorStyles then self.view:setColorStyles(colorSettings) end
+  if self.view.setColorStyleCallback then self.view:setColorStyleCallback(function(id,style) return self:setColorStyle(id,style) end) end
   if self.view.setColorOptions then
     local initial={mapper=self:mapperEnabled(),enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
     local legacy=colorSettings.highlights_enabled~=false
@@ -1280,12 +1308,12 @@ function Main:start()
     if validFeature and validFeatureAction then
       local current=self.colorizer:status()[feature]
       if featureAction=="status" then enabled=current else enabled,err=self:setColorFeature(feature,featureAction=="on" or (featureAction=="toggle" and not current)) end
-    elseif action=="on" then enabled=self:setColorizerEnabled(true)
-    elseif action=="off" then enabled=self:setColorizerEnabled(false)
-    elseif action=="toggle" or action=="" then enabled=self:setColorizerEnabled(not self.colorizer_enabled)
+    elseif action=="on" then enabled,err=self:setColorizerEnabled(true)
+    elseif action=="off" then enabled,err=self:setColorizerEnabled(false)
+    elseif action=="toggle" or action=="" then enabled,err=self:setColorizerEnabled(not self.colorizer_enabled)
     elseif action=="status" then enabled=self.colorizer:status().enabled
     else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|races|classes|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination|notice]" end
-    if enabled==nil then return nil,err end
+    if enabled==nil then if self.adapter.reportCommandError then self.adapter:reportCommandError(err) end; return nil,err end
     if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled
   end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud help$",function()

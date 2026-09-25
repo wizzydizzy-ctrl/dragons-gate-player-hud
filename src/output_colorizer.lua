@@ -1,8 +1,9 @@
 local Colorizer={}; Colorizer.__index=Colorizer
+local Styles=require("color_styles")
+local Travel=require("travel_highlights")
 
 local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},gold={224,184,79},silver={192,192,192},portal={55,190,200},attack={205,62,62},damage={255,70,70},danger={205,135,45},recovery={90,165,105},upkeep={185,105,45},spell={145,95,190},discovery={225,185,70},illumination={220,200,85},darkness={105,120,140},notice={255,215,80}}
 local directions={north=true,northeast=true,east=true,southeast=true,south=true,southwest=true,west=true,northwest=true,up=true,down=true,['in']=true,out=true,n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,u=true,d=true}
-local travelNouns={door=true,doors=true,gate=true,gates=true,arch=true,arches=true,portal=true,portals=true,staircase=true,staircases=true,stairs=true,ladder=true,ladders=true,trapdoor=true,trapdoors=true,bridge=true,bridges=true,tunnel=true,tunnels=true,passage=true,passages=true,entrance=true,entrances=true,exit=true,exits=true}
 local attackVerbs={attacks=true,swings=true,slashes=true,stabs=true,bites=true,claws=true,kicks=true,strikes=true,shoots=true,breathes=true,charges=true,pounces=true,throws=true}
 local raceColors={
   ["go-blin-al"]={153,204,255},["muatana-al"]={102,153,204},["drag-al"]={0,204,204},["fir elf"]={102,204,153},["san elf"]={153,153,255},["usil elf"]={102,102,255},["oog-ra"]={0,153,153},
@@ -31,7 +32,7 @@ local function appendNamedSegments(result,line,lower,colors)
         local before=first>1 and lower:sub(first-1,first-1) or ""; local after=last<#lower and lower:sub(last+1,last+1) or ""
         local free=not before:match("[%a%-]") and not after:match("[%a%-]")
         if free then for index=first,last do if claimed[index] then free=false; break end end end
-        if free then result[#result+1]=segment(first,last,kind,colors,palette[name]); for index=first,last do claimed[index]=true end end
+        if free then local item=segment(first,last,kind,colors,palette[name]); item.style_id=(kind=="races" and "race:" or "class:")..name; result[#result+1]=item; for index=first,last do claimed[index]=true end end
         cursor=last+1
       end
     end
@@ -43,23 +44,6 @@ end
 local function whole(line,kind,colors)
   local first=line:find("%S"); local last=line:match(".*()%S")
   return first and last and {segment(first,last,kind,colors)} or nil
-end
-
-local function portalSegment(line,lower,colors)
-  if not lower:match("%f[%a]is here%.[%s]*$") and not lower:match("%f[%a]are here%.[%s]*$") then return nil end
-  local contentLast=lower:match(".*()%S")
-  if not contentLast then return nil end
-  local clauseStart=1
-  for index=1,contentLast-1 do if line:sub(index,index):match("[%.!?]") then clauseStart=index+1 end end
-  while clauseStart<=#line and line:sub(clauseStart,clauseStart):match("%s") do clauseStart=clauseStart+1 end
-  local clause=lower:sub(clauseStart,contentLast)
-  if not clause:match("^an?%s") and not clause:match("^the%s") then return nil end
-  for _,word in ipairs({"blocking","guarding","beside","near"}) do if clause:match("%f[%a]"..word.."%f[%A]") then return nil end end
-  local subject=clause:match("^(.-)%s+is here%.$") or clause:match("^(.-)%s+are here%.$") or ""
-  local hasTravelNoun=false
-  for word in subject:gmatch("%a+") do if travelNouns[word] then hasTravelNoun=true; break end end
-  if not hasTravelNoun then return nil end
-  return {segment(clauseStart,contentLast,"portal",colors)}
 end
 
 local function specialSegments(line,lower,colors)
@@ -87,12 +71,15 @@ local function specialSegments(line,lower,colors)
   if lower:match("^%s*you expend %d+ fatigue keeping up .+%.%s*$") then return whole(line,"upkeep",colors) end
   if lower:match("^%s*the .+ casts his gaze across the room%.%s*$") or lower:match("^%s*the .+ casts her gaze across the room%.%s*$") or lower:match("^%s*the .+ casts their gaze across the room%.%s*$") or lower:match("^%s*the .+ casts .+ at you!%s*$") or lower:match("^%s*the .+ casts .+ towards you!%s*$") then return whole(line,"spell",colors) end
   if lower:match("^%s*you have discovered .+[%!%.]%s*$") then return whole(line,"discovery",colors) end
-  return portalSegment(line,lower,colors)
+  local travel=Travel.parse(line)
+  if travel then for _,item in ipairs(travel) do item.color=colors.portal end end
+  return travel
 end
 
 function Colorizer.parse(line,colors)
   colors=colors or defaultColors
   if type(line)~="string" or line=="" then return nil end
+  line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
   local first,last=line:find("%[[^%[%]\r\n]+%]")
   if first and line:sub(1,first-1):match("^%s*$") and line:sub(last+1):match("^%s*$") then
     return {segment(first,last,"room",colors)}
@@ -138,26 +125,70 @@ function Colorizer.new(adapter,enabled,settings)
     local configured=settings[kind.."_enabled"]
     if configured==nil then features[kind]=legacyHighlights else features[kind]=configured~=false end
   end
-  return setmetatable({adapter=adapter,enabled=enabled==true,colors=colors,features=features,trigger=nil,started=false},Colorizer)
+  local self=setmetatable({adapter=adapter,enabled=enabled==true,colors=colors,features=features,trigger=nil,started=false,travel=Travel.new(),line_history={}},Colorizer)
+  self:setStyles(settings)
+  return self
+end
+function Colorizer:setStyles(settings)
+  self.styles={}
+  for _,entry in ipairs(Styles.entries()) do self.styles[entry.id]=Styles.resolve(settings,entry.id) end
+  return true
 end
 function Colorizer:start()
   if self.started then return true end
-  local ok,id=pcall(self.adapter.addColorizerTrigger,self.adapter,function(line) return self:onLine(line) end)
+  local ok,id=pcall(self.adapter.addColorizerTrigger,self.adapter,function(line,number) return self:onLine(line,number) end)
   if not ok then return nil,tostring(id) end
   if not id then return nil,"colorizer trigger registration failed" end
   self.trigger=id; self.started=true; return true
 end
-function Colorizer:onLine(line)
-  if not self.started or not self.enabled then return false end
-  local segments=Colorizer.parse(line,self.colors)
-  if not segments then return false end
+function Colorizer:onLine(line,number)
+  if not self.started or not self.enabled then self.travel=Travel.new(); self.line_history={}; return false end
+  if type(line)~="string" then return false end
+  line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
+  if #line>8192 then self.travel=Travel.new(); self.line_history={}; return false end
+  self.line_history[#self.line_history+1]={text=line,number=number}
+  if #self.line_history>4 then table.remove(self.line_history,1) end
+  local segments,overlays={},{}
+  for _,item in ipairs(Colorizer.parse(line,self.colors) or {}) do if item.kind~="portal" then overlays[#overlays+1]=item end end
+  local oldOverlays={}
+  for _,item in ipairs(self.travel:onLine(line) or {}) do
+    local source=self.line_history[#self.line_history+(item.line_offset or 0)]
+    -- Never guess an older screen row from a relative offset: other triggers
+    -- may have inserted text since the previous game line arrived.
+    if source and ((item.line_offset or 0)==0 or type(source.number)=="number") then
+      item.source_line=source.text; item.line_number=source.number; item.color=self.colors.portal
+      segments[#segments+1]=item
+      if (item.line_offset or 0)<0 then
+        for _,overlay in ipairs(Colorizer.parse(source.text,self.colors) or {}) do
+          local narrow=overlay.kind=="gold" or overlay.kind=="silver" or overlay.kind=="races" or overlay.kind=="classes"
+          local overlaps=overlay.start<item.start+item.length and item.start<overlay.start+overlay.length
+          local key=tostring(source.number)..":"..overlay.start..":"..overlay.kind
+          if narrow and overlaps and not oldOverlays[key] then
+            oldOverlays[key]=true; overlay.source_line=source.text; overlay.line_number=source.number
+            overlays[#overlays+1]=overlay
+          end
+        end
+      end
+    end
+  end
+  -- Broad travel phrases go first. Currency and named styles must remain
+  -- visible inside them, including previously colored wrapped server lines.
+  for _,item in ipairs(overlays) do segments[#segments+1]=item end
   local filtered={}
   for _,item in ipairs(segments) do
     local feature=item.kind
     if item.kind=="darkness" then feature="illumination"
     elseif item.kind=="label" or item.kind=="direction" then feature="exits"
     elseif item.kind=="gold" or item.kind=="silver" then feature="currency" end
-    if self.features[feature] then filtered[#filtered+1]=item end
+    local style=self.styles[item.style_id or item.kind]
+    if self.features[feature] and style and style.enabled then
+      item.color=Styles.toRGB(style.foreground)
+      item.background=style.background and Styles.toRGB(style.background) or nil
+      item.bold=style.bold; item.underline=style.underline
+      item.source_line=item.source_line or line
+      item.line_number=item.line_number or number
+      filtered[#filtered+1]=item
+    end
   end
   if #filtered==0 then return false end
   local ok,applied,err=pcall(self.adapter.applyLineColors,self.adapter,filtered)
@@ -165,7 +196,7 @@ function Colorizer:onLine(line)
   if not applied then return nil,err or "line coloring failed" end
   return true
 end
-function Colorizer:setEnabled(enabled) self.enabled=enabled==true; return self.enabled end
+function Colorizer:setEnabled(enabled) self.enabled=enabled==true; self.travel=Travel.new(); self.line_history={}; return self.enabled end
 function Colorizer:setFeature(name,enabled)
   if name=="highlights" then
     for _,kind in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do self.features[kind]=enabled==true end

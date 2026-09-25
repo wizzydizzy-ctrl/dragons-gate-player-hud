@@ -77,6 +77,45 @@ test("persisted hidden chat survives package replacement and public reload",func
     eq(DGHUD.controller.settings.chat.visible,false)
   end)
 end)
+test("legacy color choices migrate once and survive a cold entry",function()
+  withEntryStubs(function(context)
+    local persisted,saves=nil,0
+    context.install("mudlet_adapter",function() return {
+      new=function() return context.adapter end,
+      loadColorSettings=function() return persisted end,
+      saveColorSettings=function(_,value) saves=saves+1; persisted=Settings.merge({},value); return true end,
+    } end)
+    DGHUD={user_settings={colorization={enabled=false,direction_color={12,34,56}}},shutdown=function() return true end}
+    dofile("src/entry.lua"); eq(saves,1); eq(DGHUD.settings.colorization.enabled,false)
+    DGHUD=nil; dofile("src/entry.lua")
+    eq(saves,1); eq(DGHUD.settings.colorization.enabled,false); eq(DGHUD.settings.colorization.direction_color[2],34)
+  end)
+end)
+test("unreadable color preferences are never overwritten by migration",function()
+  for _,throws in ipairs({false,true}) do
+    withEntryStubs(function(context)
+      local saves=0
+      context.install("mudlet_adapter",function() return {
+        new=function() return context.adapter end,
+        loadColorSettings=function() if throws then error("unavailable") end; return nil,"invalid data" end,
+        saveColorSettings=function() saves=saves+1; return true end,
+      } end)
+      DGHUD={user_settings={colorization={enabled=false}},shutdown=function() return true end}
+      dofile("src/entry.lua"); eq(saves,0); eq(DGHUD.settings.colorization.enabled,false); eq(DGHUD.healthCheck(),true)
+    end)
+  end
+end)
+test("failed legacy color migration preserves the active HUD and choices",function()
+  withEntryStubs(function(context)
+    context.install("mudlet_adapter",function() return {
+      new=function() return context.adapter end,loadColorSettings=function() return nil end,
+      saveColorSettings=function() return nil,"disk full" end,
+    } end)
+    DGHUD={user_settings={colorization={enabled=false}},shutdown=function() return true end}
+    dofile("src/entry.lua"); eq(DGHUD.settings.colorization.enabled,false); eq(DGHUD.healthCheck(),true)
+  end)
+end)
+
 test("persisted roller settings override stale live values during package replacement",function()
   withEntryStubs(function(context)
     context.defaults.roller={schema=3,target_total=53,hard_stop=62,max_rolls=false,arrange_mode="manual",minimum_greats=false,minimum_good_plus=false,auto_start_on_name=true,min_stats={STR=5,MP=5}}
