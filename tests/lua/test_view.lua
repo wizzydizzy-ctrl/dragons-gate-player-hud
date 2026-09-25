@@ -1744,6 +1744,122 @@ test("large HUD text keeps the inventory viewport above its wrapped footer and r
   eq(view.inventory_footer_rows,#lines); eq(view.inventory_footer.message,table.concat(lines,"<br>")); eq(view.inventory_footer.message~=wide,true)
 end)
 
+local function shortPaneInventoryState(count)
+  local items={}; for index=1,count do items[index]={name="A long carried item name "..index,weight=12.3} end
+  return {character={full_name="Test",physical={}},attributes={},combat={},equipment={items={}},inventory={items=items},runes={items={}},skills={items={}},
+    vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},carry={current=174.4,maximum=354,percent=49.3},psi={visible=false},web={visible=false},gold=12345,silver=98765,roundtime=0,position=0},
+    room={name="R",players={},flags={},exits={}}}
+end
+local function assertInventoryRowFits(view,layout)
+  local output=view.inventory_output
+  local scrollbar=view.inventory_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
+  eq(output.visible,true); eq(output.height>=layout.list_row_height+scrollbar,true)
+  eq(output.y>=view.inventory.y,true); eq(output.y+output.height<=view.inventory.y+view.inventory.height,true)
+  eq(view.inventory_content.width>=view.list_viewport_width,true)
+  eq(view.inventory_content.fontSize,layout.list_font)
+  if view.inventory_footer_scrolling then
+    local footer=view.inventory_scroll_footer
+    eq(view.inventory_footer.visible,false); eq(footer.visible,true); eq(footer.parent,output)
+    eq(footer.fontSize,layout.list_font+2)
+    eq(footer.y>=view.inventory_content.y+view.inventory_content.height,true)
+    eq(footer.x+footer.width<=output.width-view.list_resolved_scrollbar_width,true)
+    -- Each footer line must fit above the horizontal scrollbar even when the
+    -- footer as a whole needs vertical scrolling.
+    eq(footer.height/view.inventory_footer_rows<=output.height-scrollbar,true)
+    assert(footer.message:find("12345gp",1,true)); assert(footer.message:find("98765sp",1,true)); assert(footer.message:find("49.3%",1,true))
+  else
+    eq(view.inventory_scroll_footer.visible,false)
+    eq(output.y+output.height<=view.inventory_footer.y,true)
+  end
+end
+test("short MultiView panes keep a full inventory row and scrollbars at normal and large font sizes",function()
+  local Layout=require("layout")
+  for _,width in ipairs({800,960,1075}) do
+    for _,scale in ipairs({1,1.1}) do
+      for _,count in ipairs({0,1,40}) do
+        local view=chatView(7,24); local state=shortPaneInventoryState(count)
+        local layout=Layout.compute(width,500,nil,nil,state.vitals,{side_text_scale=scale})
+        view:applyLayout(layout); view:update(state)
+        eq(layout.list_font,scale==1 and 13 or 14)
+        assertInventoryRowFits(view,layout)
+        view:applyLayout(layout); view:renderInventory(state)
+        assertInventoryRowFits(view,layout)
+      end
+    end
+  end
+end)
+test("408px Large inventory reduces only local vertical padding to fit a row and scrollbar",function()
+  local Layout=require("layout"); local view=chatView(7,24); local state=shortPaneInventoryState(1)
+  for _,height in ipairs({408,500,408}) do
+    local layout=Layout.compute(800,height,nil,nil,state.vitals,{side_text_scale=1.1})
+    view:applyLayout(layout); view:update(state)
+    local output,card=view.inventory_output,view.inventory
+    eq(layout.list_padding,7); eq(layout.list_font,14); eq(view.inventory_content.fontSize,14)
+    eq(view.inventory_scroll_footer.fontSize,16); eq(view.inventory_footer_scrolling,true)
+    eq(output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+    eq(output.y+output.height<=card.y+card.height,true)
+    if height==408 then
+      eq(view.inventory_title.visible,false); eq(output.height,40)
+      eq(output.y-card.y,4); eq(card.y+card.height-output.y-output.height,4)
+    else
+      eq(view.inventory_title.visible,true); eq(output.y-card.y,layout.list_padding+layout.list_row_height+4)
+    end
+    local outputHeight=output.height
+    view.right_list_tabs.runes.click()
+    eq(view.runes_output.y-view.runes.y,layout.list_padding+layout.list_row_height+4)
+    view.right_list_tabs.inventory.click(); eq(view.inventory_output.height,outputHeight)
+  end
+end)
+test("inventory footer changes between fixed and scrolling on height font and tab transitions",function()
+  local Layout=require("layout"); local view=chatView(7,24); local state=shortPaneInventoryState(1)
+  for _,size in ipairs({{800,500,1},{800,800,1},{800,500,1.1},{960,500,1},{1075,500,1.1},{1920,1080,1},{799,600,1},{800,500,1.1}}) do
+    local layout=Layout.compute(size[1],size[2],nil,nil,state.vitals,{side_text_scale=size[3]})
+    view:applyLayout(layout); view:update(state)
+    if layout.mode=="compact" then
+      eq(view.inventory_scroll_footer.visible,false); eq(view.inventory_footer_scrolling,false)
+    else
+      assertInventoryRowFits(view,layout)
+      if size[2]==500 then eq(view.inventory_footer_scrolling,true) else eq(view.inventory_footer_scrolling,false) end
+      if layout.right_lists_mode=="tabbed" then
+        for _,tab in ipairs({"runes","skills","inventory"}) do
+          view.right_list_tabs[tab].click()
+          if tab=="inventory" then assertInventoryRowFits(view,layout)
+          else
+            eq(view.inventory_scroll_footer.visible,false); eq(view.inventory_footer.visible,false)
+            eq(view.inventory_scroll_footer.y,0); eq(view.inventory_scroll_footer.height,1)
+          end
+        end
+      end
+    end
+  end
+end)
+test("scrolling inventory footer follows changing item counts and safely renders updated values",function()
+  local Layout=require("layout"); local view=chatView(7,24)
+  for _,count in ipairs({40,1,0,12}) do
+    local state=shortPaneInventoryState(count)
+    local layout=Layout.compute(800,500,nil,nil,state.vitals,{side_text_scale=1.1})
+    view:applyLayout(layout); view:update(state); assertInventoryRowFits(view,layout)
+    eq(view.inventory_content.height,math.max(1,count*layout.list_row_height))
+    state.vitals.gold="<gold>"; state.vitals.carry.percent="<percent>"
+    view:renderInventory(state)
+    assert(view.inventory_scroll_footer.message:find("&lt;gold&gt;",1,true))
+    assert(view.inventory_scroll_footer.message:find("&lt;percent&gt;",1,true))
+    eq(view.inventory_scroll_footer.y,view.inventory_content.height+4)
+  end
+end)
+test("refreshing a scrolling inventory never temporarily removes its footer scroll extent",function()
+  local view=chatView(7,24); local state=shortPaneInventoryState(40)
+  local layout=require("layout").compute(800,500,nil,nil,state.vitals,{side_text_scale=1.1})
+  view:applyLayout(layout); view:update(state); eq(view.inventory_footer_scrolling,true)
+  local footer=view.inventory_scroll_footer; local bottom=footer.y+footer.height
+  local move,resize,hide=footer.move,footer.resize,footer.hide
+  function footer:move(x,y) eq(y+self.height>=bottom,true); return move(self,x,y) end
+  function footer:resize(width,height) eq(self.y+height>=bottom,true); return resize(self,width,height) end
+  function footer:hide() error("visible footer removed during inventory refresh") end
+  view:applyLayout(layout); view:update(state); assertInventoryRowFits(view,layout)
+  footer.move=move; footer.resize=resize; footer.hide=hide
+end)
+
 test("crossing responsive breakpoints repeatedly restores every desktop card",function()
   local Layout=require("layout"); local view=chatView(7)
   view.last_state={vitals={psi={visible=false},web={visible=false}},equipment={items={}},inventory={items={}},skills={items={}}}
@@ -1827,7 +1943,7 @@ test("reusable view validation rejects missing responsive list tab structures",f
 end)
 test("reusable view validation rejects damaged structural widgets and controls",function()
   local View=require("view")
-  for _,name in ipairs({"clock_header","attribute_strip","mapper","chat_settings_clear_saved","chat_settings_visibility"}) do
+  for _,name in ipairs({"clock_header","attribute_strip","mapper","chat_settings_clear_saved","chat_settings_visibility","inventory_scroll_footer"}) do
     local view=chatView(); view[name]=nil
     local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find(name,1,true))
   end

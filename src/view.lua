@@ -210,8 +210,9 @@ function View.inventoryFooterLines(vitals,t,capacity)
 end
 function View:renderInventoryFooter(vitals)
   local lines,tooltip=View.inventoryFooterLines(vitals,self.settings.theme,self.inventory_footer_capacity)
-  self.inventory_footer_rows=#lines; self.inventory_footer:echo(table.concat(lines,"<br>"))
-  if self.inventory_footer.setToolTip then pcall(self.inventory_footer.setToolTip,self.inventory_footer,tooltip) end
+  local footer=self.inventory_footer_scrolling and self.inventory_scroll_footer or self.inventory_footer
+  self.inventory_footer_rows=#lines; footer:echo(table.concat(lines,"<br>"))
+  if footer.setToolTip then pcall(footer.setToolTip,footer,tooltip) end
   return lines
 end
 local function label(name,parent,style,geyser)
@@ -227,6 +228,18 @@ local function gauge(name,parent,color,theme)
   return g
 end
 local function place(item,x,y,w,h) item:move(x,y); item:resize(w,h); item:show() end
+function View:resizeInventoryContent(rows,minimumHeight)
+  local layout=self.layout; local height=math.max(1,rows*layout.list_row_height)
+  if self.inventory_footer_scrolling then
+    -- Both labels stay in the same native scrollbox; resizing never reparents
+    -- widgets. The footer follows the actual items, including an empty list.
+    local lineHeight=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/layout.list_font),math.ceil((layout.list_font+2)*1.3))
+    place(self.inventory_scroll_footer,0,height+4,self.list_viewport_width,lineHeight*self.inventory_footer_rows+6)
+  else
+    height=math.max(minimumHeight or 0,height)
+  end
+  self.inventory_content:resize(self.inventory_content_width or self.list_content_width or 1,height)
+end
 local help_entries={
   {command="dghud help",description="Open this command guide."},
   {command="dghud colors [on|off|toggle|status]",description="Control all optional DGHUD output colors."},
@@ -463,6 +476,8 @@ function View.new(settings)
   self.inventory_output=Geyser.ScrollBox:new({name="DGHUD.Inventory.Output",x=0,y=0,width=100,height=100},self.root)
   self.inventory_content=label("DGHUD.Inventory.Content",self.inventory_output,"background:#101713;color:"..t.text..";")
   self.inventory_footer=label("DGHUD.Inventory.Footer",self.root,"background:transparent;color:"..t.text..";")
+  self.inventory_scroll_footer=label("DGHUD.Inventory.ScrollFooter",self.inventory_output,"background:transparent;color:"..t.text..";")
+  self.inventory_scroll_footer:resize(1,1); self.inventory_scroll_footer:hide()
   self.runes=label("DGHUD.Runes",self.root,"background:#101713;border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";")
   self.runes_title=label("DGHUD.Runes.Title",self.root,"background:transparent;color:"..t.accent..";")
   self.runes_output=Geyser.ScrollBox:new({name="DGHUD.Runes.Output",x=0,y=0,width=100,height=100},self.root)
@@ -850,6 +865,8 @@ function View:layoutCompactLists(layout,top)
 end
 function View:applyLayout(layout)
   self.layout=layout; local top,bottom=layout.header_height or layout.top,0; local t=self.settings.theme; local p=layout.panel_padding; local lp=layout.lower_panel_padding
+  local was_inventory_footer_scrolling=self.inventory_footer_scrolling
+  self.inventory_footer_scrolling=false
   local side_bottom=layout.command_line_clearance or 0
   local header_top_padding=math.max(10,(layout.color_toggle_height or 20)+8)
   self.header:setStyleSheet("background:"..t.background..";border-bottom:1px solid "..t.border..";color:"..t.text..";padding:"..header_top_padding.."px "..p.."px 6px "..p.."px;font-size:"..layout.body_font.."px;")
@@ -861,7 +878,10 @@ function View:applyLayout(layout)
   self.equipment:setStyleSheet("background:#101713;border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";padding:"..(layout.equipment_padding or p).."px;font-size:"..(layout.equipment_font or layout.body_font).."px;")
   for _,card in ipairs({self.inventory,self.runes,self.skills}) do card:setStyleSheet("background:#101713;border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";padding:"..(layout.list_padding or p).."px;font-size:"..layout.body_font.."px;") end
   for _,title in ipairs({self.inventory_title,self.runes_title,self.skills_title}) do title:setStyleSheet("background:transparent;color:"..t.accent..";font-size:"..layout.list_title_font.."px;font-weight:700;") end
-  self.inventory_footer:setStyleSheet("background:transparent;color:"..t.text..";font-size:"..(layout.list_font+2).."px;")
+  for _,footer in ipairs({self.inventory_footer,self.inventory_scroll_footer}) do
+    footer:setStyleSheet("background:transparent;color:"..t.text..";font-size:"..(layout.list_font+2).."px;")
+    if footer.setFontSize then footer:setFontSize(layout.list_font+2) end
+  end
   for _,widget in ipairs({self.inventory_content,self.runes_content,self.skills_content,self.list_measure}) do
     if widget.setFont then widget:setFont(self.list_font_family) end
     if widget.setFontSize then widget:setFontSize(layout.list_font) end
@@ -871,7 +891,6 @@ function View:applyLayout(layout)
     if title.setFontSize then title:setFontSize(layout.list_title_font) end
   end
   for _,button in pairs(self.right_list_tabs or {}) do if button.setFontSize then button:setFontSize(layout.list_font) end end
-  if self.inventory_footer.setFontSize then self.inventory_footer:setFontSize(layout.list_font+2) end
   self.list_measure:setStyleSheet("background:transparent;color:transparent;font-family:'"..self.list_font_family.."';font-size:"..layout.list_font.."px;")
   local glyphRun=string.rep("M",10)
   self.list_measure:echo(table.concat({glyphRun,glyphRun,glyphRun,glyphRun,glyphRun},"<br>"))
@@ -1015,9 +1034,27 @@ function View:applyLayout(layout)
       for _,key in ipairs(self.right_list_tab_order) do if key~=active then hideList(key) end end
       local card_y=inventory_y+tab_h+4; local card_h=math.max(1,rail_bottom-card_y); local viewport_h
       if active=="inventory" then
-        viewport_h=math.max(1,card_h-rp*2-title_h-footer_h-4)
-        place(self.inventory,card_x,card_y,card_w,card_h); place(self.inventory_title,list_x,card_y+rp,list_w,title_h); place(self.inventory_output,list_x,card_y+rp+title_h,list_w,viewport_h); place(self.inventory_footer,list_x,card_y+card_h-rp-footer_h,list_w,footer_h)
-        self.inventory_content:resize(self.inventory_content_width,math.max(viewport_h,inventory_rows*layout.list_row_height)); self.inventory_content:show(); self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
+        local minimum_viewport=layout.list_row_height+inventory_scroll_h
+        local inventory_title_h=title_h; local inventory_padding_y=rp
+        viewport_h=card_h-rp*2-inventory_title_h-footer_h-4
+        if viewport_h<minimum_viewport then
+          self.inventory_footer_scrolling=true
+          viewport_h=card_h-rp*2-inventory_title_h
+          if viewport_h<minimum_viewport then inventory_title_h=0; viewport_h=card_h-rp*2 end
+          if inventory_title_h==0 and viewport_h<minimum_viewport and card_h>=minimum_viewport then
+            inventory_padding_y=math.max(0,math.floor((card_h-minimum_viewport)/2))
+            viewport_h=card_h-inventory_padding_y*2
+          end
+          self.inventory_footer_capacity=math.max(4,math.floor(self.list_viewport_width/math.max(1,footer_character_width)))
+          self.inventory_footer:hide()
+        else
+          place(self.inventory_footer,list_x,card_y+card_h-rp-footer_h,list_w,footer_h)
+        end
+        place(self.inventory,card_x,card_y,card_w,card_h)
+        if inventory_title_h>0 then place(self.inventory_title,list_x,card_y+inventory_padding_y,list_w,inventory_title_h) else self.inventory_title:hide() end
+        place(self.inventory_output,list_x,card_y+inventory_padding_y+inventory_title_h,list_w,math.max(1,viewport_h))
+        self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
+        self:resizeInventoryContent(inventory_rows,viewport_h); self.inventory_content:show()
       elseif active=="runes" then
         viewport_h=math.max(1,card_h-rp*2-title_h-4)
         place(self.runes,card_x,card_y,card_w,card_h); place(self.runes_title,list_x,card_y+rp,list_w,title_h); place(self.runes_output,list_x,card_y+rp+title_h,list_w,viewport_h)
@@ -1082,6 +1119,11 @@ function View:applyLayout(layout)
       self.roundtime_bar.text:setStyleSheet("background:transparent;color:"..self.settings.theme.text..";font-size:"..layout.lower_roundtime_font.."px;font-weight:700;")
       self.roundtime_bar:raise()
     else self.roundtime_bar:hide() end
+  end
+  if was_inventory_footer_scrolling and not self.inventory_footer_scrolling then
+    -- Clear the old extent only when leaving this mode; temporarily shrinking
+    -- it on every refresh would clamp the native scroll position above the footer.
+    self.inventory_scroll_footer:hide(); self.inventory_scroll_footer:move(0,0); self.inventory_scroll_footer:resize(1,1)
   end
   local listLayoutSignature=table.concat({tostring(layout.mode),tostring(layout.list_font),tostring(math.floor(tonumber(self.list_outer_width) or 0)),tostring(self.skill_name_width or 0)},":")
   if self.list_layout_signature~=listLayoutSignature then
@@ -2139,8 +2181,8 @@ function View:renderInventory(s)
   signature=table.concat(signature,"\30"); if signature==self.inventory_signature then return end; self.inventory_signature=signature
   self.inventory_title:echo("<b>INVENTORY</b>")
   local lines={}; for _,item in ipairs(inventory.items or {}) do lines[#lines+1]=esc(item.name or "").."  <span style='color:"..t.muted.."'>"..esc(item.weight or "").." lb</span>" end
-  self.inventory_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.inventory_content:move(0,0); self.inventory_content:resize(self.inventory_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height)); self.inventory_content:show()
   self:renderInventoryFooter(v)
+  self.inventory_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.inventory_content:move(0,0); self:resizeInventoryContent(#lines,layout.list_row_height*5); self.inventory_content:show()
 end
 function View:renderRunes(s)
   local layout=self.layout; if not layout then return end
@@ -2260,7 +2302,7 @@ local reusableWidgetNames={
   "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_visibility","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
   "chat_sound_caption","chat_sound_explanation","chat_sound_volume","chat_sound_volume_down","chat_sound_volume_up","chat_sound_status",
   "keybindings_overlay","keybindings_panel","keybindings_bg","keybindings_title","keybindings_content","keybindings_text","keybindings_enable","keybindings_defaults","keybindings_status","keybindings_save","keybindings_cancel",
-  "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
+  "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","inventory_scroll_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
   "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
   "help_overlay","help_panel","help_bg","help_title","help_close","help_copy","help_output","help_content",
   "roller_overlay","roller_panel","roller_bg","roller_content","roller_title","roller_status","roller_save","roller_cancel","roller_arrange_caption",

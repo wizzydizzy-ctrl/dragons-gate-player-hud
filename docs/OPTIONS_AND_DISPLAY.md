@@ -137,6 +137,8 @@ DGHUD recalculates panel sizes, font-aware spacing, chat wrapping, list scrollba
 
 In Mudlet MultiView, these sizes use the individual profile pane, not the entire application window. On narrow panes, Combat stacks its fields so OR, DR, position, and posture remain visible. Inventory, Runes, and Skills start at the top of their scrollable space; long names and columns remain available through horizontal scrolling.
 
+In a very short window, Inventory keeps room for readable item rows. If the money and carry summary cannot fit below the list, it moves inside the list: scroll to the bottom to see it. It returns to its fixed position when you make the window taller.
+
 At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. On shorter or narrower desktop windows, **Inventory**, **Runes**, and **Skills** become three tabs sharing the available space; no list is discarded. At compact widths the side rails hide, but those same three scrollable tabs move into a compact strip above the chatbox. On an exceptionally short window, normal game output takes priority and the optional strip returns automatically when enough height is available.
 
 If something disappears after resizing:
