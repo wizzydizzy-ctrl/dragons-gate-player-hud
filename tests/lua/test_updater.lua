@@ -3,6 +3,67 @@ local function releaseManifest(version)
   return {package="DragonsGateHUD",version=version,minimum_mudlet="5.0.0",view_schema=4,view_contract=string.rep("b",64),archive_url="https://github.com/wizzydizzy-ctrl/dragons-gate-hud/releases/download/v"..version.."/DragonsGateHUD.mpackage",sha256=string.rep("a",64),archive_size=100}
 end
 local updateSettings={version="0.2.83",github={owner="wizzydizzy-ctrl",repository="dragons-gate-hud"},update={package_limit=1000}}
+local function withChatSoundClock(run)
+  local names={"getEpoch","tempTimer","killTimer","createStopWatch","startStopWatch","stopStopWatch","deleteStopWatch","getStopWatchTime"}; local saved={}
+  for _,name in ipairs(names) do saved[name]=rawget(_G,name) end
+  local oldTime=os.time; local h={reads=0,resources=0,fallbacks=0}
+  local ok,err=xpcall(function()
+    os.time=function() h.fallbacks=h.fallbacks+1; return 1234 end
+    getEpoch=nil
+    for index=2,#names do _G[names[index]]=function() h.resources=h.resources+1; error("chat clock must not allocate timer or stopwatch resources") end end
+    h.adapter=Adapter.new(); run(h); eq(h.resources,0)
+  end,debug.traceback)
+  os.time=oldTime
+  for _,name in ipairs(names) do rawset(_G,name,saved[name]) end
+  if not ok then error(err,0) end
+end
+
+test("chat sound clock preserves fractional seconds across integer second boundaries",function()
+  withChatSoundClock(function(h)
+    local now=100.99
+    getEpoch=function() h.reads=h.reads+1; return now end
+    local first=h.adapter:chatSoundTime(); eq(first,100.99)
+    now=101.01; local second=h.adapter:chatSoundTime(); eq(second,101.01)
+    assert(math.abs((second-first)-.02)<.000001); assert(second-first<1)
+    now=101.99; assert(h.adapter:chatSoundTime()-first>=1)
+    eq(h.reads,3); eq(h.fallbacks,0); eq(h.resources,0)
+  end)
+end)
+
+test("chat sound clock uses getEpoch seconds without scaling and leaves the epoch API unchanged",function()
+  withChatSoundClock(function(h)
+    for _,value in ipairs({0,100.125,1788221000.375,"1788221000.375"}) do
+      getEpoch=function() return value end
+      eq(h.adapter:chatSoundTime(),tonumber(value))
+    end
+    eq(h.fallbacks,0); eq(h.adapter:epoch(),1234); eq(h.fallbacks,1)
+  end)
+end)
+
+test("chat sound clock falls back safely when fractional time is missing invalid or throws",function()
+  withChatSoundClock(function(h)
+    eq(h.adapter:chatSoundTime(),1234)
+    getEpoch="unavailable"; eq(h.adapter:chatSoundTime(),1234)
+    getEpoch=function() return nil,"unavailable" end; eq(h.adapter:chatSoundTime(),1234)
+    for _,value in ipairs({false,{},"invalid",0/0,math.huge,-math.huge}) do
+      getEpoch=function() return value end
+      eq(h.adapter:chatSoundTime(),1234)
+    end
+    getEpoch=function() error("clock unavailable") end; eq(h.adapter:chatSoundTime(),1234)
+    eq(h.fallbacks,10); eq(h.resources,0)
+  end)
+end)
+
+test("repeated chat sound clock reads allocate no timers stopwatches or adapter state",function()
+  withChatSoundClock(function(h)
+    local before={}; for key,value in pairs(h.adapter) do before[key]=value end
+    getEpoch=function() h.reads=h.reads+1; return 200+h.reads/1000 end
+    for index=1,100 do eq(h.adapter:chatSoundTime(),200+index/1000) end
+    for key,value in pairs(h.adapter) do eq(value,before[key]); before[key]=nil end
+    eq(next(before),nil); eq(h.reads,100); eq(h.fallbacks,0); eq(h.resources,0)
+  end)
+end)
+
 test("roller settings serialization preserves arrangement choices disabled limits and MP",function()
   local source=Adapter.rollerSettingsSource({target_total=nil,hard_stop=nil,max_rolls=nil,reroll_delay=.1,reroll_command="reroll",arrange_mode="minimums",minimum_greats=2,minimum_good_plus=nil,auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=true,show_every_roll=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=6,MP=nil}})
   local compile=loadstring or load; local chunk,err=compile(source); assert(chunk,err); local saved=chunk()
@@ -169,6 +230,291 @@ test("failed chat visibility persistence retains the previous complete settings 
         eq(candidate.visible,not prior); eq(candidate.tab_order[1],"ALL"); eq(candidate.all_sources.ROOM,true)
       end)
     end
+  end
+end)
+
+test("sound settings round trip all tabs and preserve other chat preferences",function()
+  withChatSettingsFiles(function(h)
+    local Sounds=require("chat_sounds"); local sounds=Sounds.defaults()
+    sounds.volume=73; sounds.tabs.STAFF.enabled=false; sounds.tabs.ROOM={enabled=true,sound="staff"}
+    sounds.tabs["QUEST - NIGHT"]={enabled=true,sound="esp"}
+    local config={visible=false,tab_order={"STAFF","ALL","QUEST - NIGHT"},all_sources={ROOM=false,COMBAT=true},sounds=sounds}
+    assert(Adapter.new():saveChatSettings(config))
+    local loaded=assert(Adapter.loadChatSettings()); eq(loaded.sounds.volume,73)
+    eq(loaded.visible,false); eq(table.concat(loaded.tab_order,","),"STAFF,ALL,QUEST - NIGHT")
+    eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,true)
+    for tab,value in pairs(sounds.tabs) do eq(loaded.sounds.tabs[tab].enabled,value.enabled); eq(loaded.sounds.tabs[tab].sound,value.sound) end
+    loaded.sounds.tabs.ROOM.sound="room"; eq(sounds.tabs.ROOM.sound,"staff")
+    eq(assert(Adapter.loadChatSettings()).sounds.tabs.ROOM.sound,"staff")
+    eq(h.files[h.path..".tmp"],nil); eq(h.files[h.path..".bak"],nil)
+  end)
+end)
+
+test("sound settings at the 64 total tab boundary survive save load and revalidation",function()
+  withChatSettingsFiles(function(h)
+    local Sounds=require("chat_sounds"); local tabs={STAFF={enabled=false,sound="dragon"}}
+    for index=1,55 do tabs["CUSTOM"..index]={enabled=index%2==0,sound="esp"} end
+    local config={visible=false,tab_order={"STAFF","ALL"},all_sources={ROOM=false},sounds={volume=42,tabs=tabs}}
+    local snapshot=assert(Adapter.chatSettingsSnapshot(config))
+    local count=0; for _ in pairs(snapshot.sounds.tabs) do count=count+1 end; eq(count,64)
+    local adapter=Adapter.new(); assert(adapter:saveChatSettings(snapshot))
+    local loaded=assert(Adapter.loadChatSettings()); local normalized=assert(Sounds.validate(loaded.sounds))
+    count=0; for _ in pairs(normalized.tabs) do count=count+1 end; eq(count,64)
+    eq(loaded.visible,false); eq(loaded.all_sources.ROOM,false); eq(loaded.sounds.volume,42)
+    eq(loaded.sounds.tabs.STAFF.enabled,false); eq(loaded.sounds.tabs.STAFF.sound,"dragon")
+    for index=1,55 do eq(loaded.sounds.tabs["CUSTOM"..index].enabled,index%2==0); eq(loaded.sounds.tabs["CUSTOM"..index].sound,"esp") end
+    local serialized=h.files[h.path]; assert(adapter:saveChatSettings(loaded)); eq(h.files[h.path],serialized)
+    assert(Adapter.loadChatSettings())
+  end)
+end)
+
+test("missing persisted sounds remain absent while supplied settings receive sound defaults",function()
+  withChatSettingsFiles(function(h)
+    eq(Adapter.loadChatSettings(),nil)
+    h.files[h.path]="return {tab_order={'STAFF','ALL'}}"
+    local legacy=assert(Adapter.loadChatSettings()); eq(legacy.sounds,nil)
+    local defaults=require("chat_sounds").defaults(); defaults.volume=37; defaults.tabs.STAFF.enabled=false
+    local merged=require("settings").merge({sounds=defaults},legacy)
+    eq(merged.sounds.volume,37); eq(merged.sounds.tabs.STAFF.enabled,false)
+    assert(Adapter.new():saveChatSettings(legacy)); eq(assert(Adapter.loadChatSettings()).sounds,nil)
+    eq(h.files[h.path]:find("sounds",1,true),nil)
+    local snapshot=assert(Adapter.chatSettingsSnapshot({tab_order={"ALL"},sounds={tabs={ROOM={enabled=true}}}}))
+    eq(snapshot.sounds.volume,60); eq(snapshot.sounds.tabs.STAFF.enabled,true)
+    eq(snapshot.sounds.tabs.STAFF.sound,"staff"); eq(snapshot.sounds.tabs.ROOM.enabled,true)
+    assert(Adapter.new():saveChatSettings({tab_order={"ALL"},sounds={}}))
+    local defaults=assert(Adapter.loadChatSettings()).sounds
+    eq(defaults.volume,60); eq(defaults.tabs.STAFF.enabled,true); eq(defaults.tabs.ROOM.enabled,false)
+  end)
+end)
+
+test("invalid sounds fail validation before writes and invalid persisted sounds do not load",function()
+  withChatSettingsFiles(function(h)
+    local adapter=Adapter.new(); assert(adapter:saveChatSettings({tab_order={"ALL"},sounds={}}))
+    local original=h.files[h.path]; local writes=h.writes
+    local invalid={false,"staff",{volume=0},{volume=101},{volume=1.5},{volume="60"},{volume=0/0},{volume=math.huge},
+      {tabs=false},{tabs={STAFF={enabled="yes"}}},{tabs={STAFF={sound="../staff.wav"}}},
+      {tabs={STAFF={sound="https://example.test/tone.wav"}}},{tabs={STAFF={sound='staff"}; error("injection") --'}}}}
+    for _,sounds in ipairs(invalid) do
+      local config={tab_order={"ALL"},sounds=sounds}
+      local snapshot,err=Adapter.chatSettingsSnapshot(config); eq(snapshot,nil); eq(type(err),"string")
+      local saved,saveErr=adapter:saveChatSettings(config); eq(saved,nil); eq(type(saveErr),"string")
+      eq(h.writes,writes); eq(h.files[h.path],original)
+    end
+    for _,source in ipairs({"false","{volume=0}","{tabs={STAFF={sound='../bad.wav'}}}","{tabs={STAFF={enabled='yes'}}}"}) do
+      h.files[h.path]="return {tab_order={'ALL'},sounds="..source.."}"
+      eq(Adapter.loadChatSettings(),nil)
+    end
+  end)
+end)
+
+test("sound persistence failures preserve the previous complete chat settings",function()
+  for _,stage in ipairs({"open","write","close","backup","install"}) do
+    withChatSettingsFiles(function(h)
+      local adapter=Adapter.new(); assert(adapter:saveChatSettings({visible=false,tab_order={"STAFF","ALL"},sounds={volume=29,tabs={STAFF={enabled=false,sound="esp"}}}}))
+      local original=h.files[h.path]; h.fail=stage
+      local saved,err=adapter:saveChatSettings({visible=true,tab_order={"ALL"},sounds={volume=80}})
+      eq(saved,nil); assert(err); eq(h.files[h.path],original)
+      local loaded=assert(Adapter.loadChatSettings()); eq(loaded.visible,false); eq(loaded.sounds.volume,29)
+      eq(loaded.sounds.tabs.STAFF.enabled,false); eq(loaded.sounds.tabs.STAFF.sound,"esp")
+    end)
+  end
+end)
+
+local function withChatSoundPlayback(run)
+  local names={"lfs","getMudletHomeDir","playSoundFile","setVolume","muteSounds","unmuteSounds","downloadFile"}; local saved={}
+  for _,name in ipairs(names) do saved[name]=rawget(_G,name) end
+  local oldOpen,oldRemove=io.open,os.remove; local Sounds=require("chat_sounds"); local oldWav,oldGet=Sounds.wav,Sounds.get
+  local h={base="/profile/DGHUDData",directory="/profile/DGHUDData/chat-sounds-v1",path="/profile/DGHUDData/chat-sounds-v1/chat-staff-v1.wav",files={},modes={},plays={},opens={},mkdirs={},inspections={},writes=0,closes=0,generations=0}
+  function h:failure(stage)
+    if self.fail~=stage then return false end
+    if self.throw then error("failure at "..stage) end
+    return true
+  end
+  local ok,err=xpcall(function()
+    getMudletHomeDir=function() return "/profile/" end
+    for _,name in ipairs({"setVolume","muteSounds","unmuteSounds","downloadFile"}) do _G[name]=function() error("unexpected global media change or download") end end
+    Sounds.wav=function(id)
+      h.generations=h.generations+1
+      if h:failure("generate") then return nil,"failure at generate" end
+      return oldWav(id)
+    end
+    lfs={
+      symlinkattributes=function(path,field)
+        eq(field,"mode"); h.inspections[#h.inspections+1]=path
+        assert(path==h.base or path==h.directory or path:match("^/profile/DGHUDData/chat%-sounds%-v1/chat%-[a-z]+%-v1%.wav$"))
+        if h:failure("inspect") then return nil,"failure at inspect",13 end
+        local mode=h.modes[path] or (h.files[path]~=nil and "file" or nil)
+        if mode then return mode end
+        return nil,"missing file",2
+      end,
+      mkdir=function(path)
+        h.mkdirs[#h.mkdirs+1]=path; assert(path==h.base or path==h.directory)
+        local stage=path==h.base and "mkdirParent" or "mkdirCache"
+        if h:failure(stage) then return nil,"failure at "..stage end
+        h.modes[path]="directory"; return true
+      end,
+    }
+    io.open=function(path,mode)
+      h.opens[#h.opens+1]={path=path,mode=mode}
+      assert(path:match("^/profile/DGHUDData/chat%-sounds%-v1/chat%-[a-z]+%-v1%.wav$")); assert(mode=="rb" or mode=="wb")
+      if h:failure("open") then return nil,"failure at open" end
+      if mode=="wb" then eq(h.files[path],nil); h.files[path]="" end
+      return {
+        read=function(_,limit) eq(mode,"rb"); eq(limit,65536); if h:failure("read") then return nil,"failure at read" end; return h.files[path]:sub(1,limit) end,
+        write=function(_,value) eq(mode,"wb"); h.writes=h.writes+1; if h:failure("write") then return nil,"failure at write" end; h.files[path]=value; return true end,
+        close=function() h.closes=h.closes+1; if h:failure("close") then return nil,"failure at close" end; return true end,
+      }
+    end
+    os.remove=function(path) eq(path,h.path); h.files[path]=nil; return true end
+    playSoundFile=function(options) h.plays[#h.plays+1]=options; return true end
+    h.adapter=Adapter.new(); h.wav=oldWav; run(h,Sounds)
+  end,debug.traceback)
+  io.open,os.remove=oldOpen,oldRemove; Sounds.wav,Sounds.get=oldWav,oldGet
+  for _,name in ipairs(names) do rawset(_G,name,saved[name]) end
+  if not ok then error(err,0) end
+end
+
+test("chat playback lazily prepares fixed persistent sounds and caches only completed files",function()
+  withChatSoundPlayback(function(h)
+    eq(h.generations,0); eq(#h.opens,0); eq(#h.mkdirs,0)
+    assert(h.adapter:playChatSound("staff",60))
+    eq(h.files[h.path],h.wav("staff")); eq(#h.mkdirs,2); eq(h.writes,1); eq(h.closes,1)
+    local options=h.plays[1]; eq(options.name,h.path); eq(options.volume,60); eq(options.loops,1)
+    eq(options.key,"DGHUD.ChatAlert"); eq(options.tag,"DGHUD.ChatAlert")
+    local count=0; for _ in pairs(options) do count=count+1 end; eq(count,5)
+    assert(h.adapter:playChatSound("staff",100)); eq(h.generations,1); eq(h.writes,1); eq(#h.opens,1); eq(h.plays[2].volume,100)
+  end)
+end)
+
+test("each built-in sound resolves through the catalog to its fixed cache filename",function()
+  withChatSoundPlayback(function(h,Sounds)
+    for _,record in ipairs(Sounds.catalog) do
+      assert(h.adapter:playChatSound(record.id,1))
+      eq(h.plays[#h.plays].name,h.directory.."/"..record.file)
+      eq(h.files[h.directory.."/"..record.file],h.wav(record.id))
+    end
+    eq(#h.plays,9); eq(#h.mkdirs,2)
+  end)
+end)
+
+test("chat sound preparation accepts missing-file errors without a numeric filesystem code",function()
+  withChatSoundPlayback(function(h)
+    local inspect=lfs.symlinkattributes
+    lfs.symlinkattributes=function(path,field)
+      local mode,err,code=inspect(path,field)
+      if code==2 then return nil,"No such file or directory" end
+      return mode,err,code
+    end
+    assert(h.adapter:playChatSound("staff",60)); eq(h.files[h.path],h.wav("staff"))
+  end)
+end)
+
+test("unbounded or malformed generated audio is rejected before creating cache files",function()
+  for _,value in ipairs({false,"not a WAV","RIFF"..string.rep("x",4).."WAVE"..string.rep("x",65536)}) do
+    withChatSoundPlayback(function(h,Sounds)
+      Sounds.wav=function() return value end
+      local played,err=h.adapter:playChatSound("staff",60); eq(played,nil); assert(err)
+      eq(#h.inspections,0); eq(#h.mkdirs,0); eq(#h.opens,0); eq(#h.plays,0)
+    end)
+  end
+end)
+
+test("a matching existing WAV is reused without writing and conflicting files are retained",function()
+  withChatSoundPlayback(function(h)
+    h.files[h.path]=h.wav("staff"); assert(h.adapter:playChatSound("staff",60)); eq(h.writes,0); eq(h.opens[1].mode,"rb")
+  end)
+  for _,content in ipairs({"unrelated data",string.rep("x",65536)}) do
+    withChatSoundPlayback(function(h)
+      h.files[h.path]=content
+      local played,err=h.adapter:playChatSound("staff",60); eq(played,nil); assert(err:find("conflicts",1,true))
+      eq(h.files[h.path],content); eq(h.writes,0); eq(#h.plays,0); eq(h.adapter.chatSoundsReady,nil)
+    end)
+  end
+end)
+
+test("chat playback rejects arbitrary paths catalog paths and invalid volume before file access",function()
+  withChatSoundPlayback(function(h,Sounds)
+    for _,id in ipairs({false,{},"unknown","../staff.wav","/tmp/staff.wav","https://example.test/tone.wav","staff\0"}) do
+      local played,err=h.adapter:playChatSound(id,60); eq(played,nil); eq(type(err),"string")
+    end
+    for _,volume in ipairs({false,"60",0,101,-1,1.5,0/0,math.huge,-math.huge}) do
+      local played,err=h.adapter:playChatSound("staff",volume); eq(played,nil); eq(type(err),"string")
+    end
+    eq(h.adapter:playChatSound("staff"),nil)
+    for _,file in ipairs({"../chat-staff-v1.wav","sounds/chat-staff-v1.wav","https://example.test/staff.wav"}) do
+      Sounds.get=function() return {id="staff",file=file} end
+      eq(h.adapter:playChatSound("staff",60),nil)
+    end
+    eq(h.generations,0); eq(#h.inspections,0); eq(#h.opens,0); eq(#h.plays,0)
+  end)
+end)
+
+test("cache preparation failures and exceptions remain retryable and never play partial output",function()
+  for _,stage in ipairs({"generate","inspect","mkdirParent","mkdirCache","open","write","close"}) do
+    for _,throws in ipairs({false,true}) do
+      withChatSoundPlayback(function(h)
+        h.fail=stage; h.throw=throws
+        local played,err=h.adapter:playChatSound("staff",60); eq(played,nil); eq(type(err),"string")
+        eq(#h.plays,0); eq(h.adapter.chatSoundsReady,nil); eq(h.files[h.path],nil)
+        h.fail=nil; assert(h.adapter:playChatSound("staff",60)); eq(#h.plays,1); eq(h.files[h.path],h.wav("staff"))
+      end)
+    end
+  end
+end)
+
+test("existing cache read and close failures preserve the file and permit a later retry",function()
+  for _,stage in ipairs({"read","close"}) do
+    for _,throws in ipairs({false,true}) do
+      withChatSoundPlayback(function(h)
+        h.files[h.path]=h.wav("staff"); local original=h.files[h.path]; h.fail=stage; h.throw=throws
+        local played,err=h.adapter:playChatSound("staff",60); eq(played,nil); assert(err)
+        eq(h.files[h.path],original); eq(h.writes,0); eq(#h.plays,0); eq(h.adapter.chatSoundsReady,nil); eq(h.closes,1)
+        h.fail=nil; assert(h.adapter:playChatSound("staff",60)); eq(h.writes,0)
+      end)
+    end
+  end
+end)
+
+test("chat sound cache refuses links directories and special files at owned paths",function()
+  for _,target in ipairs({"base","directory","path"}) do
+    for _,mode in ipairs({"link","socket",target=="path" and "directory" or "file"}) do
+      withChatSoundPlayback(function(h)
+        h.modes[h[target]]=mode
+        local played,err=h.adapter:playChatSound("staff",60); eq(played,nil); assert(err)
+        eq(#h.opens,0); eq(#h.plays,0); eq(h.modes[h[target]],mode)
+      end)
+    end
+  end
+end)
+
+test("missing media filesystem or profile APIs fail safely without playback",function()
+  for _,name in ipairs({"playSoundFile","getMudletHomeDir","lfs"}) do
+    withChatSoundPlayback(function(h)
+      _G[name]=nil; local played,err=h.adapter:playChatSound("staff",60)
+      eq(played,nil); assert(err); eq(#h.opens,0); eq(#h.plays,0)
+    end)
+  end
+  withChatSoundPlayback(function(h)
+    getMudletHomeDir=function() error("profile unavailable") end
+    eq(h.adapter:playChatSound("staff",60),nil); eq(#h.opens,0)
+  end)
+end)
+
+test("playSoundFile nil without error succeeds and false nil-error or exceptions fail safely",function()
+  local outcomes={
+    {fn=function() end,success=true},
+    {fn=function() return true end,success=true},
+    {fn=function() return false,"muted" end},
+    {fn=function() return nil,"media unavailable" end},
+    {fn=function() error("playback failure") end},
+  }
+  for _,outcome in ipairs(outcomes) do
+    withChatSoundPlayback(function(h)
+      playSoundFile=outcome.fn
+      local played,err=h.adapter:playChatSound("staff",60)
+      if outcome.success then eq(played,true); eq(err,nil) else eq(played,nil); eq(type(err),"string") end
+      eq(h.files[h.path],h.wav("staff"))
+    end)
   end
 end)
 

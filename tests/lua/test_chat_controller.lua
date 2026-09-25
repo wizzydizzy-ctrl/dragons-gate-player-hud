@@ -37,9 +37,89 @@ local function fake(entries)
   return f
 end
 
-local function makeController(f,onChange)
-  return Controller.new(f,Parser,History.new(1000,3),f.storage,onChange or function() end,function() return f.character end)
+local function makeController(f,onChange,onAccepted,allSources)
+  return Controller.new(f,Parser,History.new(1000,3),f.storage,onChange or function() end,function() return f.character end,allSources,onAccepted)
 end
+
+test("accepted callback receives each live entry once after history and storage append",function()
+  local f=fake(); local accepted={}; local observations={}; local controller
+  controller=makeController(f,nil,function(entry)
+    accepted[#accepted+1]=entry
+    observations[#observations+1]={latest=controller.history.items[#controller.history.items],stored=f.storageAppends}
+  end,{ESP=false})
+  assert(controller:start()); f:line('Tekk (ESP): "hello"')
+  eq(#accepted,1); eq(accepted[1].category,"ESP"); eq(#controller:entries(),0)
+  eq(observations[1].latest,accepted[1]); eq(observations[1].stored,1)
+  f:line('Tekk (ESP): "hello"'); eq(#accepted,1); eq(f.storageAppends,1)
+  assert(controller:capture("QUEST","live custom")); assert(controller:capture("QUEST","live custom"))
+  eq(#accepted,2); eq(accepted[2].source,"custom"); eq(f.storageAppends,2)
+  f.epochValue=104; assert(controller:capture("QUEST","live custom")); eq(#accepted,3)
+  eq(controller:accept(nil),false); eq(#accepted,3)
+end)
+
+test("hydration filter changes redraws and character synchronization stay silent",function()
+  local f=fake({{category="STAFF",message="saved report"}}); local accepted=0
+  local controller=makeController(f,nil,function() accepted=accepted+1 end)
+  assert(controller:start()); assert(controller:start()); eq(#controller:entries(),1)
+  assert(controller:setFilter("STAFF")); assert(controller:setAllSources({STAFF=false})); controller:notify()
+  f.character="Gia"; assert(controller:syncCharacter()); eq(accepted,0); eq(f.storageAppends,0)
+  assert(controller:clearVisibleHistory()); eq(accepted,0)
+end)
+
+test("wrapped STAFF reports alert only once at their final boundary or timer flush",function()
+  for _,flush in ipairs({"boundary","timer"}) do
+    local f=fake(); local accepted={}
+    local controller=makeController(f,nil,function(entry) accepted[#accepted+1]=entry end)
+    assert(controller:start())
+    local first="[GM] Vaeltherion [forhekset] reports a bug in room 10532: First line"
+    f:line(first); f:line("and the final line."); eq(#accepted,0); eq(f.storageAppends,0)
+    if flush=="boundary" then f:line(">") else f:fireTimer() end
+    eq(#accepted,1); eq(accepted[1].category,"STAFF")
+    eq(accepted[1].message,"reports a bug in room 10532: First line and the final line.")
+    eq(f.storageAppends,1); eq(next(f.timers),nil)
+    f:line(first); f:line("and the final line."); f:line(">")
+    eq(#accepted,1); eq(f.storageAppends,1)
+  end
+end)
+
+test("handoff and shutdown flush STAFF history and storage without alerts",function()
+  for _,action in ipairs({"handoff","shutdown"}) do
+    local f=fake(); local accepted=0
+    local controller=makeController(f,nil,function() accepted=accepted+1 end)
+    assert(controller:start()); f:line("[GM] Wizzy resolved report #21: First line"); f:line("final line.")
+    local _,lateTimer=next(f.timers)
+    local result=controller[action](controller)
+    eq(accepted,0); eq(f.storageAppends,1); eq(#controller.history.items,1); eq(next(f.timers),nil)
+    eq(controller.history.items[1].message,"resolved report #21: First line final line.")
+    if action=="handoff" then eq(#result.entries,1); eq(result.entries[1].category,"STAFF") end
+    lateTimer(); controller:shutdown(); eq(accepted,0); eq(f.storageAppends,1)
+  end
+end)
+
+test("restoring handoff is silent and keeps duplicate suppression for subsequent live entries",function()
+  local first=fake(); local original=makeController(first); assert(original:start()); assert(original:capture("STAFF","saved staff"))
+  local second=fake(); local accepted=0; local restored=makeController(second,nil,function() accepted=accepted+1 end)
+  assert(restored:restoreHandoff(original:handoff())); assert(restored:start(true))
+  eq(accepted,0); eq(second.loadRecentCalls,0); eq(second.storageAppends,0)
+  assert(restored:capture("STAFF","saved staff")); eq(accepted,0); eq(second.storageAppends,0)
+  second.epochValue=104; assert(restored:capture("STAFF","new staff")); eq(accepted,1); eq(second.storageAppends,1)
+end)
+
+test("accepted callback failures cannot interrupt capture persistence or later entries",function()
+  local f=fake(); local attempts=0; local notifications=0
+  local controller=makeController(f,function() notifications=notifications+1 end,function() attempts=attempts+1; error("sound API failed") end)
+  assert(controller:start()); f:line('Tekk (ESP): "hello"'); assert(controller:capture("STAFF","second"))
+  eq(attempts,2); eq(f.storageAppends,2); eq(#controller:entries(),2); eq(notifications,3); eq(f.errors,0)
+end)
+
+test("storage and redraw failures still permit one callback per accepted history entry",function()
+  local f=fake(); f.storageFailure=true; local accepted=0
+  local controller=makeController(f,function() error("view unavailable") end,function() accepted=accepted+1 end)
+  assert(controller:start()); assert(controller:capture("STAFF","first")); assert(controller:capture("STAFF","second"))
+  eq(accepted,2); eq(f.storageAppends,2); eq(#controller:entries(),2); eq(f.errors,1)
+  controller.storage.append=function() error("storage exception") end
+  assert(controller:capture("STAFF","third")); eq(accepted,3); eq(#controller:entries(),3)
+end)
 
 test("one owned line trigger captures and persists recognized chat",function()
   local f=fake(); local controller=makeController(f); controller:start(); f:line('Tekk (ESP): "hello"')

@@ -228,9 +228,9 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   return geyser
 end
 
-local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible)
+local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds)
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
-  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible}})
+  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible,sounds=chatSounds}})
   Geyser=original
   return view
 end
@@ -737,6 +737,219 @@ test("chat settings separates visible clearing from confirmed saved-history dele
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_visible"); eq(view.chat_settings_clear_pending,true)
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_saved"); eq(view.chat_settings_clear_pending,false); eq(view.chat_settings_status.message:find("3 saved",1,true)~=nil,true)
   view.chat_settings_close.click(); eq(view.chat_settings_visible,false)
+end)
+test("chat sound defaults expose all nine labeled sounds through Options",function()
+  local Sounds=require("chat_sounds"); local view=chatView(); local used={}
+  view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); view.option_action_buttons.chat_settings.click()
+  eq(view.chat_settings_visible,true); eq(#view.chat_sound_order,9); eq(view.chat_sounds.volume,60)
+  for index,key in ipairs({"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}) do
+    eq(view.chat_sound_order[index],key)
+    local setting=view.chat_sounds.tabs[key]; local row=view.chat_sound_rows[key]
+    eq(setting.enabled,key=="STAFF"); eq(setting.sound,key:lower()); eq(used[setting.sound],nil); used[setting.sound]=true
+    assert(row.enabled.message:find(setting.enabled and "ON" or "OFF",1,true))
+    assert(row.choice.message:find(Sounds.get(setting.sound).label,1,true)); eq(row.preview.visible,true)
+  end
+  assert(view.chat_sound_explanation.message:find("Staff ON; other tabs OFF. Choose a sound, Preview, changes save automatically.",1,true))
+  eq(view.chat_sound_explanation.message:find("fallback",1,true),nil); eq(view.chat_sound_explanation.message:find("bursts",1,true),nil)
+  assert(view.chat_sound_explanation.tooltip:find("Preview works even when OFF. Mudlet/media mute still applies.",1,true))
+  assert(view.chat_sound_caption.tooltip:find("ALL is a fallback",1,true))
+  assert(view.chat_sound_caption.tooltip:find("one ding per second per tab",1,true))
+end)
+test("chat sound toggles send each tab and accept saved false only after persistence",function()
+  local view=chatView(); local calls={}
+  view:setOptionsActionCallback(function(action,tab,value)
+    eq(action,"chat_sound_enabled"); eq(type(value),"boolean"); eq(view:chatSoundSetting(tab).enabled,not value)
+    calls[#calls+1]={action,tab,value}; return value
+  end)
+  for _,key in ipairs(view.chat_sound_order) do
+    local row=view.chat_sound_rows[key]; local original=view:chatSoundSetting(key).enabled
+    eq(row.enabled.click(),not original); eq(view:chatSoundSetting(key).enabled,not original)
+    eq(calls[#calls][2],key); eq(calls[#calls][3],not original)
+    eq(row.enabled.click(),original); eq(view:chatSoundSetting(key).enabled,original)
+    eq(view.settings.chat.sounds.tabs[key].enabled,original)
+  end
+  eq(#calls,18)
+end)
+test("chat sound selectors cycle the catalog in both directions with exact payloads",function()
+  local Sounds=require("chat_sounds"); local view=chatView(); local calls={}
+  view:setOptionsActionCallback(function(action,tab,value)
+    eq(action,"chat_sound_choice"); assert(Sounds.get(value)); calls[#calls+1]={tab,value}; return value
+  end)
+  for index,key in ipairs(Sounds.tabOrder) do
+    local row=view.chat_sound_rows[key]; local nextId=Sounds.catalog[index%#Sounds.catalog+1].id
+    eq(row.next.click(),nextId); eq(calls[#calls][1],key); eq(calls[#calls][2],nextId)
+    eq(view:chatSoundSetting(key).sound,nextId); assert(row.choice.message:find(Sounds.get(nextId).label,1,true))
+    eq(row.previous.click(),key:lower()); eq(view:chatSoundSetting(key).sound,key:lower())
+  end
+  eq(view.chat_sound_rows.ALL.previous.click(),"combat"); eq(view.chat_sound_rows.ALL.next.click(),"all")
+  eq(#calls,20)
+end)
+test("chat sound previews work while OFF and never save or toggle settings",function()
+  local view=chatView(); local calls={}; local saved=view.settings.chat.sounds
+  view:setOptionsActionCallback(function(action,tab,value)
+    calls[#calls+1]={action,tab,value}; return true
+  end)
+  for _,key in ipairs(view.chat_sound_order) do
+    local before=view:chatSoundSetting(key).enabled
+    eq(view.chat_sound_rows[key].preview.click(),true)
+    eq(calls[#calls][1],"chat_sound_preview"); eq(calls[#calls][2],key); eq(calls[#calls][3],key:lower())
+    eq(view:chatSoundSetting(key).enabled,before); eq(view.settings.chat.sounds,saved)
+  end
+  eq(#calls,9)
+  view:setOptionsActionCallback(function() return nil,"Media is muted" end)
+  local ok,err=view.chat_sound_rows.ROOM.preview.click(); eq(ok,nil); eq(err,"Media is muted")
+  eq(view:chatSoundSetting("ROOM").enabled,false); assert(view.chat_sound_status.message:find("Media is muted",1,true))
+end)
+test("chat sound save failures preserve toggles choices volume and saved settings",function()
+  local Sounds=require("chat_sounds"); local config=Sounds.defaults(); local view=chatView(nil,nil,nil,nil,config)
+  view:applyLayout(require("layout").compute(320,260)); view:showChatSettings()
+  view:setOptionsActionCallback(function() return nil,"disk <full>" end)
+  for _,button in ipairs({view.chat_sound_rows.STAFF.enabled,view.chat_sound_rows.ROOM.enabled,view.chat_sound_rows.STAFF.next,view.chat_sound_volume_up}) do
+    local ok,err=button.click(); eq(ok,nil); eq(err,"disk <full>")
+    eq(view.chat_sounds.tabs.STAFF.enabled,true); eq(view.chat_sounds.tabs.ROOM.enabled,false)
+    eq(view.chat_sounds.tabs.STAFF.sound,"staff"); eq(view.chat_sounds.volume,60); eq(view.settings.chat.sounds,config)
+    assert(view.chat_sound_status.message:find("disk &lt;full&gt;",1,true))
+  end
+  assert(view.chat_sound_rows.STAFF.enabled.message:find("ON",1,true)); assert(view.chat_sound_rows.ROOM.enabled.message:find("OFF",1,true))
+  assert(view.chat_sound_rows.STAFF.choice.message:find("Staff Three-Tone",1,true)); assert(view.chat_sound_volume.message:find("60%",1,true))
+  view:setOptionsActionCallback(function() error("save failed") end)
+  local ok,err=view.chat_sound_rows.STAFF.enabled.click(); eq(ok,nil); assert(err:find("save failed",1,true)); eq(view.chat_sounds.tabs.STAFF.enabled,true)
+  view:setOptionsActionCallback(nil); ok,err=view.chat_sound_rows.ROOM.next.click(); eq(ok,nil); assert(err:find("unavailable",1,true)); eq(view.chat_sounds.tabs.ROOM.sound,"room")
+end)
+test("chat sound volume uses shared ten point steps and clamps at one and one hundred",function()
+  local view=chatView(); local calls={}
+  view:setOptionsActionCallback(function(action,tab,value)
+    eq(action,"chat_sound_volume"); eq(tab,nil); calls[#calls+1]=value; return value
+  end)
+  eq(view.chat_sound_volume_down.click(),50); eq(view.chat_sound_volume_up.click(),60)
+  for _=1,6 do view.chat_sound_volume_up.click() end
+  eq(view.chat_sounds.volume,100); eq(calls[#calls],100)
+  for _=1,12 do view.chat_sound_volume_down.click() end
+  eq(view.chat_sounds.volume,1); eq(calls[#calls],1); eq(view.settings.chat.sounds.volume,1)
+  view:setOptionsActionCallback(function() return 35 end)
+  eq(view.chat_sound_volume_up.click(),35); eq(view.chat_sounds.volume,35)
+end)
+test("chat sound config initializes updates and captures settings without aliasing callers",function()
+  local config={volume=40,tabs={STAFF={enabled=false,sound="room"}}}; local view=chatView(nil,nil,nil,nil,config)
+  eq(view.chat_sounds.volume,40); eq(view.chat_sounds.tabs.STAFF.enabled,false); eq(view.chat_sounds.tabs.STAFF.sound,"room")
+  config.volume=70; config.tabs.STAFF.sound="esp"; eq(view.chat_sounds.volume,40); eq(view.chat_sounds.tabs.STAFF.sound,"room")
+  view:showChatSettings(); eq(view.chat_sounds.volume,70); eq(view.chat_sounds.tabs.STAFF.sound,"esp")
+  view:applyLayout(require("layout").compute(900,700))
+  local update={volume=25,tabs={ROOM={enabled=true,sound="contact"}}}; assert(view:setChatSounds(update))
+  update.tabs.ROOM.sound="combat"; eq(view.chat_sounds.tabs.ROOM.sound,"contact")
+  assert(view.chat_sound_rows.ROOM.choice.message:find("Mind Echo",1,true)); assert(view.chat_sound_volume.message:find("25%",1,true))
+  local before=view.chat_sounds
+  local ok=view:setChatSounds({volume=101}); eq(ok,nil); eq(view.chat_sounds,before)
+  ok=view:setChatSounds({tabs={ROOM={sound="https://example.invalid/tone.wav"}}}); eq(ok,nil); eq(view.chat_sounds,before)
+end)
+test("chat sound controls reject unknown sounds tabs and malformed callback results",function()
+  local view=chatView(); local calls=0
+  view:setOptionsActionCallback(function() calls=calls+1; return true end)
+  eq(view:changeChatSound("chat_sound_choice","ROOM","../tone.wav"),nil)
+  eq(view:changeChatSound("chat_sound_enabled","UNKNOWN",true),nil)
+  eq(view:changeChatSound("chat_sound_enabled","ROOM","false"),nil)
+  eq(view:changeChatSound("chat_sound_volume",nil,0/0),nil); eq(calls,0)
+  for _,case in ipairs({{"chat_sound_enabled","STAFF",false,"false"},{"chat_sound_choice","ROOM","esp",true},{"chat_sound_volume",nil,70,101}}) do
+    view:setOptionsActionCallback(function() return case[4] end)
+    eq(view:changeChatSound(case[1],case[2],case[3]),nil)
+    eq(view.chat_sounds.tabs.STAFF.enabled,true); eq(view.chat_sounds.tabs.ROOM.sound,"room"); eq(view.chat_sounds.volume,60)
+  end
+end)
+test("chat sound custom rows canonicalize actual tabs and default OFF with Soft Bell",function()
+  local view=chatView(); view.settings.chat.tab_order={"QUEST LOG","OWN","WHISPER","<BAD>"}
+  view:renderChat({},{"QUEST LOG","EVENTS-2","OWN","WHISPER","<BAD>",string.rep("A",33)},"ALL")
+  view:showChatSettings(); eq(#view.chat_sound_order,11)
+  eq(view.chat_sound_rows.OWN,nil); eq(view.chat_sound_rows.WHISPER,nil); eq(view.chat_sound_rows["<BAD>"],nil)
+  for _,key in ipairs({"QUEST LOG","EVENTS-2"}) do
+    local row=view.chat_sound_rows[key]; assert(row); eq(view:chatSoundSetting(key).enabled,false); eq(view:chatSoundSetting(key).sound,"all")
+    assert(row.choice.message:find("Soft Bell",1,true))
+  end
+  local calls={}; view:setOptionsActionCallback(function(action,tab,value) calls[#calls+1]={action,tab,value}; return value end)
+  eq(view.chat_sound_rows["QUEST LOG"].enabled.click(),true); eq(calls[1][1],"chat_sound_enabled"); eq(calls[1][2],"QUEST LOG"); eq(calls[1][3],true)
+  eq(view.chat_sound_rows["QUEST LOG"].next.click(),"room"); eq(view.settings.chat.sounds.tabs["QUEST LOG"].sound,"room")
+  view:hideChatSettings(); view:showChatSettings(); eq(view:chatSoundSetting("QUEST LOG").enabled,true)
+  local old=view.chat_sound_rows["EVENTS-2"].preview; view:renderChat({},{"QUEST LOG"},"ALL"); eq(old.deleted,true); eq(view.chat_sound_rows["EVENTS-2"],nil)
+  local categories={}; for i=1,80 do categories[i]="CUSTOM "..i end
+  view:renderChat({},categories,"ALL"); eq(#view.chat_sound_order,64)
+end)
+test("all chat sound controls scroll without overlap and Close stays fixed at small and large sizes",function()
+  local view=chatView(); view:renderChat({},{string.rep("A",32)},"ALL"); view:showChatSettings()
+  for _,size in ipairs({{280,240},{320,260},{400,300},{420,500},{760,700},{1920,1080}}) do
+    for _,bodyFont in ipairs({14,24}) do
+      local layout=require("layout").compute(size[1],size[2]); layout.body_font=bodyFont; view:applyLayout(layout)
+      local content,panel,close=view.chat_settings_content,view.chat_settings_panel,view.chat_settings_close
+      eq(content.kind,"scrollbox"); eq(close.parent,panel); eq(content.y+content.height<=close.y,true); eq(close.y+close.height<=panel.height,true)
+      eq(panel.x>=0 and panel.x+panel.width<=size[1],true); eq(panel.y>=0 and panel.y+panel.height<=size[2],true)
+      eq(view.chat_sound_caption.y>=view.chat_settings_visibility.y+view.chat_settings_visibility.height,true)
+      eq(view.chat_settings_text.y>view.chat_sound_rows.COMBAT.preview.y,true)
+      local children={}
+      for _,widget in ipairs(view:chatSettingsWidgets()) do
+        if widget.parent==content then
+          children[#children+1]=widget; eq(widget.visible,true); eq(widget.width>0 and widget.height>0,true)
+          eq(widget.x>=0 and widget.x+widget.width<=content.width-18,true)
+          eq(widget.y>=0 and widget.y+widget.height<=content.content_height,true)
+          if widget.click then
+            eq(widget.height<=content.height,true)
+            local scroll=math.min(widget.y,content.content_height-content.height)
+            eq(widget.y-scroll>=0 and widget.y+widget.height-scroll<=content.height,true)
+          end
+        end
+      end
+      for i=1,#children do for j=i+1,#children do
+        local a,b=children[i],children[j]
+        local overlap=a.x<b.x+b.width and b.x<a.x+a.width and a.y<b.y+b.height and b.y<a.y+a.height
+        if overlap then error("overlapping chat settings controls: "..a.name.." / "..b.name) end
+      end end
+      for _,key in ipairs(view.chat_sound_order) do
+        local row=view.chat_sound_rows[key]
+        for _,name in ipairs({"caption","enabled","previous","choice","next","preview"}) do eq(row[name].parent,content); eq(row[name].visible,true) end
+        eq(row.preview.y+row.preview.height<=view.chat_settings_clear_visible.y,true)
+      end
+      eq(content.content_height>content.height,true)
+    end
+  end
+end)
+test("all nine sound rows fit without scrolling on regular desktop screens",function()
+  local view=chatView(); view:showChatSettings()
+  for _,size in ipairs({{1024,768},{1200,800},{1366,768},{1920,1080}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local content=view.chat_settings_content
+    eq(view.chat_settings_panel.height<=740,true)
+    for _,key in ipairs(view.chat_sound_order) do
+      for _,name in ipairs({"caption","enabled","previous","choice","next","preview"}) do
+        local widget=view.chat_sound_rows[key][name]
+        eq(widget.y+widget.height<=content.height,true)
+      end
+    end
+    eq(view.chat_settings_close.y>=content.y+content.height,true)
+  end
+end)
+test("chat sound show hide resize redraw and reuse never trigger playback",function()
+  local Sounds=require("chat_sounds"); local config=Sounds.defaults(); config.tabs.ROOM.enabled=true
+  local view=chatView(nil,nil,nil,nil,config); local calls=0; local oldPlay=rawget(_G,"playSoundFile")
+  _G.playSoundFile=function() error("view must not play audio directly") end
+  local ok,err=pcall(function()
+    local function callback() calls=calls+1; return true end
+    view:setOptionsActionCallback(callback)
+    for _,size in ipairs({{320,260},{1920,1080}}) do
+      view:applyLayout(require("layout").compute(size[1],size[2])); view:showChatSettings(); view:renderChatSettings(); view:hideChatSettings()
+      for _,widget in ipairs(view:chatSettingsWidgets()) do eq(widget.visible,false) end
+      view:renderChat({{category="STAFF",line="History replay"}},{"STAFF"},"ALL"); view:setChatSounds(config)
+    end
+    eq(calls,0); view:showChatSettings(); eq(view.chat_sound_rows.ROOM.preview.click(),true); eq(calls,1)
+    assert(view:prepareForReuse(view.settings)); eq(view.chat_settings_visible,false); eq(calls,1)
+    view:setOptionsActionCallback(callback); view:showChatSettings(); view:renderChat({{category="ROOM",line="Same saved entry"}},{"ROOM"},"ROOM")
+    eq(calls,1); eq(view.chat_sounds.tabs.ROOM.enabled,true)
+    local cold=chatView(nil,nil,nil,nil,config); cold:setOptionsActionCallback(callback); cold:showChatSettings(); cold:hideChatSettings(); eq(calls,1)
+  end)
+  _G.playSoundFile=oldPlay; assert(ok,err)
+end)
+test("reusable view validation requires intact sound controls",function()
+  local view=chatView(); eq(View.validateReusable(view,view.settings),true)
+  view.chat_sound_rows.STAFF.preview=nil
+  local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("sound control",1,true))
+  view=chatView(); view.chat_sound_caption=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("chat_sound_caption",1,true))
 end)
 test("keybinding settings are editable responsive and save the full keypad",function()
   local view=chatView(); local saved; view:setOptionsActionCallback(function(action) if action=="keybindings_settings" then return {enabled=false,commands={["8"]="north",Plus="up"}} end end); view:setKeybindingSettingsCallback(function(values) saved=values; return true,nil,values,{active=0,conflicts={}} end); view:applyLayout(require("layout").compute(420,360)); view.color_toggle.click(); assert(view.option_action_buttons.keybindings_settings.click()); eq(view.keybindings_visible,true); eq(view.keybinding_fields["8"].input.text,"north"); view.keybindings_enable.click(); view.keybinding_fields["0"].input:print("look"); assert(view.keybindings_save.click()); eq(saved.enabled,true); eq(saved.commands["0"],"look"); eq(view.keybindings_visible,false)

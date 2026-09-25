@@ -524,6 +524,15 @@ function Adapter.loadColorSettings()
 end
 function Adapter:killTrigger(id) return killTrigger(id) end
 function Adapter:epoch() return os.time() end
+function Adapter:chatSoundTime()
+  -- Mudlet's existing clock returns fractional seconds without allocating a timer.
+  if type(getEpoch)=="function" then
+    local ok,value=pcall(getEpoch)
+    local seconds=ok and tonumber(value) or nil
+    if seconds and seconds==seconds and seconds~=math.huge and seconds~=-math.huge then return seconds end
+  end
+  return self:epoch()
+end
 function Adapter:localTime() return os.date("%I:%M:%S %p"):gsub("^0","") end
 function Adapter:startClockTimer(fn) return tempTimer(1,fn,true) end
 function Adapter:stopClockTimer(id) return killTimer(id) end
@@ -881,6 +890,11 @@ function Adapter.chatSettingsSnapshot(config)
       result.all_sources[category]=value~=false
     end
   end
+  if config.sounds~=nil then
+    local sounds,err=require("chat_sounds").validate(config.sounds)
+    if not sounds then return nil,err end
+    result.sounds=sounds
+  end
   return result
 end
 function Adapter:saveChatSettings(config)
@@ -890,7 +904,18 @@ function Adapter:saveChatSettings(config)
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
   local sourceValues={}; for _,category in ipairs(chatAllSourceOrder) do if snapshot.all_sources then sourceValues[#sourceValues+1]="["..string.format("%q",category).."]="..tostring(snapshot.all_sources[category]==true) end end
   local sources=#sourceValues>0 and ", all_sources={"..table.concat(sourceValues,",").."}" or ""
-  local wrote,writeErr=file:write("return { visible="..tostring(snapshot.visible)..", tab_order={"..table.concat(values,",").."}"..sources.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local sounds=""
+  if snapshot.sounds then
+    local tabs,order={},{}
+    for category in pairs(snapshot.sounds.tabs) do order[#order+1]=category end
+    table.sort(order)
+    for _,category in ipairs(order) do
+      local tab=snapshot.sounds.tabs[category]
+      tabs[#tabs+1]=string.format("[%q]={enabled=%s,sound=%q}",category,tostring(tab.enabled),tab.sound)
+    end
+    sounds=string.format(", sounds={volume=%d,tabs={%s}}",snapshot.sounds.volume,table.concat(tabs,","))
+  end
+  local wrote,writeErr=file:write("return { visible="..tostring(snapshot.visible)..", tab_order={"..table.concat(values,",").."}"..sources..sounds.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
@@ -898,6 +923,78 @@ end
 function Adapter.loadChatSettings()
   local loader=loadfile(chatSettingsPath()); if not loader then return nil end; local ok,value=pcall(loader); if not ok then return nil end
   local snapshot=Adapter.chatSettingsSnapshot(value); return snapshot
+end
+local function prepareChatSound(sounds,record,base)
+  if type(sounds.wav)~="function" then return nil,"chat sound generation is unavailable" end
+  local generated,wav,generationErr=pcall(sounds.wav,record.id)
+  if not generated then return nil,tostring(wav) end
+  if type(wav)~="string" or #wav<44 or #wav>=65536 or wav:sub(1,4)~="RIFF" or wav:sub(9,12)~="WAVE" then return nil,generationErr or "invalid generated chat sound" end
+  if type(lfs)~="table" or type(lfs.symlinkattributes)~="function" or type(lfs.mkdir)~="function" then return nil,"sound filesystem inspection is unavailable" end
+  if type(io)~="table" or type(io.open)~="function" then return nil,"sound file access is unavailable" end
+  local function mode(path)
+    local inspected,value,err,code=pcall(lfs.symlinkattributes,path,"mode")
+    if not inspected then return nil,tostring(value) end
+    if value==nil and err and code~=2 then
+      local lower=tostring(err):lower()
+      if not lower:find("no such file",1,true) and not lower:find("cannot find the file",1,true) then return nil,tostring(err) end
+    end
+    return value
+  end
+  local directory=base.."/chat-sounds-v1"
+  -- Inspect only the persistent parent, our cache directory, and this catalog file.
+  for _,path in ipairs({base,directory}) do
+    local current,err=mode(path); if err then return nil,err end
+    if current==nil then
+      local called,made,makeErr=pcall(lfs.mkdir,path)
+      if not called or not made then return nil,tostring(makeErr or (not called and made) or "could not create chat sound directory") end
+      current,err=mode(path); if err then return nil,err end
+    end
+    if current~="directory" then return nil,"chat sound cache path is not a regular directory" end
+  end
+  local path=directory.."/"..record.file
+  local current,err=mode(path); if err then return nil,err end
+  if current~=nil and current~="file" then return nil,"chat sound cache path is not a regular file" end
+  local opened,file,openErr=pcall(io.open,path,current and "rb" or "wb")
+  if not opened or not file then return nil,tostring(openErr or (not opened and file) or "could not open chat sound cache") end
+  if current then
+    local read,content,readErr=pcall(function() return file:read(65536) end)
+    local closed,closeResult,closeErr=pcall(function() return file:close() end)
+    if not read or content==nil then return nil,tostring(readErr or (not read and content) or "could not read chat sound cache") end
+    if not closed or not closeResult then return nil,tostring(closeErr or closeResult or "could not close chat sound cache") end
+    -- Exact comparison validates the bounded WAV and leaves unrelated files untouched.
+    if content~=wav then return nil,"chat sound cache conflicts with the built-in sound" end
+  else
+    local wrote,result,writeErr=pcall(function() return file:write(wav) end)
+    local closed,closeResult,closeErr=pcall(function() return file:close() end)
+    if not wrote or not result or not closed or not closeResult then
+      -- This call created the file; discard only its incomplete output on failure.
+      pcall(os.remove,path)
+      return nil,tostring(writeErr or (not wrote and result) or closeErr or (not closed and closeResult) or "could not write chat sound cache")
+    end
+  end
+  return path
+end
+function Adapter:playChatSound(soundId,volume)
+  if type(volume)~="number" or volume~=volume or volume<1 or volume>100 or volume%1~=0 then return nil,"chat sound volume must be an integer between 1 and 100" end
+  if type(soundId)~="string" or not soundId:match("^[a-z]+$") then return nil,"invalid chat sound" end
+  local loaded,sounds=pcall(require,"chat_sounds")
+  if not loaded or type(sounds)~="table" or type(sounds.get)~="function" then return nil,"chat sound catalog is unavailable" end
+  local found,record=pcall(sounds.get,soundId)
+  -- The catalog is the allowlist; never accept a caller-supplied path or URL.
+  if not found or type(record)~="table" or record.id~=soundId or record.file~="chat-"..soundId.."-v1.wav" then return nil,"invalid built-in chat sound" end
+  if type(playSoundFile)~="function" then return nil,"sound playback is unavailable" end
+  if type(getMudletHomeDir)~="function" then return nil,"Mudlet profile directory is unavailable" end
+  local gotHome,home=pcall(getMudletHomeDir)
+  if not gotHome or type(home)~="string" or home=="" or home:find("%c") then return nil,"Mudlet profile directory is unavailable" end
+  local base=Adapter.dataBase(home); local path=base.."/chat-sounds-v1/"..record.file
+  if not (self.chatSoundsReady and self.chatSoundsReady[path]) then
+    local prepared,err=prepareChatSound(sounds,record,base); if not prepared then return nil,err end
+    self.chatSoundsReady=self.chatSoundsReady or {}; self.chatSoundsReady[path]=true
+  end
+  local played,result,err=pcall(playSoundFile,{name=path,volume=volume,loops=1,key="DGHUD.ChatAlert",tag="DGHUD.ChatAlert"})
+  if not played then return nil,tostring(result) end
+  if result==false or (result==nil and err~=nil) then return nil,tostring(err or "could not play built-in chat sound") end
+  return true
 end
 local function keybindingSettingsPath() return Adapter.dataBase().."/keybindings-settings.lua" end
 function Adapter.keybindingSettingsSnapshot(config)

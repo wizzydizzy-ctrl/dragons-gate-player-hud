@@ -12,6 +12,16 @@ Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanent
 
 The same settings window has a **SHOW IN ALL** section. Toggle any source to control whether it appears in the combined **ALL** tab. `COMBAT` starts off there; every other source starts on. This changes only the combined view—dedicated tabs continue to work, capture continues, and saved history is untouched. The choices persist through profile restarts and HUD updates.
 
+## Sound alerts
+
+Open **OPTIONS → CHAT SETTINGS → SOUND ALERTS**. Each tab has an **ON/OFF** control, a choice of nine short sounds, and a **PREVIEW** button. Each built-in tab starts with a different sound. **STAFF starts ON; all other alerts start OFF.** You can change the shared alert volume too. Changes save immediately for this Mudlet profile and survive restarts, character changes, and HUD updates.
+
+Preview lets you hear a sound even when that tab's alerts are OFF; it does not turn the alert on. The sounds are created locally from tones included in the HUD—no external media download or account is required. Mudlet's **Mute all media** and your computer's audio settings still apply.
+
+Only newly captured messages alert. Loading saved history, scrolling, switching tabs, changing characters, and updating the HUD do not replay old alerts. Rapid messages are limited to one alert per second per selected tab.
+
+A message can appear in more than one filter, but plays only one sound: its specific enabled tab takes priority, then **PRIVATE** for private channels, then **ALL** if the message is included there. For example, enabling ESP and ALL does not make ESP messages ding twice. Hiding the chatbox does not mute alerts; turn off its alert switches when you want silence. Custom tabs appear in the sound settings after they are created and start OFF.
+
 ## Built-in filters
 
 - **ALL** — Every captured category.

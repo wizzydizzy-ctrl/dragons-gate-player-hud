@@ -2,6 +2,7 @@ local Navigation=require("navigation")
 local Layout=require("layout")
 local MapCatalog=require("map_catalog")
 local ColorStyles=require("color_styles")
+local Sounds=require("chat_sounds")
 local View={}; View.__index=View
 function View.withFont(text,size) return "<span style='font-size:"..tonumber(size).."px'>"..text.."</span>" end
 function View.raiseCards(cards) for _,card in ipairs(cards or {}) do if card and card.raise then card:raise() end end end
@@ -382,6 +383,7 @@ function View.new(settings)
   self.chat_settings_bg=label("DGHUD.ChatSettings.Background",self.chat_settings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.chat_settings_title=label("DGHUD.ChatSettings.Title",self.chat_settings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.chat_settings_content=Geyser.ScrollBox:new({name="DGHUD.ChatSettings.Content",x=12,y=46,width=556,height=406},self.chat_settings_panel)
+  self:createChatSoundControls()
   self.chat_settings_visibility=label("DGHUD.ChatSettings.Visibility",self.chat_settings_content)
   self.chat_settings_visibility:setClickCallback(function()
     local wanted=self.chat_visible==false
@@ -621,6 +623,7 @@ function View.new(settings)
   self.map_library_visible=false
   for _,widget in ipairs({self.map_library_overlay,self.map_library_panel,self.map_library_bg,self.map_library_title,self.map_library_copy,self.map_library_search_label,self.map_library_search,self.map_library_list,self.map_collection_list,self.map_library_copy_button,self.map_library_close}) do widget:hide() end; for _,button in pairs(self.map_library_filters) do button:hide() end; for _,button in pairs(self.map_library_modes) do button:hide() end; for _,button in pairs(self.map_library_actions) do button:hide() end; for _,button in pairs(self.map_collection_actions) do button:hide() end; for _,button in pairs(self.map_library_download_actions) do button:hide() end
   self:setChatVisible(settings.chat and settings.chat.visible)
+  self:setChatSounds(settings.chat and settings.chat.sounds)
   return self
 end
 function View:isChatVisible()
@@ -705,6 +708,7 @@ function View:reorderChatTab(category,targetIndex)
 end
 function View:renderChatTabs(categories,activeFilter)
   self.chat_categories={}; for _,category in ipairs(type(categories)=="table" and categories or {}) do self.chat_categories[#self.chat_categories+1]=category end
+  if self:syncChatSoundRows() and self.chat_settings_visible and self.layout then self:layoutChatSettings(self.layout) end
   self.chat_active_filter=tostring(activeFilter or "ALL"):upper()
   categories=self.chat_categories; activeFilter=self.chat_active_filter
   if not self:isChatVisible() then self:applyChatVisibility(); return true end
@@ -1436,19 +1440,192 @@ function View:saveColorStyle()
   if self.layout then self:layoutColorSettings(self.layout) else self:renderColorStyle() end
   return true
 end
-function View:chatSettingsWidgets() local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_visibility,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close}; for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end; return widgets end
+local chatSoundExplanation="Staff ON; other tabs OFF. Choose a sound, Preview, changes save automatically."
+local chatSoundDetails="Staff alerts start ON; others OFF. One sound per new message. Preview works even when OFF. Mudlet/media mute still applies. Specific enabled tabs win, then PRIVATE for private messages, then ALL when included. ALL is a fallback; it never adds a second alert. Rapid bursts are limited to one ding per second per tab."
+local chatSoundRowControls={"caption","enabled","previous","choice","next","preview"}
+function View:createChatSoundControls()
+  self.chat_sounds=Sounds.defaults(); self.chat_sound_rows={}; self.chat_sound_order={}
+  local t=self.settings.theme
+  local textStyle="background:transparent;color:"..t.text..";"
+  local buttonStyle="background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;"
+  self.chat_sound_caption=label("DGHUD.ChatSettings.Sounds.Caption",self.chat_settings_content,"background:transparent;color:"..t.accent..";font-weight:700;",self.geyser)
+  self.chat_sound_explanation=label("DGHUD.ChatSettings.Sounds.Explanation",self.chat_settings_content,textStyle,self.geyser)
+  self.chat_sound_volume=label("DGHUD.ChatSettings.Sounds.Volume",self.chat_settings_content,textStyle,self.geyser)
+  self.chat_sound_volume_down=label("DGHUD.ChatSettings.Sounds.VolumeDown",self.chat_settings_content,buttonStyle,self.geyser)
+  self.chat_sound_volume_up=label("DGHUD.ChatSettings.Sounds.VolumeUp",self.chat_settings_content,buttonStyle,self.geyser)
+  self.chat_sound_status=label("DGHUD.ChatSettings.Sounds.Status",self.chat_settings_content,"background:transparent;color:"..t.muted..";",self.geyser)
+  for _,widget in ipairs({self.chat_sound_caption,self.chat_sound_explanation}) do if widget.setToolTip then widget:setToolTip(chatSoundDetails) end end
+  self.chat_sound_volume_down:setClickCallback(function() return self:changeChatSound("chat_sound_volume",nil,math.max(1,self.chat_sounds.volume-10)) end)
+  self.chat_sound_volume_up:setClickCallback(function() return self:changeChatSound("chat_sound_volume",nil,math.min(100,self.chat_sounds.volume+10)) end)
+  self:syncChatSoundRows()
+end
+function View:syncChatSoundRows()
+  local order,seen={},{}
+  local function add(value)
+    local key=Sounds.tabKey(value)
+    if key and not seen[key] and #order<64 then order[#order+1]=key; seen[key]=true end
+  end
+  for _,key in ipairs(Sounds.tabOrder) do add(key) end
+  local preferred=self.settings.chat and self.settings.chat.tab_order
+  for _,key in ipairs(type(preferred)=="table" and preferred or {}) do add(key) end
+  for _,key in ipairs(self.chat_categories or {}) do add(key) end
+  local changed=table.concat(order,"\n")~=table.concat(self.chat_sound_order or {},"\n")
+  self.chat_sound_order=order
+  for key,row in pairs(self.chat_sound_rows) do
+    if not seen[key] then for _,name in ipairs(chatSoundRowControls) do row[name]:delete() end; self.chat_sound_rows[key]=nil end
+  end
+  local t=self.settings.theme
+  for _,key in ipairs(order) do
+    if not self.chat_sound_rows[key] then
+      local row={}
+      for _,name in ipairs(chatSoundRowControls) do
+        -- Tab names are canonical data; widget names use a fixed numeric slot.
+        self.chat_sound_row_serial=(self.chat_sound_row_serial or 0)+1
+        local style=(name=="caption" or name=="choice") and ("background:transparent;color:"..t.text..";") or ("background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
+        row[name]=label("DGHUD.ChatSettings.Sounds.Row."..self.chat_sound_row_serial,self.chat_settings_content,style,self.geyser)
+        row[name]:hide()
+      end
+      row.enabled:setClickCallback(function() return self:changeChatSound("chat_sound_enabled",key,not self:chatSoundSetting(key).enabled) end)
+      row.previous:setClickCallback(function() return self:cycleChatSound(key,-1) end)
+      row.next:setClickCallback(function() return self:cycleChatSound(key,1) end)
+      row.preview:setClickCallback(function() return self:changeChatSound("chat_sound_preview",key,self:chatSoundSetting(key).sound) end)
+      for name,tip in pairs({caption=key,enabled="Turn "..key.." sound alerts ON or OFF",previous="Previous sound for "..key,next="Next sound for "..key,preview="Preview "..key.." sound, even when alerts are OFF"}) do
+        if row[name].setToolTip then row[name]:setToolTip(tip) end
+      end
+      self.chat_sound_rows[key]=row
+    end
+  end
+  return changed
+end
+function View:chatSoundSetting(tab)
+  return self.chat_sounds.tabs[tab] or {enabled=false,sound="all"}
+end
+function View:setChatSounds(config)
+  local normalized,err=Sounds.validate(config==nil and Sounds.defaults() or config)
+  if not normalized then return nil,err end
+  self.chat_sounds=viewCopy(normalized)
+  self:syncChatSoundRows()
+  if self.chat_settings_visible and self.layout then self:layoutChatSettings(self.layout) else self:renderChatSounds() end
+  return true
+end
+function View:cycleChatSound(tab,step)
+  if not self.chat_sound_rows[tab] then return nil,"Unknown chat sound tab." end
+  local current=self:chatSoundSetting(tab).sound; local index=1
+  for i,entry in ipairs(Sounds.catalog) do if entry.id==current then index=i; break end end
+  local entry=Sounds.catalog[(index-1+step)%#Sounds.catalog+1]
+  return self:changeChatSound("chat_sound_choice",tab,entry.id)
+end
+function View:changeChatSound(action,tab,value)
+  local function fail(err)
+    err=tostring(err or "Could not save sound settings.")
+    self.chat_sound_status_text=err; self.chat_settings_status_text=err; self:renderChatSettings()
+    return nil,err
+  end
+  if action=="chat_sound_volume" then
+    if type(value)~="number" or value~=value or value<1 or value>100 or value%1~=0 then return fail("Invalid sound volume.") end
+  elseif not self.chat_sound_rows[tab] then return fail("Unknown chat sound tab.")
+  elseif action=="chat_sound_enabled" then
+    if type(value)~="boolean" then return fail("Invalid sound toggle.") end
+  elseif action=="chat_sound_choice" or action=="chat_sound_preview" then
+    if not Sounds.get(value) then return fail("Unknown built-in sound.") end
+  else return fail("Unknown sound setting.") end
+  if not self.options_action_callback then return fail("Sound settings are unavailable.") end
+  -- Only the owner persists or plays audio. False is a successful saved OFF.
+  local ok,saved,err=pcall(self.options_action_callback,action,tab,value)
+  if not ok then return fail(saved) end
+  if saved==nil then return fail(err) end
+  if action=="chat_sound_preview" then
+    if saved~=true then return fail(err or "Could not preview sound.") end
+    self.chat_sound_status_text="Preview requested. Mudlet/media mute still applies."
+  else
+    local config=viewCopy(self.chat_sounds)
+    if action=="chat_sound_volume" then
+      if type(saved)~="number" then return fail("Invalid saved sound volume.") end
+      config.volume=saved
+    else
+      config.tabs[tab]=viewCopy(self:chatSoundSetting(tab))
+      if action=="chat_sound_enabled" then
+        if type(saved)~="boolean" then return fail("Invalid saved sound toggle.") end
+        config.tabs[tab].enabled=saved
+      else
+        if type(saved)~="string" or not Sounds.get(saved) then return fail("Invalid saved sound choice.") end
+        config.tabs[tab].sound=saved
+      end
+    end
+    local normalized,why=Sounds.validate(config); if not normalized then return fail(why) end
+    self.chat_sounds=viewCopy(normalized)
+    self.settings.chat=self.settings.chat or {}; self.settings.chat.sounds=viewCopy(normalized)
+    self.chat_sound_status_text="Sound settings saved."
+  end
+  self:renderChatSettings()
+  return saved
+end
+function View:layoutChatSounds(width,y,font)
+  local gap,h=6,math.max(32,width>=460 and font+18 or font*2+8)
+  place(self.chat_sound_caption,0,y,width,26); y=y+30
+  local chars=math.max(1,math.floor(width/(font*.65)))
+  local explanation_h=math.max(36,math.ceil(#chatSoundExplanation/chars)*(font+5)+6)
+  place(self.chat_sound_explanation,0,y,width,explanation_h); y=y+explanation_h+gap
+  place(self.chat_sound_volume,0,y,width-104,h)
+  place(self.chat_sound_volume_down,width-98,y,46,h); place(self.chat_sound_volume_up,width-46,y,46,h); y=y+h+gap
+  local status_h=width>=460 and math.max(32,font*2+8) or (font+5)*3
+  place(self.chat_sound_status,0,y,width,status_h); y=y+status_h+gap
+  for _,key in ipairs(self.chat_sound_order) do
+    local row=self.chat_sound_rows[key]
+    if width>=460 then
+      place(row.caption,0,y,92,h); place(row.enabled,98,y,52,h); place(row.previous,156,y,32,h)
+      place(row.choice,194,y,width-312,h); place(row.next,width-112,y,32,h); place(row.preview,width-74,y,74,h)
+      y=y+h+gap
+    else
+      place(row.caption,0,y,width-64,h); place(row.enabled,width-58,y,58,h); y=y+h+gap
+      place(row.previous,0,y,32,h); place(row.choice,38,y,width-76,h); place(row.next,width-32,y,32,h); y=y+h+gap
+      place(row.preview,0,y,width,h); y=y+h+gap*2
+    end
+  end
+  return y+gap
+end
+function View:renderChatSounds(font)
+  font=font or self.chat_settings_font or 11
+  self.chat_sound_caption:echo(View.withFont("<b>SOUND ALERTS</b>",font+1))
+  self.chat_sound_explanation:echo(View.withFont(chatSoundExplanation,font))
+  self.chat_sound_volume:echo(View.withFont("<b>Volume: "..self.chat_sounds.volume.."%</b>",font))
+  self.chat_sound_volume_down:echo(View.withFont("<center><b>-10</b></center>",font))
+  self.chat_sound_volume_up:echo(View.withFont("<center><b>+10</b></center>",font))
+  self.chat_sound_status:echo(View.withFont(safeText(self.chat_sound_status_text or "All tabs share this volume."),font))
+  for _,key in ipairs(self.chat_sound_order) do
+    local row=self.chat_sound_rows[key]; local setting=self:chatSoundSetting(key); local sound=Sounds.get(setting.sound)
+    local caption=clipped(key,math.max(1,math.floor((row.caption.width or 100)/(font*.7))))
+    row.caption:echo(View.withFont("<b>"..safeText(caption).."</b>",font))
+    row.enabled:setStyleSheet("background:"..(setting.enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(setting.enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(setting.enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;")
+    row.enabled:echo(View.withFont("<center><b>"..(setting.enabled and "ON" or "OFF").."</b></center>",font))
+    row.previous:echo(View.withFont("<center><b>&lt;</b></center>",font)); row.next:echo(View.withFont("<center><b>&gt;</b></center>",font))
+    row.choice:echo(View.withFont("<center>"..safeText(sound.label).."</center>",font))
+    if row.choice.setToolTip then row.choice:setToolTip(sound.label) end
+    row.preview:echo(View.withFont("<center><b>PREVIEW</b></center>",font))
+  end
+end
+function View:chatSettingsWidgets()
+  local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_visibility,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close,self.chat_sound_caption,self.chat_sound_explanation,self.chat_sound_volume,self.chat_sound_volume_down,self.chat_sound_volume_up,self.chat_sound_status}
+  for _,key in ipairs(self.chat_sound_order or {}) do for _,name in ipairs(chatSoundRowControls) do widgets[#widgets+1]=self.chat_sound_rows[key][name] end end
+  for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end
+  return widgets
+end
 function View:layoutChatSettings(layout)
   local widgets=self:chatSettingsWidgets(); if not self.chat_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
-  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(620,math.max(1,width-margin*2)),math.min(520,math.max(1,height-margin*2)); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(layout.mode=="compact" and 9 or 10,math.min(14,(layout.body_font or 14)-2)); local pad=math.max(6,math.min(14,math.floor(math.min(pw,ph)*.03))); local gap=6; local title_h=math.max(24,font+14); local close_h=math.max(26,font+14); local close_y=math.max(pad,ph-pad-close_h); local content_y=pad+title_h+gap; local content_h=math.max(1,close_y-gap-content_y); local inner_w=math.max(1,pw-pad*2); self.chat_settings_compact_copy=pw<430
+  local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800); local margin=layout.mode=="compact" and 8 or 18; local pw,ph=math.min(740,math.max(1,width-margin*2)),math.min(740,math.max(1,height-margin*2)); local x=math.floor((width-pw)/2); local y=math.floor((height-ph)/2); local font=math.max(layout.mode=="compact" and 9 or 10,math.min(14,(layout.body_font or 14)-2)); local pad=math.max(6,math.min(14,math.floor(math.min(pw,ph)*.03))); local gap=6; local title_h=math.max(24,font+14); local close_h=math.max(26,font+14); local close_y=math.max(pad,ph-pad-close_h); local content_y=pad+title_h+gap; local content_h=math.max(1,close_y-gap-content_y); local inner_w=math.max(1,pw-pad*2); self.chat_settings_compact_copy=pw<430
   place(self.chat_settings_overlay,0,0,"100%","100%"); place(self.chat_settings_panel,x,y,pw,ph); place(self.chat_settings_bg,0,0,"100%","100%"); place(self.chat_settings_title,pad,pad,pw-pad*2,title_h); place(self.chat_settings_content,pad,content_y,inner_w,content_h); place(self.chat_settings_close,math.max(pad,pw-pad-110),close_y,math.min(110,pw-pad*2),close_h)
-  local cy=0; local visibility_h=math.max(36,font+22); place(self.chat_settings_visibility,0,cy,inner_w-10,visibility_h); cy=cy+visibility_h+gap
-  local text_h=self.chat_settings_compact_copy and 100 or 88; place(self.chat_settings_text,0,cy,inner_w-10,text_h); cy=cy+text_h+gap; place(self.chat_settings_sources_caption,0,cy,inner_w-10,24); cy=cy+28
-  local columns=inner_w>=500 and 4 or 2; local column_gap=6; local cell_w=math.max(1,(inner_w-10-column_gap*(columns-1))/columns); local row_h=math.max(28,font+16); local rows=math.ceil(#self.chat_all_source_order/columns)
+  local control_w=listViewportWidth(self.chat_settings_content,inner_w,self.list_scrollbar_width); self.chat_settings_font=font
+  local cy=0; local visibility_h=math.max(36,font+22); place(self.chat_settings_visibility,0,cy,control_w,visibility_h); cy=cy+visibility_h+gap
+  cy=self:layoutChatSounds(control_w,cy,font)
+  local text_h=math.max(self.chat_settings_compact_copy and 100 or 88,(font+5)*(self.chat_settings_compact_copy and 8 or 6)); place(self.chat_settings_text,0,cy,control_w,text_h); cy=cy+text_h+gap; place(self.chat_settings_sources_caption,0,cy,control_w,24); cy=cy+28
+  local columns=control_w>=500 and 4 or 2; local column_gap=6; local cell_w=math.max(1,(control_w-column_gap*(columns-1))/columns); local row_h=math.max(28,font+16,math.ceil(14*font*.65/cell_w)*(font+5)+8); local rows=math.ceil(#self.chat_all_source_order/columns)
   for index,key in ipairs(self.chat_all_source_order) do local column=(index-1)%columns; local row=math.floor((index-1)/columns); place(self.chat_all_source_buttons[key],column*(cell_w+column_gap),cy+row*row_h,cell_w,row_h-4) end
-  cy=cy+rows*row_h+gap; local action_h=math.max(30,font+18); place(self.chat_settings_clear_visible,0,cy,inner_w-10,action_h); cy=cy+action_h+gap; place(self.chat_settings_clear_saved,0,cy,inner_w-10,action_h); cy=cy+action_h+gap; place(self.chat_settings_status,0,cy,inner_w-10,math.max(34,font*2+8)); cy=cy+math.max(34,font*2+8); self.chat_settings_content.content_height=cy
+  cy=cy+rows*row_h+gap; local action_h=math.max(30,font+18,math.ceil(43*font*.65/control_w)*(font+5)+8); place(self.chat_settings_clear_visible,0,cy,control_w,action_h); cy=cy+action_h+gap; place(self.chat_settings_clear_saved,0,cy,control_w,action_h); cy=cy+action_h+gap; place(self.chat_settings_status,0,cy,control_w,math.max(34,font*2+8)); cy=cy+math.max(34,font*2+8); self.chat_settings_content.content_height=cy
   self:renderChatSettings(font); View.raiseCards(widgets); return true
 end
 function View:renderChatSettings(font)
+  font=font or self.chat_settings_font
+  self:renderChatSounds(font)
   local visible=self.chat_visible~=false; local t=self.settings.theme
   self.chat_settings_visibility:setStyleSheet("background:"..(visible and "#173526" or "#252b28")..";border:2px solid "..t.accent..";border-radius:5px;color:"..(visible and "#c8f2d5" or t.text)..";font-weight:700;")
   self.chat_settings_visibility:echo(View.withFont("<center><b>SHOW CHATBOX: "..(visible and "ON" or "OFF").."</b></center>",(font or 11)+2))
@@ -1456,9 +1633,14 @@ function View:renderChatSettings(font)
 end
 function View:setChatAllSources(sources) self.chat_all_sources={}; for _,key in ipairs(self.chat_all_source_order or {}) do self.chat_all_sources[key]=not (type(sources)=="table" and sources[key]==false) end; if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:showChatSettings()
-  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.chat_settings_visible=true; self.chat_settings_clear_pending=false; self.chat_settings_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutChatSettings(self.layout) end; return true
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end
+  self.chat_sound_status_text=nil
+  local config=self.settings.chat and self.settings.chat.sounds
+  local ok,err=self:setChatSounds(config==nil and self.chat_sounds or config)
+  if not ok then self.chat_sound_status_text=tostring(err) end
+  self.chat_settings_visible=true; self.chat_settings_clear_pending=false; self.chat_settings_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutChatSettings(self.layout) end; return true
 end
-function View:hideChatSettings() self.chat_settings_visible=false; self.chat_settings_clear_pending=false; if self.layout then self:layoutChatSettings(self.layout) end; return true end
+function View:hideChatSettings() self.chat_settings_visible=false; self.chat_settings_clear_pending=false; for _,widget in ipairs(self:chatSettingsWidgets()) do widget:hide() end; return true end
 function View:keybindingWidgets() local widgets={self.keybindings_overlay,self.keybindings_panel,self.keybindings_bg,self.keybindings_title,self.keybindings_content,self.keybindings_text,self.keybindings_enable,self.keybindings_defaults,self.keybindings_status,self.keybindings_save,self.keybindings_cancel}; for _,field in pairs(self.keybinding_fields or {}) do widgets[#widgets+1]=field.caption; widgets[#widgets+1]=field.input end; return widgets end
 function View:layoutKeybindingSettings(layout)
   local widgets=self:keybindingWidgets(); if not self.keybindings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
@@ -2017,6 +2199,7 @@ local reusableWidgetNames={
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
   "color_settings_groups_tab","color_settings_styles_tab","color_settings_status","color_style_catalog","color_style_content","color_style_catalog_help","color_style_heading","color_style_help","color_style_status","color_style_preview","color_style_reset","color_style_cancel","color_style_save",
   "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_visibility","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
+  "chat_sound_caption","chat_sound_explanation","chat_sound_volume","chat_sound_volume_down","chat_sound_volume_up","chat_sound_status",
   "keybindings_overlay","keybindings_panel","keybindings_bg","keybindings_title","keybindings_content","keybindings_text","keybindings_enable","keybindings_defaults","keybindings_status","keybindings_save","keybindings_cancel",
   "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
   "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
@@ -2076,6 +2259,13 @@ function View.validateReusable(candidate,settings)
   if type(candidate.right_list_tab_order)~="table" or type(candidate.right_list_tabs)~="table" then return nil,"preserved HUD list tabs are incomplete" end
   for index,name in ipairs({"inventory","runes","skills"}) do if candidate.right_list_tab_order[index]~=name or not reusableLabel(candidate.right_list_tabs[name]) then return nil,"preserved HUD list tabs are incomplete" end end
   if candidate.right_list_active~=nil and not candidate.right_list_tabs[candidate.right_list_active] then return nil,"preserved HUD active list tab is invalid" end
+  if type(candidate.chat_sounds)~="table" or not Sounds.validate(candidate.chat_sounds) or type(candidate.chat_sound_order)~="table" or type(candidate.chat_sound_rows)~="table" then return nil,"preserved HUD sound controls are incomplete" end
+  for index,key in ipairs(Sounds.tabOrder) do if candidate.chat_sound_order[index]~=key then return nil,"preserved HUD sound tabs are incomplete" end end
+  for _,key in ipairs(candidate.chat_sound_order) do
+    local row=candidate.chat_sound_rows[key]
+    if type(row)~="table" then return nil,"preserved HUD sound row is incomplete" end
+    for _,name in ipairs(chatSoundRowControls) do if not reusableLabel(row[name]) then return nil,"preserved HUD sound control is incomplete" end end
+  end
   for _,collection in ipairs({
     {"color_option_order","color_option_buttons"},{"option_action_order","option_action_buttons"},{"chat_all_source_order","chat_all_source_buttons"},{"roller_toggle_order","roller_toggles"},{"roller_arrange_order","roller_arrange_buttons"},{"roller_action_order","roller_action_buttons"},{"map_settings_toggle_order","map_settings_toggles"},{"map_library_mode_order","map_library_modes"},{"map_library_filter_order","map_library_filters"},{"map_library_action_order","map_library_actions"},{"map_collection_action_order","map_collection_actions"},{"map_library_download_action_order","map_library_download_actions"},
   }) do
@@ -2122,6 +2312,8 @@ function View:prepareForReuse(settings)
   end
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
   self:setChatVisible(self.settings.chat and self.settings.chat.visible)
+  self.chat_sound_status_text=nil
+  self:setChatSounds(self.settings.chat and self.settings.chat.sounds)
   return true
 end
 function View:delete()

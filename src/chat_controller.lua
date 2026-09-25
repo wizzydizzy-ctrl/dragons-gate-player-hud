@@ -38,8 +38,8 @@ local function call(object,name,...)
   return first,second
 end
 
-function Controller.new(adapter,parser,history,storage,onChange,characterProvider,allSources)
-  return setmetatable({adapter=adapter,parser=parser,history=history,storage=storage,onChange=onChange or function() end,characterProvider=characterProvider or function() end,allSources=type(allSources)=="table" and allSources or nil,filter="ALL",started=false,historiesByCharacter={}},Controller)
+function Controller.new(adapter,parser,history,storage,onChange,characterProvider,allSources,onAccepted)
+  return setmetatable({adapter=adapter,parser=parser,history=history,storage=storage,onChange=onChange or function() end,characterProvider=characterProvider or function() end,allSources=type(allSources)=="table" and allSources or nil,onAccepted=type(onAccepted)=="function" and onAccepted or nil,filter="ALL",started=false,historiesByCharacter={}},Controller)
 end
 
 function Controller:character()
@@ -75,12 +75,13 @@ function Controller:status()
   return {active_filter=self.filter,visible_count=#self:entries(),storage_key=storageKey,last_storage_error=storageError or self.lastStorageError}
 end
 
-function Controller:accept(entry)
+function Controller:accept(entry,suppressAlert)
   local added=self.history:append(entry,call(self.adapter,"epoch"))
   if not added then return false end
   local ok,err=call(self.storage,"append",entry)
   if not ok then self:reportStorageError(err or "could not append chat log") end
   self:notify()
+  if self.started and suppressAlert~=true and self.onAccepted then pcall(self.onAccepted,entry) end
   return true
 end
 
@@ -106,11 +107,11 @@ function Controller:cancelStaffMessageTimer()
   if timer then call(self.adapter,"cancelTimer",timer) end
 end
 
-function Controller:flushStaffMessage()
+function Controller:flushStaffMessage(suppressAlert)
   self:cancelStaffMessageTimer()
   local entry=self.pendingStaffMessage; self.pendingStaffMessage=nil; self.pendingStaffMessageLines=nil
   if not entry then return false end
-  return self:accept(entry)
+  return self:accept(entry,suppressAlert)
 end
 
 function Controller:scheduleStaffMessageFlush()
@@ -146,7 +147,7 @@ function Controller:acceptParsed(entry)
 end
 
 function Controller:handoff()
-  self:flushStaffMessage()
+  self:flushStaffMessage(true)
   return {
     schema=HANDOFF_SCHEMA,
     character_key=validStorageKey(self.currentCharacterKey),
@@ -251,7 +252,7 @@ function Controller:clearSavedHistory(confirmed)
 end
 
 function Controller:shutdown()
-  self:flushStaffMessage()
+  self:flushStaffMessage(true)
   self.started=false
   local trigger=self.trigger; self.trigger=nil; local storage=self.storage
   if trigger then call(self.adapter,"killTrigger",trigger) end

@@ -718,6 +718,36 @@ local function withChatVisibilityRuntime(overrides,run)
   if not ok then error(err,0) end
 end
 
+test("chat sounds route live staff messages once and options persist without changing other chat choices",function()
+  withChatVisibilityRuntime({chat={personal_option="keep"}},function(f,hud)
+    local played={}
+    function f:playChatSound(id,volume) played[#played+1]={id=id,volume=volume}; return true end
+    assert(hud.chat:onLine('[GM] Aeron: new staff alert'))
+    eq(#played,1); eq(played[1].id,"staff"); eq(played[1].volume,60)
+    eq(hud.chat:onLine('[GM] Aeron: new staff alert'),false); eq(#played,1)
+    assert(hud.chat:setFilter("STAFF")); hud:refresh(); eq(#played,1)
+    assert(hud.chat:onLine('Kaida says, "quiet room by default"')); eq(#played,1)
+    eq(f.optionsActionCallback("chat_sound_enabled","STAFF",false),false)
+    eq(f.savedChatSettings.sounds.tabs.STAFF.enabled,false); eq(DGHUD.user_settings.chat.sounds.tabs.STAFF.enabled,false)
+    eq(f.optionsActionCallback("chat_sound_choice","STAFF","esp"),"esp")
+    eq(f.optionsActionCallback("chat_sound_volume",nil,30),30)
+    assert(f.optionsActionCallback("chat_sound_preview","STAFF","esp")); eq(#played,2); eq(played[2].id,"esp"); eq(played[2].volume,30)
+    eq(hud.settings.chat.sounds.tabs.STAFF.enabled,false)
+    eq(f.optionsActionCallback("chat_visibility",nil,false),false)
+    eq(f.optionsActionCallback("chat_all_source","COMBAT",true),true)
+    assert(f.chatOrderCallback({"STAFF","ALL","ROOM"}))
+    eq(f.savedChatSettings.sounds.tabs.STAFF.enabled,false); eq(f.savedChatSettings.sounds.tabs.STAFF.sound,"esp"); eq(f.savedChatSettings.sounds.volume,30)
+    eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.all_sources.COMBAT,true); eq(hud.settings.chat.personal_option,"keep")
+    assert(hud:reload()); eq(#played,2); eq(hud.chat_sounds.config.tabs.STAFF.enabled,false)
+    assert(hud.chat:onLine('[GM] Aeron: muted after reload')); eq(#played,2)
+    f.failChatSettingsSave="disk full"
+    local ok,err=f.optionsActionCallback("chat_sound_enabled","STAFF",true); eq(ok,nil); assert(err:find("disk full",1,true))
+    eq(hud.settings.chat.sounds.tabs.STAFF.enabled,false); eq(DGHUD.user_settings.chat.sounds.tabs.STAFF.enabled,false)
+    eq(f.optionsActionCallback("chat_sound_choice","STAFF","../../danger.wav"),nil)
+    eq(f.optionsActionCallback("chat_sound_volume",nil,101),nil)
+  end)
+end)
+
 local function assertChatRuntimeUnchanged(f,hud,before)
   eq(hud.chat,before.chat); eq(hud.chat.history,before.history); eq(hud.chat.storage,before.storage)
   eq(hud.chat.trigger,before.trigger); eq(f.triggers[before.trigger],before.callback); eq(hud.chat.started,true)
@@ -860,6 +890,21 @@ local function withChatVisibilityEntry(persisted,run)
   rawset(_G,"DGHUD",savedGlobal); rawset(_G,"getMudletHomeDir",savedHome); rawset(_G,"tempTimer",savedTimer)
   if not ok then error(err,0) end
 end
+
+test("entry and upgrade keep saved chat alert choices and do not replay sounds",function()
+  local sounds={volume=40,tabs={STAFF={enabled=false,sound="dragon"},ROOM={enabled=true,sound="private"}}}
+  withChatVisibilityEntry({visible=true,tab_order={"STAFF","ALL"},sounds=sounds},function(f)
+    local count=0; function f:playChatSound() count=count+1; return true end
+    dofile("src/entry.lua")
+    eq(DGHUD.settings.chat.sounds.tabs.STAFF.enabled,false); eq(DGHUD.settings.chat.sounds.tabs.STAFF.sound,"dragon")
+    eq(DGHUD.settings.chat.sounds.tabs.ROOM.enabled,true); eq(DGHUD.settings.chat.sounds.volume,40)
+    assert(DGHUD.chat.capture("ROOM","one new line")); eq(count,1)
+    assert(DGHUD.reload()); eq(count,1)
+    dofile("src/entry.lua"); eq(count,1)
+    eq(DGHUD.controller.chat_sounds.config.tabs.STAFF.enabled,false); eq(DGHUD.settings.chat.sounds.volume,40)
+    eq(#DGHUD.controller.chat.history:entries("ALL"),1)
+  end)
+end)
 
 test("entry loads persisted hidden chat and public reload keeps it hidden with history",function()
   withChatVisibilityEntry({visible=false,tab_order={"STAFF","ALL","ROOM"},all_sources={ROOM=true,COMBAT=false}},function(f)

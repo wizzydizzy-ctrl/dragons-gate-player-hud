@@ -3,6 +3,7 @@ local State=require("state"); local Events=require("events"); local Layout=requi
 local Main={}; Main.__index=Main
 local ColorStyles=require("color_styles")
 local Settings=require("settings")
+local ChatSounds=require("chat_sounds")
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
@@ -472,11 +473,17 @@ end
 function Main:startChat()
   local settings=self.settings.chat or {}
   if settings.enabled==false then return true end
+  self.chat_sounds=ChatSounds.new(self.adapter,settings.sounds) or ChatSounds.new(self.adapter,{tabs={STAFF={enabled=false}}})
   local visibleLimit=ChatHistory.visibleLimit(settings.visible_limit)
   local storage=self.adapter:createChatStorage(visibleLimit)
   self.chat=ChatController.new(self.adapter,ChatParser,ChatHistory.new(visibleLimit,settings.dedupe_seconds or 3),storage,function(entries,categories,filter)
     if self.view and self.view.renderChat then self.view:renderChat(entries,categories,filter) end
-  end,function() return self:characterName() end,settings.all_sources)
+  end,function() return self:characterName() end,settings.all_sources,function(entry)
+    if self.chat_sounds then
+      local ok,err=self.chat_sounds:onEntry(entry,self.settings.chat and self.settings.chat.all_sources)
+      if ok==nil then self.chat_sound_error=err end
+    end
+  end)
   local restored=false
   if type(self.chat_handoff)=="table" then restored=self.chat:restoreHandoff(self.chat_handoff)==true end
   if self.view and self.view.setChatFilterCallback then
@@ -488,7 +495,7 @@ function Main:startChat()
   end
   if self.view and self.view.setChatOrderCallback then
     self.view:setChatOrderCallback(function(order)
-      local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources,visible=not (self.settings.chat and self.settings.chat.visible==false)}
+      local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources,visible=not (self.settings.chat and self.settings.chat.visible==false),sounds=self.settings.chat and self.settings.chat.sounds}
       if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
       self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=order
       local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.tab_order=order end
@@ -526,7 +533,7 @@ end
 function Main:setChatVisible(visible)
   if type(visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local chatSettings=self.settings.chat or {}
-  local candidate={visible=visible,tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=chatSettings.all_sources}
+  local candidate={visible=visible,tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=chatSettings.all_sources,sounds=chatSettings.sounds}
   if self.adapter.saveChatSettings then
     local saved,err=self.adapter:saveChatSettings(candidate)
     if not saved then return nil,"Could not save chat visibility: "..tostring(err) end
@@ -552,7 +559,7 @@ function Main:setChatAllSource(category,enabled)
   local chatSettings=self.settings.chat or {}; local sources={}
   for key,value in pairs(chatSettings.all_sources or {}) do sources[key]=value~=false end
   sources[category]=enabled
-  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=sources,visible=chatSettings.visible~=false}
+  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=sources,visible=chatSettings.visible~=false,sounds=chatSettings.sounds}
   if self.adapter.saveChatSettings then local saved,err=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save ALL tab sources: "..tostring(err) end end
   self.settings.chat=chatSettings; chatSettings.all_sources=sources
   local root=rawget(_G,"DGHUD")
@@ -560,6 +567,43 @@ function Main:setChatAllSource(category,enabled)
   if self.chat then self.chat:setAllSources(sources) end
   if self.view and self.view.setChatAllSources then self.view:setChatAllSources(sources) end
   return enabled
+end
+function Main:commitChatSounds(config)
+  local validated,err=ChatSounds.validate(config); if not validated then return nil,err end
+  local chatSettings=self.settings.chat or {}
+  local candidate=Settings.merge(chatSettings,{sounds=validated})
+  candidate.tab_order=candidate.tab_order or ChatSounds.tabOrder
+  if not self.adapter.saveChatSettings then return nil,"Chat sound settings cannot be saved in this profile." end
+  local saved,saveErr=self.adapter:saveChatSettings(candidate)
+  if not saved then return nil,"Could not save chat sounds: "..tostring(saveErr or "settings unavailable") end
+  self.settings.chat=chatSettings; chatSettings.sounds=validated
+  if self.chat_sounds then self.chat_sounds:setConfig(validated) end
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.sounds=validated end
+  if self.view and self.view.setChatSounds then self.view:setChatSounds(validated) end
+  return true
+end
+function Main:setChatSound(tab,field,value)
+  local key=ChatSounds.tabKey(tab)
+  if not key or (field~="enabled" and field~="sound") then return nil,"Choose a chat tab and sound setting." end
+  if field=="enabled" and type(value)~="boolean" then return nil,"Sound ON/OFF must be a boolean." end
+  if field=="sound" and not ChatSounds.get(value) then return nil,"Choose a bundled alert sound." end
+  local config,err=ChatSounds.validate(self.settings.chat and self.settings.chat.sounds); if not config then return nil,err end
+  config.tabs[key]=config.tabs[key] or {enabled=false,sound="all"}; config.tabs[key][field]=value
+  local saved,saveErr=self:commitChatSounds(config); if not saved then return nil,saveErr end
+  return self.settings.chat.sounds.tabs[key][field]
+end
+function Main:setChatSoundVolume(value)
+  local config,err=ChatSounds.validate(self.settings.chat and self.settings.chat.sounds); if not config then return nil,err end
+  config.volume=value
+  local saved,saveErr=self:commitChatSounds(config); if not saved then return nil,saveErr end
+  return self.settings.chat.sounds.volume
+end
+function Main:previewChatSound(tab,soundId)
+  local key=ChatSounds.tabKey(tab); if not key then return nil,"Choose a chat tab." end
+  local sounds,err=ChatSounds.new(self.adapter,self.settings.chat and self.settings.chat.sounds); if not sounds then return nil,err end
+  local record=sounds.config.tabs[key] or {sound="all"}
+  return sounds:play(soundId or record.sound)
 end
 function Main:scheduleRoundtimeTick()
   if self.roundtime_timer or self.roundtime_display<=0 then return end
@@ -1141,6 +1185,10 @@ function Main:start()
     if action=="chat_clear_saved" then return self:clearSavedChat(true) end
     if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
     if action=="chat_visibility" then return self:setChatVisible(wanted) end
+    if action=="chat_sound_enabled" then return self:setChatSound(key,"enabled",wanted) end
+    if action=="chat_sound_choice" then return self:setChatSound(key,"sound",wanted) end
+    if action=="chat_sound_volume" then return self:setChatSoundVolume(wanted) end
+    if action=="chat_sound_preview" then return self:previewChatSound(key,wanted) end
     if action=="roller_settings" then return self.roller and self.roller.cfg end
     if action=="keybindings_settings" then return self.keybindings and self.keybindings:snapshot() end
     if action=="auto_update" then
@@ -1159,6 +1207,7 @@ function Main:start()
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
   if self.view.setChatAllSources then self.view:setChatAllSources(self.settings.chat and self.settings.chat.all_sources or {}) end
+  if self.view.setChatSounds then self.view:setChatSounds(self.settings.chat and self.settings.chat.sounds) end
   if self.view.setChatVisible then self.view:setChatVisible(not (self.settings.chat and self.settings.chat.visible==false)) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
