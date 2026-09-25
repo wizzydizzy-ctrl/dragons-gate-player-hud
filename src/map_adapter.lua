@@ -6,6 +6,12 @@ local unpackValues=table.unpack or unpack
 local reverse={n="s",ne="sw",e="w",se="nw",s="n",sw="ne",w="e",nw="se",up="down",down="up",["in"]="out",out="in"}
 local LEGACY_ROOM_NAME_MIGRATION_KEY="dghud.legacy_room_names_schema"
 local LEGACY_ROOM_NAME_MIGRATION_SCHEMA="1"
+local ordinaryDirections={north="n",n="n",northeast="ne",ne="ne",east="e",e="e",southeast="se",se="se",south="s",s="s",southwest="sw",sw="sw",west="w",w="w",northwest="nw",nw="nw",up="up",u="up",down="down",d="down",["in"]="in",i="in",out="out",o="out",["north-east"]="ne",["south-east"]="se",["south-west"]="sw",["north-west"]="nw"}
+local SPECIAL_LINE_PREFIX="dghud.special_line."
+
+local function ordinaryDirection(value)
+  return type(value)=="string" and ordinaryDirections[value:lower():match("^%s*(.-)%s*$")] or nil
+end
 
 local function areaName(key)
   local value=tostring(key)
@@ -61,6 +67,56 @@ local function finiteNumber(value)
   local number=tonumber(value)
   if not number or number~=number or number==math.huge or number==-math.huge then return nil end
   return number
+end
+
+local function normalizeOrdinaryExits(values)
+  if type(values)~="table" then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
+  local exits={}
+  for key,value in pairs(values) do
+    local direction,to=ordinaryDirection(key),positiveInteger(value)
+    if not direction or not to then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
+    if exits[direction] and exits[direction]~=to then return nil,"ordinary exit aliases have conflicting destinations for "..direction end
+    exits[direction]=to
+  end
+  return exits
+end
+
+local function readRoomExits(api,id)
+  local exits,err=read(api,"getRoomExits",id)
+  if exits==nil then return nil,err end
+  return normalizeOrdinaryExits(exits)
+end
+
+local function specialLineKey(command)
+  return SPECIAL_LINE_PREFIX..command:gsub(".",function(c) return string.format("%02x",string.byte(c)) end)
+end
+
+-- Version 1 owns only a single endpoint, dot style and no arrow. Never load or
+-- execute metadata/commands as Lua; unknown versions remain somebody else's data.
+local function decodeSpecialLine(value)
+  if value=="" then return nil end
+  if #value>256 then return {protected=true} end
+  local suppressed=value:match("^1|suppressed|(%d+)$")
+  if suppressed then return {suppressed=true,to=positiveInteger(suppressed)} end
+  local to,x,y,r,g,b=value:match("^1|active|(%d+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)$")
+  local record={to=positiveInteger(to),x=finiteNumber(x),y=finiteNumber(y),r=finiteNumber(r),g=finiteNumber(g),b=finiteNumber(b)}
+  if not record.to or not record.x or not record.y then return {protected=true} end
+  for _,key in ipairs({"r","g","b"}) do local n=record[key]; if not n or n%1~=0 or n<0 or n>255 then return {protected=true} end end
+  return record
+end
+
+local function encodeSpecialLine(to,x,y,color)
+  return table.concat({"1","active",tostring(to),string.format("%.17g",x),string.format("%.17g",y),color[1],color[2],color[3]},"|")
+end
+
+local function specialLineMatches(line,record)
+  if not record or record.protected or record.suppressed or type(line)~="table" then return false end
+  local points,attributes=line.points,line.attributes
+  if type(points)~="table" or next(points)~=0 or next(points,0)~=nil or type(points[0])~="table" or type(attributes)~="table" then return false end
+  local color=attributes.color
+  return attributes.style=="dot line" and attributes.arrow==false and type(color)=="table"
+    and color.r==record.r and color.g==record.g and color.b==record.b
+    and points[0].x==record.x and points[0].y==record.y
 end
 
 local function normalizeCommand(value)
@@ -212,7 +268,7 @@ function MapAdapter:getRoom(roomID)
   local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil and not absentUserData(ownerErr) then return nil,ownerErr end
   if owner~=self.owner then return {id=id,owner=tostring(owner or "")~="" and tostring(owner) or "personal"} end
   local record,recordErr=self:roomRecord(id); if not record then return nil,recordErr end
-  local exits,exitsErr=read(self.api,"getRoomExits",id); if exits==nil then return nil,exitsErr end; if type(exits)~="table" then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
+  local exits,exitsErr=readRoomExits(self.api,id); if exits==nil then return nil,exitsErr end
   local special,specialErr=read(self.api,"getSpecialExits",id,true); if special==nil then return nil,specialErr end; if type(special)~="table" then return nil,"Mudlet mapper API getSpecialExits returned invalid data" end
   local ordinary={}; for direction,to in pairs(exits) do if positiveInteger(to) then ordinary[#ordinary+1]={direction=tostring(direction):lower(),to=positiveInteger(to)} end end
   table.sort(ordinary,function(a,b) return a.direction==b.direction and a.to<b.to or a.direction<b.direction end)
@@ -234,12 +290,20 @@ function MapAdapter:putRoom(room)
   local id=positiveInteger(room.id); if not id then return nil,"room ID must be a positive integer" end
   local exists,existsErr=read(self.api,"roomExists",id); if exists==nil then return nil,existsErr end
   if exists then local owner,ownerErr=read(self.api,"getRoomUserData",id,"dghud.owner"); if owner==nil and ownerErr~=nil then return nil,ownerErr end; if owner~=self.owner then return nil,"room "..id.." belongs to another mapper" end end
+  local wanted={}
+  for _,entry in ipairs(room.exits or {}) do
+    local direction=type(entry)=="table" and ordinaryDirection(entry.direction)
+    local to=type(entry)=="table" and positiveInteger(entry.to)
+    if not direction or not to then return nil,"room transfer has an invalid ordinary exit" end
+    if wanted[direction] and wanted[direction]~=to then return nil,"ordinary exit aliases have conflicting destinations for "..direction end
+    wanted[direction]=to
+  end
+  local current={}
+  if exists then local currentErr; current,currentErr=readRoomExits(self.api,id); if not current then return nil,currentErr end end
   local partition=tostring(room.partition or room.area or "unknown"); local area,areaErr=self:ensureArea(partition); if not area then return nil,areaErr end
   if not exists then local added,addErr=invoke(self.api,"addRoom",id); if not added then return nil,addErr end end
   local operations={{"setRoomUserData",id,"dghud.owner",self.owner},{"setRoomUserData",id,"dghud.state","provisional"},{"setRoomUserData",id,"dghud.mapper_schema",self.schema},{"setRoomUserData",id,"dghud.environment",tostring(room.environment or "")},{"setRoomUserData",id,"dghud.flags",table.concat(room.flags or {},",")},{"setRoomUserData",id,"dghud.room_name",tostring(room.name or "")},{"setRoomUserData",id,"dghud.partition",partition},{"setRoomUserData",id,"dghud.game_area",tostring(room.area or "unknown")},{"setRoomUserData",id,"dghud.poi_tags",table.concat(room.poi or {},",")},{"setRoomUserData",id,"dghud.stash_owner",tostring(room.stash_owner or "")},{"setRoomUserData",id,"dghud.derived_from_artifact",tostring(room.derived_from and room.derived_from.artifact_id or "")},{"setRoomUserData",id,"dghud.derived_from_author",tostring(room.derived_from and room.derived_from.author or "")},{"setRoomUserData",id,"dghud.derived_from_publisher",tostring(room.derived_from and room.derived_from.publisher or "")},{"setRoomUserData",id,"dghud.derived_from_slug",tostring(room.derived_from and room.derived_from.slug or "")},{"setRoomUserData",id,"dghud.derived_from_verified","false"},{"setRoomUserData",id,"dghud.library_readonly",room.read_only and "true" or "false"},{"setRoomArea",id,area},{"setRoomCoordinates",id,tonumber(room.x) or 0,tonumber(room.y) or 0,tonumber(room.z) or 0},{"setRoomName",id,""}}
   for _,operation in ipairs(operations) do local ok,operationErr=invoke(self.api,unpackValues(operation)); if not ok then return nil,operationErr end end
-  local wanted={}; for _,entry in ipairs(room.exits or {}) do wanted[tostring(entry.direction):lower()]=positiveInteger(entry.to) end
-  local current,currentErr=read(self.api,"getRoomExits",id); if current==nil then return nil,currentErr end
   for direction in pairs(current) do if wanted[tostring(direction):lower()]==nil then local removed,removeErr=invoke(self.api,"setExit",id,-1,direction); if not removed then return nil,removeErr end end end
   for direction,to in pairs(wanted) do local linked,linkErr=invoke(self.api,"setExit",id,to,direction); if not linked then return nil,linkErr end end
   local oldSpecial,oldSpecialErr=read(self.api,"getSpecialExits",id,true); if oldSpecial==nil then return nil,oldSpecialErr end
@@ -502,7 +566,7 @@ function MapAdapter:scanInboundBatch(scan,deleting,limit)
     if not source or type(name)~="string" then return nil,nil,"Mudlet mapper API getRooms returned invalid data" end
     inspected=inspected+1
     if not deleting[source] then
-      local ordinary,ordinaryErr=read(self.api,"getRoomExits",source)
+      local ordinary,ordinaryErr=readRoomExits(self.api,source)
       if ordinary==nil then return nil,nil,ordinaryErr or "Mudlet mapper API getRoomExits failed" end
       if type(ordinary)~="table" then return nil,nil,"Mudlet mapper API getRoomExits returned invalid data" end
       local special,specialErr=read(self.api,"getSpecialExits",source,true)
@@ -539,7 +603,7 @@ function MapAdapter:inboundSources(roomIDs)
   end
   local inbound={}
   for source in pairs(existing) do
-    local ordinary,ordinaryErr=read(self.api,"getRoomExits",source)
+    local ordinary,ordinaryErr=readRoomExits(self.api,source)
     if ordinary==nil then return nil,ordinaryErr or "Mudlet mapper API getRoomExits failed" end
     if type(ordinary)~="table" then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
     local special,specialErr=read(self.api,"getSpecialExits",source,true)
@@ -749,7 +813,7 @@ function MapAdapter:validateRouteStep(fromID,toID,command)
   if not self:isOwned(from) or not self:isOwned(to) then return nil,"route endpoints are not owned by DragonsGateHUD" end
   local direction=MapperModel.direction(command)
   if direction then
-    local exits,exitsErr=read(self.api,"getRoomExits",from)
+    local exits,exitsErr=readRoomExits(self.api,from)
     if exits==nil then return nil,exitsErr end
     if type(exits)~="table" then return nil,"Mudlet mapper API getRoomExits returned invalid data" end
     if positiveInteger(exits[direction])==to then return true,direction end
@@ -781,6 +845,205 @@ function MapAdapter:connectSpecial(fromID,toID,command)
   local added,addErr=invoke(self.api,"addSpecialExit",from,to,normalized)
   if added==nil then return nil,addErr end
   return true
+end
+
+-- Rendering is deliberately separate from graph persistence. Always return a
+-- stats table: an unavailable/failed cosmetic API must not stop the HUD.
+function MapAdapter:syncSpecialExitLines(roomID,options)
+  local stats={scanned=0,special_edges=0,created=0,updated=0,preserved=0,skipped=0,unchanged=0,errors={},noop=true}
+  local function stop(message,isError)
+    stats.reason=message; stats.skipped=stats.skipped+1
+    if isError then stats.errors[#stats.errors+1]=message end
+    return stats
+  end
+  if options==nil then options={} end
+  if type(options)~="table" then return stop("special-line options must be a table",true) end
+  if options.read_only or options.editable==false then return stop("map is read-only") end
+  local id=positiveInteger(roomID)
+  if not id then return stop("current room ID must be a positive integer",true) end
+  local maxRooms=positiveInteger(options.max_rooms or 1000)
+  local maxEdges=positiveInteger(options.max_edges or 4096)
+  if not maxRooms or not maxEdges then return stop("special-line limits must be positive integers",true) end
+  maxRooms=math.min(maxRooms,1000); maxEdges=math.min(maxEdges,4096)
+  local color=options.color or {80,180,190}
+  if type(color)~="table" then return stop("special-line color must contain three RGB integers",true) end
+  local components=0
+  for key,value in pairs(color) do
+    components=components+1
+    if components>3 or (key~=1 and key~=2 and key~=3) or type(value)~="number" or not finiteNumber(value) or value%1~=0 or value<0 or value>255 then
+      return stop("special-line color must contain three RGB integers",true)
+    end
+  end
+  if components~=3 then return stop("special-line color must contain three RGB integers",true) end
+  color={color[1],color[2],color[3]}
+  local api=self.api
+  local function capable(name)
+    if type(api[name])~="function" then return false end
+    if type(api.hasCapability)=="function" then local ok,available=pcall(api.hasCapability,name); return ok and available==true end
+    return true
+  end
+  for _,name in ipairs({"roomExists","getRoomArea","getAreaRooms1","getRoomCoordinates","getRoomUserData","setRoomUserData","getSpecialExits","getCustomLines","addCustomLine"}) do
+    if not capable(name) then stats.unavailable=name; return stop("Mudlet mapper API "..name.." is unavailable") end
+  end
+  local area,areaErr=read(api,"getRoomArea",id)
+  if not positiveInteger(area) then return stop(areaErr or "current room has no valid mapper area",true) end
+  stats.area=area
+  local values,listErr=read(api,"getAreaRooms1",area)
+  if type(values)~="table" then return stop(listErr or "invalid mapper area room list",true) end
+  local ids,seen,count={},{},0
+  for _,value in pairs(values) do
+    count=count+1
+    if count>maxRooms then stats.limited=true; return stop("special-line room limit exceeded") end
+    local room=positiveInteger(value)
+    if not room then return stop("invalid mapper area room ID",true) end
+    if not seen[room] then seen[room]=true; ids[#ids+1]=room end
+  end
+  if not seen[id] then return stop("current room is absent from its mapper area",true) end
+  table.sort(ids)
+
+  local function userData(room,key)
+    local value,err=read(api,"getRoomUserData",room,key)
+    if value==nil and err and not absentUserData(err) then return nil,err end
+    if value==nil then return "" end
+    if type(value)~="string" then return nil,"invalid special-line room metadata" end
+    return value
+  end
+  local function inspect(room,peer,edgeBudget)
+    local record={id=room,commands={},metadata={},custom={},edge_count=0,writable=false}
+    local exists,err=read(api,"roomExists",room)
+    if exists==nil then return nil,err or "could not inspect special-line room" end
+    if not exists then return record end
+    local owner,ownerErr=userData(room,"dghud.owner"); if owner==nil then return nil,ownerErr end
+    if owner~=self.owner then return record end
+    local state,stateErr=userData(room,"dghud.state"); if state==nil then return nil,stateErr end
+    local readonly,readonlyErr=userData(room,"dghud.library_readonly"); if readonly==nil then return nil,readonlyErr end
+    if readonly=="true" or (state~="" and state~="ready") then return record end
+    local nativeArea,nativeErr=read(api,"getRoomArea",room)
+    if nativeArea==nil then return nil,nativeErr or "could not inspect special-line area" end
+    if nativeArea~=area then return record end
+    local x,y,z=read(api,"getRoomCoordinates",room)
+    if x==nil then return nil,y or "could not inspect special-line coordinates" end
+    record.x,record.y,record.z=finiteNumber(x),finiteNumber(y),finiteNumber(z)
+    if not record.x or not record.y or not record.z or record.z%1~=0 then return record end
+    local custom,customErr=read(api,"getCustomLines",room)
+    if type(custom)~="table" then return nil,customErr or "invalid custom-line inspection result" end
+    record.custom=custom
+    local special,specialErr=read(api,"getSpecialExits",room,true)
+    if type(special)~="table" then return nil,specialErr or "invalid special-exit inspection result" end
+    -- Revalidation reads only this pair's command metadata, rather than every
+    -- outgoing command again for each neighbour of a busy room.
+    if peer then special={[peer]=special[peer],[tostring(peer)]=special[tostring(peer)]} end
+    local destinations=0
+    for destination,commands in pairs(special) do
+      destinations=destinations+1
+      if destinations>maxEdges then return nil,"special-line edge limit exceeded",true end
+      local to=positiveInteger(destination)
+      if not to or type(commands)~="table" then return nil,"invalid special-exit destination data" end
+      for command in pairs(commands) do
+        record.edge_count=record.edge_count+1
+        if record.edge_count>(edgeBudget or maxEdges) then return nil,"special-line edge limit exceeded",true end
+        -- Commands are opaque data, never executable Lua or game sends. Numeric
+        -- and direction-like keys would select Mudlet's ordinary exit slots.
+        if type(command)=="string" and #command<=160 and command:find("%S") and not command:find("[%z\1-\31\127]") and not ordinaryDirection(command) and not tonumber(command) then
+          if record.commands[command] and record.commands[command]~=to then return nil,"special exit command has conflicting destinations" end
+          record.commands[command]=to
+          local metadata,metadataErr=userData(room,specialLineKey(command))
+          if metadata==nil then return nil,metadataErr end
+          record.metadata[command]=metadata
+        end
+      end
+    end
+    record.writable=true
+    return record
+  end
+
+  -- Complete the bounded inspection, including every ownership record, before
+  -- the first custom-line or metadata write. A late read failure writes nothing.
+  local rooms,groups={},{}
+  for _,room in ipairs(ids) do
+    local record,err,limited=inspect(room,nil,maxEdges-stats.special_edges)
+    if not record then stats.limited=limited; return stop(err,not limited) end
+    rooms[room]=record; stats.scanned=stats.scanned+1
+    stats.special_edges=stats.special_edges+record.edge_count
+    if stats.special_edges>maxEdges then stats.limited=true; return stop("special-line edge limit exceeded") end
+  end
+  if not rooms[id].writable then return stop("current room is not editable HUD map data") end
+  for _,from in ipairs(ids) do
+    local source=rooms[from]
+    for command,to in pairs(source.commands) do
+      local target=rooms[to]
+      if target and target.writable and from~=to and source.z==target.z and (source.x~=target.x or source.y~=target.y) then
+        local key=tostring(math.min(from,to))..":"..tostring(math.max(from,to))
+        groups[key]=groups[key] or {}
+        groups[key][#groups[key]+1]={from=from,to=to,command=command}
+      else stats.skipped=stats.skipped+1 end
+    end
+  end
+  local keys={}; for key in pairs(groups) do keys[#keys+1]=key end; table.sort(keys)
+  local function unchangedCommands(a,b,peer)
+    for key,to in pairs(a) do if to==peer and b[key]~=to then return false end end
+    for key,to in pairs(b) do if to==peer and a[key]~=to then return false end end
+    return true
+  end
+  local function saveMetadata(edge,value)
+    local saved,err=invoke(api,"setRoomUserData",edge.from,specialLineKey(edge.command),value)
+    if not saved then stats.errors[#stats.errors+1]=err or "could not save special-line ownership" end
+    return saved
+  end
+  for _,key in ipairs(keys) do
+    local edges=groups[key]
+    table.sort(edges,function(a,b) return a.from==b.from and a.command<b.command or a.from<b.from end)
+    -- Recheck both endpoints immediately before mutation. In particular, a
+    -- manual edit between preflight and drawing must never be overwritten.
+    local fresh,stale={},false
+    for _,room in ipairs({edges[1].from,edges[1].to}) do
+      local peer=room==edges[1].from and edges[1].to or edges[1].from
+      local record,err=inspect(room,peer)
+      local before=rooms[room]
+      if not record or not record.writable or record.x~=before.x or record.y~=before.y or record.z~=before.z or not unchangedCommands(record.commands,before.commands,peer) then
+        stale=true; stats.errors[#stats.errors+1]=err or "map changed after special-line preflight"; break
+      end
+      fresh[room]=record
+    end
+    if stale then stats.skipped=stats.skipped+1 else
+      local protected,managed,suppress=false,nil,{}
+      for _,edge in ipairs(edges) do
+        local source=fresh[edge.from]
+        local line,record=source.custom[edge.command],decodeSpecialLine(source.metadata[edge.command])
+        if record and (record.protected or record.suppressed or record.to~=edge.to) then protected=true
+        elseif record and not specialLineMatches(line,record) then
+          protected=true; suppress[#suppress+1]=edge
+        elseif line~=nil then
+          if not record then protected=true
+          elseif managed then protected=true -- Preserve unexpected pre-existing duplicates.
+          else managed=edge end
+        end
+      end
+      for _,edge in ipairs(suppress) do saveMetadata(edge,"1|suppressed|"..tostring(edge.to)) end
+      if protected then stats.preserved=stats.preserved+1 else
+        local edge=managed or edges[1]
+        local target=fresh[edge.to]
+        local metadata=encodeSpecialLine(edge.to,target.x,target.y,color)
+        local desired=decodeSpecialLine(metadata)
+        if specialLineMatches(fresh[edge.from].custom[edge.command],desired) then stats.unchanged=stats.unchanged+1 else
+          local added,err=invoke(api,"addCustomLine",edge.from,edge.to,edge.command,"dot line",color,false)
+          if not added then stats.errors[#stats.errors+1]=err or "could not draw special-exit line" else
+            stats.noop=false
+            if managed then stats.updated=stats.updated+1 else stats.created=stats.created+1 end
+            local after,afterErr=read(api,"getCustomLines",edge.from)
+            if type(after)~="table" or not specialLineMatches(after[edge.command],desired) then
+              stats.errors[#stats.errors+1]=afterErr or "special-line readback did not match; ownership was not claimed"
+            else saveMetadata(edge,metadata) end
+          end
+        end
+      end
+    end
+  end
+  if not stats.noop and capable("updateMap") then
+    local refreshed,err=invoke(api,"updateMap")
+    if not refreshed then stats.errors[#stats.errors+1]=err or "could not refresh special-exit lines" end
+  end
+  return stats
 end
 
 function MapAdapter:setCurrent(roomID)
@@ -931,6 +1194,7 @@ end
 function MapAdapter.mudletApi(globals)
   globals=globals or _G
   local api={}
+  api.hasCapability=function(name) return type(globals[name])=="function" or (name=="roomExists" and type(globals.getRoomName)=="function") end
   local names={"addRoom","deleteRoom","addAreaName","deleteArea","setAreaName","getAreaTable","getAreaRooms1","getMapLabels","setAreaUserData","getAreaUserData","setRoomArea","getRoomArea","setRoomName","setRoomCoordinates","setRoomUserData","getRoomUserData","setExitStub","setExit","getRoomExits","addSpecialExit","removeSpecialExit","getSpecialExits","getRoomCoordinates","getRooms","getRoomsByPosition","getAllMapUserData","setMapUserData","getMapZoom","setMapZoom","setRoomIDbyHash","centerview","updateMap","tempTimer"}
   local function wrapper(name)
     return function(...)
@@ -952,10 +1216,17 @@ function MapAdapter.mudletApi(globals)
         if type(fn)~="function" then return missing(name) end
         local ok,a,b,c=pcall(fn,...)
         if not ok then return nil,"Mudlet mapper API "..name.." failed: "..tostring(a) end
+        if name=="getRoomExits" and a~=nil then
+          local normalized,err=normalizeOrdinaryExits(a); if not normalized then return nil,err end
+          return normalized,b,c
+        end
         return a,b,c
       end
     end
   end
+  api.addCustomLine=wrapper("addCustomLine")
+  api.removeCustomLine=wrapper("removeCustomLine")
+  api.getCustomLines=function(...) return read(globals,"getCustomLines",...) end
   api.getPath=function(fromID,toID)
     local fn=globals.getPath
     if type(fn)~="function" then return missing("getPath") end

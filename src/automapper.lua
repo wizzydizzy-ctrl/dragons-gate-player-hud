@@ -4,6 +4,12 @@ local function trim(value)
   return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
+local readOnlyCommands={[""]=true,look=true,l=true,inventory=true,inv=true,i=true,stat=true,info=true,skill=true,time=true,who=true}
+local function isReadOnlyCommand(value)
+  if value:find("[;%c]") then return false end
+  return readOnlyCommands[value]==true or value:match("^info%s+%S")~=nil
+end
+
 local function contains(values,wanted)
   for _,value in ipairs(values or {}) do if value==wanted then return true end end
   return false
@@ -27,6 +33,8 @@ function Automapper:onOutgoing(command)
   local value=trim(command)
   local classified=value:lower()
   local direction=self.model.direction(classified)
+  -- Read-only requests do not acknowledge or replace an in-flight direction.
+  if self.current_id and self.pending and self.pending.direction and isReadOnlyCommand(classified) then return nil end
   if direction and self.current_id then
     if self.pending and self.pending.direction then
       self.direction_queue[#self.direction_queue+1]=direction

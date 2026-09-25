@@ -300,6 +300,55 @@ test("additional directional movement queues behind the pending movement",functi
   eq(mapper.pending.from,100); eq(mapper.pending.direction,"n"); eq(mapper.direction_queue[1],"e")
 end)
 
+test("read-only commands preserve directional intent and queued arrivals",function()
+  local commands={"","  ","look","l","inventory","inv","i","stat","info","info mag","info magic","info stats","skill","time","who","  LOOK  ","INFO MAGIC"}
+  for _,command in ipairs(commands) do
+    local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end)
+    assert(mapper:onRoom(room(100)))
+    mapper:onOutgoing("n"); eq(mapper:onOutgoing(command),nil); mapper:onOutgoing("e")
+    eq(mapper:onOutgoing(command),nil)
+    assert(mapper:onRoom(room(100)))
+    eq(mapper.pending.from,100); eq(mapper.pending.direction,"n"); eq(#mapper.direction_queue,1); eq(mapper.direction_queue[1],"e")
+    eq(#map.links,0)
+    assert(mapper:onRoom(room(101)))
+    eq(mapper.pending.from,101); eq(mapper.pending.direction,"e"); eq(#mapper.direction_queue,0)
+    mapper:onOutgoing(command); assert(mapper:onRoom(room(101))); eq(#map.links,1)
+    assert(mapper:onRoom(room(102)))
+    eq(#map.links,2); eq(map.links[1].from,100); eq(map.links[1].to,101); eq(map.links[1].direction,"n")
+    eq(map.links[2].from,101); eq(map.links[2].to,102); eq(map.links[2].direction,"e")
+    eq(map.links[1].reverse,false); eq(map.links[2].reverse,false); eq(#map.special,0)
+    eq(mapper.pending,nil); eq(#mapper.direction_queue,0)
+  end
+end)
+
+test("unknown special and chained commands still clear directional intent",function()
+  for _,command in ipairs({"go door","go store","enter portal","say north","dance","information","look north","info magic;n","info magic\nn","info magic\rgo door","info magic\0n"}) do
+    local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end)
+    assert(mapper:onRoom(room(100))); mapper:onOutgoing("n"); mapper:onOutgoing("e")
+    eq(mapper:onOutgoing(command),nil); eq(mapper.pending,nil); eq(#mapper.direction_queue,0)
+    assert(mapper:onRoom(room(101))); eq(#map.links,0); eq(#map.special,0)
+  end
+end)
+
+test("read-only commands neither create intent nor preserve a pending special transition",function()
+  local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end)
+  assert(mapper:onRoom(room(100))); mapper:onOutgoing("look")
+  eq(mapper.pending,nil); eq(#mapper.direction_queue,0)
+  assert(mapper:onSpecialTransition({from=100,to=900,command="go door",kind="special"}))
+  mapper:onOutgoing("look"); eq(mapper.pending,nil); eq(#mapper.direction_queue,0)
+  assert(mapper:onRoom(room(900))); eq(#map.links,0); eq(#map.special,0)
+end)
+
+test("outgoing commands before a current room retain their original clearing behavior",function()
+  for _,command in ipairs({"n","look","info magic","","go door"}) do
+    local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end)
+    mapper.pending={from=100,direction="n"}; mapper.direction_queue={"e"}
+    eq(mapper:onOutgoing(command),Model.direction(command))
+    eq(mapper:currentRoom(),nil); eq(mapper.pending,nil); eq(#mapper.direction_queue,0)
+    eq(#map.links,0); eq(#map.rooms,0)
+  end
+end)
+
 test("rapid directional commands are consumed in GMCP room order",function()
   local map=fakeMap(); local mapper=Automapper.new(Model,map,function() end)
   assert(mapper:onRoom(room(100,"Start",1,{"north"})))

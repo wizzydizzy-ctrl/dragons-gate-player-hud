@@ -69,13 +69,52 @@ test("normal commands never arm a special transition",function()
   eq(tracker:pending(),nil); eq(adapter:timerCount(),0)
 end)
 
-test("accepts conservative traversal verbs and the four special go nouns",function()
+test("accepts conservative traversal verbs and named go objects",function()
   local accepted={"go gate","go the door","go through portal","go crumbling iron arch","go path","enter tunnel","leave","climb rope","crawl passage","cross bridge","board ferry","disembark"}
   for _,command in ipairs(accepted) do
     local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,12)
     assert(tracker:onOutgoing(command,100),command)
     eq(adapter.timers[tracker.timer].delay,12)
   end
+end)
+
+test("TG shop hole and abbreviated travel commands require a changed room ID",function()
+  for _,command in ipairs({"go store","go shop","go pawnshop","go pawn","go tav","go exit","go hole","go drain","go stairs","go 2 door"}) do
+    local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,12)
+    assert(tracker:onOutgoing(command,10542),command)
+    eq(tracker:onRoom(10542),nil)
+    local transition=assert(tracker:onRoom(10538))
+    eq(transition.command,command); eq(transition.from,10542); eq(transition.to,10538)
+    eq(transition.category,command=="go 2 door" and "door" or "other")
+    eq(tracker:onRoom(10542),nil) -- no unobserved return link
+  end
+end)
+
+test("failed or expired GO object attempts never create a connection",function()
+  local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,12)
+  assert(tracker:onOutgoing("go store",10538))
+  assert(tracker:onLine("I don't see what you are referring to."))
+  eq(tracker:onRoom(9006),nil)
+  assert(tracker:onOutgoing("go fount",10542)); eq(tracker:onRoom(10542),nil)
+  adapter:fireOnlyTimer(); eq(tracker:onRoom(9006),nil)
+end)
+
+test("empty GO and command chains cannot become saved map commands",function()
+  local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,12)
+  for _,command in ipairs({"go","go ","go door;west","go door\nwest","go "..string.rep("a",161)}) do
+    eq(tracker:onOutgoing(command,10542),nil); eq(tracker:pending(),nil)
+  end
+end)
+
+test("read-only refresh commands do not steal or extend a pending GO transition",function()
+  local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,12)
+  assert(tracker:onOutgoing("go store",10542)); local timer=tracker.timer
+  for _,command in ipairs({"look","info","info religion","inventory","skill","time","who",""}) do
+    eq(tracker:onOutgoing(command,10542),nil); eq(tracker.timer,timer); eq(adapter.nextTimer,1)
+  end
+  local transition=assert(tracker:onRoom(10538)); eq(transition.command,"go store")
+  assert(tracker:onOutgoing("go exit",10538)); tracker:onOutgoing("look",10538)
+  adapter:fireOnlyTimer(); eq(tracker:onRoom(10542),nil)
 end)
 
 test("supports explicit extra travel patterns without broadening defaults",function()
@@ -101,6 +140,19 @@ test("known failed traversal output cancels before unrelated movement",function(
     local adapter=fakeTimerAdapter(); local tracker=Special.new(MapperModel,adapter,12)
     assert(tracker:onOutgoing("go gate",100)); assert(tracker:onLine(line)); eq(tracker:pending(),nil); eq(tracker:onRoom(900),nil)
   end
+end)
+
+test("failed travel after a prompt or ANSI colors cannot attach a later room",function()
+  for _,prefix in ipairs({"","> ","[0] 100/100 hp, 100/100 ftg> ","\27[31m[10538] 301/301 hp, 173/173 ftg >\27[0m"}) do
+    local tracker=Special.new(MapperModel,fakeTimerAdapter(),12)
+    assert(tracker:onOutgoing("go store",10542))
+    assert(tracker:onLine(prefix.."I don't see what you are referring to."))
+    eq(tracker:pending(),nil); eq(tracker:onRoom(999),nil)
+  end
+  local tracker=Special.new(MapperModel,fakeTimerAdapter(),12)
+  assert(tracker:onOutgoing("go store",10542))
+  eq(tracker:onLine('Someone says, "I don\'t see what you are referring to."'),nil)
+  assert(tracker:pending())
 end)
 
 test("replacement disconnect and cancellation failures clear candidate ownership",function()

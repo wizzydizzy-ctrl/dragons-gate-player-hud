@@ -59,6 +59,51 @@ test("walker clears a roundtime pause safely on stop",function()
   assert(walker:onRoundtime(0)); eq(#adapter.sent,1)
 end)
 
+test("repeated room refreshes during roundtime cannot complete an unsent step",function()
+  local adapter=fakeAdapter(); local statuses={}
+  local walker=Walker.new(adapter,function(kind) statuses[#statuses+1]=kind end)
+  assert(walker:start({rooms={1,2,3},commands={"n","e"}},3))
+  walker:onRoundtime(4); assert(walker:onRoom(2))
+  for _=1,3 do
+    assert(walker:onRoom(2)); eq(walker:active(),true); eq(walker.index,2)
+    eq(walker.origin,2); eq(walker.expected,nil); eq(walker.timeout,nil); eq(#adapter.sent,1)
+    eq(statuses[#statuses],"paused")
+  end
+  eq(#adapter.canceled,1); eq(adapter.nextTimer,1)
+  assert(walker:onRoundtime(0)); assert(walker:onRoundtime(0))
+  eq(#adapter.sent,2); eq(adapter.sent[2].command,"e"); eq(walker.expected,3); eq(adapter.nextTimer,2)
+  local timer=walker.timeout; assert(walker:onRoom(2)); eq(walker.timeout,timer)
+  assert(walker:onRoom(3)); eq(walker:active(),false); eq(statuses[#statuses],"arrived"); eq(#adapter.canceled,2)
+end)
+
+test("an initially paused route ignores current-room refreshes until its first send",function()
+  local adapter=fakeAdapter(); local walker=Walker.new(adapter,function() end)
+  walker:onRoundtime(4); assert(walker:start({rooms={1,2},commands={"n"}},2))
+  for _=1,3 do
+    assert(walker:onRoom(1)); eq(walker:active(),true); eq(walker.index,1)
+    eq(walker.origin,1); eq(walker.expected,nil); eq(walker.timeout,nil)
+  end
+  eq(#adapter.sent,0); eq(adapter.nextTimer,0)
+  assert(walker:onRoundtime(0)); eq(#adapter.sent,1); eq(adapter.sent[1].command,"n"); eq(walker.expected,2)
+  assert(walker:onRoom(2)); eq(walker:active(),false)
+end)
+
+test("paused routes reject other rooms or invalid updates without acknowledging an unsent step",function()
+  for _,initialPause in ipairs({true,false}) do
+    for _,update in ipairs({{room=3},{room="invalid"},{}}) do
+      local adapter=fakeAdapter(); local statuses={}
+      local walker=Walker.new(adapter,function(kind) statuses[#statuses+1]=kind end)
+      if initialPause then walker:onRoundtime(4) end
+      assert(walker:start({rooms={1,2,3},commands={"n","e"}},3))
+      if not initialPause then walker:onRoundtime(4); assert(walker:onRoom(2)) end
+      local sent=initialPause and 0 or 1
+      assert(walker:onRoom(update.room))
+      eq(walker:active(),false); eq(#adapter.sent,sent); eq(statuses[#statuses],"stopped")
+      assert(walker:onRoundtime(0)); eq(#adapter.sent,sent)
+    end
+  end
+end)
+
 test("walker ignores same-origin room refresh while awaiting destination",function()
   local adapter=fakeAdapter(); local walker=Walker.new(adapter,function() end)
   assert(walker:start({rooms={176,177},commands={"ne"}},177)); local timer=walker.timeout

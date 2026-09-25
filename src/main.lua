@@ -73,7 +73,7 @@ function Main:switchMapCollection(id)
   if self.map and self.map.resetMapContext then self.map:resetMapContext() end
   self.map_collections:setActive(target.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then return restore(indexErr) end
   if self.automapper then self.automapper:onDisconnect(); local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info; if info then self.automapper:onRoom(info) end end
-  self:refresh(); return self.map_collections:active()
+  self:syncMapSpecialLines(true); self:refresh(); return self.map_collections:active()
 end
 function Main:createMapCollection(name,source)
   local saved,err=self:saveActiveMapCollection(); if not saved then return nil,err end
@@ -122,7 +122,7 @@ function Main:installDownloadedCollection(entry,model,name)
   local policies={default="use_imported",rooms={}}; local plan,previewErr=self.map_transfer:preview(model,policies); local result,applyErr=plan and self.map_transfer:apply(plan,self:mapTransferCreator())
   if not result then return rollback(previewErr or applyErr) end
   local metadata,snapshotErr=self.adapter:saveMapCollection(item.id); if not metadata then return rollback(snapshotErr) end
-  self.map_collections:updateSnapshot(item.id,metadata); self.map_collections:setActive(item.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:deleteMapCollection(item.id); return rollback(indexErr) end; self:presentMapCollections("Downloaded as a separate editable map: "..item.name); return item
+  self.map_collections:updateSnapshot(item.id,metadata); self.map_collections:setActive(item.id); local indexed,indexErr=self:saveMapCollectionIndex(); if not indexed then self.adapter:deleteMapCollection(item.id); return rollback(indexErr) end; self:syncMapSpecialLines(true); self:presentMapCollections("Downloaded as a separate editable map: "..item.name); return item
 end
 function Main:downloadLibraryCollection(entry,replaceCurrent)
   if type(entry)~="table" then return nil,"select a shared map first" end
@@ -284,7 +284,9 @@ function Main:refresh()
   local signature=(normalized.vitals.psi.visible and "1" or "0")..(normalized.vitals.web.visible and "1" or "0")
   self.last_state=normalized
   if signature~=self.layout_vitals_signature then self:applyResponsiveLayout(normalized) end
-  self.view:update(normalized); Main.syncRunesApi(normalized); if self.chat then self.chat:syncCharacter() end; return true
+  self.view:update(normalized); Main.syncRunesApi(normalized); if self.chat then self.chat:syncCharacter() end
+  self:syncMapSpecialLines()
+  return true
 end
 function Main:refreshCharacterData()
   local function failed(message) if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end; return nil,message end
@@ -590,6 +592,32 @@ function Main:applyResponsiveLayout(state)
   if self.view and self.view.applyLayout then self.view:applyLayout(layout) end; return layout
 end
 function Main:mapperEnabled() return not (self.settings.mapper and self.settings.mapper.enabled==false) end
+function Main:syncMapSpecialLines(force)
+  -- Decorative lines must never stop the HUD or rewrite the travel graph.
+  if not self:mapperEnabled() or self.map_collection_unsafe or not self.map or type(self.map.syncSpecialExitLines)~="function" then return true end
+  local active=self.map_collections and self.map_collections:active()
+  if active and active.editable==false then return true end
+  local room=self.automapper and self.automapper:currentRoom()
+  if not room then return true end
+  local collection=active and active.id or false
+  if not force and self.special_lines_map==self.map and self.special_lines_collection==collection and self.special_lines_room==room then return true end
+  self.special_lines_map=self.map; self.special_lines_collection=collection; self.special_lines_room=room
+  local called,stats,err=pcall(self.map.syncSpecialExitLines,self.map,room,{max_rooms=1000,max_edges=4096,color={80,180,190}})
+  if not called then err=stats; stats=nil end
+  self.special_lines_stats=stats
+  local errors=type(stats)=="table" and stats.errors
+  local errorCount=type(errors)=="table" and #errors or (tonumber(errors) or 0)
+  if type(stats)~="table" or errorCount>0 then
+    local message=tostring(err or "Some special-exit lines could not be drawn; saved routes are unchanged.")
+    if message~=self.special_lines_error then
+      self.special_lines_error=message
+      pcall(self.mapperStatus,self,"warning",message,true)
+    end
+    return nil,message
+  end
+  self.special_lines_error=nil
+  return true
+end
 function Main:setMapperEnabled(enabled)
   enabled=enabled==true
   local wasEnabled=self:mapperEnabled()
@@ -636,7 +664,7 @@ function Main:mapToolbarAction(action)
   local current=self.automapper and self.automapper:currentRoom()
   if not current then local err="current room is unavailable"; self:mapperStatus("error",err,true); return nil,err end
   local callOk,result,err=pcall(function()
-    if action=="center" then return self.map:center(current) end
+    if action=="center" then self:syncMapSpecialLines(true); return self.map:center(current) end
     if action=="larger" or action=="smaller" then
       local settings=self.settings.mapper or {}
       return self.map:zoom(current,action,settings.zoom_step,settings.zoom_min,settings.zoom_max)
@@ -929,6 +957,7 @@ function Main:confirmMapTransfer()
     local switched,switchErr=self:switchMapCollection(created.id); if not switched then self:reportMapTransfer(switchErr,true); return nil,switchErr end; combined=created
   end
   local result,err=self.map_transfer:apply(pending.plan,self:mapTransferCreator()); if not result then self:reportMapTransfer(err,true); return nil,err end
+  self:syncMapSpecialLines(true)
   if combined then local saved,saveErr=self:saveActiveMapCollection(); if not saved then self:reportMapTransfer("Combined map was applied but could not be saved: "..tostring(saveErr),true); return nil,saveErr end end
   self.pending_map_import=nil; if self.view and self.view.setMapLibraryImportPending then self.view:setMapLibraryImportPending(false) end
   local message=(combined and ("Combined map saved as '"..combined.name.."': ") or "Map installed: ")..result.applied.." rooms added or updated, "..result.kept.." of your rooms kept, "..result.skipped.." skipped."

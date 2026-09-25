@@ -2,8 +2,13 @@ local Adapter=require("map_adapter")
 local Automapper=require("automapper")
 local Model=require("mapper_model")
 
+local function copy(value)
+  if type(value)~="table" then return value end
+  local result={}; for key,item in pairs(value) do result[key]=copy(item) end; return result
+end
+
 local function fakeMapApi(seed)
-  local api={rooms=seed or {},areas={},areaUser={},mapUser={},labels={},nextArea=1,fail={},path=nil,refreshed=0,deletedRooms={},deletedAreas={},special={},specialAdds=0,zoom={}}
+  local api={rooms=seed or {},areas={},areaUser={},mapUser={},labels={},nextArea=1,fail={},path=nil,refreshed=0,deletedRooms={},deletedAreas={},special={},specialAdds=0,zoom={},custom={},customAdds=0,customWrites={}}
   local function gate(name)
     if api.fail[name]=="throw" then error(name.." exploded") end
     if api.fail[name] then return nil,name.." rejected" end
@@ -47,7 +52,7 @@ local function fakeMapApi(seed)
     local ok,e=gate("addSpecialExit"); if not ok then return nil,e end
     api.special[from]=api.special[from] or {}; api.special[from][command]=to; api.specialAdds=api.specialAdds+1; return true
   end
-  function api.removeSpecialExit(from,command) local ok,e=gate("removeSpecialExit"); if not ok then return nil,e end; if api.special[from] then api.special[from][command]=nil end; return true end
+  function api.removeSpecialExit(from,command) local ok,e=gate("removeSpecialExit"); if not ok then return nil,e end; if api.special[from] then api.special[from][command]=nil end; if api.custom[from] then api.custom[from][command]=nil end; return true end
   function api.getSpecialExits(from,listAll)
     local ok,e=gate("getSpecialExits"); if not ok then return nil,e end
     eq(listAll,true)
@@ -56,6 +61,26 @@ local function fakeMapApi(seed)
     return grouped
   end
   function api.getRoomCoordinates(id) local ok,e=gate("getRoomCoordinates"); if not ok then return nil,e end; local r=api.rooms[id]; return r and r.x,r and r.y,r and r.z end
+  function api.getCustomLines(id)
+    local ok,e=gate("getCustomLines"); if not ok then return nil,e end
+    if not api.rooms[id] then return nil,"room does not exist" end
+    return copy(api.custom[id] or {})
+  end
+  function api.addCustomLine(from,to,command,style,color,arrow)
+    local ok,e=gate("addCustomLine"); if not ok then return nil,e end
+    if not api.rooms[from] or not api.rooms[to] then return nil,"room does not exist" end
+    if api.rooms[from].area~=api.rooms[to].area then return nil,"different mapper area" end
+    if not (api.special[from] and api.special[from][command]) and not api.rooms[from].exits[command] then return nil,"exit does not exist" end
+    api.custom[from]=api.custom[from] or {}
+    api.custom[from][command]={attributes={style=style,color={r=color[1],g=color[2],b=color[3]},arrow=arrow},points={[0]={x=api.rooms[to].x,y=api.rooms[to].y}}}
+    api.customAdds=api.customAdds+1; api.customWrites[#api.customWrites+1]={from=from,to=to,command=command,style=style,color=copy(color),arrow=arrow}
+    return true
+  end
+  function api.removeCustomLine(from,command)
+    local ok,e=gate("removeCustomLine"); if not ok then return nil,e end
+    if not api.custom[from] or not api.custom[from][command] then return nil,"custom line does not exist" end
+    api.custom[from][command]=nil; return true
+  end
   function api.getRooms() local ok,e=gate("getRooms"); if not ok then return nil,e end; local out={}; for id,r in pairs(api.rooms) do out[id]=r.name or ("Room "..id) end; return out end
   function api.getAllMapUserData() local ok,e=gate("getAllMapUserData"); if not ok then return nil,e end; local out={}; for k,v in pairs(api.mapUser) do out[k]=v end; return out end
   function api.setMapUserData(k,v) local ok,e=gate("setMapUserData"); if not ok then return nil,e end; api.mapUser[k]=v; return true end
@@ -897,4 +922,280 @@ test("production route requires both Mudlet route globals",function()
   globals.speedWalkPath={1,2}; globals.speedWalkDir=nil
   route,err=Adapter.new(Adapter.mudletApi(globals)):route(1,2)
   eq(route,nil); eq(err,"Mudlet mapper API getPath did not provide speedWalkDir")
+end)
+
+local function lineFixture()
+  local api=fakeMapApi(); local map=Adapter.new(api)
+  assert(map:ensureRoom(descriptor(1,"A"),{x=0,y=0,z=0},"A"))
+  assert(map:ensureRoom(descriptor(2,"A"),{x=2,y=0,z=0},"A"))
+  assert(map:connectSpecial(1,2,"go door"))
+  return api,map
+end
+
+local function lineMetadataKey(command)
+  return "dghud.special_line."..command:gsub(".",function(c) return string.format("%02x",string.byte(c)) end)
+end
+
+local function forbidGraphWrites(api)
+  for _,name in ipairs({"addRoom","deleteRoom","addAreaName","deleteArea","setRoomArea","setRoomCoordinates","setRoomName","setExit","setExitStub","addSpecialExit","removeSpecialExit","removeCustomLine"}) do
+    api[name]=function() error("renderer attempted "..name) end
+  end
+  local native=api.setRoomUserData
+  api.setRoomUserData=function(id,key,value) assert(key:find("dghud.special_line.",1,true)==1); return native(id,key,value) end
+  api.getRooms=function() error("renderer attempted whole-map enumeration") end
+end
+
+test("TG-shaped sparse exits draw seven dots for twelve saved links without graph writes",function()
+  local api=fakeMapApi(); local map=Adapter.new(api)
+  local edges={{38,174,"go door"},{174,38,"go door"},{173,178,"go arch"},{178,173,"go arch"},{173,6190,"go door"},{6190,173,"go door"},{216,8422,"go gate"},{8370,215,"go path"},{9441,9443,"go gate"},{9443,9441,"go gate"},{10543,10556,"go gate"},{10556,10543,"go gate"}}
+  local ids={}; for _,edge in ipairs(edges) do ids[edge[1]]=true; ids[edge[2]]=true end
+  local count=0
+  for id in pairs(ids) do count=count+1; assert(map:ensureRoom(descriptor(id,"A"),{x=count,y=0,z=0},"A")) end
+  for index=count+1,158 do assert(map:ensureRoom(descriptor(20000+index,"A"),{x=index,y=0,z=0},"A")) end
+  for _,edge in ipairs(edges) do assert(map:connectSpecial(edge[1],edge[2],edge[3])) end
+  local before=copy(api.rooms); forbidGraphWrites(api)
+  local stats=map:syncSpecialExitLines(38)
+  eq(stats.scanned,158); eq(stats.special_edges,12); eq(stats.created,7); eq(stats.updated,0); eq(#stats.errors,0); eq(stats.noop,false)
+  eq(api.customAdds,7); eq(api.specialAdds,12)
+  for _,edge in ipairs(edges) do eq(api.special[edge[1]][edge[3]],edge[2]) end
+  for id,room in pairs(api.rooms) do for _,key in ipairs({"area","x","y","z","name"}) do eq(room[key],before[id][key]) end end
+  for _,line in ipairs(api.customWrites) do eq(line.style,"dot line"); eq(line.arrow,false); eq(table.concat(line.color,","),"80,180,190") end
+  stats=Adapter.new(api):syncSpecialExitLines(38)
+  eq(stats.created,0); eq(stats.updated,0); eq(stats.unchanged,7); eq(stats.noop,true); eq(api.customAdds,7); eq(#stats.errors,0)
+end)
+
+test("special-line representative survives reverse and alternate commands after reload",function()
+  local api,map=lineFixture(); assert(map:connectSpecial(2,1,"GO Door"))
+  eq(map:syncSpecialExitLines(1).created,1)
+  assert(map:connectSpecial(1,2,"climb rope"))
+  local stats=Adapter.new(api):syncSpecialExitLines(2)
+  eq(stats.unchanged,1); eq(api.customAdds,1); assert(api.custom[1]["go door"]); eq(api.custom[1]["climb rope"],nil); eq(api.custom[2],nil)
+end)
+
+test("renderer treats confirmed travel commands as exact opaque keys",function()
+  for _,command in ipairs({"GO Shop","go pawn","go hole","go tav","go exit","climb Rope","enter  portal","cross $bridge"}) do
+    local api,map=lineFixture(); api.special[1]={}; assert(map:connectSpecial(1,2,command))
+    forbidGraphWrites(api)
+    local stats=map:syncSpecialExitLines(1)
+    eq(stats.created,1); eq(#stats.errors,0); assert(api.custom[1][command]); eq(api.customWrites[1].command,command)
+  end
+end)
+
+test("manual lines including identical dots on either exit protect the pair",function()
+  for _,source in ipairs({1,2}) do
+    local api,map=lineFixture(); assert(map:connectSpecial(2,1,"leave gate"))
+    local command=source==1 and "go door" or "leave gate"; local target=source==1 and 2 or 1
+    assert(api.addCustomLine(source,target,command,"solid line",{1,2,3},true))
+    local original=api.custom[source][command]; local stats=map:syncSpecialExitLines(1)
+    eq(stats.preserved,1); eq(stats.created,0); eq(api.custom[source][command],original); eq(api.rooms[source].user[lineMetadataKey(command)],nil)
+  end
+  local api,map=lineFixture(); assert(api.addCustomLine(1,2,"go door","dot line",{80,180,190},false))
+  eq(map:syncSpecialExitLines(1).preserved,1); eq(api.rooms[1].user[lineMetadataKey("go door")],nil)
+end)
+
+test("manual geometry style color arrow and extra points release generated ownership",function()
+  local changes={
+    function(line) line.points[0].x=44 end,
+    function(line) line.attributes.style="solid line" end,
+    function(line) line.attributes.color.r=255 end,
+    function(line) line.attributes.arrow=true end,
+    function(line) line.points[1]={x=2,y=9} end,
+  }
+  for _,change in ipairs(changes) do
+    local api,map=lineFixture(); eq(map:syncSpecialExitLines(1).created,1)
+    change(api.custom[1]["go door"]); local original=api.custom[1]["go door"]
+    local stats=Adapter.new(api):syncSpecialExitLines(1)
+    eq(stats.preserved,1); eq(stats.updated,0); eq(api.custom[1]["go door"],original)
+    eq(api.rooms[1].user[lineMetadataKey("go door")],"1|suppressed|2")
+    api.custom[1]["go door"]=nil
+    stats=Adapter.new(api):syncSpecialExitLines(1); eq(stats.created,0); eq(stats.preserved,1)
+  end
+end)
+
+test("manual deletion stays suppressed even after a reverse exit is added",function()
+  local api,map=lineFixture(); eq(map:syncSpecialExitLines(1).created,1)
+  api.custom[1]["go door"]=nil
+  eq(Adapter.new(api):syncSpecialExitLines(1).preserved,1)
+  assert(map:connectSpecial(2,1,"go gate"))
+  local stats=Adapter.new(api):syncSpecialExitLines(2)
+  eq(stats.created,0); eq(stats.preserved,1); eq(api.customAdds,1); eq(api.custom[2],nil)
+end)
+
+test("unknown malformed and different-destination ownership records are protected",function()
+  for _,value in ipairs({"2|active|2|2|0|80|180|190","bad","1|active|3|2|0|80|180|190",string.rep("x",300)}) do
+    local api,map=lineFixture(); api.rooms[1].user[lineMetadataKey("go door")]=value
+    local stats=map:syncSpecialExitLines(1)
+    eq(stats.preserved,1); eq(stats.created,0); eq(api.rooms[1].user[lineMetadataKey("go door")],value)
+  end
+end)
+
+test("unchanged managed endpoints update from saved room coordinates without reflow",function()
+  local api,map=lineFixture(); eq(map:syncSpecialExitLines(1).created,1)
+  api.rooms[2].x=7; api.rooms[2].y=3; forbidGraphWrites(api)
+  local stats=Adapter.new(api):syncSpecialExitLines(1)
+  eq(stats.updated,1); eq(stats.created,0); eq(api.custom[1]["go door"].points[0].x,7); eq(api.custom[1]["go door"].points[0].y,3)
+  eq(api.rooms[1].x,0); eq(api.rooms[1].y,0); eq(api.rooms[2].x,7); eq(api.rooms[2].y,3)
+  eq(Adapter.new(api):syncSpecialExitLines(1).unchanged,1)
+  stats=map:syncSpecialExitLines(1,{color={5,6,7}}); eq(stats.updated,1); eq(api.custom[1]["go door"].attributes.color.r,5)
+end)
+
+test("renderer completes every preflight read before any mutation",function()
+  local api,map=lineFixture(); assert(map:ensureRoom(descriptor(3,"A"),{x=3,y=0,z=0},"A"))
+  local native=api.getCustomLines
+  api.getCustomLines=function(id) if id==3 then return nil,"late inspection failure" end; return native(id) end
+  local writes=0; api.setRoomUserData=function() writes=writes+1; return true end
+  local stats=map:syncSpecialExitLines(1)
+  eq(stats.created,0); eq(api.customAdds,0); eq(writes,0); eq(stats.errors[1],"late inspection failure")
+end)
+
+test("room and aggregate edge caps preflight without partial drawings",function()
+  local api,map=lineFixture()
+  for id=3,1001 do api.rooms[id]=copy(api.rooms[2]); api.rooms[id].x=id end
+  local stats=map:syncSpecialExitLines(1,{max_rooms=5000})
+  eq(stats.limited,true); eq(api.customAdds,0); eq(stats.scanned,0)
+  api,map=lineFixture(); stats=map:syncSpecialExitLines(1,{max_rooms=1})
+  eq(stats.limited,true); eq(api.customAdds,0)
+  api,map=lineFixture(); api.special[1]={}; api.special[2]={}
+  for index=1,2050 do api.special[1]["go a"..index]=2; api.special[2]["go b"..index]=1 end
+  stats=map:syncSpecialExitLines(1,{max_edges=9999}); eq(stats.limited,true); eq(api.customAdds,0)
+  api,map=lineFixture(); api.special[1]["go gate"]=2
+  stats=map:syncSpecialExitLines(1,{max_edges=1}); eq(stats.limited,true); eq(api.customAdds,0)
+end)
+
+test("missing native and injected capabilities degrade to harmless stats",function()
+  for _,name in ipairs({"roomExists","getRoomArea","getAreaRooms1","getRoomCoordinates","getRoomUserData","setRoomUserData","getSpecialExits","getCustomLines","addCustomLine"}) do
+    local api,map=lineFixture(); api[name]=nil
+    local stats=map:syncSpecialExitLines(1)
+    eq(stats.noop,true); eq(stats.unavailable,name); eq(stats.skipped,1); eq(#stats.errors,0); eq(api.customAdds,0)
+  end
+  local stats=Adapter.new(Adapter.mudletApi({})):syncSpecialExitLines(1)
+  eq(stats.noop,true); eq(stats.skipped,1); eq(#stats.errors,0)
+  local api,map=lineFixture(); api.updateMap=nil; eq(map:syncSpecialExitLines(1).created,1)
+end)
+
+test("special-line metadata inspection is linear in edges and respects remaining budget",function()
+  local api,map=lineFixture()
+  for id=3,12 do assert(map:ensureRoom(descriptor(id,"A"),{x=id,y=0,z=0},"A")); assert(map:connectSpecial(1,id,"go gate"..id)) end
+  local native=api.getRoomUserData; local metadataReads=0
+  api.getRoomUserData=function(id,key)
+    if key:find("dghud.special_line.",1,true)==1 then metadataReads=metadataReads+1 end
+    return native(id,key)
+  end
+  local stats=map:syncSpecialExitLines(1)
+  eq(stats.created,11); eq(metadataReads,22)
+  api,map=lineFixture(); api.special[2]={["go back"]=1,["go portal"]=1}; native=api.getRoomUserData; metadataReads=0
+  api.getRoomUserData=function(id,key) if key:find("dghud.special_line.",1,true)==1 then metadataReads=metadataReads+1 end; return native(id,key) end
+  stats=map:syncSpecialExitLines(1,{max_edges=2})
+  eq(stats.limited,true); eq(metadataReads,2); eq(api.customAdds,0)
+end)
+
+test("changed endpoint ownership or graph after preflight prevents drawing",function()
+  for _,change in ipairs({function(api) api.rooms[2].user["dghud.owner"]="Personal" end,function(api) api.special[1]["go door"]=3 end}) do
+    local api,map=lineFixture(); local native=api.getCustomLines; local reads=0
+    api.getCustomLines=function(id) if id==1 then reads=reads+1; if reads==2 then change(api) end end; return native(id) end
+    local stats=map:syncSpecialExitLines(1)
+    eq(stats.created,0); eq(stats.skipped,1); eq(#stats.errors,1); eq(api.customAdds,0)
+  end
+end)
+
+test("drawing exceptions and nil or false failures never affect the graph",function()
+  for _,failure in ipairs({true,"throw","false","nil"}) do
+    local api,map=lineFixture()
+    if failure=="false" then api.addCustomLine=function() return false end
+    elseif failure=="nil" then api.addCustomLine=function() return nil end
+    else api.fail.addCustomLine=failure end
+    local stats=map:syncSpecialExitLines(1)
+    eq(stats.created,0); eq(#stats.errors,1); eq(api.special[1]["go door"],2); eq(api.specialAdds,1); eq(api.rooms[1].user[lineMetadataKey("go door")],nil)
+  end
+end)
+
+test("failed metadata and readback leave new lines unclaimed and preserved",function()
+  for _,failure in ipairs({"metadata","readback"}) do
+    local api,map=lineFixture(); local native=api.getCustomLines
+    if failure=="metadata" then api.fail.setRoomUserData=true
+    else api.getCustomLines=function(id) if api.customAdds>0 then return nil,"readback failed" end; return native(id) end end
+    local stats=map:syncSpecialExitLines(1)
+    eq(stats.created,1); eq(#stats.errors,1); eq(api.rooms[1].user[lineMetadataKey("go door")],nil)
+    api.fail.setRoomUserData=nil; api.getCustomLines=native
+    stats=Adapter.new(api):syncSpecialExitLines(1)
+    eq(stats.preserved,1); eq(stats.created,0); eq(stats.updated,0); eq(api.customAdds,1)
+  end
+end)
+
+test("manual lines appearing after preflight are preserved",function()
+  local api,map=lineFixture(); local native=api.getCustomLines; local reads=0
+  api.getCustomLines=function(id)
+    if id==1 then reads=reads+1; if reads==2 then assert(api.addCustomLine(1,2,"go door","solid line",{3,4,5},true)) end end
+    return native(id)
+  end
+  local stats=map:syncSpecialExitLines(1)
+  eq(stats.created,0); eq(stats.preserved,1); eq(api.custom[1]["go door"].attributes.style,"solid line")
+end)
+
+test("unsafe geometry ownership and reserved command slots are skipped",function()
+  for _,change in ipairs({
+    function(api) api.rooms[2].area=99 end,
+    function(api) api.rooms[2].z=1 end,
+    function(api) api.rooms[2].x=0 end,
+    function(api) api.rooms[2].x=0/0 end,
+    function(api) api.rooms[2].user["dghud.owner"]="Personal" end,
+    function(api) api.rooms[2].user["dghud.state"]="provisional" end,
+    function(api) api.rooms[2].user["dghud.library_readonly"]="true" end,
+    function(api) api.rooms[2]=nil end,
+  }) do
+    local api,map=lineFixture(); change(api)
+    local stats=map:syncSpecialExitLines(1); eq(stats.created,0); eq(api.customAdds,0); eq(stats.noop,true)
+  end
+  for _,command in ipairs({"north","N","north-east","i","o","1","go\ngate",string.rep("x",161)}) do
+    local api,map=lineFixture(); api.special[1]={[command]=2}
+    eq(map:syncSpecialExitLines(1).created,0); eq(api.customAdds,0)
+  end
+  local api,map=lineFixture(); eq(map:syncSpecialExitLines(1,{read_only=true}).created,0)
+end)
+
+test("malformed inspection and options return errors without writes",function()
+  local api,map=lineFixture()
+  for _,options in ipairs({false,"bad",{color={1,2}},{color={1,2,256}},{max_rooms=0},{max_edges=-1}}) do
+    local stats=map:syncSpecialExitLines(1,options); eq(#stats.errors,1); eq(api.customAdds,0)
+  end
+  api.getSpecialExits=function() return {[2]={["go door"]="0"},[3]={["go door"]="0"}} end
+  local stats=map:syncSpecialExitLines(1); eq(#stats.errors,1); eq(api.customAdds,0)
+end)
+
+test("custom-line wrappers preserve shapes and native capability checks",function()
+  local called; local line={attributes={style="dot line",color={r=80,g=180,b=190},arrow=false},points={[0]={x=9,y=2}}}
+  local globals={getCustomLines=function() return {["go Door"]=copy(line)} end,addCustomLine=function(...) called={...}; return true end}
+  local api=Adapter.mudletApi(globals)
+  eq(api.hasCapability("addCustomLine"),true); eq(api.hasCapability("removeCustomLine"),false)
+  assert(api.addCustomLine(1,2,"go Door","dot line",{80,180,190},false)); eq(called[3],"go Door"); eq(called[6],false)
+  eq(api.getCustomLines(1)["go Door"].points[0].x,9)
+  globals.addCustomLine=function() return nil,"rejected" end
+  local ok,err=api.addCustomLine(1,2,"go Door","dot line",{80,180,190},false); eq(ok,nil); eq(err,"rejected")
+end)
+
+test("ordinary exits normalize native long keys for snapshots and route checks",function()
+  local api,map=lineFixture()
+  local directions={north="n",northeast="ne",east="e",southeast="se",south="s",southwest="sw",west="w",northwest="nw",up="up",down="down",["in"]="in",out="out"}
+  for long,short in pairs(directions) do
+    api.rooms[1].exits={[long]=2}
+    local ok,command=map:validateRouteStep(1,2,short); eq(ok,true); eq(command,short)
+    eq(assert(map:getRoom(1)).exits[1].direction,short)
+  end
+  local wrapped=Adapter.mudletApi({getRoomExits=function() return {north=2,n=2,east=3},17 end})
+  local exits,context=wrapped.getRoomExits(1); eq(exits.n,2); eq(exits.e,3); eq(exits.north,nil); eq(context,17)
+end)
+
+test("putRoom reconciles normalized keys and preflights alias conflicts",function()
+  local api,map=lineFixture(); api.rooms[1].exits={n=2,e=2}
+  local native=api.getRoomExits
+  api.getRoomExits=function(id) local exits=native(id); return {north=exits.n,east=exits.e} end
+  local room=assert(map:getRoom(1)); room.exits={{direction="north",to=2},{direction="n",to=2}}
+  assert(map:putRoom(room)); eq(api.rooms[1].exits.n,2); eq(api.rooms[1].exits.e,nil)
+  local writes=0; api.setRoomUserData=function() writes=writes+1; return true end
+  api.getRoomExits=function() return {north=2,n=3} end
+  local ok,err=map:putRoom(room); eq(ok,nil); assert(err:find("conflicting",1,true)); eq(writes,0)
+  ok,err=map:validateRouteStep(1,2,"n"); eq(ok,nil); assert(err:find("conflicting",1,true))
+  eq(map:getRoom(1),nil)
+  api.getRoomExits=native; room.exits={{direction="north",to=2},{direction="n",to=3}}
+  ok,err=map:putRoom(room); eq(ok,nil); assert(err:find("conflicting",1,true)); eq(writes,0)
 end)

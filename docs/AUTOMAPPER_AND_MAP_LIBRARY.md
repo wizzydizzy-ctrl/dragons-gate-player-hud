@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Make sure you are using DGHUD v0.3.32 or newer:
+Make sure you are using DGHUD v0.3.62 or newer:
 
 ```text
 dghud update
@@ -18,10 +18,23 @@ It understands:
 - `up`, `down`, `in`, and `out`
 - Commands such as `swim north`
 - Doors, gates, portals, arches, paths, and other special travel commands
+- Named or abbreviated objects: `go store`, `go pawnshop`, `go tav`, `go hole`, and `go exit`
 
 Revisiting a room updates the existing mapped room instead of creating a duplicate.
 
 Special travel stays on the current map by default. A newly discovered destination is placed beside the room you left; the mapper prefers continuing in your direction of travel, avoids ordinary exits and occupied coordinates, and then chooses the next deterministic adjacent space. Existing rooms keep their saved coordinates. If a travel type should begin a separate submap, enable it under **Options → Map Settings**. Gates, portals, doors, arches, paths, and other special travel can each be enabled independently. The return connection is learned after you travel back through it.
+
+### What the connecting lines mean
+
+- **Solid lines:** ordinary directional exits, such as north or southwest.
+- **Dotted teal lines:** a saved connection that needs a command such as `go door` or `go portal`. The exact command is saved for automatic walking; it is not replaced with a compass direction.
+- A dotted line does **not** promise a return trip. Travel back normally to teach the mapper the return command.
+
+Existing saved special connections receive dotted lines when their current area is activated. A room that was never connected cannot be repaired by guessing from its position: revisit it through its entrance, then use its exit to teach both routes. There is no need to clear the map.
+
+The HUD leaves hand-drawn custom lines and existing room positions alone. If you edit or delete one of its dotted lines, it respects that choice. After manually moving rooms, use the **Center button** to refresh any unchanged HUD-generated dotted connections. Different areas or levels keep their saved travel links, but do not get a misleading line drawn across the current floor.
+
+For very large areas, decorative line generation is limited to 1,000 rooms and 4,096 special exits per area. This safety limit does not remove rooms or travel connections.
 
 ## Map controls
 

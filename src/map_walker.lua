@@ -39,13 +39,15 @@ end
 function Walker:sendNext()
   local command=self.route and self.route.commands[self.index]
   if not command then self.last_destination=self.destination; return self:stop("arrived") end
+  self.origin=self.route.rooms[self.index]
   if self.roundtime>0 then
+    self.expected=nil
     self.waiting_roundtime=true
     self:status("paused","Walk paused for roundtime "..tostring(self.roundtime))
     return true
   end
   self.waiting_roundtime=nil
-  self.origin=self.route.rooms[self.index]; self.expected=self.route.rooms[self.index+1]
+  self.expected=self.route.rooms[self.index+1]
   local callOk,sent,err=pcall(self.adapter.sendCommand,self.adapter,command,true)
   if not callOk then err=sent; sent=nil end
   if sent==nil or sent==false then local reason=err or "movement command failed"; self:stop(reason,true); return nil,reason end
@@ -90,7 +92,7 @@ function Walker:onRoom(roomID)
   if not self.route then return true end
   local actual=tonumber(roomID)
   if actual==tonumber(self.origin) then return true end
-  if actual~=tonumber(self.expected) then return self:stop("unexpected room "..tostring(roomID),true) end
+  if not self.expected or actual~=tonumber(self.expected) then return self:stop("unexpected room "..tostring(roomID),true) end
   local timerOk,timerErr=self:clearTimer()
   if not timerOk then
     self:stop(timerErr or "movement timer cancellation failed",true)

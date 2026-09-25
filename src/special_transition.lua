@@ -2,6 +2,7 @@ local Special={}; Special.__index=Special
 
 local specialNouns={gate=true,door=true,portal=true,arch=true,path=true}
 local traversalVerbs={enter=true,leave=true,climb=true,crawl=true,cross=true,board=true,disembark=true}
+local readOnlyCommands={[""]=true,look=true,l=true,inventory=true,inv=true,i=true,stat=true,info=true,skill=true,time=true,who=true}
 
 local function trim(value)
   return tostring(value or ""):match("^%s*(.-)%s*$")
@@ -22,7 +23,9 @@ local function builtInTravel(value)
     for word in arguments:gmatch("[%w_'-]+") do
       if specialNouns[word] then return word end
     end
-    return nil
+    -- GO names an object, including abbreviations such as "go tav". The
+    -- changing room ID confirms travel; the noun alone never creates a link.
+    return arguments~="" and "other" or nil
   end
   if not traversalVerbs[verb] then return nil end
   return (verb=="leave" or verb=="disembark" or arguments~="") and "other" or nil
@@ -80,10 +83,14 @@ function Special:cancel(reason)
 end
 
 function Special:onOutgoing(command,originID)
+  local classified=normalize(command)
+  if self.candidate and self.candidate.from==tonumber(originID) and not tostring(command):find("[;%c]")
+    and (readOnlyCommands[classified] or classified:match("^info%s+%S")) then return nil end
   local cancelled,cancelErr=self:cancel("replaced")
   if not cancelled then return nil,boundedError("special transition replacement cancellation failed",cancelErr) end
-  local classified=normalize(command)
   if not positive(originID) or classified=="" or self.model.direction(classified) then return nil end
+  -- One sent command must represent one traversal; never persist command chains.
+  if tostring(command):find("[%z\1-\31\127;]") or #classified>160 then return nil end
   local category=builtInTravel(classified)
   if not category and configuredTravel(classified,self.extra_patterns) then category="other" end
   if not category then return nil end
@@ -109,7 +116,10 @@ end
 
 function Special:onLine(line)
   if not self.candidate then return nil end
-  local value=normalize(line)
+  local value=normalize(tostring(line or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""))
+  -- Mudlet can append output to a prompt. Strip only known prompt forms,
+  -- not arbitrary text/chat quoting a movement-failure message.
+  value=value:gsub("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>%s*",""):gsub("^>%s*","")
   for _,pattern in ipairs(failurePatterns) do
     if value:match(pattern) then return self:cancel("failed") end
   end

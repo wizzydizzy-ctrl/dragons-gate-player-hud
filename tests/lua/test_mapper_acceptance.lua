@@ -207,14 +207,60 @@ local function submapSettings()
   return Settings.merge(Defaults,{mapper={transition_submaps={gate=true,portal=true,door=true,arch=true,path=true,other=true}}})
 end
 
-test("HUD release defaults are ready for version 0.3.61",function()
-  eq(Defaults.version,"0.3.61"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
+test("HUD release defaults are ready for version 0.3.62",function()
+  eq(Defaults.version,"0.3.62"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
   eq(Defaults.chat.all_sources.COMBAT,false); eq(Defaults.chat.all_sources.ROOM,true); eq(Defaults.chat.all_sources.STAFF,true)
   eq(Defaults.theme.hp,"#ba5147"); eq(Defaults.theme.fatigue,"#b08f18")
   eq(Defaults.time.speed,2); eq(Defaults.time.sunrise_hour,6); eq(Defaults.time.sunset_hour,18)
   eq(Defaults.mapper.minimum_height,90); eq(Defaults.mapper.schema,2)
   for _,key in ipairs({"gate","portal","door","arch","path","other"}) do eq(Defaults.mapper.transition_submaps[key],false) end
   eq(Defaults.roller.schema,3); eq(Defaults.roller.target_total,53); eq(Defaults.roller.hard_stop,62); eq(Defaults.roller.reroll_delay,.1); eq(Defaults.roller.arrange_mode,"manual"); eq(Defaults.roller.minimum_greats,nil); eq(Defaults.roller.minimum_good_plus,nil); eq(Defaults.roller.min_stats.APP,5)
+end)
+
+test("special line rendering refreshes once per room and stays optional",function()
+  local world={rooms={},stubs={},links={},special={},areas={},zoom={},creations={},sent={}}
+  local f=runtime(world); local hud=Main.new(f,Defaults); assert(hud:start())
+  local scans=0
+  function hud.map:syncSpecialExitLines(id,options)
+    scans=scans+1; eq(id,hud.automapper:currentRoom()); eq(options.max_rooms,1000); eq(options.max_edges,4096)
+    return {created=0,errors={}}
+  end
+  assert(hud:refresh()); eq(scans,1)
+  assert(hud:refresh()); eq(scans,1)
+  observeCommand(f,"north"); arrive(f,177,{"south"}); eq(scans,2)
+  assert(hud:mapToolbarAction("center")); eq(scans,3)
+  function hud.map:syncSpecialExitLines() scans=scans+1; error("drawing unavailable") end
+  assert(hud:refresh()); eq(scans,3)
+  local ok= hud:syncMapSpecialLines(true); eq(ok,nil); eq(scans,4)
+  assert(hud:refresh()); eq(scans,4); eq(hud.started,true)
+  function hud.map:syncSpecialExitLines() scans=scans+1; return {created=0,errors={"native drawing failed"}} end
+  local arrayOk,arrayErr=hud:syncMapSpecialLines(true); eq(arrayOk,nil); assert(arrayErr:find("saved routes are unchanged",1,true)); eq(scans,5)
+  hud.map_collection_unsafe=true; assert(hud:syncMapSpecialLines(true)); eq(scans,5)
+  hud.map_collection_unsafe=false
+  local active=hud.map_collections and hud.map_collections:active()
+  if active then active.editable=false; assert(hud:syncMapSpecialLines(true)); eq(scans,5) end
+end)
+
+test("TG shops and abbreviated objects map on the current area with exact return commands",function()
+  local world={rooms={},stubs={},links={},special={},areas={},zoom={},creations={},sent={}}
+  local f=runtime(world)
+  f.gmcp.Room.Info={num=10542,name="Hunter's Square",area=1,exits={"northeast","east","west"}}
+  local hud=Main.new(f,Defaults); assert(hud:start())
+  for _,visit in ipairs({{10538,"go store"},{10540,"go tav"},{10539,"go pawnshop"}}) do
+    observeCommand(f,visit[2]); arrive(f,visit[1],{})
+    eq(world.special["10542:"..visit[1]..":"..visit[2]],true)
+    eq(world.special[visit[1]..":10542:go exit"],nil)
+    eq(world.rooms[visit[1]].partition,world.rooms[10542].partition)
+    observeCommand(f,"go exit"); arrive(f,10542,{"northeast","east","west"})
+    eq(world.special[visit[1]..":10542:go exit"],true)
+  end
+  eq(count(world.special),6); eq(count(world.rooms),4); eq(count(world.links),0)
+  local before=stable(world.rooms)
+  assert(hud:reload()); observeCommand(f,"go store"); arrive(f,10538,{})
+  eq(stable(world.rooms),before); eq(count(world.special),6)
+  local route=assert(hud.map:route(10538,10540))
+  eq(table.concat(route.commands,","),"go exit,go tav")
+  eq(#world.sent,0)
 end)
 
 test("special submaps persist canonical rooms zoom and mixed walking end to end",function()

@@ -1014,6 +1014,7 @@ test("map settings popup is responsive and submits transition choices",function(
 end)
 test("map settings treat every missing submap choice as off",function()
   local view=chatView(); view:showMapSettings({transition_submaps={}})
+  assert(view.map_settings_status.message:find("Solid: directions. Dotted: special exits.",1,true))
   local values=view:mapSettingsValues()
   for _,key in ipairs({"gate","portal","door","arch","path","other"}) do eq(view.map_settings_draft[key],false); eq(values.transition_submaps[key],false) end
 end)
