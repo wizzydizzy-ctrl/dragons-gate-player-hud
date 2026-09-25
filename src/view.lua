@@ -1594,7 +1594,13 @@ function View:renderChatSounds(font)
   self.chat_sound_status:echo(View.withFont(safeText(self.chat_sound_status_text or "All tabs share this volume."),font))
   for _,key in ipairs(self.chat_sound_order) do
     local row=self.chat_sound_rows[key]; local setting=self:chatSoundSetting(key); local sound=Sounds.get(setting.sound)
-    local caption=clipped(key,math.max(1,math.floor((row.caption.width or 100)/(font*.7))))
+    -- Geyser stores constraints such as "10px" in width, even after resize.
+    local captionWidth=100
+    if type(row.caption.get_width)=="function" then
+      local ok,value=pcall(row.caption.get_width,row.caption); value=ok and tonumber(value) or nil
+      if value and value>0 and value<math.huge then captionWidth=value end
+    end
+    local caption=clipped(key,math.max(1,math.floor(captionWidth/(font*.7))))
     row.caption:echo(View.withFont("<b>"..safeText(caption).."</b>",font))
     row.enabled:setStyleSheet("background:"..(setting.enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(setting.enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(setting.enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;")
     row.enabled:echo(View.withFont("<center><b>"..(setting.enabled and "ON" or "OFF").."</b></center>",font))

@@ -924,6 +924,55 @@ test("all nine sound rows fit without scrolling on regular desktop screens",func
     eq(view.chat_settings_close.y>=content.y+content.height,true)
   end
 end)
+test("chat sound startup and resize accept Geyser px constraints through pixel getters",function()
+  local original=Geyser; local geyser=fakeGeyser(); local newLabel=geyser.Label.new
+  function geyser.Label:new(cons,parent)
+    local item=newLabel(self,cons,parent)
+    if cons.name:match("^DGHUD%.ChatSettings%.Sounds%.Row%.") then
+      -- Geyser.calc_constraints converts numbers to px strings on creation
+      -- and every resize; get_width supplies the resolved numeric pixels.
+      function item:resize(width,height)
+        self.pixel_width=math.floor(width); self.width=string.format("%dpx",self.pixel_width)
+        self.height=string.format("%dpx",math.floor(height))
+      end
+      function item:get_width() self.width_reads=(self.width_reads or 0)+1; return self.pixel_width end
+      item:resize(cons.width,cons.height)
+    end
+    return item
+  end
+  Geyser=geyser
+  local ok,err=xpcall(function()
+    local settings=require("settings").resolve(require("defaults"),{})
+    local view=View.new(settings); local calls=0
+    view:setOptionsActionCallback(function() calls=calls+1; return true end)
+    for _,key in ipairs(view.chat_sound_order) do
+      local caption=view.chat_sound_rows[key].caption
+      eq(caption.width,"10px"); eq(caption:get_width(),10); eq(caption.width_reads>1,true)
+    end
+    for _,size in ipairs({{1920,1080},{320,260},{1200,800}}) do
+      view:applyLayout(require("layout").compute(size[1],size[2])); view:showChatSettings()
+      for _,key in ipairs(view.chat_sound_order) do
+        local caption=view.chat_sound_rows[key].caption; local before=caption.width_reads
+        assert(caption.width:match("^%d+px$")); eq(caption:get_width()>10,true)
+        view:renderChatSounds(); eq(caption.width_reads>before+1,true)
+        assert(caption.message:find(key,1,true))
+      end
+      view:hideChatSettings(); assert(view:setChatSounds(settings.chat.sounds))
+    end
+    eq(calls,0)
+  end,debug.traceback)
+  Geyser=original; assert(ok,err)
+end)
+test("chat sound caption width safely falls back when pixel getters are unavailable",function()
+  local view=chatView(); local caption=view.chat_sound_rows.STAFF.caption
+  caption.width="100%" -- Raw constraints must never be used for arithmetic.
+  caption.get_width=function() return 14 end
+  view:renderChatSounds(); eq(caption.message:find("STAFF",1,true),nil)
+  for _,getter in ipairs({false,function() error("not ready") end,function() return nil end,function() return "10px" end,function() return 0 end,function() return -1 end,function() return 0/0 end,function() return math.huge end}) do
+    caption.get_width=getter
+    view:renderChatSounds(); assert(caption.message:find("STAFF",1,true))
+  end
+end)
 test("chat sound show hide resize redraw and reuse never trigger playback",function()
   local Sounds=require("chat_sounds"); local config=Sounds.defaults(); config.tabs.ROOM.enabled=true
   local view=chatView(nil,nil,nil,nil,config); local calls=0; local oldPlay=rawget(_G,"playSoundFile")
