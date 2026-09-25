@@ -2,7 +2,7 @@ local Colorizer={}; Colorizer.__index=Colorizer
 local Styles=require("color_styles")
 local Travel=require("travel_highlights")
 
-local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},gold={224,184,79},silver={192,192,192},portal={55,190,200},attack={205,62,62},damage={255,70,70},danger={205,135,45},recovery={90,165,105},upkeep={185,105,45},spell={145,95,190},discovery={225,185,70},illumination={220,200,85},darkness={105,120,140},notice={255,215,80}}
+local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},gold={224,184,79},silver={192,192,192},portal={55,190,200},presence={136,190,153},presence_phrase={255,220,90},attack={205,62,62},damage={255,70,70},danger={205,135,45},recovery={90,165,105},upkeep={185,105,45},spell={145,95,190},discovery={225,185,70},illumination={220,200,85},darkness={105,120,140},notice={255,215,80}}
 local directions={north=true,northeast=true,east=true,southeast=true,south=true,southwest=true,west=true,northwest=true,up=true,down=true,['in']=true,out=true,n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,u=true,d=true}
 local attackVerbs={attacks=true,swings=true,slashes=true,stabs=true,bites=true,claws=true,kicks=true,strikes=true,shoots=true,breathes=true,charges=true,pounces=true,throws=true}
 local raceColors={
@@ -71,8 +71,8 @@ local function specialSegments(line,lower,colors)
   if lower:match("^%s*you expend %d+ fatigue keeping up .+%.%s*$") then return whole(line,"upkeep",colors) end
   if lower:match("^%s*the .+ casts his gaze across the room%.%s*$") or lower:match("^%s*the .+ casts her gaze across the room%.%s*$") or lower:match("^%s*the .+ casts their gaze across the room%.%s*$") or lower:match("^%s*the .+ casts .+ at you!%s*$") or lower:match("^%s*the .+ casts .+ towards you!%s*$") then return whole(line,"spell",colors) end
   if lower:match("^%s*you have discovered .+[%!%.]%s*$") then return whole(line,"discovery",colors) end
-  local travel=Travel.parse(line)
-  if travel then for _,item in ipairs(travel) do item.color=colors.portal end end
+  local travel=Travel.parsePresence(line)
+  if travel then for _,item in ipairs(travel) do item.color=colors[item.kind] end end
   return travel
 end
 
@@ -118,14 +118,14 @@ end
 
 function Colorizer.new(adapter,enabled,settings)
   settings=type(settings)=="table" and settings or {}
-  local colors={room=settings.room_color or defaultColors.room,label=settings.label_color or defaultColors.label,direction=settings.direction_color or defaultColors.direction,gold=settings.gold_color or defaultColors.gold,silver=settings.silver_color or defaultColors.silver,portal=settings.portal_color or defaultColors.portal,attack=settings.attack_color or defaultColors.attack,damage=settings.damage_color or defaultColors.damage,danger=settings.danger_color or defaultColors.danger,recovery=settings.recovery_color or defaultColors.recovery,upkeep=settings.upkeep_color or defaultColors.upkeep,spell=settings.spell_color or defaultColors.spell,discovery=settings.discovery_color or defaultColors.discovery,illumination=settings.illumination_color or defaultColors.illumination,darkness=settings.darkness_color or defaultColors.darkness,notice=settings.notice_color or defaultColors.notice}
+  local colors={room=settings.room_color or defaultColors.room,label=settings.label_color or defaultColors.label,direction=settings.direction_color or defaultColors.direction,gold=settings.gold_color or defaultColors.gold,silver=settings.silver_color or defaultColors.silver,portal=settings.portal_color or defaultColors.portal,presence=settings.presence_color or defaultColors.presence,presence_phrase=settings.presence_phrase_color or defaultColors.presence_phrase,attack=settings.attack_color or defaultColors.attack,damage=settings.damage_color or defaultColors.damage,danger=settings.danger_color or defaultColors.danger,recovery=settings.recovery_color or defaultColors.recovery,upkeep=settings.upkeep_color or defaultColors.upkeep,spell=settings.spell_color or defaultColors.spell,discovery=settings.discovery_color or defaultColors.discovery,illumination=settings.illumination_color or defaultColors.illumination,darkness=settings.darkness_color or defaultColors.darkness,notice=settings.notice_color or defaultColors.notice}
   local legacyHighlights=settings.highlights_enabled~=false
   local features={room=settings.room_enabled~=false,exits=settings.exits_enabled~=false,currency=settings.currency_enabled~=false,races=settings.races_enabled~=false,classes=settings.classes_enabled~=false}
-  for _,kind in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
+  for _,kind in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
     local configured=settings[kind.."_enabled"]
     if configured==nil then features[kind]=legacyHighlights else features[kind]=configured~=false end
   end
-  local self=setmetatable({adapter=adapter,enabled=enabled==true,colors=colors,features=features,trigger=nil,started=false,travel=Travel.new(),line_history={}},Colorizer)
+  local self=setmetatable({adapter=adapter,enabled=enabled==true,colors=colors,features=features,trigger=nil,started=false,travel=Travel.new(true),line_history={}},Colorizer)
   self:setStyles(settings)
   return self
 end
@@ -142,21 +142,32 @@ function Colorizer:start()
   self.trigger=id; self.started=true; return true
 end
 function Colorizer:onLine(line,number)
-  if not self.started or not self.enabled then self.travel=Travel.new(); self.line_history={}; return false end
+  if not self.started or not self.enabled then self.travel=Travel.new(true); self.line_history={}; return false end
   if type(line)~="string" then return false end
   line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
-  if #line>8192 then self.travel=Travel.new(); self.line_history={}; return false end
+  if #line>8192 then self.travel=Travel.new(true); self.line_history={}; return false end
   self.line_history[#self.line_history+1]={text=line,number=number}
   if #self.line_history>4 then table.remove(self.line_history,1) end
   local segments,overlays={},{}
-  for _,item in ipairs(Colorizer.parse(line,self.colors) or {}) do if item.kind~="portal" then overlays[#overlays+1]=item end end
+  for _,item in ipairs(Colorizer.parse(line,self.colors) or {}) do
+    if item.kind~="portal" and item.kind~="presence" and item.kind~="presence_phrase" then overlays[#overlays+1]=item end
+  end
   local oldOverlays={}
-  for _,item in ipairs(self.travel:onLine(line) or {}) do
+  local travelParts=self.travel:onLine(line) or {}
+  -- A wrapped subject without trustworthy historical row numbers is not
+  -- partially painted: even its current-row "is here" suffix would mislead.
+  for _,item in ipairs(travelParts) do
+    if (item.line_offset or 0)<0 then
+      local source=self.line_history[#self.line_history+item.line_offset]
+      if not source or type(source.number)~="number" then travelParts={}; break end
+    end
+  end
+  for _,item in ipairs(travelParts) do
     local source=self.line_history[#self.line_history+(item.line_offset or 0)]
     -- Never guess an older screen row from a relative offset: other triggers
     -- may have inserted text since the previous game line arrived.
     if source and ((item.line_offset or 0)==0 or type(source.number)=="number") then
-      item.source_line=source.text; item.line_number=source.number; item.color=self.colors.portal
+      item.source_line=source.text; item.line_number=source.number; item.color=self.colors[item.kind]
       segments[#segments+1]=item
       if (item.line_offset or 0)<0 then
         for _,overlay in ipairs(Colorizer.parse(source.text,self.colors) or {}) do
@@ -178,6 +189,7 @@ function Colorizer:onLine(line,number)
   for _,item in ipairs(segments) do
     local feature=item.kind
     if item.kind=="darkness" then feature="illumination"
+    elseif item.kind=="presence_phrase" then feature="presence"
     elseif item.kind=="label" or item.kind=="direction" then feature="exits"
     elseif item.kind=="gold" or item.kind=="silver" then feature="currency" end
     local style=self.styles[item.style_id or item.kind]
@@ -196,10 +208,10 @@ function Colorizer:onLine(line,number)
   if not applied then return nil,err or "line coloring failed" end
   return true
 end
-function Colorizer:setEnabled(enabled) self.enabled=enabled==true; self.travel=Travel.new(); self.line_history={}; return self.enabled end
+function Colorizer:setEnabled(enabled) self.enabled=enabled==true; self.travel=Travel.new(true); self.line_history={}; return self.enabled end
 function Colorizer:setFeature(name,enabled)
   if name=="highlights" then
-    for _,kind in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do self.features[kind]=enabled==true end
+    for _,kind in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do self.features[kind]=enabled==true end
     return enabled==true
   end
   if self.features[name]==nil then return nil,"unknown color feature" end
@@ -209,7 +221,7 @@ function Colorizer:toggle() return self:setEnabled(not self.enabled) end
 function Colorizer:status()
   local result={enabled=self.enabled,started=self.started,trigger=self.trigger}
   for key,value in pairs(self.features) do result[key]=value end
-  result.highlights=result.portal and result.attack and result.damage and result.danger and result.recovery and result.upkeep and result.spell and result.discovery and result.illumination and result.notice
+  result.highlights=result.portal and result.presence and result.attack and result.damage and result.danger and result.recovery and result.upkeep and result.spell and result.discovery and result.illumination and result.notice
   return result
 end
 function Colorizer:shutdown()

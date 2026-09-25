@@ -71,8 +71,9 @@ end
 local quoteState
 
 local function terminal(text)
-  local first=text:find("%f[%a]is%s+here%.?%s*$")
-  return first or text:find("%f[%a]are%s+here%.?%s*$")
+  local first,after=text:match("()%f[%a]is%s+here()%.?%s*$")
+  if first then return first,after end
+  return text:match("()%f[%a]are%s+here()%.?%s*$")
 end
 
 local function tailStart(text,last)
@@ -92,6 +93,8 @@ local function travelPhrase(text,first,last,initial)
   for word in phrase:gmatch("%S+") do words[#words+1]=word end
   if #words==0 or (initial and not articles[words[1]]) then return nil end
   local headStart=articles[words[1]] and 2 or 1
+  -- A pair of doors is still a travel object; a pair of gloves is not.
+  if words[headStart]=="pair" and words[headStart+1]=="of" then headStart=headStart+2 end
   local headEnd=#words
   for index=headStart,#words do
     local word=words[index]
@@ -105,11 +108,15 @@ local function travelPhrase(text,first,last,initial)
   return {start=first,length=last-first+1,kind="portal"}
 end
 
-local function subjectSegments(text,first,last)
+local function subjectSegments(text,first,last,includePresence)
   local result={}
   local cursor,initial=first,true
   local function add(stop)
     local item=travelPhrase(text,cursor,stop,initial)
+    if not item and includePresence then
+      local start,finish=trimRange(text,cursor,stop)
+      if start<=finish then item={start=start,length=finish-start+1,kind="presence"} end
+    end
     if item then result[#result+1]=item end
     initial=false
   end
@@ -133,21 +140,27 @@ local function subjectSegments(text,first,last)
   return #result>0 and result or nil
 end
 
-local function parseConfirmed(line,initialQuote)
+local function parseConfirmed(line,initialQuote,includePresence)
   if boundary(line) then return nil end
   local lower=line:lower()
-  local ending=terminal(lower)
+  local ending,after=terminal(lower)
   if not ending then return nil end
   local first,last=tailStart(line,ending-1)
-  if quoteState(line:sub(1,first-1),initialQuote) or line:sub(first,last):find('"',1,true)
+  if quoteState(line:sub(1,first-1),initialQuote) or line:sub(first,last):find(":",1,true)
+    or line:sub(first,last):find('"',1,true)
     or line:sub(first,last):find("“",1,true) or line:sub(first,last):find("”",1,true)
     or line:sub(first,last):find("‘",1,true) then return nil end
   local article=lower:sub(first,last):match("^(%a+)%s")
   if not articles[article] then return nil end
-  return subjectSegments(line,first,last)
+  local parts=subjectSegments(line,first,last,includePresence)
+  if includePresence and parts then
+    parts[#parts+1]={start=ending,length=after-ending,kind="presence_phrase"}
+  end
+  return parts
 end
 
 function Travel.parse(line) return parseConfirmed(line) end
+function Travel.parsePresence(line) return parseConfirmed(line,nil,true) end
 
 local function pendingStart(line,initialQuote)
   if boundary(line) or terminal(line:lower()) then return nil end
@@ -159,8 +172,8 @@ local function pendingStart(line,initialQuote)
   return first
 end
 
-function Travel.new()
-  return setmetatable({lines={},bytes=0,quote=nil,quoteLines=0,quoteBytes=0,rejected=false},Travel)
+function Travel.new(includePresence)
+  return setmetatable({lines={},bytes=0,quote=nil,quoteLines=0,quoteBytes=0,rejected=false,includePresence=includePresence==true},Travel)
 end
 
 function Travel:reset()
@@ -197,7 +210,7 @@ local function mappedSegments(parts,lines)
       local last=math.min(part.start+part.length-1,position+#source-1)
       first,last=trimRange(source,first-position+1,last-position+1)
       if first<=last then
-        local item={start=first,length=last-first+1,kind="portal",source_line=source}
+        local item={start=first,length=last-first+1,kind=part.kind,source_line=source}
         if index<#lines then item.line_offset=index-#lines end
         result[#result+1]=item
       end
@@ -250,7 +263,7 @@ function Travel:onLine(line)
   lines[#lines+1]=line
   local joined=table.concat(lines," ")
   if terminal(joined:lower()) then
-    local parts=parseConfirmed(joined,self.initialQuote or initialQuote)
+    local parts=parseConfirmed(joined,self.initialQuote or initialQuote,self.includePresence)
     self:reset()
     return parts and mappedSegments(parts,lines) or nil
   end

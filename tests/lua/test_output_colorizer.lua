@@ -58,15 +58,77 @@ test("race and class toggles independently filter all positional matches",functi
   assert(c:setFeature("races",true)); eq(c:setFeature("classes",false),false); assert(c:onLine("Monitanian Fighter and Human Cleric")); eq(#f.applied[2],2); eq(f.applied[2][1].kind,"races"); eq(f.applied[2][2].kind,"races"); c:shutdown()
 end)
 
-test("colors only travel-object clauses at the end of room prose",function()
+test("colors travel objects without swallowing surrounding prose",function()
   local line="The wall is cracked. An open sinister black iron gate is here."
-  local parts=assert(Colorizer.parse(line)); eq(#parts,1); eq(parts[1].kind,"portal")
+  local parts=assert(Colorizer.parse(line)); eq(#parts,2); eq(parts[1].kind,"portal")
   eq(line:sub(parts[1].start,parts[1].start+parts[1].length-1),"An open sinister black iron gate")
   local plural=assert(Colorizer.parse("An arch and a portal to the temples are here.")); eq(plural[1].kind,"portal")
   local padded=assert(Colorizer.parse("  An open gate is here.   ")); eq(padded[1].start,3); eq(padded[1].length,12)
-  eq(Colorizer.parse("A battered wooden chest is here."),nil)
   eq(Colorizer.parse("The door is old and covered in rust."),nil)
-  eq(Colorizer.parse("A merchant blocking the gate is here."),nil)
+end)
+
+test("room objects and terminal presence phrases use distinct exact spans",function()
+  for _,sample in ipairs({
+    {"The wall is cracked. An open iron gate is here.","is here",{{"portal","An open iron gate"}}},
+    {"An arch and a portal to the temples are here.","are here",{{"portal","An arch"},{"portal","a portal to the temples"}}},
+    {"  A SHOP IS HERE.  ","IS HERE",{{"portal","A SHOP"}}},
+    {"A shop is here","is here",{{"portal","A shop"}}},
+    {"A battered wooden chest is here.","is here",{{"presence","A battered wooden chest"}}},
+    {"A fountain and a torch are here.","are here",{{"presence","A fountain"},{"presence","a torch"}}},
+    {"A merchant blocking the gate is here.","is here",{{"presence","A merchant blocking the gate"}}},
+  }) do
+    local line,phrase,subjects=sample[1],sample[2],sample[3]
+    local first=assert(line:find(phrase,1,true))
+    local parts=assert(Colorizer.parse(line))
+    eq(#parts,#subjects+1)
+    for index,wanted in ipairs(subjects) do
+      local part=parts[index]
+      eq(part.kind,wanted[1]); eq(part.start,assert(line:find(wanted[2],1,true))); eq(part.length,#wanted[2])
+      assert(part.start+part.length<=first)
+      if part.kind=="presence" then eq(table.concat(assert(part.color),","),"136,190,153")
+      else eq(table.concat(assert(part.color),","),"55,190,200") end
+    end
+    local ending=parts[#parts]
+    eq(ending.kind,"presence_phrase"); eq(ending.start,first); eq(ending.length,#phrase)
+    eq(table.concat(assert(ending.color),","),"255,220,90")
+  end
+end)
+
+test("presence coloring excludes plain prose chat and nonterminal mentions",function()
+  local f=fake(); local c=Colorizer.new(f,true); assert(c:start())
+  for _,line in ipairs({
+    "The phrase is here for illustration.",
+    "I think the gate is here.",
+    'Someone says, "A gate is here."',
+    "You say, A gate is here.",
+    "[CHAT] Someone: A shop is here.",
+    "A sign reads: A gate is here.",
+    "A gate is here. trailing prose",
+    "is here.", "are here.",
+  }) do
+    eq(Colorizer.parse(line),nil)
+    eq(c:onLine(line),false)
+  end
+  eq(#f.applied,0); c:shutdown()
+end)
+
+test("presence subjects and here words are independently customizable and toggleable",function()
+  local f=fake()
+  local c=Colorizer.new(f,true,{styles={
+    presence={foreground="#123456"},
+    presence_phrase={foreground="#FEDCBA"},
+  }})
+  assert(c:start())
+  assert(c:onLine("A wooden chest is here.",100))
+  eq(f.applied[1][1].kind,"presence")
+  eq(table.concat(f.applied[1][1].color,","),"18,52,86")
+  eq(f.applied[1][2].kind,"presence_phrase")
+  eq(table.concat(f.applied[1][2].color,","),"254,220,186")
+  eq(c:setFeature("presence",false),false)
+  eq(c:onLine("A wooden chest is here.",101),false)
+  assert(c:onLine("An open gate is here.",102))
+  eq(#f.applied[2],1); eq(f.applied[2][1].kind,"portal")
+  c:shutdown()
 end)
 
 test("classifies restrained combat danger recovery upkeep spell and discovery lines",function()
@@ -270,7 +332,10 @@ test("emoji spans on earlier console rows preserve UTF-16 offsets and the cursor
     moveCursor=function(x,y) column,cursor=x,y; return true end,
     selectSection=function(start,length) selected={cursor,start,length}; return true end,
     setFgColor=function() end,deselect=function() end}
-  assert(MudletAdapter.new():applyLineColors(f.applied[1],api))
+  local earlier={}
+  for _,part in ipairs(f.applied[1]) do if part.line_number==100 then earlier[#earlier+1]=part end end
+  eq(#earlier,1)
+  assert(MudletAdapter.new():applyLineColors(earlier,api))
   eq(selected[1],100); eq(selected[2],4); eq(selected[3],19)
   eq(cursor,107); eq(column,4); c:shutdown()
 end)
@@ -325,13 +390,35 @@ local overlapStyles={styles={
   ["race:human"]={foreground="#778899"},["class:cleric"]={foreground="#AABBCC"},
 }}
 
+test("ordinary room objects paint muted subjects and a brighter terminal phrase",function()
+  local lines={[100]="A battered wooden chest is here.",[101]="A fountain and a torch are here."}
+  local f=colorSurface(lines); local c=Colorizer.new(f,true); assert(c:start())
+  for _,sample in ipairs({
+    {100,{"A battered wooden chest"},"is here"},
+    {101,{"A fountain","a torch"},"are here"},
+  }) do
+    local row,subjects,phrase=sample[1],sample[2],sample[3]
+    f.cursor=row
+    assert(c:onLine(lines[row],row))
+    local expected={}
+    for _,subject in ipairs(subjects) do
+      local first=assert(lines[row]:find(subject,1,true))
+      for index=first,first+#subject-1 do expected[index]="136,190,153" end
+    end
+    local first=assert(lines[row]:find(phrase,1,true))
+    for index=first,first+#phrase-1 do expected[index]="255,220,90" end
+    for index=1,#lines[row] do eq((f.painted[row] or {})[index],expected[index]) end
+  end
+  c:shutdown()
+end)
+
 test("current-row travel color is painted before intersecting currency race and class styles",function()
   local prefix="A gold coin rests nearby. "
   local subject="A silver gate to the Human Cleric temple"
   local lines={[100]=prefix..subject.." is here."}
   local f=colorSurface(lines); local c=Colorizer.new(f,true,overlapStyles); assert(c:start())
   assert(c:onLine(lines[100],100))
-  eq(#f.paintCalls,5); eq(f.applied[1][1].kind,"portal")
+  eq(#f.paintCalls,6); eq(f.applied[1][1].kind,"portal")
   eq(f.paintCalls[1].row,100); eq(f.paintCalls[1].start,#prefix)
   eq(f.paintCalls[1].length,#subject); eq(f.paintCalls[1].color,"17,34,51")
   f:assertColor(100,"gate","17,34,51")
@@ -339,7 +426,10 @@ test("current-row travel color is painted before intersecting currency race and 
   f:assertColor(100,"silver","68,85,102")
   f:assertColor(100,"Human","119,136,153")
   f:assertColor(100,"Cleric","170,187,204")
-  f:assertColor(100,"is here.",nil)
+  local suffixColor=(f.painted[100] or {})[assert(lines[100]:find("is here",1,true))]
+  assert(suffixColor and suffixColor~="17,34,51")
+  f:assertColor(100,"is here",suffixColor)
+  eq((f.painted[100] or {})[#lines[100]],nil)
   eq(f.cursor,100); eq(f.column,3); c:shutdown()
 end)
 
@@ -352,7 +442,7 @@ test("wrapped travel replays only intersecting prior-row overlays after all broa
   eq(#f.applied[1],4) -- Initial currency/race/class colors precede travel confirmation.
   f.paintCalls={}; f.cursor=107; f.column=4
   assert(c:onLine(lines[107],107))
-  local parts=f.applied[2]; eq(#parts,6); eq(#f.paintCalls,6)
+  local parts=f.applied[2]; eq(#parts,7); eq(#f.paintCalls,7)
   eq(parts[1].kind,"portal"); eq(parts[1].line_number,100)
   eq(parts[2].kind,"portal"); eq(parts[2].line_number,107)
   eq(f.paintCalls[1].start,#prefix); eq(f.paintCalls[1].length,#subject)
@@ -375,6 +465,9 @@ test("wrapped travel replays only intersecting prior-row overlays after all broa
   f:assertColor(100,"and",nil)
   f:assertColor(107,"door","17,34,51")
   f:assertColor(107,"silver","68,85,102")
-  f:assertColor(107,"are here.",nil)
+  local suffixColor=(f.painted[107] or {})[assert(lines[107]:find("are here",1,true))]
+  assert(suffixColor and suffixColor~="17,34,51")
+  f:assertColor(107,"are here",suffixColor)
+  eq((f.painted[107] or {})[#lines[107]],nil)
   eq(f.cursor,107); eq(f.column,4); c:shutdown()
 end)

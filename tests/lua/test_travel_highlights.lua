@@ -1,5 +1,40 @@
 local Travel=require("travel_highlights")
 
+test("room presence separates ordinary objects from travel and from terminal words",function()
+  local line="A wooden chest, an open gate, and a torch are here."
+  local parts=assert(Travel.parsePresence(line))
+  eq(#parts,4)
+  for index,wanted in ipairs({
+    {"presence","A wooden chest"},{"portal","an open gate"},
+    {"presence","a torch"},{"presence_phrase","are here"},
+  }) do
+    eq(parts[index].kind,wanted[1])
+    eq(line:sub(parts[index].start,parts[index].start+parts[index].length-1),wanted[2])
+  end
+  eq(Travel.parsePresence('A sign reads: A gate is here.'),nil)
+  eq(Travel.parsePresence('Someone says, "A gate is here."'),nil)
+end)
+
+test("wrapped room presence maps object and here words to their original rows",function()
+  local parser=Travel.new(true)
+  eq(parser:onLine("An old chest and a gate",100),nil)
+  local parts=assert(parser:onLine("are here.",107))
+  eq(#parts,3)
+  eq(parts[1].kind,"presence"); eq(parts[1].line_offset,-1)
+  eq(parts[2].kind,"portal"); eq(parts[2].line_offset,-1)
+  eq(parts[3].kind,"presence_phrase"); eq(parts[3].line_offset,nil)
+  eq(parts[3].source_line:sub(parts[3].start,parts[3].start+parts[3].length-1),"are here")
+  parser=Travel.new(true)
+  eq(parser:onLine("A small shop is",100),nil)
+  local split=assert(parser:onLine("here.",107))
+  eq(#split,3)
+  eq(split[1].kind,"portal")
+  eq(split[2].kind,"presence_phrase"); eq(split[2].line_offset,-1)
+  eq(split[2].source_line:sub(split[2].start,split[2].start+split[2].length-1),"is")
+  eq(split[3].kind,"presence_phrase"); eq(split[3].line_offset,nil)
+  eq(split[3].source_line:sub(split[3].start,split[3].start+split[3].length-1),"here")
+end)
+
 local function phrases(line,expected)
   local parts=Travel.parse(line)
   if #expected==0 then eq(parts,nil); return end
@@ -36,6 +71,14 @@ test("travel phrases exclude the presence suffix and preceding prose",function()
   phrases("  An open gate is here.   ",{"An open gate"})
   phrases("\tA SHOP\tIS\tHERE. \r",{"A SHOP"})
   phrases("A shop is here",{"A shop"})
+end)
+
+test("a pair of doors keeps travel coloring but a pair of items does not",function()
+  phrases("A pair of heavy iron doors is here.",{"A pair of heavy iron doors"})
+  local line="A pair of leather boots is here."
+  eq(Travel.parse(line),nil)
+  local parts=assert(Travel.parsePresence(line))
+  eq(parts[1].kind,"presence"); eq(parts[2].kind,"presence_phrase")
 end)
 
 test("travel allows SHOP instructions before a confirmed exit",function()

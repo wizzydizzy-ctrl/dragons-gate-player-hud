@@ -379,8 +379,8 @@ function View.new(settings)
   self.color_settings_close=label("DGHUD.ColorSettings.Close",self.color_settings_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
   self:createColorStyleEditor()
   self.color_option_buttons={}
-  self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
-  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
+  self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
+  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",presence="OTHER OBJECTS / HERE",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
@@ -1358,7 +1358,7 @@ function View:setColorStyles(config)
   for _,key in ipairs(self.color_option_order) do
     if key~="mapper" and key~="enabled" then
       local value=config[key.."_enabled"]
-      if value==nil and ({portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true,notice=true})[key] then value=config.highlights_enabled end
+      if value==nil and ({portal=true,presence=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true,notice=true})[key] then value=config.highlights_enabled end
       options[key]=value~=false
     end
   end
@@ -1421,7 +1421,7 @@ function View:renderColorStyle()
   self.color_style_heading:echo(View.withFont("<b>"..safeText(entry.label).."</b> · "..safeText(entry.group),font+1))
   self.color_style_help:echo(View.withFont(self.color_style_help.option_text,font))
   for _,field in pairs(self.color_style_fields) do field.caption:echo(View.withFont(field.caption.option_text.." (#RRGGBB)",font)) end
-  local samples={room="The town square",label="Obvious exits:",direction="north, east, up",gold="100 gold",silver="50 silver",portal="a shimmering portal",attack="An enemy attacks you!",damage="You take damage!",danger="Your way is blocked.",recovery="You feel refreshed.",upkeep="Your spell draws energy.",spell="A spell flashes nearby.",discovery="You discover a hidden treasure.",illumination="The room is illuminated.",darkness="The room is dark.",notice="An important game notice."}
+  local samples={room="The town square",label="Obvious exits:",direction="north, east, up",gold="100 gold",silver="50 silver",portal="a shimmering portal",presence="a wooden chest",presence_phrase="is here / are here",attack="An enemy attacks you!",damage="You take damage!",danger="Your way is blocked.",recovery="You feel refreshed.",upkeep="Your spell draws energy.",spell="A spell flashes nearby.",discovery="You discover a hidden treasure.",illumination="The room is illuminated.",darkness="The room is dark.",notice="An important game notice."}
   local previewCSS="background:"..(preview.enabled and preview.background or "#080B0A")..";color:"..(preview.enabled and preview.foreground or t.text)..";border:1px solid "..t.border..";"
   previewCSS=previewCSS.."font-weight:"..(preview.enabled and preview.bold and "bold" or "normal")..";text-decoration:"..(preview.enabled and preview.underline and "underline" or "none")..";"
   self.color_style_preview:setStyleSheet(previewCSS)

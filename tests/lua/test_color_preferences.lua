@@ -83,7 +83,7 @@ test("color preferences keep absent toggles sparse and preserve every false togg
   local empty = assert(Preferences.snapshot({}))
   eq(next(empty.styles), nil); eq(empty.enabled, nil)
   local config = {enabled=false, highlights_enabled=false}
-  for _, feature in ipairs({"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
+  for _, feature in ipairs({"room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
     config[feature.."_enabled"] = false
   end
   local decoded = assert(Preferences.decode(assert(Preferences.encode(config))))

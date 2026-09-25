@@ -9,7 +9,7 @@ local Preferences = {MAX_BYTES=65536, HEADER="DGHUD-COLORS|1"}
 local MAX_BYTES, HEADER = Preferences.MAX_BYTES, Preferences.HEADER
 local toggles, toggleSet = {"enabled", "highlights_enabled"}, {}
 for _, feature in ipairs({
-  "room", "exits", "currency", "races", "classes", "portal", "attack",
+  "room", "exits", "currency", "races", "classes", "portal", "presence", "attack",
   "damage", "danger", "recovery", "upkeep", "spell", "discovery",
   "illumination", "notice",
 }) do

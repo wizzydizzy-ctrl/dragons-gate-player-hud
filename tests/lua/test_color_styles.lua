@@ -4,7 +4,8 @@ local Colorizer = require("output_colorizer")
 -- Independent fixtures copied from the original colorizer's RGB palettes.
 local baseColors = {
   room={224,184,79}, label={139,45,45}, direction={191,91,33}, gold={224,184,79},
-  silver={192,192,192}, portal={55,190,200}, attack={205,62,62}, damage={255,70,70},
+  silver={192,192,192}, portal={55,190,200}, presence={136,190,153}, presence_phrase={255,220,90},
+  attack={205,62,62}, damage={255,70,70},
   danger={205,135,45}, recovery={90,165,105}, upkeep={185,105,45}, spell={145,95,190},
   discovery={225,185,70}, illumination={220,200,85}, darkness={105,120,140}, notice={255,215,80},
 }
@@ -27,10 +28,10 @@ local classColors = {
   forester={255,204,51}, psion={255,102,204}, thief={255,102,153},
 }
 local baseOrder = {
-  "room", "label", "direction", "gold", "silver", "portal", "attack", "damage",
+  "room", "label", "direction", "gold", "silver", "portal", "presence", "presence_phrase", "attack", "damage",
   "danger", "recovery", "upkeep", "spell", "discovery", "illumination", "darkness", "notice",
 }
-local features = {label="exits", direction="exits", gold="currency", silver="currency", darkness="illumination"}
+local features = {label="exits", direction="exits", gold="currency", silver="currency", darkness="illumination", presence_phrase="presence"}
 local styleFields = {foreground=true, background=true, bold=true, underline=true, enabled=true}
 
 local function rejected(value, err)
@@ -56,9 +57,9 @@ local function styleEquals(actual, expected)
   for key in pairs(styleFields) do eq(actual[key], expected[key]) end
 end
 
-test("style registry includes all 65 base and named palette entries with stable metadata", function()
+test("style registry includes all 67 base and named palette entries with stable metadata", function()
   local entries, again, seen = Styles.entries(), Styles.entries(), {}
-  eq(#entries, 65)
+  eq(#entries, 67)
   for index, entry in ipairs(entries) do
     eq(seen[entry.id], nil); seen[entry.id] = entry
     eq(again[index].id, entry.id)
@@ -75,7 +76,7 @@ test("style registry includes all 65 base and named palette entries with stable 
     end
   end
   for id in pairs(baseColors) do assert(seen[id]) end
-  local count = 16
+  local count = 18
   for _, palette in ipairs({{raceColors, "race", "races", "Races"}, {classColors, "class", "classes", "Classes"}}) do
     local names = {}
     for name, rgb in pairs(palette[1]) do
@@ -95,7 +96,7 @@ end)
 test("registry defaults match every existing parser segment kind and named palette color", function()
   local samples = {
     "[Old Cemetery.]", "Obvious exits: north.", "Gold and silver.",
-    "An open gate is here.", "The hound bites you!", "Your head takes 8 points of impact damage!",
+    "An open gate is here.", "A wooden chest is here.", "The hound bites you!", "Your head takes 8 points of impact damage!",
     "You cannot move in that direction.", "** You are fully rested.",
     "You expend 1 fatigue keeping up the ward.", "The acolyte casts a curse at you!",
     "You have discovered a secret path!", "This area is illuminated.",
@@ -280,9 +281,9 @@ end)
 test("registry and returned styles cannot be changed through caller-owned copies", function()
   local entries = Styles.entries()
   entries[1].id = "changed"; entries[1].default.foreground = "#000000"
-  entries[17].name = "changed"; entries[17].default.enabled = false; entries[2] = nil
-  eq(Styles.entries()[1].id, "room"); eq(Styles.entries()[17].name, "anthian")
-  eq(Styles.entries()[17].default.enabled, true); eq(#Styles.entries(), 65)
+  entries[19].name = "changed"; entries[19].default.enabled = false; entries[2] = nil
+  eq(Styles.entries()[1].id, "room"); eq(Styles.entries()[19].name, "anthian")
+  eq(Styles.entries()[19].default.enabled, true); eq(#Styles.entries(), 67)
   local defaults = Styles.defaults("room"); defaults.foreground = "#000000"
   eq(Styles.defaults("room").foreground, "#E0B84F")
   local config = {room_color={1,2,3},styles={room={background={4,5,6}}}}

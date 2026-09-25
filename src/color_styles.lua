@@ -33,6 +33,8 @@ add("direction", "Exit directions", "Room and exits", "direction", nil, "exits",
 add("gold", "Gold", "Currency", "gold", nil, "currency", "#E0B84F")
 add("silver", "Silver", "Currency", "silver", nil, "currency", "#C0C0C0")
 add("portal", "Travel objects / shops", "Highlights", "portal", nil, "portal", "#37BEC8")
+add("presence", "Other room objects", "Highlights", "presence", nil, "presence", "#88BE99")
+add("presence_phrase", "Is here / are here", "Highlights", "presence_phrase", nil, "presence", "#FFDC5A")
 add("attack", "Incoming attacks", "Highlights", "attack", nil, "attack", "#CD3E3E")
 add("damage", "Damage taken", "Highlights", "damage", nil, "damage", "#FF4646")
 add("danger", "Movement warnings", "Highlights", "danger", nil, "danger", "#CD872D")
