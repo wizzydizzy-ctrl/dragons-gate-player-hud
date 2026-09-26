@@ -7,6 +7,8 @@
 local Styles = require("color_styles")
 local Preferences = {MAX_BYTES=65536, HEADER="DGHUD-COLORS|1"}
 local MAX_BYTES, HEADER = Preferences.MAX_BYTES, Preferences.HEADER
+local MAX_CUSTOM_RULES, MAX_PHRASE_BYTES = 50, 120
+local customFields = {phrase=true, foreground=true, background=true, bold=true, underline=true, enabled=true}
 local toggles, toggleSet = {"enabled", "highlights_enabled"}, {}
 for _, feature in ipairs({
   "room", "exits", "currency", "races", "classes", "portal", "presence", "attack",
@@ -37,12 +39,77 @@ local function plain(value)
   return type(value) == "table" and getmetatable(value) == nil
 end
 
+-- Keep byte offsets stable: these common Latin-1 uppercase UTF-8 letters
+-- become lowercase letters of the same encoded length. Other UTF-8 text
+-- remains literal, and ASCII is handled by Lua's lower().
+function Preferences.foldCase(value)
+  if type(value) ~= "string" then return nil end
+  local folded=value:lower():gsub("\195([\128-\150\152-\158])", function(char)
+    return "\195"..string.char(char:byte()+32)
+  end)
+  return (folded:gsub("\197\189","\197\190"):gsub("\197\160","\197\161"):gsub("\196\140","\196\141"))
+end
+
+local function customRule(input)
+  if not plain(input) then return nil, "custom highlight must be a plain table" end
+  for key in next, input do
+    if not customFields[key] then return nil, "unknown custom highlight field" end
+  end
+  local phrase = rawget(input, "phrase")
+  if type(phrase) ~= "string" then return nil, "custom highlight needs a phrase" end
+  if phrase:find("[%z\1-\31\127]") then return nil, "custom highlight phrase must be 1-120 bytes without controls" end
+  phrase = phrase:match("^%s*(.-)%s*$")
+  if #phrase < 1 or #phrase > MAX_PHRASE_BYTES then
+    return nil, "custom highlight phrase must be 1-120 bytes without controls"
+  end
+  local foreground = rawget(input, "foreground")
+  if type(foreground) ~= "string" then return nil, "custom highlight foreground must be #RRGGBB" end
+  foreground = Styles.normalizeColor(foreground)
+  if not foreground then return nil, "custom highlight foreground must be #RRGGBB" end
+  local background = rawget(input, "background")
+  if background ~= false then
+    if type(background) ~= "string" then return nil, "custom highlight background must be false or #RRGGBB" end
+    background = Styles.normalizeColor(background)
+    if not background then return nil, "custom highlight background must be false or #RRGGBB" end
+  end
+  for _, key in ipairs({"bold", "underline", "enabled"}) do
+    if type(rawget(input, key)) ~= "boolean" then return nil, "custom highlight "..key.." must be a boolean" end
+  end
+  return {
+    phrase=phrase, foreground=foreground, background=background,
+    bold=rawget(input, "bold"), underline=rawget(input, "underline"), enabled=rawget(input, "enabled"),
+  }
+end
+
+-- One validator serves edits, saved records, and the live colorizer. Nothing
+-- from the file is ever evaluated as Lua or interpreted as a pattern.
+function Preferences.normalizeCustomRules(input)
+  if input == nil then return {} end
+  if not plain(input) then return nil, "custom highlights must be a plain array" end
+  local count = 0
+  for key in next, input do
+    count = count + 1
+    if count > MAX_CUSTOM_RULES or type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > MAX_CUSTOM_RULES then
+      return nil, "custom highlights must be an array of at most 50 rules"
+    end
+  end
+  local result, seen = {}, {}
+  for index=1,count do
+    local rule, err = customRule(rawget(input, index))
+    if not rule then return nil, err end
+    local folded = Preferences.foldCase(rule.phrase)
+    if seen[folded] then return nil, "duplicate custom highlight phrase" end
+    seen[folded], result[index] = true, rule
+  end
+  return result
+end
+
 function Preferences.snapshot(config)
   if not plain(config) then return nil, "colorization must be a plain table" end
-  local result, legacy, count = {styles={}}, {}, 0
+  local result, legacy, count = {styles={}, custom_rules={}}, {}, 0
   for key, value in next, config do
     count = count + 1
-    if count > #toggles + #entries + 3 then return nil, "too many color settings" end
+    if count > #toggles + #entries + 4 then return nil, "too many color settings" end
     if toggleSet[key] then
       if type(value) ~= "boolean" then return nil, "color toggles must be booleans" end
       result[key] = value
@@ -60,10 +127,13 @@ function Preferences.snapshot(config)
         if not color then return nil, err end
         legacy[palettes[key][name]] = color
       end
-    elseif key ~= "styles" then
+    elseif key ~= "styles" and key ~= "custom_rules" then
       return nil, "unknown color setting"
     end
   end
+  local custom, customErr = Preferences.normalizeCustomRules(rawget(config, "custom_rules"))
+  if not custom then return nil, customErr end
+  result.custom_rules = custom
   local inputStyles = rawget(config, "styles")
   if inputStyles == nil then inputStyles = {} end
   local overrides, err = Styles.validateOverrides(inputStyles)
@@ -82,6 +152,13 @@ function Preferences.snapshot(config)
 end
 
 local function bit(value) return value and "1" or "0" end
+local function encodePhrase(phrase)
+  return (phrase:gsub(".", function(char) return string.format("%02X", char:byte()) end))
+end
+local function decodePhrase(hex)
+  if #hex < 2 or #hex > MAX_PHRASE_BYTES*2 or #hex % 2 ~= 0 or not hex:match("^[0-9A-F]+$") then return nil end
+  return (hex:gsub("..", function(byte) return string.char(tonumber(byte, 16)) end))
+end
 
 function Preferences.encode(config)
   local normalized, err = Preferences.snapshot(config)
@@ -99,6 +176,14 @@ function Preferences.encode(config)
       bit(style.bold), bit(style.underline), bit(style.enabled),
     }, "|")
   end
+  for _, rule in ipairs(normalized.custom_rules) do
+    -- Hex is bounded and cannot introduce separators, controls, or code into
+    -- this line-oriented v1 data format. A v1 file without these records is unchanged.
+    lines[#lines+1] = table.concat({
+      "custom", encodePhrase(rule.phrase), rule.foreground, rule.background or "-",
+      bit(rule.bold), bit(rule.underline), bit(rule.enabled),
+    }, "|")
+  end
   local text = table.concat(lines, "\n").."\n"
   if #text > MAX_BYTES then return nil, "color settings exceed 64 KiB" end
   return text
@@ -111,14 +196,31 @@ function Preferences.decode(text)
     return nil, "invalid or incomplete color settings header/record"
   end
   if text:find("[%z\1-\9\11-\31\127]") then return nil, "invalid color settings characters" end
-  local result, seen, count = {styles={}}, {}, 0
+  local result, seen, count = {styles={}, custom_rules={}}, {}, 0
   for line in text:sub(#HEADER+2):gmatch("(.-)\n") do
     count = count + 1
-    if count > #toggles + #entries or #line > 256 then return nil, "too many or oversized color records" end
+    if count > #toggles + #entries + MAX_CUSTOM_RULES or #line > (line:sub(1,7) == "custom|" and 320 or 256) then
+      return nil, "too many or oversized color records"
+    end
     local key, value = line:match("^toggle|([a-z_]+)|([01])$")
     if key then
       if not toggleSet[key] or seen[key] then return nil, "unknown or duplicate toggle" end
       seen[key], result[key] = true, value == "1"
+    elseif line:sub(1,7) == "custom|" then
+      local hex, foreground, background, bold, underline, enabled =
+        line:match("^custom|([^|]+)|([^|]+)|([^|]+)|([01])|([01])|([01])$")
+      local phrase = hex and decodePhrase(hex)
+      if not phrase or #result.custom_rules >= MAX_CUSTOM_RULES then return nil, "invalid custom highlight record" end
+      if background == "-" then background = false end
+      local rule, err = customRule({
+        phrase=phrase, foreground=foreground, background=background,
+        bold=bold == "1", underline=underline == "1", enabled=enabled == "1",
+      })
+      if not rule then return nil, err end
+      local folded = Preferences.foldCase(rule.phrase)
+      if seen["custom:"..folded] then return nil, "duplicate custom highlight phrase" end
+      seen["custom:"..folded] = true
+      result.custom_rules[#result.custom_rules+1] = rule
     else
       local id, foreground, background, bold, underline, enabled =
         line:match("^style|([^|]+)|([^|]+)|([^|]+)|([01])|([01])|([01])$")

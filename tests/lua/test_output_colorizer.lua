@@ -9,6 +9,139 @@ local function fake()
   return f
 end
 
+local function custom(phrase,extras)
+  local rule={phrase=phrase,foreground="#12AB34",background=false,bold=false,underline=false,enabled=true}
+  for key,value in pairs(extras or {}) do rule[key]=value end
+  return rule
+end
+
+test("custom highlights use case-insensitive literal whole-word matching",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("gate")}}); assert(c:start())
+  eq(#c.custom_rules,1)
+  assert(c:onLine("Gate gatekeeper GATE gated gate.",12))
+  local parts=f.applied[1]; eq(#parts,3)
+  for _,part in ipairs(parts) do
+    eq(part.kind,"custom"); eq(part.color[1],18); eq(part.color[2],171); eq(part.color[3],52)
+    eq(part.source_line,"Gate gatekeeper GATE gated gate.")
+  end
+  eq(parts[1].start,1); eq(parts[2].start,17); eq(parts[3].start,28)
+  eq(c:onLine("gated gatekeeper",13),false)
+  c:shutdown()
+end)
+
+test("custom highlights handle literal pattern characters and several occurrences",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("a+b.*|%"),custom("iron gate",{foreground="#ABCDEF",background="#203040",bold=true,underline=true})}})
+  assert(c:start())
+  assert(c:onLine("a+b.*|% a+bxx a+b.*|%",20))
+  eq(#f.applied[1],2); eq(f.applied[1][1].kind,"custom")
+  eq(f.applied[1][1].length,7); eq(f.applied[1][2].start,15)
+  assert(c:onLine("An IRON GATE stands beside an iron gate.",21))
+  local parts=f.applied[2]; eq(#parts,2)
+  eq(parts[1].kind,"custom"); eq(parts[2].kind,"custom")
+  eq(parts[1].background[1],32); eq(parts[1].bold,true); eq(parts[2].underline,true)
+  c:shutdown()
+end)
+
+test("custom phrases preserve prominent version notices",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("version")}}); assert(c:start())
+  assert(c:onLine("There are new version notes.",22))
+  local notice
+  for _,part in ipairs(f.applied[1]) do
+    if part.kind=="notice" then notice=part end
+    assert(part.kind~="custom")
+  end
+  assert(notice and notice.display_text:find("IMPORTANT %- PLEASE READ"))
+  c:shutdown()
+end)
+
+test("custom phrases span verified wrapped rows but never stale console rows",function()
+  local previousGetLines=_G.getLines
+  local ok,err=pcall(function()
+    local rows={[70]=string.rep("A",100).." iron",[71]="gate is here."}
+    _G.getLines=function(start) return {rows[start]} end
+    local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("iron gate")}}); assert(c:start())
+    c:onLine(rows[70],70)
+    assert(c:onLine(rows[71],71))
+    local customParts={}
+    for _,part in ipairs(f.applied[#f.applied]) do if part.kind=="custom" then customParts[#customParts+1]=part end end
+    eq(#customParts,2); eq(customParts[1].line_number,70); eq(customParts[1].start,102)
+    eq(customParts[2].line_number,71); eq(customParts[2].start,1); eq(customParts[2].length,4)
+    c:shutdown()
+    local stale=fake(); local fresh=Colorizer.new(stale,true,{custom_rules={custom("iron gate")}}); assert(fresh:start())
+    fresh:onLine(rows[70],70); rows[70]="replaced by other output"; fresh:onLine(rows[71],71)
+    for _,batch in ipairs(stale.applied) do for _,part in ipairs(batch) do assert(part.kind~="custom") end end
+    fresh:shutdown()
+    local narrow=fake(); function narrow:getMainConsoleWrap() return 30 end
+    rows[70]=string.rep("A",20).." iron"
+    local resized=Colorizer.new(narrow,true,{custom_rules={custom("iron gate")}}); assert(resized:start())
+    resized:onLine(rows[70],70); resized:onLine(rows[71],71)
+    local count=0; for _,part in ipairs(narrow.applied[#narrow.applied]) do if part.kind=="custom" then count=count+1 end end
+    eq(count,2); resized:shutdown()
+    local separate=fake(); local unrelated=Colorizer.new(separate,true,{custom_rules={custom("iron gatekeeper")}}); assert(unrelated:start())
+    rows[70]="You drop an iron"; rows[71]="gatekeeper enters."
+    unrelated:onLine(rows[70],70); unrelated:onLine(rows[71],71)
+    for _,batch in ipairs(separate.applied) do for _,part in ipairs(batch) do assert(part.kind~="custom") end end
+    unrelated:shutdown()
+  end)
+  _G.getLines=previousGetLines
+  assert(ok,err)
+end)
+
+test("custom words fold common accented Latin letters without moving byte offsets",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("Élan")}}); assert(c:start())
+  assert(c:onLine("élan grows.",23))
+  local part=f.applied[1][1]; eq(part.kind,"custom"); eq(part.start,1); eq(part.length,#"élan")
+  assert(c:setCustomRules({custom("Žena")}))
+  assert(c:onLine("žena grows.",24))
+  local extended=f.applied[2][1]; eq(extended.kind,"custom"); eq(extended.length,#"žena")
+  c:shutdown()
+end)
+
+test("longer custom phrases win overlaps and custom colors replace built-in spans",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("gate"),custom("iron gate",{foreground="#FF0000"})}})
+  assert(c:start())
+  assert(c:onLine("An open iron gate is here.",30))
+  local parts=f.applied[1]; local customPart
+  for _,part in ipairs(parts) do
+    if part.kind=="custom" then customPart=part end
+  end
+  assert(customPart); eq(customPart.start,9); eq(customPart.length,9); eq(customPart.color[1],255)
+  eq(parts[#parts].kind,"custom")
+  for _,part in ipairs(parts) do
+    if part.kind~="custom" then
+      assert(part.start+part.length<=customPart.start or part.start>=customPart.start+customPart.length)
+    end
+  end
+  c:shutdown()
+end)
+
+test("custom rules can override currency, disable individually, and update live",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("gold",{enabled=false})}}); assert(c:start())
+  assert(c:onLine("Gold 2gp",40)); eq(f.applied[1][1].kind,"gold")
+  assert(c:setCustomRules({custom("gold",{foreground="#010203",background=false})}))
+  assert(c:onLine("Gold 2gp",41))
+  local parts=f.applied[2]
+  eq(parts[#parts].kind,"custom"); eq(parts[#parts].color[1],1)
+  for _,part in ipairs(parts) do if part.kind~="custom" then assert(part.start>4) end end
+  -- Main replaces this field directly after persisting the normalized snapshot.
+  c.custom_rules={custom("silver",{foreground="#445566"})}
+  assert(c:onLine("Silver 4sp",42)); eq(f.applied[3][#f.applied[3]].kind,"custom")
+  eq(f.applied[3][#f.applied[3]].color[1],68)
+  eq(c:setCustomRules({custom("bad\nphrase")}),nil)
+  assert(c:onLine("Silver 4sp",43)); eq(f.applied[4][#f.applied[4]].kind,"custom")
+  c:setEnabled(false); eq(c:onLine("Silver",44),false)
+  c:shutdown()
+end)
+
+test("invalid custom settings fail safely without preventing built-in colors",function()
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("bad",{foreground="#NOTHEX"})}})
+  assert(c:start()); eq(#c.custom_rules,0)
+  assert(c:onLine("Gold",50)); eq(f.applied[1][1].kind,"gold")
+  c.custom_rules={custom("bad",{foreground="#NOTHEX"})}
+  assert(c:onLine("Gold",51)); eq(f.applied[2][1].kind,"gold")
+  c:shutdown()
+end)
+
 test("parses an isolated bracketed room title",function()
   local parts=assert(Colorizer.parse("[Old Cemetery.]")); eq(#parts,1); eq(parts[1].kind,"room"); eq(parts[1].start,1); eq(parts[1].length,15)
   eq(Colorizer.parse("prefix [Old Cemetery.]"),nil); eq(Colorizer.parse("[broken] trailing"),nil)

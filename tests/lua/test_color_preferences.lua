@@ -20,6 +20,11 @@ local Styles = require("color_styles")
 local HOME, DIR = "/profile", "/profile/DGHUDData"
 local PATH = DIR.."/color-settings.dat"
 local HEADER = "DGHUD-COLORS|1\n"
+local function custom(phrase, extras)
+  local rule={phrase=phrase,foreground="#12ab34",background=false,bold=false,underline=false,enabled=true}
+  for key,value in pairs(extras or {}) do rule[key]=value end
+  return rule
+end
 
 local function reject(fn, ...)
   local ok, value, err = pcall(fn, ...)
@@ -81,7 +86,7 @@ end
 
 test("color preferences keep absent toggles sparse and preserve every false toggle", function()
   local empty = assert(Preferences.snapshot({}))
-  eq(next(empty.styles), nil); eq(empty.enabled, nil)
+  eq(next(empty.styles), nil); eq(empty.enabled, nil); eq(#empty.custom_rules, 0)
   local config = {enabled=false, highlights_enabled=false}
   for _, feature in ipairs({"room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
     config[feature.."_enabled"] = false
@@ -89,6 +94,82 @@ test("color preferences keep absent toggles sparse and preserve every false togg
   local decoded = assert(Preferences.decode(assert(Preferences.encode(config))))
   for key in pairs(config) do eq(decoded[key], false) end
   eq(next(decoded.styles), nil)
+  eq(#decoded.custom_rules, 0)
+end)
+
+test("color preferences save literal custom phrases in bounded v1 records", function()
+  local config={enabled=true,custom_rules={
+    custom("  Open gate  ",{foreground="#abcdef",background="#123456",bold=true}),
+    custom("a+b.*|%",{enabled=false,underline=true}),
+  }}
+  local snapshot=assert(Preferences.snapshot(config))
+  eq(snapshot.custom_rules[1].phrase,"Open gate")
+  eq(snapshot.custom_rules[1].foreground,"#ABCDEF")
+  eq(snapshot.custom_rules[1].background,"#123456")
+  eq(config.custom_rules[1].phrase,"  Open gate  ")
+  local encoded=assert(Preferences.encode(config))
+  assert(encoded:find("DGHUD-COLORS|1\n",1,true)==1)
+  assert(encoded:find("custom|4F70656E2067617465|#ABCDEF|#123456|1|0|1\n",1,true))
+  assert(not encoded:find("a+b.*|%",1,true))
+  local decoded=assert(Preferences.decode(encoded))
+  eq(decoded.custom_rules[2].phrase,"a+b.*|%")
+  eq(decoded.custom_rules[2].enabled,false)
+  eq(decoded.custom_rules[2].underline,true)
+  eq(assert(Preferences.encode(decoded)),encoded)
+  local api=fake()
+  assert(Preferences.save(HOME,config,api))
+  eq(assert(Preferences.load(HOME,api)).custom_rules[1].phrase,"Open gate")
+end)
+
+test("color preferences preserve old v1 files and reject malformed custom records", function()
+  local old=HEADER.."toggle|enabled|0\nstyle|room|#112233|-|0|0|1\n"
+  local decoded=assert(Preferences.decode(old))
+  eq(#decoded.custom_rules,0)
+  eq(assert(Preferences.encode(decoded)),old)
+  local record="custom|67617465|#AABBCC|-|0|0|1\n"
+  for _,text in ipairs({
+    HEADER.."custom|47415445|#AABBCC|-|0|0|1\n"..record,
+    HEADER..record..record,
+    HEADER.."custom|6|#AABBCC|-|0|0|1\n",
+    HEADER.."custom|GG|#AABBCC|-|0|0|1\n",
+    HEADER.."custom|0A|#AABBCC|-|0|0|1\n",
+    HEADER.."custom|61|#ZZZZZZ|-|0|0|1\n",
+    HEADER.."custom|61|#AABBCC|#12345|0|0|1\n",
+    HEADER.."custom|61|#AABBCC|-|0|0|1|extra\n",
+    HEADER.."custom|61|#AABBCC|-|0|0|1\nreturn os.execute('x')\n",
+  }) do reject(Preferences.decode,text) end
+  local sameCase=HEADER.."custom|47617465|#AABBCC|-|0|0|1\n"..record
+  reject(Preferences.decode,sameCase)
+end)
+
+test("color preferences bound custom arrays, phrases, fields and duplicate names", function()
+  local fifty={}
+  for index=1,50 do fifty[index]=custom("phrase "..index) end
+  eq(#assert(Preferences.snapshot({custom_rules=fifty})).custom_rules,50)
+  local longest=string.rep("x",120)
+  eq(assert(Preferences.decode(assert(Preferences.encode({custom_rules={custom(longest)}})))).custom_rules[1].phrase,longest)
+  fifty[51]=custom("extra")
+  reject(Preferences.snapshot,{custom_rules=fifty})
+  for _,rules in ipairs({
+    {custom("")}, {custom(" \t ")}, {custom(string.rep("x",121))},
+    {custom("one\ntwo")}, {custom("\none")}, {custom("one\n")},
+    {custom("one\0two")}, {custom("one\127two")},
+    {custom("Gate"),custom("gate")},
+    {custom("Élan"),custom("élan")},
+    {custom("Žena"),custom("žena")},
+    {custom("  Gate"),custom("gate  ")},
+    {[2]=custom("gap")}, {[1]=custom("good"),label=custom("bad")},
+    {custom("ok",{foreground="#XYZXYZ"})},
+    {custom("ok",{background="#12345"})},
+    {custom("ok",{bold="true"})},
+    {custom("ok",{underline=1})},
+    {custom("ok",{command="send('quit')"})},
+  }) do reject(Preferences.snapshot,{custom_rules=rules}) end
+  local noEnabled=custom("ok"); noEnabled.enabled=nil
+  reject(Preferences.snapshot,{custom_rules={noEnabled}})
+  local ruleWithMeta=setmetatable(custom("ok"),{__index=function() error("executed") end})
+  reject(Preferences.snapshot,{custom_rules={ruleWithMeta}})
+  reject(Preferences.snapshot,{custom_rules=setmetatable({}, {__index=function() error("executed") end})})
 end)
 
 test("color preferences save default RGB values without freezing registry defaults", function()

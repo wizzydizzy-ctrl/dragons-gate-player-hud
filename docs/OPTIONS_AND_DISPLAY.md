@@ -96,6 +96,8 @@ This keeps Mudlet's native input, command history, current draft, and aliases. T
 
 **COLOR SETTINGS** opens individual toggles for room titles, exits, currency, races, professions, travel objects, combat warnings, recovery, spell threats, discoveries, and illumination.
 
+The **CUSTOM WORDS/PHRASES** section lets you add, edit, or delete your own literal text matches. Each one can have its own text color, background highlight, bold, underline, and on/off choice. Saved entries stay with your Mudlet profile across character changes and HUD updates.
+
 All highlights are enabled by default. Turning a highlight off changes only DGHUD's coloring; it does not suppress game text.
 
 See [Color Highlighting](COLOR_HIGHLIGHTING.md).

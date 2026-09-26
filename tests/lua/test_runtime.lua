@@ -33,6 +33,7 @@ local function fake()
     setColorToggleCallback=function(self,callback) f.colorToggleCallback=callback end,
     setColorOptionsCallback=function(self,callback) f.colorOptionsCallback=callback end,
     setColorStyleCallback=function(self,callback) f.colorStyleCallback=callback end,
+    setCustomHighlightCallbacks=function(self,save,delete) f.customHighlightSave=save; f.customHighlightDelete=delete end,
     setColorStyles=function(self,config) f.viewColorStyles=config end,
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
@@ -1329,6 +1330,33 @@ test("color style changes persist independently and save failures leave runtime 
   local cold=Main.new(fake(),{layout={},colorization=f.savedColorSettings}); assert(cold:start())
   eq(cold.colorizer:status().exits,false); eq(cold.colorizer.styles.direction.foreground,"#00FF00")
   cold:shutdown(); hud:shutdown()
+end)
+
+test("custom word highlights save, recolor immediately, survive restart, and delete safely",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local rule={phrase="hidden gate",foreground="#55CCAA",background="#112233",bold=true,underline=false,enabled=true}
+  eq(f.customHighlightSave(nil,rule),true)
+  eq(f.savedColorSettings.custom_rules[1].phrase,"hidden gate")
+  eq(f.viewColorStyles.custom_rules[1].foreground,"#55CCAA")
+  f.triggers[f.colorizerTrigger]("A hidden gate is here.")
+  local found
+  for _,item in ipairs(f.coloredSegments or {}) do if item.kind=="custom" then found=item end end
+  assert(found); eq(found.color[1],85); eq(found.background[3],51); eq(found.bold,true)
+  local revised={phrase="secret gate",foreground="#AA55CC",background=false,bold=false,underline=true,enabled=true}
+  eq(f.customHighlightSave("hidden gate",revised),true)
+  eq(#f.savedColorSettings.custom_rules,1); eq(f.savedColorSettings.custom_rules[1].phrase,"secret gate")
+  local count=f.next; f.failColorSave=true
+  eq(f.customHighlightDelete("secret gate"),nil)
+  eq(#f.savedColorSettings.custom_rules,1); eq(hud.colorizer.custom_rules[1].phrase,"secret gate"); eq(f.next,count)
+  f.failColorSave=false
+  local cold=Main.new(fake(),{layout={},colorization=f.savedColorSettings}); assert(cold:start())
+  eq(cold.colorizer.custom_rules[1].phrase,"secret gate")
+  cold:shutdown()
+  eq(f.customHighlightDelete("secret gate"),true)
+  eq(#f.savedColorSettings.custom_rules,0)
+  eq(f.customHighlightSave(nil,{phrase="bad\nphrase",foreground="#FFFFFF",background=false,bold=false,underline=false,enabled=true}),nil)
+  eq(#f.savedColorSettings.custom_rules,0)
+  hud:shutdown()
 end)
 
 test("master color aliases report persistence failures without changing active colors",function()

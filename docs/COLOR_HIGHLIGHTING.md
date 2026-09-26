@@ -38,9 +38,17 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 7. Set Bold, Underline, and the individual style's On/Off choice.
 8. Click **SAVE** to apply. **CANCEL** discards unsaved edits. **RESET** restores the original style in the preview; click Save to keep it.
 
+## Custom words and phrases
+
+Open **OPTIONS → COLOR SETTINGS → CUSTOM WORDS/PHRASES** to add your own highlights. Enter the exact word or phrase you want to find, then choose its text color, optional background highlight, bold, underline, and on/off state. Save it to apply to new game text. Select a saved entry to change it later, or delete it when you no longer want it.
+
+Matches are literal text, not regular expressions, and ignore case for English and common accented Latin letters. Other scripts may need exact capitalization. A saved word is matched as a word rather than inside a longer word. Custom entries apply to new output in the main display and can override an overlapping built-in color without changing the original game text. Important version notices keep their prominent warning even when a custom phrase overlaps them. The master All Highlights switch still controls whether any coloring appears. Custom entries remain private to the Mudlet profile; they are saved with the other color settings and survive HUD updates, character changes, and restarts.
+
+For example, save `secret path` with yellow text and a dark background to make that phrase stand out whenever the game prints it. Entries are limited in length and number so a large collection cannot slow down the display.
+
 **Example: change exits to blue.** Open Text Styles, select **Exit directions**, choose blue, then Save. The `Obvious exits:` / `Obvious paths:` label is a separate style, so it can stay red or use another color.
 
-Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, and important notices all have separate editable styles. The category and master switches must also be on for a style to appear.
+Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, and important notices all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear.
 
 Selections apply to **new output**, not previously printed lines. Use `look` to see a room description again. Saved choices survive HUD reloads, package updates, character changes, and Mudlet restarts within the same profile. They are stored as validated data in `DGHUDData/color-settings.dat`, outside the replaceable package. A failed save shows an error and does not apply partial changes.
 

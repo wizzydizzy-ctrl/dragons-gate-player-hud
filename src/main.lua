@@ -217,6 +217,9 @@ function Main.installColorizerApi(namespace)
   api.getStyle=function(id) local controller=active(); if not controller then return nil,"colorizer is not running" end; return ColorStyles.resolve(controller.settings.colorization,id) end
   api.setStyle=function(id,style) local controller=active(); if not controller then return nil,"colorizer is not running" end; return controller:setColorStyle(id,style) end
   api.listStyles=ColorStyles.entries
+  api.customRules=function() local controller=active(); if not controller then return nil,"colorizer is not running" end; local config=controller.settings.colorization or {}; return Settings.merge({},config.custom_rules or {}) end
+  api.saveCustomRule=function(oldPhrase,rule) local controller=active(); if not controller then return nil,"colorizer is not running" end; return controller:setCustomHighlight(oldPhrase,rule) end
+  api.deleteCustomRule=function(phrase) local controller=active(); if not controller then return nil,"colorizer is not running" end; return controller:deleteCustomHighlight(phrase) end
   return api
 end
 function Main:commitColorSettings(candidate)
@@ -232,6 +235,7 @@ function Main:commitColorSettings(candidate)
   if self.colorizer then
     local updated=OutputColorizer.new(self.adapter,self.colorizer_enabled,normalized)
     self.colorizer.colors=updated.colors; self.colorizer.features=updated.features; self.colorizer.styles=updated.styles
+    self.colorizer.custom_rules=updated.custom_rules
     self.colorizer:setEnabled(self.colorizer_enabled)
   end
   if self.view then
@@ -261,6 +265,35 @@ function Main:setColorStyle(id,style)
   local candidate=Settings.merge({},self.settings.colorization or {})
   candidate.styles=type(candidate.styles)=="table" and candidate.styles or {}; candidate.styles[id]=validated
   return self:commitColorSettings(candidate)
+end
+function Main:setCustomHighlight(oldPhrase,rule)
+  if type(rule)~="table" or getmetatable(rule)~=nil or type(rawget(rule,"phrase"))~="string" then return nil,"Enter a word or phrase to highlight." end
+  if oldPhrase~=nil and type(oldPhrase)~="string" then return nil,"Invalid saved phrase." end
+  local fold=require("color_preferences").foldCase
+  local candidate=Settings.merge({},self.settings.colorization or {})
+  candidate.custom_rules=type(candidate.custom_rules)=="table" and candidate.custom_rules or {}
+  local found
+  if oldPhrase~=nil then
+    for index,saved in ipairs(candidate.custom_rules) do
+      if type(saved.phrase)=="string" and fold(saved.phrase)==fold(oldPhrase) then found=index; break end
+    end
+    if not found then return nil,"Saved phrase was not found." end
+  end
+  if found then candidate.custom_rules[found]=rule else candidate.custom_rules[#candidate.custom_rules+1]=rule end
+  return self:commitColorSettings(candidate)
+end
+function Main:deleteCustomHighlight(phrase)
+  if type(phrase)~="string" then return nil,"Invalid saved phrase." end
+  local fold=require("color_preferences").foldCase
+  local candidate=Settings.merge({},self.settings.colorization or {})
+  candidate.custom_rules=type(candidate.custom_rules)=="table" and candidate.custom_rules or {}
+  for index,saved in ipairs(candidate.custom_rules) do
+    if type(saved.phrase)=="string" and fold(saved.phrase)==fold(phrase) then
+      table.remove(candidate.custom_rules,index)
+      return self:commitColorSettings(candidate)
+    end
+  end
+  return nil,"Saved phrase was not found."
 end
 function Main:clockDisplay()
   local real
@@ -1169,6 +1202,10 @@ function Main:start()
   local colorSettings=type(self.settings.colorization)=="table" and self.settings.colorization or {}
   if self.view.setColorStyles then self.view:setColorStyles(colorSettings) end
   if self.view.setColorStyleCallback then self.view:setColorStyleCallback(function(id,style) return self:setColorStyle(id,style) end) end
+  if self.view.setCustomHighlightCallbacks then self.view:setCustomHighlightCallbacks(
+    function(oldPhrase,rule) return self:setCustomHighlight(oldPhrase,rule) end,
+    function(phrase) return self:deleteCustomHighlight(phrase) end
+  ) end
   if self.view.setColorOptions then
     local initial={mapper=self:mapperEnabled(),enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
     local legacy=colorSettings.highlights_enabled~=false

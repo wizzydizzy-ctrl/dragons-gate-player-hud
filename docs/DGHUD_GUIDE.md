@@ -28,7 +28,7 @@ dghud check
 | [HUD Screen and Character Data](HUD_SCREEN_AND_CHARACTER_DATA.md) | Every visible section, where its information comes from, and how to refresh it. |
 | [Options and Display Settings](OPTIONS_AND_DISPLAY.md) | Every button under **OPTIONS**, text size, resizing, and saved preferences. |
 | [Chatbox](CHATBOX.md) | Chat categories, filters, permanent local history, and custom capture triggers. |
-| [Color Highlighting](COLOR_HIGHLIGHTING.md) | Every optional highlight, what each color means, and how to toggle it. |
+| [Color Highlighting](COLOR_HIGHLIGHTING.md) | Built-in highlights, color choices, and how to add your own words or phrases. |
 | [Automapper and Map Library](AUTOMAPPER_AND_MAP_LIBRARY.md) | Automatic mapping, special submaps, walking, cleanup, named map collections, sharing, downloading, and combining maps. |
 | [Autoroller](AUTOROLLER.md) | Both character-creation rolling methods, every setting, recommended setups, commands, and troubleshooting. |
 | [Updates and Emergency Recovery](UPDATES_AND_RECOVERY.md) | Safe manual updates, optional automatic updates, preserved data, and `dghud recover`. |

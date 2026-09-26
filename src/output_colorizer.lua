@@ -1,6 +1,8 @@
 local Colorizer={}; Colorizer.__index=Colorizer
 local Styles=require("color_styles")
 local Travel=require("travel_highlights")
+local Preferences=require("color_preferences")
+local MAX_CUSTOM_MATCHES=256
 
 local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},gold={224,184,79},silver={192,192,192},portal={55,190,200},presence={136,190,153},presence_phrase={255,220,90},attack={205,62,62},damage={255,70,70},danger={205,135,45},recovery={90,165,105},upkeep={185,105,45},spell={145,95,190},discovery={225,185,70},illumination={220,200,85},darkness={105,120,140},notice={255,215,80}}
 local directions={north=true,northeast=true,east=true,southeast=true,south=true,southwest=true,west=true,northwest=true,up=true,down=true,['in']=true,out=true,n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,u=true,d=true}
@@ -116,8 +118,183 @@ function Colorizer.parse(line,colors)
   return #result>0 and result or nil
 end
 
+local function wordByte(byte)
+  return byte and (byte>=128 or (byte>=48 and byte<=57) or (byte>=65 and byte<=90) or (byte>=97 and byte<=122) or byte==95)
+end
+
+local function customSegments(line,rules,bridge)
+  local result, claimed, candidates = {}, {}, {}
+  local lower=Preferences.foldCase(line)
+  for index,rule in ipairs(rules) do
+    if rule.enabled then candidates[#candidates+1]={rule=rule,index=index,needle=Preferences.foldCase(rule.phrase)} end
+  end
+  -- Longest phrase wins a custom/custom overlap; otherwise saved order wins.
+  table.sort(candidates,function(a,b)
+    if #a.needle==#b.needle then return a.index<b.index end
+    return #a.needle>#b.needle
+  end)
+  for _,candidate in ipairs(candidates) do
+    local needle,rule=candidate.needle,candidate.rule
+    local firstWord,lastWord=wordByte(needle:byte(1)),wordByte(needle:byte(-1))
+    local cursor=1
+    while #result<MAX_CUSTOM_MATCHES do
+      -- Plain find's fourth argument forbids Lua pattern interpretation.
+      local first,last=lower:find(needle,cursor,true)
+      if not first then break end
+      local boundaries=(not bridge or (first<=bridge and last>bridge+1)) and
+        (not firstWord or not wordByte(line:byte(first-1))) and
+        (not lastWord or not wordByte(line:byte(last+1)))
+      local free=boundaries
+      if free then for position=first,last do if claimed[position] then free=false; break end end end
+      if free then
+        for position=first,last do claimed[position]=true end
+        result[#result+1]={
+          start=first,length=last-first+1,kind="custom",color=Styles.toRGB(rule.foreground),
+          background=rule.background and Styles.toRGB(rule.background) or nil,
+          bold=rule.bold,underline=rule.underline,
+          rank_length=#needle,rule_index=candidate.index,
+        }
+      end
+      cursor=first+1
+    end
+    if #result>=MAX_CUSTOM_MATCHES then break end
+  end
+  table.sort(result,function(a,b) return a.start<b.start end)
+  return result
+end
+
+local function outranks(first,second)
+  if first.rank_length~=second.rank_length then return first.rank_length>second.rank_length end
+  return first.rule_index<second.rule_index
+end
+
+local function copySegment(item,start,length)
+  local copy={}
+  for key,value in pairs(item) do copy[key]=value end
+  copy.start,copy.length=start,length
+  return copy
+end
+
+local function verifiedLine(number,source)
+  local get=rawget(_G,"getLines")
+  if type(number)~="number" or number<0 or number%1~=0 or type(source)~="string" or type(get)~="function" then return false end
+  local ok,lines=pcall(get,number,number+1)
+  return ok and type(lines)=="table" and lines[1]==source
+end
+
+local function wrappedCustomSegments(previous,current,rules,adapter)
+  if not previous or type(previous.text)~="string" or type(previous.number)~="number"
+    or type(current.number)~="number" or current.number~=previous.number+1 then return {} end
+  local hasPhrase=false
+  for _,rule in ipairs(rules) do if rule.enabled and rule.phrase:find(" ",1,true) then hasPhrase=true; break end end
+  if not hasPhrase then return {} end
+  local old,now=previous.text,current.text
+  local oldEnd=old:match(".*()%S")
+  local nowStart=now:find("%S")
+  -- Require the preceding line to approach the configured wrap column. This
+  -- avoids joining ordinary consecutive messages that happen to share words.
+  local threshold=80
+  if adapter and type(adapter.getMainConsoleWrap)=="function" then
+    local ok,columns=pcall(adapter.getMainConsoleWrap,adapter)
+    if ok and type(columns)=="number" and columns>=1 then threshold=math.max(20,math.min(80,columns-10)) end
+  end
+  if not oldEnd or oldEnd<threshold or not nowStart or not wordByte(old:byte(oldEnd)) or not wordByte(now:byte(nowStart))
+    or old:match("^%s*[%[>]" ) or now:match("^%s*[%[>]" ) then return {} end
+  local joined=old:sub(1,oldEnd).." "..now:sub(nowStart)
+  local matches=customSegments(joined,rules,oldEnd)
+  if #matches==0 then return {} end
+  -- Both absolute console rows must still contain the exact game text. The
+  -- adapter verifies again when selecting; missing/stale rows color neither half.
+  if not verifiedLine(previous.number,old) or not verifiedLine(current.number,now) then return {} end
+  local result={}
+  for _,match in ipairs(matches) do
+    local group={}
+    local left=copySegment(match,match.start,oldEnd-match.start+1)
+    local right=copySegment(match,nowStart,match.start+match.length-oldEnd-2)
+    left.source_line,left.line_number,left.wrap_group=old,previous.number,group
+    right.source_line,right.line_number,right.wrap_group=now,current.number,group
+    result[#result+1]=left; result[#result+1]=right
+  end
+  return result
+end
+
+local function selectCustomSegments(current,wrapped,parts)
+  local groups={}
+  for _,item in ipairs(current) do groups[#groups+1]={item} end
+  local seen={}
+  for _,item in ipairs(wrapped) do
+    local group=item.wrap_group
+    if not seen[group] then seen[group]=true; groups[#groups+1]=group end
+    group[#group+1]=item
+  end
+  table.sort(groups,function(a,b) return outranks(a[1],b[1]) end)
+  local chosen,claimed={},{}
+  for _,group in ipairs(groups) do
+    local blocked=#group==0 or #chosen+#group>MAX_CUSTOM_MATCHES
+    for _,item in ipairs(group) do
+      if not blocked then
+        local row=item.line_number or -1
+        local occupied=claimed[row] or {}
+        for pos=item.start,item.start+item.length-1 do if occupied[pos] then blocked=true; break end end
+        for _,span in ipairs(parts) do
+          if span.display_text and span.source_line==item.source_line and span.line_number==item.line_number and
+            span.start<item.start+item.length and item.start<span.start+span.length then blocked=true; break end
+        end
+      end
+    end
+    if not blocked then
+      for _,item in ipairs(group) do
+        local row=item.line_number or -1
+        local occupied=claimed[row] or {}; claimed[row]=occupied
+        for pos=item.start,item.start+item.length-1 do occupied[pos]=true end
+        chosen[#chosen+1]=item
+      end
+    end
+  end
+  table.sort(chosen,function(a,b)
+    if a.line_number==b.line_number then return a.start<b.start end
+    return (a.line_number or -1)<(b.line_number or -1)
+  end)
+  return chosen
+end
+
+local function withoutCustomOverlap(parts,custom)
+  if #custom==0 then return parts end
+  local result={}
+  for _,item in ipairs(parts) do
+    local spans={item}
+    for _,highlight in ipairs(custom) do
+      if item.source_line==highlight.source_line and item.line_number==highlight.line_number then
+        local remaining={}
+        local customEnd=highlight.start+highlight.length
+        for _,span in ipairs(spans) do
+          local spanEnd=span.start+span.length
+          if span.start<customEnd and highlight.start<spanEnd then
+            -- Replacement notices are protected before this pass; retaining
+            -- this guard prevents any future caller from deleting their text.
+            if not span.display_text then
+              if span.start<highlight.start then
+                remaining[#remaining+1]=copySegment(span,span.start,highlight.start-span.start)
+              end
+              if customEnd<spanEnd then
+                remaining[#remaining+1]=copySegment(span,customEnd,spanEnd-customEnd)
+              end
+            end
+          else
+            remaining[#remaining+1]=span
+          end
+        end
+        spans=remaining
+        if #spans==0 then break end
+      end
+    end
+    for _,span in ipairs(spans) do result[#result+1]=span end
+  end
+  return result
+end
+
 function Colorizer.new(adapter,enabled,settings)
-  settings=type(settings)=="table" and settings or {}
+  settings=type(settings)=="table" and getmetatable(settings)==nil and settings or {}
   local colors={room=settings.room_color or defaultColors.room,label=settings.label_color or defaultColors.label,direction=settings.direction_color or defaultColors.direction,gold=settings.gold_color or defaultColors.gold,silver=settings.silver_color or defaultColors.silver,portal=settings.portal_color or defaultColors.portal,presence=settings.presence_color or defaultColors.presence,presence_phrase=settings.presence_phrase_color or defaultColors.presence_phrase,attack=settings.attack_color or defaultColors.attack,damage=settings.damage_color or defaultColors.damage,danger=settings.danger_color or defaultColors.danger,recovery=settings.recovery_color or defaultColors.recovery,upkeep=settings.upkeep_color or defaultColors.upkeep,spell=settings.spell_color or defaultColors.spell,discovery=settings.discovery_color or defaultColors.discovery,illumination=settings.illumination_color or defaultColors.illumination,darkness=settings.darkness_color or defaultColors.darkness,notice=settings.notice_color or defaultColors.notice}
   local legacyHighlights=settings.highlights_enabled~=false
   local features={room=settings.room_enabled~=false,exits=settings.exits_enabled~=false,currency=settings.currency_enabled~=false,races=settings.races_enabled~=false,classes=settings.classes_enabled~=false}
@@ -125,13 +302,25 @@ function Colorizer.new(adapter,enabled,settings)
     local configured=settings[kind.."_enabled"]
     if configured==nil then features[kind]=legacyHighlights else features[kind]=configured~=false end
   end
-  local self=setmetatable({adapter=adapter,enabled=enabled==true,colors=colors,features=features,trigger=nil,started=false,travel=Travel.new(true),line_history={}},Colorizer)
-  self:setStyles(settings)
+  local self=setmetatable({adapter=adapter,enabled=enabled==true,colors=colors,features=features,trigger=nil,started=false,travel=Travel.new(true),line_history={},custom_rules={}},Colorizer)
+  local styled=self:setStyles(settings)
+  if not styled then self:setStyles({}) end
   return self
 end
 function Colorizer:setStyles(settings)
+  settings=type(settings)=="table" and getmetatable(settings)==nil and settings or {}
+  local ok,err=self:setCustomRules(settings.custom_rules)
+  if not ok then return nil,err end
   self.styles={}
   for _,entry in ipairs(Styles.entries()) do self.styles[entry.id]=Styles.resolve(settings,entry.id) end
+  return true
+end
+function Colorizer:setCustomRules(rules)
+  local normalized,err=Preferences.normalizeCustomRules(rules)
+  if not normalized then return nil,err end
+  self.custom_rules=normalized
+  self._custom_rules_source=normalized
+  self._custom_rules_validated=Preferences.normalizeCustomRules(normalized)
   return true
 end
 function Colorizer:start()
@@ -185,6 +374,17 @@ function Colorizer:onLine(line,number)
   -- Broad travel phrases go first. Currency and named styles must remain
   -- visible inside them, including previously colored wrapped server lines.
   for _,item in ipairs(overlays) do segments[#segments+1]=item end
+  -- Main's save path replaces custom_rules directly with a fresh validated
+  -- array. Revalidate that new table once, not for every incoming game line.
+  if self._custom_rules_source~=self.custom_rules then
+    self._custom_rules_validated=Preferences.normalizeCustomRules(self.custom_rules) or {}
+    self._custom_rules_source=self.custom_rules
+  end
+  local rules=self._custom_rules_validated or {}
+  local custom=customSegments(line,rules)
+  for _,item in ipairs(custom) do item.source_line=line; item.line_number=number end
+  local previous=self.line_history[#self.line_history-1]
+  local wrapped=#rules>0 and wrappedCustomSegments(previous,{text=line,number=number},rules,self.adapter) or {}
   local filtered={}
   for _,item in ipairs(segments) do
     local feature=item.kind
@@ -202,6 +402,9 @@ function Colorizer:onLine(line,number)
       filtered[#filtered+1]=item
     end
   end
+  custom=selectCustomSegments(custom,wrapped,filtered)
+  filtered=withoutCustomOverlap(filtered,custom)
+  for _,item in ipairs(custom) do filtered[#filtered+1]=item end
   if #filtered==0 then return false end
   local ok,applied,err=pcall(self.adapter.applyLineColors,self.adapter,filtered)
   if not ok then return nil,tostring(applied) end

@@ -2,6 +2,7 @@ local Navigation=require("navigation")
 local Layout=require("layout")
 local MapCatalog=require("map_catalog")
 local ColorStyles=require("color_styles")
+local ColorPreferences=require("color_preferences")
 local Sounds=require("chat_sounds")
 local View={}; View.__index=View
 function View.withFont(text,size) return "<span style='font-size:"..tonumber(size).."px'>"..text.."</span>" end
@@ -1201,6 +1202,7 @@ function View:createColorStyleEditor()
   end
   self.color_settings_groups_tab=text("GroupsTab",self.color_settings_panel,"CATEGORIES",function() return self:showColorSettingsPage("groups") end)
   self.color_settings_styles_tab=text("StylesTab",self.color_settings_panel,"TEXT STYLES",function() return self:showColorSettingsPage("styles") end)
+  self.color_settings_custom_tab=text("CustomTab",self.color_settings_panel,"CUSTOM WORDS/PHRASES",function() return self:showColorSettingsPage("custom") end)
   self.color_settings_status=text("CategoryStatus",self.color_settings_panel,"")
   self.color_style_catalog=scroll("Catalog"); self.color_style_content=scroll("Editor")
   self.color_style_catalog_help=text("CatalogHelp",self.color_style_catalog,"Choose game text to edit its colors and highlights.")
@@ -1255,6 +1257,49 @@ function View:createColorStyleEditor()
   self.color_style_reset:setToolTip("Reset only this style to its original colors. Save to apply.")
   self.color_style_cancel=text("Cancel",self.color_settings_panel,"CANCEL",function() return self:cancelColorStyle() end)
   self.color_style_save=text("Save",self.color_settings_panel,"SAVE",function() return self:saveColorStyle() end)
+  self.custom_highlight_rules={}; self.custom_highlight_rows={}
+  self.custom_highlight_list=scroll("CustomList"); self.custom_highlight_content=scroll("CustomEditor")
+  self.custom_highlight_status=text("CustomStatus",self.color_settings_panel,"")
+  self.custom_highlight_help=text("CustomHelp",self.custom_highlight_list,"Match literal words or phrases in game text. Up to 50 saved rules.")
+  self.custom_highlight_add=text("CustomAdd",self.custom_highlight_list,"+ ADD WORD / PHRASE",function() return self:addCustomHighlight() end)
+  self.custom_highlight_count=text("CustomCount",self.custom_highlight_list,"")
+  self.custom_highlight_phrase_caption=text("CustomPhraseCaption",self.custom_highlight_content,"Word or phrase (literal match, 1–120 bytes)")
+  self.custom_highlight_phrase=remember(input("DGHUD.ColorStyles.CustomPhrase",self.custom_highlight_content,self.geyser))
+  self.custom_highlight_phrase:setAction(function(value)
+    if value~=nil then self.custom_highlight_phrase:print(tostring(value)) end
+    return self:previewCustomHighlight()
+  end)
+  self.custom_highlight_preview=text("CustomPreview",self.custom_highlight_content,"")
+  self.custom_highlight_editor_help=text("CustomEditorHelp",self.custom_highlight_content,"Enter #RRGGBB or choose a swatch. Preview only until saved.")
+  self.custom_highlight_fields={}
+  for _,key in ipairs({"foreground","background"}) do
+    local field={caption=text("Custom."..key..".Caption",self.custom_highlight_content,key=="foreground" and "Text color" or "Highlight color")}
+    field.input=remember(input("DGHUD.ColorStyles.Custom."..key,self.custom_highlight_content,self.geyser))
+    field.input:setAction(function(value)
+      if value~=nil then field.input:print(tostring(value)) end
+      return self:previewCustomHighlight()
+    end)
+    self.custom_highlight_fields[key]=field
+  end
+  self.custom_highlight_toggle_order={"background_enabled","bold","underline","enabled"}; self.custom_highlight_toggles={}
+  for _,key in ipairs(self.custom_highlight_toggle_order) do
+    self.custom_highlight_toggles[key]=text("CustomToggle."..key,self.custom_highlight_content,toggles[key],function() return self:toggleCustomHighlight(key) end)
+  end
+  self.custom_highlight_palette_targets={}
+  for _,key in ipairs({"foreground","background"}) do
+    self.custom_highlight_palette_targets[key]=text("CustomPalette."..key,self.custom_highlight_content,key=="foreground" and "SWATCHES: TEXT" or "SWATCHES: HIGHLIGHT",function()
+      if not self.custom_highlight_draft then return nil end
+      self.custom_highlight_palette_target=key; self:renderCustomHighlight(); return true
+    end)
+  end
+  self.custom_highlight_swatches={}
+  for index,color in ipairs(colorPalette) do
+    local swatch=text("CustomSwatch."..index,self.custom_highlight_content,color,function() return self:chooseCustomHighlightSwatch(color) end)
+    self.custom_highlight_swatches[index]=swatch
+  end
+  self.custom_highlight_cancel=text("CustomCancel",self.color_settings_panel,"BACK",function() return self:showColorSettingsPage("custom") end)
+  self.custom_highlight_delete=text("CustomDelete",self.color_settings_panel,"DELETE",function() return self:deleteCustomHighlight() end)
+  self.custom_highlight_save=text("CustomSave",self.color_settings_panel,"SAVE",function() return self:saveCustomHighlight() end)
 end
 function View:colorSettingsWidgets()
   local widgets={self.color_settings_overlay,self.color_settings_panel,self.color_settings_bg,self.color_settings_title,self.color_settings_content,self.color_settings_close}
@@ -1265,6 +1310,7 @@ end
 function View:layoutColorSettings(layout)
   local widgets=self:colorSettingsWidgets()
   if self.color_style_draft then self:readColorStyleDraft() end
+  if self.custom_highlight_draft then self:readCustomHighlightDraft() end
   for _,widget in ipairs(widgets) do widget:hide() end
   if not self.color_settings_visible then return true end
   local width,height=math.max(1,layout.window_width or 1200),math.max(1,layout.window_height or 800)
@@ -1276,13 +1322,15 @@ function View:layoutColorSettings(layout)
   place(self.color_settings_bg,0,0,"100%","100%"); place(self.color_settings_title,pad,8,math.max(1,inner-76),28)
   self.color_settings_title:echo(View.withFont("<b>COLOR SETTINGS</b>",pw<360 and font or font+3))
   place(self.color_settings_close,pw-pad-70,8,70,28); self.color_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font))
-  local tabWidth=(inner-gap)/2
-  for index,key in ipairs({"groups","styles"}) do
+  local tabWidth=(inner-gap*2)/3
+  for index,key in ipairs({"groups","styles","custom"}) do
     local tab=self["color_settings_"..key.."_tab"]; place(tab,pad+(index-1)*(tabWidth+gap),42,tabWidth,30)
-    self:renderColorStyleButton(tab,self.color_settings_page==key or (key=="styles" and self.color_settings_page=="editor"))
+    local original=tab.option_text; if key=="custom" and pw<520 then tab.option_text="CUSTOM" end
+    self:renderColorStyleButton(tab,self.color_settings_page==key or (key=="styles" and self.color_settings_page=="editor") or (key=="custom" and self.color_settings_page=="custom_editor"))
+    tab.option_text=original
   end
   local top=self.color_settings_page=="styles" and 80 or 128
-  local footer=self.color_settings_page=="editor" and 48 or 10; local contentHeight=math.max(1,ph-top-footer)
+  local footer=(self.color_settings_page=="editor" or self.color_settings_page=="custom_editor") and 48 or 10; local contentHeight=math.max(1,ph-top-footer)
   if self.color_settings_page=="groups" then
     place(self.color_settings_content,pad,top,inner,contentHeight)
     place(self.color_settings_status,pad,78,inner,44)
@@ -1292,6 +1340,20 @@ function View:layoutColorSettings(layout)
     self.color_settings_content.content_height=math.ceil(#self.color_option_order/columns)*row; self:renderColorOptions()
   elseif self.color_settings_page=="styles" then
     place(self.color_style_catalog,pad,top,inner,contentHeight); self:layoutColorStyleCatalog(body)
+  elseif self.color_settings_page=="custom" then
+    place(self.custom_highlight_status,pad,78,inner,44); self:renderCustomHighlightStatus()
+    place(self.custom_highlight_list,pad,top,inner,contentHeight); self:layoutCustomHighlightList(body)
+  elseif self.color_settings_page=="custom_editor" and self.custom_highlight_draft then
+    place(self.custom_highlight_status,pad,78,inner,44); self:renderCustomHighlightStatus()
+    place(self.custom_highlight_content,pad,top,inner,contentHeight); self:layoutCustomHighlightEditor(body)
+    local bw=(inner-gap*2)/3
+    for index,key in ipairs({"cancel","delete","save"}) do
+      local button=self["custom_highlight_"..key]
+      if key~="delete" or self.custom_highlight_selected then
+        place(button,pad+(index-1)*(bw+gap),ph-40,bw,30); self:renderColorStyleButton(button,key=="save")
+      end
+    end
+    self:renderCustomHighlight()
   elseif self.color_style_draft then
     place(self.color_style_status,pad,78,inner,44)
     place(self.color_style_content,pad,top,inner,contentHeight); self:layoutColorStyleEditor(body)
@@ -1346,13 +1408,256 @@ function View:layoutColorStyleEditor(width)
   self.color_style_content.content_height=y
   for _,field in pairs(self.color_style_fields) do field.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";color:"..self.settings.theme.text..";font-size:"..font.."px;") end
 end
+local function customPhrase(value)
+  if type(value)~="string" then return nil end
+  local phrase=value:match("^%s*(.-)%s*$")
+  if #phrase<1 or #phrase>120 or phrase:find("%c") then return nil end
+  return phrase
+end
+local function customRule(value)
+  if type(value)~="table" or getmetatable(value)~=nil then return nil end
+  local phrase=customPhrase(rawget(value,"phrase"))
+  local foreground=ColorStyles.normalizeColor(rawget(value,"foreground"))
+  local rawBackground=rawget(value,"background")
+  local background
+  if rawBackground==false then background=false else background=ColorStyles.normalizeColor(rawBackground) end
+  if not phrase or not foreground or not background and background~=false then return nil end
+  return {phrase=phrase,foreground=foreground,background=background,bold=rawget(value,"bold")==true,underline=rawget(value,"underline")==true,enabled=rawget(value,"enabled")~=false}
+end
+function View:syncCustomHighlightRows()
+  local t=self.settings.theme
+  for index=1,#self.custom_highlight_rules do
+    if not self.custom_highlight_rows[index] then
+      local row=label("DGHUD.ColorStyles.CustomEntry."..index,self.custom_highlight_list,"background:#111814;border:1px solid "..t.border..";color:"..t.text..";",self.geyser)
+      row:setClickCallback(function() return self:selectCustomHighlightAt(index) end)
+      row:hide(); self.custom_highlight_rows[index]=row; self.color_style_widgets[#self.color_style_widgets+1]=row
+    end
+  end
+  for index=#self.custom_highlight_rules+1,#self.custom_highlight_rows do self.custom_highlight_rows[index]:hide() end
+end
+function View:renderCustomHighlightStatus(message,isError)
+  local t=self.settings.theme; local copy=message or self.custom_highlight_error or self.custom_highlight_message or "Choose a saved phrase or add a new one. Matches are literal, not patterns."
+  local errorState=isError~=nil and isError or self.custom_highlight_error~=nil
+  self.custom_highlight_status:echo(View.withFont("<span style='color:"..(errorState and t.hp or t.muted).."'>"..safeText(copy).."</span>",self.color_style_font or 11))
+  if self.custom_highlight_status.setToolTip then self.custom_highlight_status:setToolTip(copy) end
+end
+function View:layoutCustomHighlightList(width)
+  local font=self.color_style_font or 11
+  place(self.custom_highlight_help,0,0,width,40); self.custom_highlight_help:echo(View.withFont(safeText(self.custom_highlight_help.option_text),font))
+  place(self.custom_highlight_add,0,44,width,32); self:renderColorStyleButton(self.custom_highlight_add,true)
+  place(self.custom_highlight_count,0,84,width,24)
+  self.custom_highlight_count:echo(View.withFont(#self.custom_highlight_rules.." / 50 saved",font))
+  local y=112
+  for index,rule in ipairs(self.custom_highlight_rules) do
+    local row=self.custom_highlight_rows[index]; place(row,0,y,width,34); y=y+38
+    local color=ColorStyles.normalizeColor(rule.foreground) or "#FFFFFF"
+    row:setStyleSheet("background:#111814;border:1px solid "..self.settings.theme.border..";border-radius:4px;color:"..self.settings.theme.text..";")
+    row:echo(View.withFont("<span style='color:"..color.."'>■</span> &nbsp; "..safeText(rule.phrase)..(rule.enabled==false and " (off)" or "").." &nbsp; ›",font))
+    if row.setToolTip then row:setToolTip(safeText(rule.phrase)) end
+  end
+  self.custom_highlight_list.content_height=y
+end
+function View:layoutCustomHighlightEditor(width)
+  local font=self.color_style_font or 11; local gap=6; local y=0
+  local function row(widget,height) place(widget,0,y,width,height); y=y+height+gap end
+  row(self.custom_highlight_phrase_caption,24); row(self.custom_highlight_phrase,30)
+  row(self.custom_highlight_preview,52); row(self.custom_highlight_editor_help,42)
+  row(self.custom_highlight_fields.foreground.caption,20); row(self.custom_highlight_fields.foreground.input,30)
+  row(self.custom_highlight_toggles.background_enabled,30)
+  if self.custom_highlight_draft.background_enabled then row(self.custom_highlight_fields.background.caption,20); row(self.custom_highlight_fields.background.input,30) end
+  local targetWidth=(width-gap)/2
+  for index,key in ipairs({"foreground","background"}) do place(self.custom_highlight_palette_targets[key],(index-1)*(targetWidth+gap),y,targetWidth,36) end
+  y=y+42
+  local columns=width>=400 and 12 or 6; local sw=(width-gap*(columns-1))/columns
+  for index,swatch in ipairs(self.custom_highlight_swatches) do place(swatch,((index-1)%columns)*(sw+gap),y+math.floor((index-1)/columns)*32,sw,26) end
+  y=y+math.ceil(#self.custom_highlight_swatches/columns)*32+gap
+  for _,key in ipairs({"bold","underline","enabled"}) do row(self.custom_highlight_toggles[key],30) end
+  self.custom_highlight_content.content_height=y
+  for _,field in pairs(self.custom_highlight_fields) do field.input:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";color:"..self.settings.theme.text..";font-size:"..font.."px;") end
+  self.custom_highlight_phrase:setStyleSheet("background:#080b0a;border:1px solid "..self.settings.theme.border..";color:"..self.settings.theme.text..";font-size:"..font.."px;")
+end
+function View:setCustomHighlightCallbacks(saveCallback,deleteCallback)
+  self.custom_highlight_save_callback=type(saveCallback)=="function" and saveCallback or nil
+  self.custom_highlight_delete_callback=type(deleteCallback)=="function" and deleteCallback or nil
+  return true
+end
+function View:readCustomHighlightDraft()
+  local draft=self.custom_highlight_draft; if not draft then return nil end
+  draft.phrase=self.custom_highlight_phrase:getText()
+  draft.foreground=self.custom_highlight_fields.foreground.input:getText()
+  draft.background_text=self.custom_highlight_fields.background.input:getText()
+  draft.background=draft.background_enabled and draft.background_text or false
+  return draft
+end
+function View:customHighlightValues()
+  local draft=self:readCustomHighlightDraft(); if not draft then return nil,"Choose or add a phrase first." end
+  local phrase=customPhrase(draft.phrase)
+  if not phrase then return nil,"Enter a literal phrase of 1–120 bytes without line breaks." end
+  for _,rule in ipairs(self.custom_highlight_rules) do
+    if ColorPreferences.foldCase(rule.phrase)==ColorPreferences.foldCase(phrase) and rule.phrase~=self.custom_highlight_selected then return nil,"That phrase is already saved." end
+  end
+  if not self.custom_highlight_selected and #self.custom_highlight_rules>=50 then return nil,"The 50-rule limit has been reached." end
+  local foreground=ColorStyles.normalizeColor(tostring(draft.foreground):match("^%s*(.-)%s*$"))
+  if not foreground then return nil,"Text color: enter # and six color digits, such as #79D98B." end
+  local background=false
+  if draft.background_enabled then
+    background=ColorStyles.normalizeColor(tostring(draft.background_text):match("^%s*(.-)%s*$"))
+    if not background then return nil,"Highlight color: enter # and six color digits, such as #333333." end
+  end
+  return {phrase=phrase,foreground=foreground,background=background,bold=draft.bold==true,underline=draft.underline==true,enabled=draft.enabled==true}
+end
+function View:renderCustomHighlight()
+  local draft=self.custom_highlight_draft; if not draft then return true end
+  local t=self.settings.theme; local font=self.color_style_font or 11
+  self.custom_highlight_delete.option_text=self.custom_highlight_delete_pending and "CONFIRM DELETE" or "DELETE"
+  if self.custom_highlight_delete.visible then self:renderColorStyleButton(self.custom_highlight_delete,false) end
+  local rule,validationError=self:customHighlightValues()
+  if rule then self.custom_highlight_preview_style=viewCopy(rule) end
+  local preview=self.custom_highlight_preview_style or {foreground="#FFFFFF",background=false,bold=false,underline=false,enabled=true}
+  local background=preview.enabled and preview.background or false
+  local color=preview.enabled and preview.foreground or t.text
+  self.custom_highlight_preview:setStyleSheet("background:"..(background or "#080B0A")..";color:"..color..";border:1px solid "..t.border..";font-weight:"..(preview.enabled and preview.bold and "bold" or "normal")..";text-decoration:"..(preview.enabled and preview.underline and "underline" or "none")..";")
+  local sample=safeText(customPhrase(draft.phrase) or "Your phrase preview")
+  if preview.enabled and preview.bold then sample="<b>"..sample.."</b>" end
+  if preview.enabled and preview.underline then sample="<u>"..sample.."</u>" end
+  self.custom_highlight_preview:echo(View.withFont("<center><span style='color:"..color.."'>"..sample.."</span></center>",font+2),"nocolor")
+  self.custom_highlight_phrase_caption:echo(View.withFont(safeText(self.custom_highlight_phrase_caption.option_text),font))
+  self.custom_highlight_editor_help:echo(View.withFont(safeText(self.custom_highlight_editor_help.option_text),font))
+  for _,field in pairs(self.custom_highlight_fields) do field.caption:echo(View.withFont(field.caption.option_text.." (#RRGGBB)",font)) end
+  for _,key in ipairs(self.custom_highlight_toggle_order) do
+    local button=self.custom_highlight_toggles[key]; local enabled=draft[key]==true
+    self:renderColorStyleButton(button,enabled); button:echo(View.withFont("<center>"..safeText(button.option_text)..": <b>"..(enabled and "ON" or "OFF").."</b></center>",font))
+  end
+  for key,button in pairs(self.custom_highlight_palette_targets) do self:renderColorStyleButton(button,key==self.custom_highlight_palette_target) end
+  for index,swatch in ipairs(self.custom_highlight_swatches) do swatch:setStyleSheet("background:"..colorPalette[index]..";border:2px solid "..t.border..";border-radius:3px;"); swatch:echo("") end
+  local message=self.custom_highlight_error or validationError or self.custom_highlight_message or "Preview only. Save applies this phrase."
+  if not self.custom_highlight_error and not validationError and self.color_options.enabled==false then message=message.." All highlights are currently off." end
+  self:renderCustomHighlightStatus(message,self.custom_highlight_error~=nil or validationError~=nil)
+  return rule~=nil,validationError
+end
+function View:previewCustomHighlight()
+  if not self.custom_highlight_draft then return nil,"Choose or add a phrase first." end
+  self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false
+  return self:renderCustomHighlight()
+end
+function View:toggleCustomHighlight(key)
+  local draft=self:readCustomHighlightDraft(); if not draft or not self.custom_highlight_toggles[key] then return nil,"Choose or add a phrase first." end
+  draft[key]=not draft[key]; self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderCustomHighlight() end
+  return true
+end
+function View:chooseCustomHighlightSwatch(color)
+  local draft=self:readCustomHighlightDraft(); color=ColorStyles.normalizeColor(color)
+  if not draft or not color then return nil,"Choose a valid color." end
+  local target=self.custom_highlight_palette_target or "foreground"
+  self.custom_highlight_fields[target].input:print(color)
+  if target=="background" then draft.background_enabled=true end
+  self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderCustomHighlight() end
+  return true
+end
+function View:addCustomHighlight()
+  if #self.custom_highlight_rules>=50 then
+    self.custom_highlight_error="The 50-rule limit has been reached."; self:renderCustomHighlightStatus(); return nil,self.custom_highlight_error
+  end
+  self.custom_highlight_selected=nil; self.custom_highlight_draft={phrase="",foreground="#FFFFFF",background=false,background_enabled=false,background_text="#333333",bold=false,underline=false,enabled=true}
+  self.custom_highlight_phrase:print(""); self.custom_highlight_fields.foreground.input:print("#FFFFFF"); self.custom_highlight_fields.background.input:print("#333333")
+  self.custom_highlight_preview_style=viewCopy(self.custom_highlight_draft)
+  self.custom_highlight_palette_target="foreground"; self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false; self.color_settings_page="custom_editor"
+  if self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
+function View:selectCustomHighlightAt(index)
+  local rule=self.custom_highlight_rules[index]
+  if not rule then return nil,"Unknown phrase." end
+  return self:selectCustomHighlight(rule.phrase)
+end
+function View:selectCustomHighlight(phrase)
+  local selected
+  for _,rule in ipairs(self.custom_highlight_rules) do if rule.phrase==phrase then selected=rule; break end end
+  if not selected then return nil,"Unknown phrase." end
+  self.custom_highlight_selected=selected.phrase; self.custom_highlight_draft=viewCopy(selected)
+  self.custom_highlight_draft.background_enabled=selected.background~=false
+  self.custom_highlight_draft.background_text=selected.background or "#333333"
+  self.custom_highlight_phrase:print(selected.phrase); self.custom_highlight_fields.foreground.input:print(selected.foreground); self.custom_highlight_fields.background.input:print(self.custom_highlight_draft.background_text)
+  self.custom_highlight_preview_style=viewCopy(selected); self.custom_highlight_palette_target="foreground"
+  self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false; self.color_settings_page="custom_editor"
+  if self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
+function View:saveCustomHighlight()
+  if self.custom_highlight_saving then return nil,"A save is already in progress." end
+  local rule,err=self:customHighlightValues()
+  if not rule then self.custom_highlight_error=err; self:renderCustomHighlight(); return nil,err end
+  if not self.custom_highlight_save_callback then
+    self.custom_highlight_error="Saving custom phrases is unavailable. No changes were applied."; self:renderCustomHighlight(); return nil,self.custom_highlight_error
+  end
+  local oldPhrase=self.custom_highlight_selected
+  self.custom_highlight_saving=true; self.custom_highlight_pending_config=nil
+  local ok,result,why=pcall(self.custom_highlight_save_callback,oldPhrase,viewCopy(rule))
+  self.custom_highlight_saving=false
+  local pending=self.custom_highlight_pending_config; self.custom_highlight_pending_config=nil
+  if not ok or result~=true then
+    self.custom_highlight_error="Could not save. "..tostring((ok and why) or (not ok and result) or "Your changes have not been applied.")
+    self:renderCustomHighlight(); return nil,self.custom_highlight_error
+  end
+  if pending then self:setColorStyles(pending) else
+    local rules=viewCopy(self.custom_highlight_rules); local replaced=false
+    for index,saved in ipairs(rules) do if saved.phrase==oldPhrase then rules[index]=viewCopy(rule); replaced=true; break end end
+    if not replaced then rules[#rules+1]=viewCopy(rule) end
+    self.color_styles_config.custom_rules=viewCopy(rules); self.custom_highlight_rules=rules; self:syncCustomHighlightRows()
+  end
+  self.custom_highlight_selected=rule.phrase; self.custom_highlight_draft=viewCopy(rule)
+  self.custom_highlight_draft.background_enabled=rule.background~=false; self.custom_highlight_draft.background_text=rule.background or "#333333"
+  self.custom_highlight_phrase:print(rule.phrase); self.custom_highlight_fields.foreground.input:print(rule.foreground); self.custom_highlight_fields.background.input:print(self.custom_highlight_draft.background_text)
+  self.custom_highlight_preview_style=viewCopy(rule); self.custom_highlight_error=nil; self.custom_highlight_message="Saved. This phrase will be highlighted in new game text."; self.custom_highlight_delete_pending=false
+  if self.layout then self:layoutColorSettings(self.layout) else self:renderCustomHighlight() end
+  return true
+end
+function View:deleteCustomHighlight()
+  if self.custom_highlight_saving then return nil,"A save is already in progress." end
+  local phrase=self.custom_highlight_selected
+  if not phrase then return nil,"Choose a saved phrase first." end
+  if not self.custom_highlight_delete_pending then
+    self.custom_highlight_delete_pending=true; self.custom_highlight_error=nil; self.custom_highlight_message="Click CONFIRM DELETE again to remove this saved phrase."
+    self.custom_highlight_delete.option_text="CONFIRM DELETE"
+    if self.layout then self:layoutColorSettings(self.layout) else self:renderCustomHighlight() end
+    return true
+  end
+  if not self.custom_highlight_delete_callback then
+    self.custom_highlight_error="Deleting custom phrases is unavailable. No changes were applied."; self:renderCustomHighlight(); return nil,self.custom_highlight_error
+  end
+  self.custom_highlight_saving=true; self.custom_highlight_pending_config=nil
+  local ok,result,why=pcall(self.custom_highlight_delete_callback,phrase)
+  self.custom_highlight_saving=false
+  local pending=self.custom_highlight_pending_config; self.custom_highlight_pending_config=nil
+  if not ok or result~=true then
+    self.custom_highlight_error="Could not delete. "..tostring((ok and why) or (not ok and result) or "Your phrase is still saved.")
+    self:renderCustomHighlight(); return nil,self.custom_highlight_error
+  end
+  if pending then self:setColorStyles(pending) else
+    local rules={}; for _,rule in ipairs(self.custom_highlight_rules) do if rule.phrase~=phrase then rules[#rules+1]=viewCopy(rule) end end
+    self.color_styles_config.custom_rules=viewCopy(rules); self.custom_highlight_rules=rules; self:syncCustomHighlightRows()
+  end
+  self.custom_highlight_draft=nil; self.custom_highlight_selected=nil; self.custom_highlight_error=nil; self.custom_highlight_message="Deleted “"..phrase.."”."; self.custom_highlight_delete_pending=false; self.custom_highlight_delete.option_text="DELETE"; self.color_settings_page="custom"
+  if self.layout then self:layoutColorSettings(self.layout) end
+  return true
+end
 function View:setColorStyleCallback(callback) self.color_style_callback=type(callback)=="function" and callback or nil; return true end
 function View:setColorStyles(config)
   config=viewCopy(type(config)=="table" and config or {})
   -- A controller may publish a snapshot inside its save callback. Accept it
   -- only when that callback confirms persistence, so a failure cannot repaint.
   if self.color_style_saving then self.color_style_pending_config=config; return true end
+  if self.custom_highlight_saving then self.custom_highlight_pending_config=config; return true end
   self.color_styles_config=config
+  local custom,seen={},{}
+  for _,item in ipairs(type(config.custom_rules)=="table" and config.custom_rules or {}) do
+    if #custom>=50 then break end
+    local rule=customRule(item)
+    if rule and not seen[ColorPreferences.foldCase(rule.phrase)] then custom[#custom+1]=rule; seen[ColorPreferences.foldCase(rule.phrase)]=true end
+  end
+  self.custom_highlight_rules=custom; self:syncCustomHighlightRows()
   for _,entry in ipairs(self.color_style_entries) do self.color_style_saved[entry.id]=ColorStyles.resolve(config,entry.id) end
   local options={enabled=config.enabled~=false}
   for _,key in ipairs(self.color_option_order) do
@@ -1367,8 +1672,9 @@ function View:setColorStyles(config)
   return true
 end
 function View:showColorSettingsPage(page)
-  if page~="groups" and page~="styles" then return nil,"Unknown color settings page." end
+  if page~="groups" and page~="styles" and page~="custom" then return nil,"Unknown color settings page." end
   self.color_style_draft=nil; self.color_style_selected=nil; self.color_style_error=nil; self.color_style_note=nil
+  self.custom_highlight_draft=nil; self.custom_highlight_selected=nil; self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false; self.custom_highlight_delete.option_text="DELETE"
   self.color_settings_page=page
   if self.layout then self:layoutColorSettings(self.layout) end
   return true
@@ -1939,6 +2245,8 @@ function View:showColorSettings() self:hideHelp(); self:hideMapSettings(); self:
 function View:hideColorSettings()
   self.color_settings_visible=false; self.color_style_draft=nil; self.color_style_selected=nil; self.color_style_error=nil; self.color_style_note=nil; self.color_settings_error=nil
   if self.color_settings_page=="editor" then self.color_settings_page="styles" end
+  self.custom_highlight_draft=nil; self.custom_highlight_selected=nil; self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false; self.custom_highlight_delete.option_text="DELETE"
+  if self.color_settings_page=="custom_editor" then self.color_settings_page="custom" end
   for _,widget in ipairs(self:colorSettingsWidgets()) do widget:hide() end
   return true
 end
@@ -2298,7 +2606,8 @@ end
 local reusableWidgetNames={
   "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
-  "color_settings_groups_tab","color_settings_styles_tab","color_settings_status","color_style_catalog","color_style_content","color_style_catalog_help","color_style_heading","color_style_help","color_style_status","color_style_preview","color_style_reset","color_style_cancel","color_style_save",
+  "color_settings_groups_tab","color_settings_styles_tab","color_settings_custom_tab","color_settings_status","color_style_catalog","color_style_content","color_style_catalog_help","color_style_heading","color_style_help","color_style_status","color_style_preview","color_style_reset","color_style_cancel","color_style_save",
+  "custom_highlight_list","custom_highlight_content","custom_highlight_status","custom_highlight_help","custom_highlight_add","custom_highlight_count","custom_highlight_phrase_caption","custom_highlight_phrase","custom_highlight_preview","custom_highlight_editor_help","custom_highlight_cancel","custom_highlight_delete","custom_highlight_save",
   "chat_container","chat_bg","chat_tabs","chat_output","chat_settings_overlay","chat_settings_panel","chat_settings_bg","chat_settings_title","chat_settings_content","chat_settings_visibility","chat_settings_text","chat_settings_sources_caption","chat_settings_clear_visible","chat_settings_clear_saved","chat_settings_status","chat_settings_close",
   "chat_sound_caption","chat_sound_explanation","chat_sound_volume","chat_sound_volume_down","chat_sound_volume_up","chat_sound_status",
   "keybindings_overlay","keybindings_panel","keybindings_bg","keybindings_title","keybindings_content","keybindings_text","keybindings_enable","keybindings_defaults","keybindings_status","keybindings_save","keybindings_cancel",
@@ -2320,12 +2629,12 @@ local function reusableConsole(value) return reusableWidget(value) and type(valu
 local function nameSet(values) local result={}; for _,name in ipairs(values) do result[name]=true end; return result end
 local plainReusableWidgets=nameSet({
   "root","color_menu","options_scroll","color_settings_panel","color_settings_content","chat_container","chat_tabs","chat_settings_panel","chat_settings_content","keybindings_panel","keybindings_content",
-  "color_style_catalog","color_style_content",
+  "color_style_catalog","color_style_content","custom_highlight_list","custom_highlight_content",
   "inventory_output","runes_output","skills_output","right","vitals_right","mapper","compass_area","utility_area","help_panel","help_output",
   "roller_panel","roller_content","latent_alert_panel","map_settings_panel","map_settings_content","feedback_panel","support_panel","map_library_panel","map_library_list","map_collection_list",
   "hp","fatigue","carry","psi","web","roundtime_bar",
 })
-local inputReusableWidgets=nameSet({"map_settings_area_name","map_settings_subarea_name","feedback_summary","feedback_details","map_library_search"})
+local inputReusableWidgets=nameSet({"map_settings_area_name","map_settings_subarea_name","feedback_summary","feedback_details","map_library_search","custom_highlight_phrase"})
 function View.validateReusable(candidate,settings)
   if type(candidate)=="table" and candidate.disposed then return nil,"preserved HUD view is disposed" end
   if type(candidate)~="table" or not reusableWidget(candidate.root) or type(candidate.root.delete)~="function" then return nil,"preserved HUD view is unavailable" end
@@ -2358,6 +2667,16 @@ function View.validateReusable(candidate,settings)
     if type(candidate.color_style_rows)~="table" or not reusableLabel(candidate.color_style_rows[entry.id]) or not candidate.color_style_by_id[entry.id] or type(candidate.color_style_saved[entry.id])~="table" then return nil,"preserved HUD color catalog is incomplete" end
     local group=candidate.color_style_groups[entry.group]; if type(group)~="table" or not reusableLabel(group.heading) or not reusableLabel(candidate.color_style_group_buttons[entry.group]) then return nil,"preserved HUD color groups are incomplete" end
   end
+  if type(candidate.custom_highlight_rules)~="table" or type(candidate.custom_highlight_rows)~="table" or type(candidate.custom_highlight_fields)~="table" or type(candidate.custom_highlight_toggles)~="table" or type(candidate.custom_highlight_palette_targets)~="table" or type(candidate.custom_highlight_swatches)~="table" or type(candidate.custom_highlight_toggle_order)~="table" then return nil,"preserved HUD custom highlights are incomplete" end
+  if #candidate.custom_highlight_rules>50 or #candidate.custom_highlight_rows<#candidate.custom_highlight_rules then return nil,"preserved HUD custom highlights are incomplete" end
+  for index=1,#candidate.custom_highlight_rules do if not reusableLabel(candidate.custom_highlight_rows[index]) then return nil,"preserved HUD custom highlight row is incomplete" end end
+  for index,row in ipairs(candidate.custom_highlight_rows) do if not reusableLabel(row) or not row.parent or row.parent~=candidate.custom_highlight_list then return nil,"preserved HUD custom highlight row is incomplete" end end
+  for _,key in ipairs({"foreground","background"}) do
+    local field=candidate.custom_highlight_fields[key]
+    if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) or not reusableLabel(candidate.custom_highlight_palette_targets[key]) then return nil,"preserved HUD custom highlight inputs are incomplete" end
+  end
+  for index=1,#colorPalette do if not reusableLabel(candidate.custom_highlight_swatches[index]) then return nil,"preserved HUD custom highlight palette is incomplete" end end
+  for index,key in ipairs({"background_enabled","bold","underline","enabled"}) do if candidate.custom_highlight_toggle_order[index]~=key or not reusableLabel(candidate.custom_highlight_toggles[key]) then return nil,"preserved HUD custom highlight toggles are incomplete" end end
   if type(candidate.right_list_tab_order)~="table" or type(candidate.right_list_tabs)~="table" then return nil,"preserved HUD list tabs are incomplete" end
   for index,name in ipairs({"inventory","runes","skills"}) do if candidate.right_list_tab_order[index]~=name or not reusableLabel(candidate.right_list_tabs[name]) then return nil,"preserved HUD list tabs are incomplete" end end
   if candidate.right_list_active~=nil and not candidate.right_list_tabs[candidate.right_list_active] then return nil,"preserved HUD active list tab is invalid" end
@@ -2396,6 +2715,7 @@ function View:prepareForReuse(settings)
   self:ensureVersionLabel(); self:renderVersion()
   self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.color_style_callback=nil; self.color_style_pending_config=nil; self.color_style_saving=false
+  self.custom_highlight_save_callback=nil; self.custom_highlight_delete_callback=nil; self.custom_highlight_pending_config=nil; self.custom_highlight_saving=false
   self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
   self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.keybindings_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
   self.map_zoom_callback=nil; self.map_clear_all_callback=nil
@@ -2428,7 +2748,7 @@ function View:delete()
   for key,value in pairs(self) do if type(key)=="string" and key:match("_callback$") and type(value)=="function" then self[key]=nil end end
   -- Rejected or partially constructed views may lack editor widgets. Their
   -- root still needs deleting before the replacement uses the same names.
-  if self.root then pcall(self.hideColorSettings,self) end; self.color_style_callback=nil
+  if self.root then pcall(self.hideColorSettings,self) end; self.color_style_callback=nil; self.custom_highlight_save_callback=nil; self.custom_highlight_delete_callback=nil
   -- Preserve the cleanup handle if native deletion throws part way through.
   -- The view stays retired, but a caller can safely retry the remaining cleanup.
   self.root=nil; self._pending_delete_root=root
