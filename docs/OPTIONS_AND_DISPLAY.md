@@ -4,6 +4,12 @@
 
 The **OPTIONS** button is at the far left of the header. The current DGHUD version is shown beside it. Click **OPTIONS** to open a short menu of sections.
 
+## Mudlet UI
+
+**MUDLET UI: OFF** means Mudlet's separate starter dock (extra map, chat, and vitals) is hidden. DGHUD turns that dock off by default when it first appears, without touching the game-text window, command line, toolbar, or HUD mapper. Click the option to show the starter dock if you want it; click again to hide it. Mudlet remembers your choice across restarts and HUD updates. The extra dock may overlap the HUD when shown, but you can drag it by its title bar.
+
+If that starter package is not installed in the profile, the option reports that it is unavailable and changes nothing. Mudlet's own `baseui show` and `baseui hide` commands still work; reopening OPTIONS refreshes the toggle's status.
+
 ## Chat Settings
 
 Open **OPTIONS → CHAT SETTINGS → SHOW CHATBOX** to show or completely hide the top-center chatbox. It starts **ON**. Turning it **OFF** expands the main display without deleting history or stopping chat capture. You can reopen Chat Settings through OPTIONS even while chat is hidden. This preference survives character changes, restarts, and HUD updates.

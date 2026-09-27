@@ -189,6 +189,34 @@ function Adapter.new() return setmetatable({},Adapter) end
 function Adapter:getBorders() return getBorderLeft(),getBorderTop(),getBorderRight(),getBorderBottom() end
 function Adapter:getWindowSize() return getMainWindowSize() end
 function Adapter:setBorders(l,t,r,b) setBorderLeft(l);setBorderTop(t);setBorderRight(r);setBorderBottom(b) end
+-- Mudlet 5's optional starter dock owns its own persistent hide/show choice.
+-- Never use expandAlias here: without that package it could send text to the MUD.
+function Adapter:baseUIStatus(api)
+  local base=rawget(api or _G,"BaseUI")
+  if type(base)~="table" or type(base.settings)~="table" or type(base.show)~="function" or (type(base.standAside)~="function" and type(base.hide)~="function") then
+    return {available=false,visible=false,fresh=false}
+  end
+  local saved=base.settings
+  return {available=true,visible=saved.hidden~=true and saved.standingAside==nil,fresh=saved.hidden==nil and saved.standingAside==nil}
+end
+function Adapter:setBaseUIVisible(visible,api)
+  if type(visible)~="boolean" then return nil,"Mudlet starter UI visibility must be on or off" end
+  local base=rawget(api or _G,"BaseUI")
+  if type(base)~="table" or type(base.settings)~="table" or type(base.show)~="function" or (type(base.standAside)~="function" and type(base.hide)~="function") then
+    return nil,"Mudlet's starter UI is not installed in this profile"
+  end
+  local ok,err
+  if visible then ok,err=pcall(base.show)
+  elseif type(base.standAside)=="function" then
+    -- Unlike hide(), standing aside lets Mudlet restore its starter dock if
+    -- this HUD package is ever uninstalled. An explicit show() still wins.
+    ok,err=pcall(base.standAside,nil,"DragonsGateHUD")
+  else ok,err=pcall(base.hide) end
+  if not ok then return nil,"Could not change Mudlet's starter UI: "..tostring(err) end
+  local shown=base.settings.hidden~=true and base.settings.standingAside==nil
+  if shown~=visible then return nil,"Mudlet's starter UI did not confirm the change" end
+  return true
+end
 function Adapter:getMainConsoleWrap(api)
   api=api or _G
   if type(api.getWindowWrap)~="function" then return nil end

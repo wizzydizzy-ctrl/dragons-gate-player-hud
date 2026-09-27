@@ -845,7 +845,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,notice=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,12); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,13); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -862,11 +862,25 @@ test("main input alignment defaults off immediately after automatic main wrap",f
   local view=chatView(); local button=view.option_action_buttons.align_main_input
   eq(view.main_input_aligned,false); eq(button.option_text,"ALIGN INPUT: OFF")
   eq(button.tooltip,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
-  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,text_size,auto_main_wrap,align_main_input,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
+  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,auto_main_wrap,align_main_input,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(button.visible,true); assert(button.message:find("ALIGN INPUT: OFF",1,true))
   local wrap=view.option_action_buttons.auto_main_wrap
   eq(button.y,wrap.y+wrap.height)
+end)
+test("Mudlet starter UI option is reversible and refreshes its actual status",function()
+  local view=chatView(); local button=view.option_action_buttons.base_ui_toggle
+  eq(button.option_text,"MUDLET UI: UNAVAILABLE")
+  assert(button.tooltip:find("starter panel",1,true))
+  local visible=true; local checked=0
+  view:setBaseUIStatusCallback(function() checked=checked+1; view:setBaseUIVisible(visible,true) end)
+  view:setOptionsActionCallback(function(action)
+    eq(action,"base_ui_toggle"); visible=not visible; return view:setBaseUIVisible(visible,true)
+  end)
+  view:applyLayout(require("layout").compute(420,360)); view.color_toggle.click()
+  eq(checked,1); eq(button.option_text,"MUDLET UI: ON"); eq(button.visible,true)
+  eq(button.click(),false); eq(button.option_text,"MUDLET UI: OFF"); eq(view.color_menu_visible,false)
+  view.color_toggle.click(); eq(checked,2); eq(button.option_text,"MUDLET UI: OFF")
 end)
 
 test("main input alignment setter refreshes hidden and open menus independently of wrap",function()

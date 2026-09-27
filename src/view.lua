@@ -389,14 +389,19 @@ function View.new(settings)
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
     button:setClickCallback(function() return self:selectColorOption(key) end); button.option_text=text; self.color_option_buttons[key]=button
   end
-  self.option_action_order={"command_help","refresh_data","auto_update","text_size","auto_main_wrap","align_main_input","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
-  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
+  self.option_action_order={"command_help","refresh_data","auto_update","base_ui_toggle","text_size","auto_main_wrap","align_main_input","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
+  local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",base_ui_toggle="MUDLET UI: UNAVAILABLE",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   local alignInputButton=self.option_action_buttons.align_main_input
   if alignInputButton.setToolTip then pcall(alignInputButton.setToolTip,alignInputButton,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference.") end
+  local baseUIButton=self.option_action_buttons.base_ui_toggle
+  if baseUIButton.setToolTip then pcall(baseUIButton.setToolTip,baseUIButton,"Show or hide Mudlet's optional starter panel (map, chat, and vitals). This does not hide game text, the command line, or the Dragons Gate HUD. The choice is remembered by Mudlet; its panel may overlap the HUD when shown.") end
   self.color_options={}; for _,key in ipairs(self.color_option_order) do self.color_options[key]=true end; self.color_menu_visible=false
-  self.color_toggle:setClickCallback(function() return self:setColorMenuVisible(not self.color_menu_visible) end)
+  self.color_toggle:setClickCallback(function()
+    if not self.color_menu_visible and self.base_ui_status_callback then self.base_ui_status_callback() end
+    return self:setColorMenuVisible(not self.color_menu_visible)
+  end)
   self.color_menu_scrim:setClickCallback(function() return self:setColorMenuVisible(false) end)
   self.color_settings_close:setClickCallback(function() return self:hideColorSettings() end); self.color_settings_overlay:setClickCallback(function() return self:hideColorSettings() end); self.color_settings_visible=false
   for _,widget in ipairs({self.color_menu_scrim,self.color_menu,self.color_menu_bg,self.options_scroll}) do widget:hide() end
@@ -2192,12 +2197,21 @@ function View:setMapCenterCallback(callback) self.map_center_callback=type(callb
 function View:setColorToggleCallback(callback) self.color_toggle_callback=type(callback)=="function" and callback or nil; return true end
 function View:setColorOptionsCallback(callback) self.color_options_callback=type(callback)=="function" and callback or nil; return true end
 function View:setOptionsActionCallback(callback) self.options_action_callback=type(callback)=="function" and callback or nil; return true end
+function View:setBaseUIStatusCallback(callback) self.base_ui_status_callback=type(callback)=="function" and callback or nil; return true end
 function View:setAutoUpdateEnabled(enabled)
   self.auto_update_enabled=enabled==true
   local button=self.option_action_buttons and self.option_action_buttons.auto_update
   if button then button.option_text="AUTOMATIC UPDATES: "..(self.auto_update_enabled and "ON" or "OFF") end
   if self.color_menu_visible then self:renderColorOptions() end
   return self.auto_update_enabled
+end
+function View:setBaseUIVisible(enabled,available)
+  self.base_ui_visible=enabled==true
+  self.base_ui_available=available==true
+  local button=self.option_action_buttons and self.option_action_buttons.base_ui_toggle
+  if button then button.option_text="MUDLET UI: "..(not self.base_ui_available and "UNAVAILABLE" or (self.base_ui_visible and "ON" or "OFF")) end
+  if self.color_menu_visible then self:renderColorOptions() end
+  return self.base_ui_visible
 end
 function View:setDisplayTextSize(name)
   name=tostring(name or "normal"):lower()
@@ -2718,7 +2732,7 @@ function View:prepareForReuse(settings)
   self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.color_style_callback=nil; self.color_style_pending_config=nil; self.color_style_saving=false
   self.custom_highlight_save_callback=nil; self.custom_highlight_delete_callback=nil; self.custom_highlight_pending_config=nil; self.custom_highlight_saving=false
-  self.options_action_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
+  self.options_action_callback=nil; self.base_ui_status_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
   self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.keybindings_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
   self.map_zoom_callback=nil; self.map_clear_all_callback=nil
   -- Force the first refresh under the new runtime to repaint list content even

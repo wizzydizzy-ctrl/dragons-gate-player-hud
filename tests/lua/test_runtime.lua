@@ -9,6 +9,11 @@ local function fake()
   function f:getBorders() return self.borders[1],self.borders[2],self.borders[3],self.borders[4] end
   function f:setBorders(a,b,c,d) self.set_borders={a,b,c,d} end
   function f:getWindowSize() return self.width or 1920,self.height or 1080 end
+  function f:baseUIStatus() return MudletAdapter.baseUIStatus(self,{BaseUI=self.baseUI}) end
+  function f:setBaseUIVisible(enabled)
+    if self.failBaseUI then return nil,self.failBaseUI end
+    return MudletAdapter.setBaseUIVisible(self,enabled,{BaseUI=self.baseUI})
+  end
   function f:getMainConsoleWrap() return self.main_wrap_columns or self.profile_main_wrap or 100 end
   function f:mainConsoleWrapColumns(pixelWidth,allowance)
     self.main_wrap_measurements=self.main_wrap_measurements or {}; self.main_wrap_measurements[#self.main_wrap_measurements+1]={pixelWidth,allowance}
@@ -38,6 +43,8 @@ local function fake()
     setColorOptions=function(self,options) f.viewColorOptions=options; f.viewColorEnabled=options.enabled end,
     setColorEnabled=function(self,enabled) f.viewColorEnabled=enabled end,
     setOptionsActionCallback=function(self,callback) f.optionsActionCallback=callback end,
+    setBaseUIStatusCallback=function(self,callback) f.baseUIStatusCallback=callback end,
+    setBaseUIVisible=function(self,visible) f.viewBaseUIVisible=visible end,
     setMainInputAligned=function(self,enabled) f.viewInputAligned=enabled end,
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
@@ -236,6 +243,53 @@ test("Mudlet adapter suppresses the Short and Full default map information",func
     updateMap=function() updates=updates+1 end,
   }),true)
   eq(disabled[1],"Short"); eq(disabled[2],"Full"); eq(#disabled,2); eq(updates,1)
+end)
+test("Mudlet starter UI adapter changes only its own reversible dock",function()
+  local adapter=MudletAdapter.new()
+  local base={settings={}}
+  local hideCalls,showCalls=0,0
+  function base.hide() hideCalls=hideCalls+1; base.settings.hidden=true end
+  function base.standAside(_,name) eq(name,"DragonsGateHUD"); hideCalls=hideCalls+1; base.settings.standingAside=name end
+  function base.show() showCalls=showCalls+1; base.settings.hidden=false; base.settings.standingAside=nil end
+  local api={BaseUI=base}
+  local status=adapter:baseUIStatus(api); eq(status.available,true); eq(status.fresh,true); eq(status.visible,true)
+  assert(adapter:setBaseUIVisible(false,api)); eq(hideCalls,1); eq(base.settings.standingAside,"DragonsGateHUD"); eq(base.settings.hidden,nil)
+  status=adapter:baseUIStatus(api); eq(status.fresh,false); eq(status.visible,false)
+  assert(adapter:setBaseUIVisible(true,api)); eq(showCalls,1); eq(base.settings.hidden,false); eq(adapter:baseUIStatus(api).visible,true)
+  eq(adapter:setBaseUIVisible("off",api),nil)
+  local result,err=adapter:setBaseUIVisible(true,{}); eq(result,nil); assert(err:find("not installed",1,true))
+  base.show=function() error("failed to show") end
+  result,err=adapter:setBaseUIVisible(true,api); eq(result,nil); assert(err:find("failed to show",1,true))
+end)
+test("HUD hides a fresh Mudlet starter UI but preserves an explicit choice",function()
+  local f=fake(); local base={settings={}}
+  function base.hide() base.settings.hidden=true; f.baseHideCalls=(f.baseHideCalls or 0)+1 end
+  function base.standAside(_,name) base.settings.standingAside=name; f.baseHideCalls=(f.baseHideCalls or 0)+1 end
+  function base.show() base.settings.hidden=false; base.settings.standingAside=nil; f.baseShowCalls=(f.baseShowCalls or 0)+1 end
+  f.baseUI=base
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  eq(f.baseHideCalls,1); eq(base.settings.standingAside,"DragonsGateHUD"); eq(f.viewBaseUIVisible,false)
+  eq(f.optionsActionCallback("base_ui_toggle"),true); eq(f.baseShowCalls,1); eq(f.viewBaseUIVisible,true)
+  assert(hud:reload()); eq(f.baseHideCalls,1); eq(f.viewBaseUIVisible,true)
+  assert(hud:shutdown()); local cold=Main.new(f,{layout={}}); assert(cold:start()); eq(f.baseHideCalls,1); eq(f.viewBaseUIVisible,true)
+  eq(f.optionsActionCallback("base_ui_toggle"),false); eq(f.baseHideCalls,2); eq(f.viewBaseUIVisible,false)
+  eq(f.baseUIStatusCallback().visible,false)
+  cold:shutdown()
+end)
+test("late starter UI install is hidden, but an absent package is left alone",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  eq(f.viewBaseUIVisible,false)
+  local value,err=f.optionsActionCallback("base_ui_toggle"); eq(value,nil); assert(err:find("not installed",1,true))
+  local base={settings={}}; function base.hide() base.settings.hidden=true; f.lateHideCalls=(f.lateHideCalls or 0)+1 end
+  function base.standAside(_,name) base.settings.standingAside=name; f.lateHideCalls=(f.lateHideCalls or 0)+1 end
+  function base.show() base.settings.hidden=false end
+  f.baseUI=base
+  f.callbacks.sysInstallPackage("sysInstallPackage","unrelated"); eq(f.lateHideCalls,nil)
+  f.callbacks.sysInstallPackage("sysInstallPackage","mudlet-base-ui"); eq(f.lateHideCalls,1)
+  base.settings.standingAside=nil; f.callbacks.sysLoadEvent("sysLoadEvent"); eq(f.lateHideCalls,2)
+  base.settings.standingAside=nil; base.settings.hidden=false; f.callbacks.sysLoadEvent("sysLoadEvent"); eq(f.lateHideCalls,2); eq(f.viewBaseUIVisible,true)
+  f.failBaseUI="dock is unavailable"; value,err=f.optionsActionCallback("base_ui_toggle"); eq(value,nil); eq(err,"dock is unavailable"); eq(f.viewBaseUIVisible,true)
+  hud:shutdown()
 end)
 test("Mudlet adapter derives and applies main-console wrap from live font metrics",function()
   local applied={}; local current=77

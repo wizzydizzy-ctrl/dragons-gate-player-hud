@@ -382,6 +382,39 @@ end
 function Main:mainInputAligned()
   return self.settings.display and self.settings.display.align_input==true or false
 end
+function Main:baseUIStatus()
+  if self.adapter.baseUIStatus then return self.adapter:baseUIStatus() end
+  return {available=false,visible=false,fresh=false}
+end
+function Main:syncBaseUI()
+  local status=self:baseUIStatus()
+  local changed=false
+  -- A fresh Mudlet starter dock has no saved visibility choice. Stand aside
+  -- once, while preserving explicit baseui show/hide and another game's UI.
+  if status.available and status.fresh and self.adapter.setBaseUIVisible then
+    local ok,err=self.adapter:setBaseUIVisible(false)
+    if not ok then
+      if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,"Mudlet UI: "..tostring(err)) end
+    else changed=true end
+    status=self:baseUIStatus()
+  end
+  if self.view and self.view.setBaseUIVisible then self.view:setBaseUIVisible(status.visible,status.available) end
+  if changed and self.started then self:applyResponsiveLayout(self.last_state) end
+  return status
+end
+function Main:setBaseUIVisible(enabled)
+  if type(enabled)~="boolean" then return nil,"Mudlet UI visibility must be on or off" end
+  if not self.adapter.setBaseUIVisible then return nil,"Mudlet's starter UI is unavailable in this profile" end
+  local ok,err=self.adapter:setBaseUIVisible(enabled)
+  if not ok then
+    if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,err) end
+    return nil,err
+  end
+  local status=self:baseUIStatus()
+  if self.view and self.view.setBaseUIVisible then self.view:setBaseUIVisible(status.visible,status.available) end
+  self:applyResponsiveLayout(self.last_state)
+  return status.visible
+end
 function Main:applyMainInputAlignment(enabled,layout,retainBaseline)
   if not self.adapter.setMainInputAlignment then
     if enabled then return nil,"Input alignment requires Mudlet 5.0 or newer." end
@@ -1228,6 +1261,7 @@ function Main:start()
     if action=="chat_sound_preview" then return self:previewChatSound(key,wanted) end
     if action=="roller_settings" then return self.roller and self.roller.cfg end
     if action=="keybindings_settings" then return self.keybindings and self.keybindings:snapshot() end
+    if action=="base_ui_toggle" then return self:setBaseUIVisible(not self:baseUIStatus().visible) end
     if action=="auto_update" then
       local enabled=not (self.settings.update and self.settings.update.auto_apply==true); self.settings.update=self.settings.update or {}; self.settings.update.auto_apply=enabled
       local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.update=type(root.user_settings.update)=="table" and root.user_settings.update or {}; root.user_settings.update.auto_apply=enabled end
@@ -1243,10 +1277,16 @@ function Main:start()
     local command=({roller_start="start",roller_stop="stop",roller_status="status",roller_show="show",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
+  if self.view.setBaseUIStatusCallback then self.view:setBaseUIStatusCallback(function()
+    local status=self:baseUIStatus()
+    if self.view and self.view.setBaseUIVisible then self.view:setBaseUIVisible(status.visible,status.available) end
+    return status
+  end) end
   if self.view.setChatAllSources then self.view:setChatAllSources(self.settings.chat and self.settings.chat.all_sources or {}) end
   if self.view.setChatSounds then self.view:setChatSounds(self.settings.chat and self.settings.chat.sounds) end
   if self.view.setChatVisible then self.view:setChatVisible(not (self.settings.chat and self.settings.chat.visible==false)) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
+  self:syncBaseUI()
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
   if self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(self:mainConsoleAutoWrapEnabled()) end
   if self.view.setMainInputAligned then self.view:setMainInputAligned(self:mainInputAligned()) end
@@ -1342,6 +1382,10 @@ function Main:start()
     if eventName=="gmcp.Char.Vitals" then local data=self.adapter:getGMCP(); local vitals=data and data.Char and data.Char.Vitals; self:onRoundtime(vitals and vitals.roundtime or 0); return end
     self:refresh()
   end) end
+  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysLoadEvent",function() self:syncBaseUI() end)
+  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysInstallPackage",function(_,packageName)
+    if packageName=="mudlet-base-ui" then self:syncBaseUI() end
+  end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.room,function()
     local data=self.adapter:getGMCP(); local info=data and data.Room and data.Room.Info; local ok,err
     if self:mapperEnabled() then
