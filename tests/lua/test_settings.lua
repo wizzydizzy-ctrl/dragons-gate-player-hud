@@ -1,6 +1,16 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("saved roller thresholds migrate by characteristic slot without changing the original",function()
+  local old={schema=1,roller={min_stats={VOI=7,APP=6,INT=5}}}
+  local resolved,migrated,changed=Settings.resolve(defaults,old)
+  eq(changed,true); eq(resolved.roller.min_stats.PRE,7); eq(resolved.roller.min_stats.LUK,6)
+  eq(migrated.roller.min_stats.VOI,7); eq(migrated.roller.min_stats.APP,6)
+  eq(old.roller.min_stats.PRE,nil); eq(old.roller.min_stats.LUK,nil)
+  local newer=Settings.resolve(defaults,{schema=1,roller={min_stats={VOI=7,APP=6,PRE=4,LUK=false}}})
+  eq(newer.roller.min_stats.PRE,4); eq(newer.roller.min_stats.LUK,false)
+end)
+
 test("input alignment is opt-in and saved choices survive settings resolution",function()
   eq(defaults.display.align_input,false)
   eq(Settings.resolve(defaults,{}).display.align_input,false)

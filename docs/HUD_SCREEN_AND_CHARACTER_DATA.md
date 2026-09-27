@@ -11,7 +11,7 @@ The header contains:
 - the **OPTIONS** button;
 - the installed DGHUD version;
 - **DRAGONS GATE**;
-- STR, INT, WIS, DEX, AGI, CON, CHA, WIL, VOI, PER, and APP;
+- STR, INT, WIS, DEX, AGI, CON, CHA, WIL, PRE, PER, and LUK;
 - your computer's local real time; and
 - synchronized Dragons Gate time with **Daytime** or **Night**.
 

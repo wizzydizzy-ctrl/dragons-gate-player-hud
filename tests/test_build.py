@@ -75,7 +75,7 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('tempTimer(0,Bridge.run)',migration_script)
             self.assertEqual(manifest['package'],'DragonsGateHUD')
             self.assertEqual(manifest['archive_url'],f'https://github.com/{owner}/{repository}/releases/download/v{manifest["version"]}/DragonsGateHUD.mpackage')
-            self.assertEqual(manifest['view_schema'],4)
+            self.assertEqual(manifest['view_schema'],5)
             self.assertRegex(manifest['view_contract'],r'^[0-9a-f]{64}$')
             expected_contract=hashlib.sha256()
             for filename in ('view.lua','navigation.lua'):

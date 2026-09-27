@@ -145,7 +145,7 @@ Tokens expire after 30 seconds. There is no force-delete command.
 Valid current stat names:
 
 ```text
-STR INT WIS DEX AGI CON CHA WIL VOI PER APP
+STR INT WIS DEX AGI CON CHA WIL PRE PER LUK
 ```
 
 See the [Autoroller Guide](AUTOROLLER.md) before changing hard-stop or automatic-placement settings.

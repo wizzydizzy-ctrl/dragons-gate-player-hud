@@ -26,7 +26,7 @@ Do not reroll unless you intentionally want to discard the rare result. DGHUD le
 The current creator has exactly 11 characteristics:
 
 ```text
-STR INT WIS DEX AGI CON CHA WIL VOI PER APP
+STR INT WIS DEX AGI CON CHA WIL PRE PER LUK
 ```
 
 Each characteristic is worth 1 through 7 points:
@@ -46,6 +46,8 @@ Each characteristic is worth 1 through 7 points:
 `Excel` and `Superb` are accepted as top-rank aliases and score the same as `Great`. The maximum total is therefore 77.
 
 MP was removed from the current creator and is not part of the 77-point score. DGHUD can recognize an older 12-value screen only so an outdated or partially updated display does not confuse capture; current settings and limits use 11 characteristics.
+
+The game now shows **PRE** and **LUK** in the positions previously labeled **VOI** and **APP**. Existing saved VOI/APP minimums carry over to those positions once; review the PRE/LUK values in **Options → Autoroller** after updating. Older screens can still be read. Typed `rr set VOI` and `rr set APP` remain aliases for PRE and LUK; use the new names going forward.
 
 ## The two current rolling methods
 
@@ -298,7 +300,7 @@ Safety: DGHUD never sends done; final acceptance is always manual.
 `rr show` begins with the same live status, followed by these groups:
 
 - **Roll rules** — target total, hard stop, maximum rolls, reroll delay, and the fixed reroll command.
-- **Characteristic minimums** — whether minimums are enabled, whether they are required to stop, and every current STR-through-APP minimum with its label.
+- **Characteristic minimums** — whether minimums are enabled, whether they are required to stop, and every current STR-through-LUK minimum with its label.
 - **Roll-and-arrange only** — the qualifying-pool action and the Great and Good-or-Great pool-count requirements. Those two count settings do not affect Roll-in-place results.
 - **Startup, output, and logs** — auto-start, per-roll output, logging, and profile-local log names. Full filesystem paths are not printed.
 
@@ -342,7 +344,7 @@ rr set arrange minimums
 rr set STR 5
 rr set INT 7
 rr set WIL 6
-rr set APP off
+rr set LUK off
 ```
 
 Use the settings panel when you want to change many minimums or toggle the master minimum controls.
@@ -352,7 +354,7 @@ Use the settings panel when you want to change many minimums or toggle the maste
 Roll in place:
 
 ```text
-[DGHUD Roller] Roll #24  Total=56/77  STR 5  INT 6 ... APP 4
+[DGHUD Roller] Roll #24  Total=56/77  STR 5  INT 6 ... LUK 4
 ```
 
 Roll and arrange:

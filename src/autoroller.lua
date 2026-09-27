@@ -1,17 +1,20 @@
 local Roller={}; Roller.__index=Roller
-local order={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+local order={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
 local legacyOrder={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
-local oldOrder=order
+local oldOrder={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
+local supportedStats={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK","VOI","APP","MP"}
+local pairedStat={PRE="VOI",LUK="APP",VOI="PRE",APP="LUK"}
 local creatorFirst={"STR","INT","WIS","DEX","AGI","CON"}
 local creatorSecond={"CHA","WIL","VOI","PER","APP","MP"}
-local currentCreatorSecond={"CHA","WIL","VOI","PER","APP"}
+local legacyCreatorSecond={"CHA","WIL","VOI","PER","APP"}
+local currentCreatorSecond={"CHA","WIL","PRE","PER","LUK"}
 local ranks={awful=1,poor=2,low=3,aver=4,average=4,fair=5,good=6,great=7,excel=7,superb=7}
 local rankLabels={[1]="Awful",[2]="Poor",[3]="Low",[4]="Aver",[5]="Fair",[6]="Good",[7]="Great"}
 -- MP was removed from the live creator. Keep the old 12-value tables only so
 -- archived/partially-updated screens cannot confuse capture, but all current
 -- limits and defaults are based on the eleven live characteristics.
-local maximumTotal=#legacyOrder*7
-local arrangeOrders={[11]=legacyOrder,[12]=order}
+local maximumTotal=#order*7
+local arrangeOrders={[11]=order,[12]=oldOrder}
 local captureLineLimit=8
 local arrangeModes={manual=true,game_auto=true,minimums=true}
 local latentPsionMessage="Something stirs behind your eyes. You have a latent psionic gift."
@@ -31,6 +34,12 @@ local function headerMatches(line,names)
   local found=words(line); if #found~=#names then return false end
   for index,name in ipairs(names) do if found[index]:upper()~=name then return false end end
   return true
+end
+local function secondHeader(line)
+  if headerMatches(line,currentCreatorSecond) then return currentCreatorSecond,order end
+  if headerMatches(line,legacyCreatorSecond) then return legacyCreatorSecond,legacyOrder end
+  if headerMatches(line,creatorSecond) then return creatorSecond,oldOrder end
+  return nil
 end
 local function rankValues(line,count)
   local found=words(line); if #found~=count then return nil end
@@ -67,8 +76,8 @@ local function assignmentValues(line,names)
   if #found~=#names then return nil end
   return found
 end
-local function statText(stats)
-  local out={}; for _,name in ipairs(order) do if stats[name]~=nil then out[#out+1]=name.." "..tostring(stats[name]) end end; return table.concat(out,"  ")
+local function statText(stats,names)
+  local out={}; for _,name in ipairs(names or order) do if stats[name]~=nil then out[#out+1]=name.." "..tostring(stats[name]) end end; return table.concat(out,"  ")
 end
 local function autoStartEnabled(config) return config.auto_start_on_name~=false end
 local function promptProtocol(line)
@@ -95,6 +104,12 @@ local function rankSetting(value)
   if not number or not rankLabels[number] then return "off" end
   return tostring(number).." ("..rankLabels[number]..")"
 end
+local function minimumFor(config,name)
+  local minimums=config.min_stats or {}
+  local value=minimums[name]
+  if value==nil and pairedStat[name] then value=minimums[pairedStat[name]] end
+  return tonumber(value)
+end
 local function safeLocalName(value)
   local name=trim(value)
   if name=="" then return "not configured" end
@@ -116,7 +131,10 @@ function Roller.new(adapter,settings,onConfig,onAlert)
   if trim(config.reroll_command):lower()~="reroll" then config.reroll_command="reroll" end
   for _,key in ipairs({"target_total","hard_stop","max_rolls","minimum_greats","minimum_good_plus"}) do if config[key]==false then config[key]=nil end end
   config.arrange_mode=trim(config.arrange_mode):lower(); if not arrangeModes[config.arrange_mode] then config.arrange_mode="manual" end
-  config.min_stats=copy(config.min_stats or {}); for _,key in ipairs(order) do if config.min_stats[key]==false then config.min_stats[key]=nil end end
+  config.min_stats=copy(config.min_stats or {})
+  if config.min_stats.PRE==nil and config.min_stats.VOI~=nil then config.min_stats.PRE=config.min_stats.VOI end
+  if config.min_stats.LUK==nil and config.min_stats.APP~=nil then config.min_stats.LUK=config.min_stats.APP end
+  for _,key in ipairs(supportedStats) do if config.min_stats[key]==false then config.min_stats[key]=nil end end
   local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert},Roller); self:reset(); return self
 end
 function Roller:echo(message) if self.adapter.reportRoller then self.adapter:reportRoller(message) end end
@@ -141,17 +159,17 @@ function Roller:log(message)
   local called,ok,err=pcall(self.adapter.appendRollerLog,self.adapter,self.state.log,message)
   if not called or not ok then self:echo("Logging stopped: "..tostring((not called and ok) or err or "write failed")); if self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log) end; self.state.log=nil end
 end
-function Roller:minimumFailures(stats)
+function Roller:minimumFailures(stats,names)
   local out={}; if self.cfg.use_min_stats~=true then return out end
-  for _,name in ipairs(order) do local needed=tonumber((self.cfg.min_stats or {})[name]); if needed and stats[name]~=nil and stats[name]<needed then out[#out+1]=name.." "..stats[name].."<"..needed end end
+  for _,name in ipairs(names or order) do local needed=minimumFor(self.cfg,name); if needed and stats[name]~=nil and stats[name]<needed then out[#out+1]=name.." "..stats[name].."<"..needed end end
   return out
 end
-function Roller:assignmentPlan(pool)
-  local activeOrder=arrangeOrders[#pool]
+function Roller:assignmentPlan(pool,activeOrder)
+  activeOrder=activeOrder or arrangeOrders[#pool]
   if type(pool)~="table" or not activeOrder then return nil,"the pool is incomplete" end
   local wanted={}
   if self.cfg.use_min_stats==true then
-    for index,name in ipairs(activeOrder) do local needed=tonumber((self.cfg.min_stats or {})[name]); if needed then wanted[#wanted+1]={name=name,needed=needed,index=index} end end
+    for index,name in ipairs(activeOrder) do local needed=minimumFor(self.cfg,name); if needed then wanted[#wanted+1]={name=name,needed=needed,index=index} end end
   end
   table.sort(wanted,function(a,b) if a.needed~=b.needed then return a.needed>b.needed end; return a.index<b.index end)
   local available=copy(pool); table.sort(available,function(a,b) return a>b end); local plan={}
@@ -163,20 +181,20 @@ function Roller:assignmentPlan(pool)
   end
   return plan,available
 end
-function Roller:poolFailures(pool)
+function Roller:poolFailures(pool,activeOrder)
   local out={}; local greats,goodPlus=0,0
   for _,value in ipairs(pool or {}) do if value>=7 then greats=greats+1 end; if value>=6 then goodPlus=goodPlus+1 end end
   local neededGreats=limit(self.cfg.minimum_greats); if neededGreats and greats<neededGreats then out[#out+1]="Greats "..greats.."<"..neededGreats end
   local neededGoodPlus=limit(self.cfg.minimum_good_plus); if neededGoodPlus and goodPlus<neededGoodPlus then out[#out+1]="Good+ "..goodPlus.."<"..neededGoodPlus end
   local mode=self.cfg.arrange_mode or "manual"
   local needsPlan=self.cfg.use_min_stats==true and (mode=="minimums" or (mode=="manual" and self.cfg.require_min_stats_to_stop~=false))
-  if needsPlan then local plan,err=self:assignmentPlan(pool); if not plan then out[#out+1]=err end end
+  if needsPlan then local plan,err=self:assignmentPlan(pool,activeOrder); if not plan then out[#out+1]=err end end
   return out
 end
 function Roller:qualified(roll)
   local hard=limit(self.cfg.hard_stop); if hard and roll.total>=hard then return true,"hard stop "..hard end
   local target=limit(self.cfg.target_total); if not target or roll.total<target then return false,"below target "..tostring(target or "disabled") end
-  local failures=roll.pool and self:poolFailures(roll.pool) or self:minimumFailures(roll.stats)
+  local failures=roll.pool and self:poolFailures(roll.pool,roll.order) or self:minimumFailures(roll.stats,roll.order)
   if #failures>0 and (roll.pool or self.cfg.require_min_stats_to_stop~=false) then return false,table.concat(failures,", ") end
   return true,"target "..target
 end
@@ -197,7 +215,7 @@ function Roller:stop(reason,holdResult)
 end
 function Roller:rollText(roll)
   if roll.pool then local labels={}; for _,value in ipairs(roll.pool) do labels[#labels+1]=rankLabels[value] end; return "Roll #"..roll.roll.."  Total="..roll.total.."/"..roll.maximum.."  Pool: "..table.concat(labels," ") end
-  return "Roll #"..roll.roll.."  Total="..roll.total.."/"..roll.maximum.."  "..statText(roll.stats)
+  return "Roll #"..roll.roll.."  Total="..roll.total.."/"..roll.maximum.."  "..statText(roll.stats,roll.order)
 end
 function Roller:report(reason)
   local s=self.state; local lines={reason or "Roller statistics","Rolls: "..s.rolls.."  Average: "..string.format("%.2f",s.rolls>0 and s.sum/s.rolls or 0)}
@@ -274,12 +292,14 @@ function Roller:settingsText()
   lines[#lines+1]="[Characteristic minimums]"
   lines[#lines+1]="Minimums enabled: "..onOff(cfg.use_min_stats,false)
   lines[#lines+1]="Require minimums to stop: "..onOff(cfg.require_min_stats_to_stop,true)
-  for index=1,#legacyOrder,2 do
-    local left=legacyOrder[index]..": "..rankSetting(minimums[legacyOrder[index]])
-    local right=legacyOrder[index+1]
+  for index=1,#order,2 do
+    local left=order[index]..": "..rankSetting(minimums[order[index]])
+    local right=order[index+1]
     lines[#lines+1]=right and (left.."    "..right..": "..rankSetting(minimums[right])) or left
   end
-  if minimums.MP~=nil and minimums.MP~=false then lines[#lines+1]="Legacy MP: "..rankSetting(minimums.MP).." (ignored by current 11-stat screens)" end
+  for _,key in ipairs({"VOI","APP","MP"}) do
+    if minimums[key]~=nil then lines[#lines+1]="Legacy "..key..": "..rankSetting(minimums[key]).." (ignored by current 11-stat screens)" end
+  end
   lines[#lines+1]=""
   lines[#lines+1]="[Roll-and-arrange only]"
   lines[#lines+1]="Qualifying-pool action: "..arrangeModeText(cfg.arrange_mode)
@@ -299,15 +319,17 @@ end
 function Roller:record(stats,protocol,names)
   local total=0; for _,name in ipairs(names) do local value=stats[name]; if not value then return false end; total=total+value end
   local s=self.state; s.rolls=s.rolls+1; s.sum=s.sum+total
-  local roll={roll=s.rolls,total=total,maximum=#names*7,stats=copy(stats),protocol=protocol}; s.last=roll
+  local roll={roll=s.rolls,total=total,maximum=#names*7,stats=copy(stats),order=copy(names),protocol=protocol}; s.last=roll
   if not s.best or total>s.best.total then s.best=roll end; if not s.worst or total<s.worst.total then s.worst=roll end
   s.protocol=protocol; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
 end
 function Roller:recordPool(pool)
-  local activeOrder=arrangeOrders[#pool]; if not activeOrder then return false end
+  local activeOrder=self.state.characteristic_order
+  if type(activeOrder)~="table" or #activeOrder~=#pool then activeOrder=arrangeOrders[#pool] end
+  if not activeOrder then return false end
   local total=0; for _,value in ipairs(pool or {}) do if not rankLabels[value] then return false end; total=total+value end
   local s=self.state; s.rolls=s.rolls+1; s.sum=s.sum+total
-  local roll={roll=s.rolls,total=total,maximum=#activeOrder*7,pool=copy(pool),protocol="arrange"}; s.last=roll
+  local roll={roll=s.rolls,total=total,maximum=#activeOrder*7,pool=copy(pool),order=copy(activeOrder),protocol="arrange"}; s.last=roll
   if not s.best or total>s.best.total then s.best=roll end; if not s.worst or total<s.worst.total then s.worst=roll end
   s.protocol="arrange"; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.pending_pool=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
 end
@@ -367,6 +389,12 @@ function Roller:onOutgoing(command)
   if s.owned_outgoing==normalized then s.owned_outgoing=nil; return true end
   if normalized:match("^rr%s") or normalized=="rr" or normalized:match("^dghud%s") or normalized=="dghud" then return false end
   if normalized=="reroll" or (normalized=="n" and (s.protocol=="legacy" or s.held_protocol=="legacy")) then return self:rearmForManualReroll(normalized=="n" and "legacy" or nil) end
+  if s.active and s.rolls==0 and s.protocol==nil and s.phase=="observing" then
+    -- A manual start can precede the creator's method choice. Choosing a
+    -- rolling method is not a request to cancel, and cannot send a reroll.
+    if normalized=="2" or normalized=="3" then return false end
+    if normalized=="1" then return self:stop("Assign method selected") end
+  end
   if s.result_held and (normalized=="done" or normalized=="y" or normalized=="<" or normalized=="back" or normalized=="q" or normalized=="quit") then return self:stop("Character creation continued") end
   if s.active or s.timer or s.arrangement then return self:stop("Player command cancelled automatic rolling",true) end
   return false
@@ -417,7 +445,7 @@ function Roller:beginArrangement(roll,reason)
   if mode=="manual" then self:echo("TARGET HIT — pool left waiting for your placements and manual done.\n"..self:rollText(roll)); return self:stop(reason,true) end
   local commands={}
   if mode=="minimums" then
-    local plan,remaining=self:assignmentPlan(roll.pool)
+    local plan,remaining=self:assignmentPlan(roll.pool,roll.order)
     if not plan then self:echo("TARGET HIT, but configured minimums cannot be placed — pool left untouched.\n"..self:rollText(roll)); return self:stop(reason,true) end
     local expectedPool=copy(roll.pool)
     for _,entry in ipairs(plan) do
@@ -430,7 +458,7 @@ function Roller:beginArrangement(roll,reason)
     end
     if #remaining>0 then commands[#commands+1]={command="auto",auto=true} end
   else commands[1]={command="auto",auto=true} end
-  self.state.fresh_roll=false; self.state.phase="assigning"; self.state.arrangement={mode=mode,commands=commands,index=0,awaiting=nil,display_expected=nil,display_stats={},auto_board_complete=false,order=arrangeOrders[#roll.pool] or order}
+  self.state.fresh_roll=false; self.state.phase="assigning"; self.state.arrangement={mode=mode,commands=commands,index=0,awaiting=nil,display_expected=nil,display_stats={},auto_board_complete=false,order=roll.order or order}
   self:echo("TARGET HIT — "..(mode=="minimums" and "placing configured minimums, then using game auto" or "using game auto").."; done remains manual.\n"..self:rollText(roll))
   return self:advanceArrangement()
 end
@@ -478,7 +506,8 @@ function Roller:onLine(line)
     local stat,label=trim(cleanLine(line)):match("^([A-Za-z]+)%s+placed:%s*([A-Za-z]+)%.?$")
     if stat and awaiting and awaiting.stat and stat:upper()==awaiting.stat and ranks[label:lower()]==awaiting.value then awaiting.confirmed=true; return true end
     if headerMatches(line,creatorFirst) then sequence.display_expected=creatorFirst; sequence.display_stats={}; return true end
-    if headerMatches(line,currentCreatorSecond) or headerMatches(line,creatorSecond) then sequence.display_expected=headerMatches(line,creatorSecond) and creatorSecond or currentCreatorSecond; return true end
+    local second=secondHeader(line)
+    if second then sequence.display_expected=second; return true end
     if sequence.display_expected then
       local names=sequence.display_expected; local values=assignmentValues(line,names); sequence.display_expected=nil
       if values then
@@ -527,13 +556,12 @@ function Roller:onLine(line)
     if not s.active then s.protocol="creator"; s.fresh_roll=false; s.expected=creatorFirst; s.partial={}; s.pending_stats=nil; s.passive_lines=0; return true end
     return self:beginBlock("creator",creatorFirst,true)
   end
-  if headerMatches(line,currentCreatorSecond) or headerMatches(line,creatorSecond) then
-    local second=headerMatches(line,creatorSecond) and creatorSecond or currentCreatorSecond
-    local activeOrder=second==creatorSecond and order or legacyOrder
+  local second,activeOrder=secondHeader(line)
+  if second then
+    s.characteristic_order=activeOrder
     if s.active and s.protocol=="arrange" then return false end
     if s.active and s.protocol=="creator" and type(s.partial)~="table" then return false end
     if not s.active and not (autoStartEnabled(self.cfg) and s.protocol=="creator" and type(s.partial)=="table") then return false end
-    s.characteristic_order=activeOrder
     if not s.active then s.expected=second; return true end
     return self:beginBlock("creator",second,false)
   end
@@ -541,12 +569,14 @@ function Roller:onLine(line)
 
   local protocol=promptProtocol(line)
   if protocol=="arrange" and not self.state.active and autoStartEnabled(self.cfg) and self.state.pending_pool then
-    local pending=copy(self.state.pending_pool); local started,err=self:start(); if not started then return started,err end
+    local pending=copy(self.state.pending_pool); local names=self.state.characteristic_order; local started,err=self:start(); if not started then return started,err end
+    self.state.characteristic_order=names
     self:recordPool(pending)
   end
   if protocol=="creator" and not self.state.active and autoStartEnabled(self.cfg) and self.state.pending_stats then
-    local pending=copy(self.state.pending_stats); local started,err=self:start(); if not started then return started,err end
-    self:record(pending,"creator",pending.MP~=nil and order or legacyOrder)
+    local pending=copy(self.state.pending_stats); local names=self.state.characteristic_order or (pending.MP~=nil and oldOrder or pending.PRE~=nil and order or legacyOrder)
+    local started,err=self:start(); if not started then return started,err end
+    self:record(pending,"creator",names)
   end
   if not self.state.active and (self.state.pending_stats or self.state.pending_pool) then
     self.state.passive_lines=(self.state.passive_lines or 0)+1
@@ -572,6 +602,12 @@ function Roller:onLine(line)
 end
 function Roller:set(key,value)
   key=trim(key):upper(); value=trim(value); local values
+  local requested=key
+  local legacyAlias
+  if key=="VOI" then key="PRE"; legacyAlias="VOI"
+  elseif key=="APP" then key="LUK"; legacyAlias="APP"
+  elseif key=="PRE" then legacyAlias="VOI"
+  elseif key=="LUK" then legacyAlias="APP" end
   if key=="TOTAL" then values={target_total=value}
   elseif key=="HARD" then values={hard_stop=value}
   elseif key=="MAX" then values={max_rolls=value}
@@ -581,13 +617,15 @@ function Roller:set(key,value)
   elseif key=="ARRANGE" or key=="MODE" then values={arrange_mode=value}
   elseif ranks[key:lower()] then return nil,"use a stat name, not a rank"
   else
-    local valid=false; for _,name in ipairs(order) do if key==name then valid=true end end; if not valid then return nil,"unknown roller setting" end
-    local enable=true; if value:lower()=="off" then enable=false; for _,name in ipairs(order) do if name~=key and (self.cfg.min_stats or {})[name] then enable=true; break end end end
+    local valid=false; for _,name in ipairs(supportedStats) do if key==name then valid=true end end; if not valid then return nil,"unknown roller setting" end
+    local enable=true; if value:lower()=="off" then enable=false; for _,name in ipairs(supportedStats) do if name~=key and name~=legacyAlias and (self.cfg.min_stats or {})[name] then enable=true; break end end end
     values={use_min_stats=enable,min_stats={[key]=value}}
+    if legacyAlias then values.min_stats[legacyAlias]=value end
   end
   local ok,err=self:configure(values,true); if not ok then return nil,err end
   local shown=key=="TOTAL" and self.cfg.target_total or key=="HARD" and self.cfg.hard_stop or key=="MAX" and self.cfg.max_rolls or key=="DELAY" and self.cfg.reroll_delay or key=="GREATS" and self.cfg.minimum_greats or (key=="GOODPLUS" or key=="GOODS") and self.cfg.minimum_good_plus or (key=="ARRANGE" or key=="MODE") and self.cfg.arrange_mode or (self.cfg.min_stats or {})[key]
-  self:echo("Set "..key.." to "..tostring(shown or "off")); return true
+  local note=requested~=key and " (formerly "..requested..")" or key=="MP" and " (legacy 12-stat screens only)" or ""
+  self:echo("Set "..key.." to "..tostring(shown or "off")..note); return true
 end
 function Roller:configure(values,silent)
   values=type(values)=="table" and values or {}; local candidate=copy(self.cfg); candidate.reroll_command="reroll"
@@ -605,9 +643,9 @@ function Roller:configure(values,silent)
   for _,key in ipairs({"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}) do if values[key]~=nil then if type(values[key])~="boolean" then return nil,key.." must be true or false" end; candidate[key]=values[key] end end
   for _,key in ipairs({"log_folder","master_file"}) do if values[key]~=nil then local value=trim(values[key]); if value=="" or value=="." or value==".." or not value:match("^[%w%._%-]+$") then return nil,key.." must be a safe name without a path" end; candidate[key]=value end end
   candidate.min_stats=copy(candidate.min_stats or {})
-  for _,key in ipairs(order) do if values.min_stats and values.min_stats[key]~=nil then local raw=trim(values.min_stats[key]); local number=tonumber(raw); if raw=="" or raw:lower()=="off" then candidate.min_stats[key]=nil elseif not number or number<1 or number>7 or number~=math.floor(number) then return nil,key.." minimum must be 1-7 or off" else candidate.min_stats[key]=number end end end
+  for _,key in ipairs(supportedStats) do if values.min_stats and values.min_stats[key]~=nil then local raw=trim(values.min_stats[key]); local number=tonumber(raw); if raw=="" or raw:lower()=="off" then candidate.min_stats[key]=nil elseif not number or number<1 or number>7 or number~=math.floor(number) then return nil,key.." minimum must be 1-7 or off" else candidate.min_stats[key]=number end end end
   if not candidate.target_total and not candidate.hard_stop and not candidate.max_rolls then return nil,"enable a target, hard stop, or maximum rolls" end
-  if candidate.use_min_stats then local any=false; for _,key in ipairs(order) do if candidate.min_stats[key] then any=true; break end end; if not any then return nil,"enable at least one stat minimum or turn minimums off" end end
+  if candidate.use_min_stats then local any=false; for _,key in ipairs(supportedStats) do if candidate.min_stats[key] then any=true; break end end; if not any then return nil,"enable at least one stat minimum or turn minimums off" end end
   if self.onConfig then local saved,err=self.onConfig(copy(candidate)); if saved==nil or saved==false then return nil,err or "could not save settings" end end
   self.cfg=candidate; if not silent then self:echo("Settings saved.") end; return true
 end

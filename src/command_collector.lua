@@ -74,7 +74,13 @@ function Collector:finish(lines)
       if spec.snapshot=="info" and type(self.snapshot.info)=="table" then
         local previous=self.snapshot.info
         for key,value in pairs(result) do
-          if type(value)=="table" and type(previous[key])=="table" then for child,childValue in pairs(value) do previous[key][child]=childValue end else previous[key]=value end
+          if key=="attributes" and type(value)=="table" and next(value)~=nil then
+            -- A game-format change must not leave retired characteristic names
+            -- beside the current ones in the retained INFO snapshot.
+            previous[key]=value
+          elseif type(value)=="table" and type(previous[key])=="table" then
+            for child,childValue in pairs(value) do previous[key][child]=childValue end
+          else previous[key]=value end
         end
         result=previous
       end

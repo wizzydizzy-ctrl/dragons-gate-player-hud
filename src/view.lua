@@ -160,7 +160,9 @@ function View.detailsContent(combat,attributes,t,layout,vitals)
 end
 function View.attributeStripContent(attributes,t,layout)
   local parts={}; attributes=attributes or {}
-  for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}) do
+  local oldNames=attributes.VOI~=nil or attributes.APP~=nil
+  local names=oldNames and {"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"} or {"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
+  for _,key in ipairs(names) do
     parts[#parts+1]="<span style='color:"..t.muted.."'>"..key.."</span> <b>"..esc(attributes[key] or "—").."</b>"
   end
   return View.withFont(table.concat(parts," &nbsp; "),layout.attribute_strip_font or layout.small_font)
@@ -547,7 +549,7 @@ function View.new(settings)
   self.roller_status=label("DGHUD.RollerSettings.Status",self.roller_panel,"background:transparent;color:"..t.muted..";")
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.roller_cancel=label("DGHUD.RollerSettings.Cancel",self.roller_panel,"background:#171b18;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
-  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
+  self.roller_fields={}; self.roller_field_order={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   local fieldLabels={target_total="Normal target total (1-77/off)",hard_stop="Keep any roll at/above (1-77/off; bypasses normal rules)",max_rolls="Stop safely after this many rolls (off=unlimited)",reroll_delay="Pause between rerolls (seconds)",minimum_greats="Arranged pools: minimum Great values (1-11/off)",minimum_good_plus="Arranged pools: minimum Good-or-Great values (1-11/off)",log_folder="Log folder name",master_file="Master log filename"}
   for _,key in ipairs(self.roller_field_order) do local caption=label("DGHUD.RollerSettings.Caption."..key,self.roller_content,"background:transparent;color:"..t.text..";"); local edit=input("DGHUD.RollerSettings.Input."..key,self.roller_content,self.geyser); self.roller_fields[key]={caption=caption,input=edit,label=fieldLabels[key] or (key.." minimum (1-7/off)")} end
   self.roller_toggle_order={"auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled"}; self.roller_toggles={}
@@ -2091,7 +2093,7 @@ function View:layoutRollerSettings(layout)
     for index,mode in ipairs(self.roller_arrange_order) do place(self.roller_arrange_buttons[mode],(index-1)*(modeWidth+modeGap),24,modeWidth,34) end
   end
   local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_status","roller_show","roller_stats","roller_last","roller_reset","roller_help"}
-  local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
+  local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   local function layoutColumn(items,column)
     local cx=(column-1)*(columnWidth+gap)
     for index,key in ipairs(items) do local ry=modeSectionHeight+(index-1)*rowHeight; local field=self.roller_fields[key]
@@ -2702,7 +2704,7 @@ function View.validateReusable(candidate,settings)
   end
   for index=1,#Navigation.directions do if type(candidate.direction_buttons)~="table" or type(candidate.direction_buttons[index])~="table" or not reusableLabel(candidate.direction_buttons[index].label) then return nil,"preserved HUD direction controls are incomplete" end end
   for index=1,#Navigation.utilities do if type(candidate.utility_buttons)~="table" or type(candidate.utility_buttons[index])~="table" or not reusableLabel(candidate.utility_buttons[index].label) then return nil,"preserved HUD utility controls are incomplete" end end
-  local rollerRequired={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
+  local rollerRequired={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   for _,name in ipairs(rollerRequired) do local field=type(candidate.roller_fields)=="table" and candidate.roller_fields[name] or nil; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD autoroller view is incomplete" end end
   local mapSettingsRequired={"minimum_height","height_percent","maximum_height","zoom_step","zoom_min","zoom_max","walk_timeout","special_timeout"}
   if type(candidate.map_settings_field_order)~="table" or type(candidate.map_settings_fields)~="table" then return nil,"preserved HUD mapper settings are incomplete" end

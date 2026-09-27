@@ -74,6 +74,30 @@ test("info ignores the staff-only MP column and accepts the staff prompt",functi
   local lines={" Str Int Wis Dex Agi Con Cha Wil Voi Per App MP","Great Great Great Great Great Great Great Great Great Great Great Great"," 18 18 18 18 18 18 18 18 18 18 18 18","[199] 301/301 hp, 173/173 ftg >"}
   local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Great"); eq(r.attributes.APP,"Great"); eq(Parser.isComplete("info",lines),true)
 end)
+test("updated info parses PRE and LUK with an optional staff MP column",function()
+  local lines={"You are Test Tester, a light boned and muscular bodied 43 year old Entropic Male adolescent Psycian. You are 7'7\" and weigh 239 lbs.",
+    "HP: 299 of 299  Ftg: 188 of 188  Psi: 40 of 40  Carry: 94.9 of 6553.5 lbs.",
+    " Str   Int   Wis   Dex   Agi   Con   Cha   Wil   Pre   Per   Luk   MP",
+    "Super Super Super Super Super Super Super Super Great Excel Good Super",
+    "18 18 18 18 18 18 18 18 17 16 15 18",
+    "[5130] 299/299 hp, 188/188 ftg >"}
+  local r=assert(Parser.parseInfo(lines))
+  eq(r.attributes.PRE,"Great"); eq(r.attributes.PER,"Excel"); eq(r.attributes.LUK,"Good")
+  eq(r.attributes.VOI,nil); eq(r.attributes.APP,nil); eq(Parser.isComplete("info",lines),true)
+end)
+test("updated info accepts wrapped PRE LUK headers and eleven values",function()
+  local lines={"Str Int Wis Dex Agi Con","Cha Wil Pre Per Luk",
+    "Awful Poor Low Aver Fair Good","Great Excel Super Godly Fair",">"}
+  local r=assert(Parser.parseInfo(lines))
+  eq(r.attributes.STR,"Awful"); eq(r.attributes.CON,"Good")
+  eq(r.attributes.PRE,"Super"); eq(r.attributes.LUK,"Fair")
+end)
+test("updated info accepts Superb without retaining a stale attribute snapshot",function()
+  local lines={"Str Int Wis Dex Agi Con Cha Wil Pre Per Luk",
+    "Superb Great Great Good Good Fair Fair Fair Great Good Superb",">"}
+  local r=assert(Parser.parseInfo(lines))
+  eq(r.attributes.STR,"Superb"); eq(r.attributes.PRE,"Great"); eq(r.attributes.LUK,"Superb")
+end)
 test("info keeps distinct staff ranks aligned while ignoring MP",function()
   local lines={"Str Int Wis Dex Agi Con Cha Wil Voi Per App MP","Awful Poor Low Aver Fair Good Great Excel Super Godly Aver Fair","11 12 13 14 15 16 17 18 19 20 21 22","[199] 301/301 hp, 173/173 ftg >"}
   local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Awful"); eq(r.attributes.CON,"Good"); eq(r.attributes.WIL,"Excel"); eq(r.attributes.PER,"Godly"); eq(r.attributes.APP,"Aver")

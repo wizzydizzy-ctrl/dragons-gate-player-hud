@@ -12,6 +12,7 @@ local legacyPrompt="Use this body ? Y,n"
 local firstHeader="  STR         INT         WIS         DEX         AGI         CON"
 local secondHeader="  CHA         WIL         VOI         PER         APP         MP"
 local currentSecondHeader="  CHA         WIL         VOI         PER         APP"
+local updatedSecondHeader="  CHA         WIL         PRE         PER         LUK"
 local creatorPrompt="reroll  done  ? help"
 local arrangePrompt="<stat> <label>  auto  clear  reroll  done  ? help"
 local arrangeResetPrompt="<stat> <label>  auto  reset  reroll  done  ? help"
@@ -26,6 +27,75 @@ end
 local function currentRoll(r,first,second)
   assert(r:onLine(firstHeader)); assert(r:onLine(first)); r:onLine(""); assert(r:onLine(currentSecondHeader)); assert(r:onLine(second))
 end
+local function updatedRoll(r,first,second)
+  assert(r:onLine(firstHeader)); assert(r:onLine(first)); r:onLine(""); assert(r:onLine(updatedSecondHeader)); assert(r:onLine(second))
+end
+
+test("updated roll in place captures PRE and LUK and sends only one confirmed reroll",function()
+  local f=fake(); local r=Roller.new(f,{target_total=60,reroll_delay=0,auto_start_on_name=true})
+  updatedRoll(r,"Good Excel Fair Aver Fair Fair","Low Fair Fair Aver Awful")
+  assert(r:onLine(creatorPrompt)); eq(r.state.rolls,1); eq(r.state.last.total,50)
+  eq(r.state.last.stats.PRE,5); eq(r.state.last.stats.LUK,1)
+  eq(r.state.last.stats.VOI,nil); eq(r.state.last.stats.APP,nil)
+  local timer=r.state.timer; assert(timer and f.timers[timer]); eq(r:onLine(creatorPrompt),false)
+  f.timers[timer].fn(); eq(#f.sent,1); eq(f.sent[1],"reroll")
+  r:onLine("> reroll"); r:onLine("That set was too weak to offer -- rolling again.")
+  updatedRoll(r,"Great Great Great Great Great Great","Great Great Great Great Great")
+  assert(r:onLine(creatorPrompt)); eq(r.state.rolls,2); eq(r.state.active,false); eq(#f.sent,1)
+  assert(r.state.result_held); assert(f.messages[#f.messages-1]:find("manual done",1,true))
+end)
+
+test("updated arranged pool assigns PRE and LUK before asking the game to fill",function()
+  local f=fake(); local r=Roller.new(f,{target_total=60,auto_start_on_name=true,use_min_stats=true,arrange_mode="minimums",min_stats={PRE=7,LUK=6}})
+  assert(r:onLine(firstHeader)); r:onLine("-- -- -- -- -- --"); r:onLine(updatedSecondHeader); r:onLine("-- -- -- -- --")
+  assert(r:onLine("Pool: Great Good Good Good Good Good Fair Fair Fair Fair Fair"))
+  assert(r:onLine(arrangeResetPrompt)); eq(r.state.last.order[9],"PRE"); eq(r.state.last.order[11],"LUK")
+  eq(f.sent[1],"pre great")
+  assert(r:onLine("PRE placed: Great.")); assert(r:onLine("Pool: Good Good Good Good Good Fair Fair Fair Fair Fair"))
+  assert(r:onLine(arrangeResetPrompt)); eq(f.sent[2],"luk good")
+  assert(r:onLine("LUK placed: Good.")); assert(r:onLine("Pool: Good Good Good Good Fair Fair Fair Fair Fair"))
+  assert(r:onLine(arrangeResetPrompt)); eq(f.sent[3],"auto")
+  for _,command in ipairs(f.sent) do assert(command~="done") end
+end)
+
+test("assign method never sends a reroll without the exact rolling prompt",function()
+  local f=fake(); local r=Roller.new(f,{target_total=60,auto_start_on_name=true})
+  r:onLine("Step 7 of 10 - Characteristics")
+  updatedRoll(r,"Poor Poor Awful Awful Awful Awful","Awful Awful Awful Awful Awful")
+  eq(r:onLine("raise <stat>  lower <stat>  reset  done  ? help"),false)
+  eq(r.state.active,false); eq(#f.sent,0)
+end)
+
+test("manual start survives a creator choice of either rolling method",function()
+  for _,method in ipairs({"2","3"}) do
+    local f=fake(); local r=Roller.new(f,{target_total=77,auto_start_on_name=false})
+    r:onLine("Step 7 of 10 - Characteristics"); assert(r:start())
+    eq(r:onOutgoing(method),false); eq(r.state.active,true); eq(r.state.result_held,false)
+    if method=="2" then
+      assert(r:onLine("Pool: Good Good Good Good Good Good Good Good Good Good Good"))
+    else
+      updatedRoll(r,"Good Good Good Good Good Good","Good Good Good Good Good")
+    end
+    eq(r.state.rolls,1); eq(#f.sent,0)
+  end
+end)
+
+test("legacy stat labels honor current slot minimums",function()
+  local f=fake(); local r=Roller.new(f,{target_total=53,hard_stop=62,auto_start_on_name=true,
+    use_min_stats=true,require_min_stats_to_stop=true,min_stats={PRE=5,LUK=5}})
+  currentRoll(r,"Good Good Good Good Good Good","Good Good Awful Good Awful")
+  assert(r:onLine(creatorPrompt)); eq(r.state.last.total,56)
+  eq(r.state.active,true); eq(r.state.result_held,false)
+  assert(r.state.timer); eq(#f.sent,0)
+end)
+
+test("old minimum commands update the renamed current stat slots",function()
+  local f=fake(); local r=Roller.new(f,{target_total=53,use_min_stats=true,min_stats={PRE=5,LUK=5}})
+  assert(r:set("VOI","7")); eq(r.cfg.min_stats.PRE,7); eq(r.cfg.min_stats.VOI,7)
+  assert(f.messages[#f.messages]:find("formerly VOI",1,true))
+  assert(r:set("APP","6")); eq(r.cfg.min_stats.LUK,6); eq(r.cfg.min_stats.APP,6)
+  assert(r:set("PRE","off")); eq(r.cfg.min_stats.PRE,nil); eq(r.cfg.min_stats.VOI,nil)
+end)
 
 test("current eleven-stat roll in place auto-starts and scores 77",function()
   local f=fake(); local r=Roller.new(f,{target_total=77,auto_start_on_name=true})
@@ -146,7 +216,7 @@ test("rr show reports every setting in clear groups without changing state",func
     arrange_mode="minimums",minimum_greats=2,minimum_good_plus=5,
     auto_start_on_name=false,use_min_stats=true,require_min_stats_to_stop=false,
     show_every_roll=false,logging_enabled=false,log_folder="private_rolls",master_file="summary.txt",
-    min_stats={STR=5,INT=7,APP=false,MP=6},
+    min_stats={STR=5,INT=7,LUK=false,MP=6},
   },function() saves=saves+1; return true end)
   local state=r.state
   assert(r:command("show")); eq(r.state,state); eq(r.state.active,false); eq(saves,0); eq(#f.sent,0)
@@ -156,7 +226,7 @@ test("rr show reports every setting in clear groups without changing state",func
     "[Roll rules]","Target total: 55 / 77","Hard stop: off","Maximum rolls: 5000",
     "Reroll delay: 0.25 seconds","Reroll command: reroll (fixed)",
     "[Characteristic minimums]","Minimums enabled: ON","Require minimums to stop: OFF",
-    "STR: 5 (Fair)","INT: 7 (Great)","APP: off","Legacy MP: 6 (Good)",
+    "STR: 5 (Fair)","INT: 7 (Great)","LUK: off","Legacy MP: 6 (Good)",
     "[Roll-and-arrange only]","MY MINIMUMS + AUTO (minimums)","Minimum Great values: 2",
     "Minimum Good-or-Great values: 5","apply only to Roll-and-arrange pools",
     "[Startup, output, and logs]","Print every roll: OFF","Roll logging: OFF",
@@ -358,13 +428,13 @@ end)
 test("minimum mode with all stats configured does not send auto into an empty pool",function()
   local f=fake(); local mins={}; for _,name in ipairs(Roller.order) do mins[name]=1 end
   local r=Roller.new(f,{target_total=12,auto_start_on_name=true,use_min_stats=true,arrange_mode="minimums",min_stats=mins})
-  assert(r:onLine("Pool: Great Good Good Good Good Good Fair Fair Aver Low Low Low")); assert(r:onLine(arrangePrompt))
-  local labels={"Great","Good","Good","Good","Good","Good","Fair","Fair","Aver","Low","Low","Low"}
+  assert(r:onLine("Pool: Great Good Good Good Good Good Fair Fair Aver Low Low")); assert(r:onLine(arrangePrompt))
+  local labels={"Great","Good","Good","Good","Good","Good","Fair","Fair","Aver","Low","Low"}
   for index=1,#Roller.order do local command=f.sent[index]
     local stat,label=command:match("^(%a+)%s+(%a+)$"); assert(stat and label); assert(r:onLine(stat:upper().." placed: "..label:sub(1,1):upper()..label:sub(2).."."))
     assert(removeLabel(labels,label)); assert(r:onLine(poolLine(labels))); assert(r:onLine(arrangePrompt))
   end
-  eq(#f.sent,12); eq(r.state.active,false)
+  eq(#f.sent,11); eq(r.state.active,false)
 end)
 
 test("pool thresholds count Great separately and Good or better together",function()

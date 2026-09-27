@@ -21,6 +21,12 @@ end
 function Settings.migrate(input)
   local result=copy(input or {}); local changed=false; local schema=tonumber(result.schema) or 0
   if schema<1 then result.update=result.update or {}; result.update.auto_apply=false; result.auto_update=nil; result.schema=1; changed=true end
+  local minimums=type(result.roller)=="table" and result.roller.min_stats or nil
+  if type(minimums)=="table" then
+    -- Carry forward saved thresholds in the two renamed characteristic slots.
+    if minimums.PRE==nil and minimums.VOI~=nil then minimums.PRE=minimums.VOI; changed=true end
+    if minimums.LUK==nil and minimums.APP~=nil then minimums.LUK=minimums.APP; changed=true end
+  end
   local colors=type(result.colorization)=="table" and result.colorization or nil
   if colors and colors.highlights_enabled~=nil then
     for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do

@@ -1,6 +1,9 @@
 local Parser={}
-local ATTRS={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
-local RANKS={awful="Awful",poor="Poor",low="Low",aver="Aver",fair="Fair",good="Good",great="Great",excel="Excel",super="Super",godly="Godly"}
+local ATTR_ORDERS={
+  {"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"},
+  {"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"},
+}
+local RANKS={awful="Awful",poor="Poor",low="Low",aver="Aver",fair="Fair",good="Good",great="Great",excel="Excel",super="Super",superb="Superb",godly="Godly"}
 local GAME_MONTHS={tanei=1,odeth=2,daleth=3,majus=4,mateth=5,rina=6}
 local function clean(value)
   return tostring(value or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("%s+$","")
@@ -82,27 +85,30 @@ function Parser.parseInfo(lines)
   local carry,carryMax=vitals:match("Carry:%s*(%d+%.?%d*)%s+of%s+(%d+%.?%d*)%s+lbs?%.")
   if hp or fatigue or carry then result.vitals={hp=tonumber(hp),hp_max=tonumber(hpMax),fatigue=tonumber(fatigue),fatigue_max=tonumber(fatigueMax),carry=tonumber(carry),carry_max=tonumber(carryMax)} end
 
-  local headerEnd
-  for start=1,#lines do
-    local expected=1
-    for index=start,math.min(#lines,start+#ATTRS+1) do
-      local words={}; for word in trim(lines[index]):gmatch("[%a]+") do words[#words+1]=word:lower() end
-      if index==start and words[1]~="str" then break end
-      for _,word in ipairs(words) do
-        if expected<=#ATTRS then
-          if word~=ATTRS[expected]:lower() then expected=0; break end
-          expected=expected+1
+  local headerEnd,headerAttrs
+  for _,attrs in ipairs(ATTR_ORDERS) do
+    for start=1,#lines do
+      local expected=1
+      for index=start,math.min(#lines,start+#attrs+1) do
+        local words={}; for word in trim(lines[index]):gmatch("[%a]+") do words[#words+1]=word:lower() end
+        if index==start and words[1]~="str" then break end
+        for _,word in ipairs(words) do
+          if expected<=#attrs then
+            if word~=attrs[expected]:lower() then expected=0; break end
+            expected=expected+1
+          end
         end
+        if expected==#attrs+1 then headerEnd=index; headerAttrs=attrs; break end
+        if expected==0 then break end
       end
-      if expected==#ATTRS+1 then headerEnd=index; break end
-      if expected==0 then break end
+      if headerEnd then break end
     end
     if headerEnd then break end
   end
   if headerEnd then
-    for start=headerEnd+1,math.min(#lines,headerEnd+#ATTRS+2) do
+    for start=headerEnd+1,math.min(#lines,headerEnd+#headerAttrs+2) do
       local values={}; local index=start; local valid=true
-      while #values<#ATTRS and index<=math.min(#lines,headerEnd+#ATTRS+2) do
+      while #values<#headerAttrs and index<=math.min(#lines,headerEnd+#headerAttrs+2) do
         local found=0
         for word in trim(lines[index]):gmatch("[%a]+") do
           local rank=RANKS[word:lower()]; if not rank then valid=false; break end
@@ -111,7 +117,7 @@ function Parser.parseInfo(lines)
         if not valid or found==0 then break end
         index=index+1
       end
-      if valid and #values>=#ATTRS then for n,key in ipairs(ATTRS) do result.attributes[key]=values[n] end; break end
+      if valid and #values>=#headerAttrs then for n,key in ipairs(headerAttrs) do result.attributes[key]=values[n] end; break end
     end
   end
   if not result.physical.age and not result.attributes.STR and not result.vitals then return nil,"unrecognized info response" end

@@ -207,14 +207,14 @@ local function submapSettings()
   return Settings.merge(Defaults,{mapper={transition_submaps={gate=true,portal=true,door=true,arch=true,path=true,other=true}}})
 end
 
-test("HUD release defaults are ready for version 0.3.70",function()
-  eq(Defaults.version,"0.3.70"); eq(Defaults.view_schema,4); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
+test("HUD release defaults are ready for version 0.3.71",function()
+  eq(Defaults.version,"0.3.71"); eq(Defaults.view_schema,5); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
   eq(Defaults.chat.all_sources.COMBAT,false); eq(Defaults.chat.all_sources.ROOM,true); eq(Defaults.chat.all_sources.STAFF,true)
   eq(Defaults.theme.hp,"#ba5147"); eq(Defaults.theme.fatigue,"#b08f18")
   eq(Defaults.time.speed,2); eq(Defaults.time.sunrise_hour,6); eq(Defaults.time.sunset_hour,18)
   eq(Defaults.mapper.minimum_height,90); eq(Defaults.mapper.schema,2)
   for _,key in ipairs({"gate","portal","door","arch","path","other"}) do eq(Defaults.mapper.transition_submaps[key],false) end
-  eq(Defaults.roller.schema,3); eq(Defaults.roller.target_total,53); eq(Defaults.roller.hard_stop,62); eq(Defaults.roller.reroll_delay,.1); eq(Defaults.roller.arrange_mode,"manual"); eq(Defaults.roller.minimum_greats,nil); eq(Defaults.roller.minimum_good_plus,nil); eq(Defaults.roller.min_stats.APP,5)
+  eq(Defaults.roller.schema,4); eq(Defaults.roller.target_total,53); eq(Defaults.roller.hard_stop,62); eq(Defaults.roller.reroll_delay,.1); eq(Defaults.roller.arrange_mode,"manual"); eq(Defaults.roller.minimum_greats,nil); eq(Defaults.roller.minimum_good_plus,nil); eq(Defaults.roller.min_stats.PRE,5); eq(Defaults.roller.min_stats.LUK,5)
 end)
 
 test("special line rendering refreshes once per room and stays optional",function()

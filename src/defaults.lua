@@ -1,12 +1,12 @@
 return {
   schema = 1,
-  view_schema = 4,
+  view_schema = 5,
   -- Replaced with a SHA-256 of the structural view sources while building a
   -- release, so live-view reuse requires exact compatibility.
   view_contract = "__DGHUD_VIEW_CONTRACT__",
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.3.70",
+  version = "0.3.71",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   display = { side_text_scale = 1.0, auto_wrap = true, align_input = false },
   keybindings = { enabled=false, commands={ ["8"]="north",["9"]="northeast",["6"]="east",["3"]="southeast",["2"]="south",["1"]="southwest",["4"]="west",["7"]="northwest",["5"]="look",Plus="up",Minus="down",["0"]="",Period="",Asterisk="",Slash="",Enter="" } },
@@ -51,12 +51,12 @@ return {
   },
   time = { speed=2, sunrise_hour=6, sunset_hour=18 },
   roller = {
-    schema=3,
+    schema=4,
     target_total=53, hard_stop=62, max_rolls=nil, reroll_delay=.1, reroll_command="reroll",
     arrange_mode="manual", minimum_greats=nil, minimum_good_plus=nil,
     auto_start_on_name=true, use_min_stats=true, require_min_stats_to_stop=true,
     show_every_roll=true, logging_enabled=true, log_folder="og_dg_roller", master_file="og_dg_rolls_master.txt",
-    min_stats={STR=5,INT=5,WIS=5,DEX=5,AGI=5,CON=5,CHA=5,WIL=5,VOI=5,PER=5,APP=5},
+    min_stats={STR=5,INT=5,WIS=5,DEX=5,AGI=5,CON=5,CHA=5,WIL=5,PRE=5,PER=5,LUK=5},
   },
   mapper = {
     enabled=true,
