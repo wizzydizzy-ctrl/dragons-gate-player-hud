@@ -5,8 +5,8 @@ local viewHandoff=previous and previous._view_handoff
 local mainWrapBaseline=previous and (previous._main_wrap_baseline or (type(previous.controller)=="table" and previous.controller.original_main_console_wrap))
 local function copyChatEntries(entries,partial)
   -- Capture before replacing loaded modules. A full controller snapshot carries
-  -- ten bounded source histories; a view-only fallback carries one visible tab.
-  local limit=partial==true and 1000 or 10000
+  -- eleven bounded source histories; a view-only fallback carries one visible tab.
+  local limit=partial==true and 1000 or 11000
   local source=type(entries)=="table" and entries or {}; local result={}; local first=math.max(1,#source-limit+1)
   for index=first,#source do
     local entry=source[index]

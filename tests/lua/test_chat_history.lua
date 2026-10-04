@@ -1,5 +1,39 @@
 local History=require("chat_history")
 
+
+test("WORLD has a dedicated retention bucket and remains visible in its own tab when hidden in ALL",function()
+  local history=History.new(3,3)
+  local arrival={category="WORLD",speaker="Obatalla Ogoun",message="just arrived in the world."}
+  local departure={category="WORLD",speaker="Obatalla Ogoun",message="has left the world."}
+  eq(History.retentionKey(arrival),"WORLD"); eq(History.retentionKey({category=" world "}),"WORLD")
+  eq(history:append(arrival,100),true); eq(history:append(arrival,101),false)
+  eq(history:append(departure,104),true)
+  eq(#history:entries("ALL",{WORLD=false}),0); eq(#history:entries("WORLD",{WORLD=false}),2)
+  eq(#history:entries("PRIVATE"),0); eq(#history:entries("ROOM"),0)
+  eq(history:entries("WORLD")[1],arrival); eq(history:entries("WORLD")[2],departure)
+  eq(#history:entries("ALL",{WORLD=true}),2); eq(#history.items,2)
+  eq(table.concat(history:categories(),","),"WORLD")
+end)
+
+for _,mode in ipairs({"append","hydrate"}) do
+  test(mode.." keeps WORLD independent of COMBAT and the shared custom category bucket",function()
+    local history=History.new(3,0)
+    local entries={{category="WORLD",speaker="Obatalla Ogoun",message="just arrived in the world."},
+      {category="STAFF",message="protected staff"}}
+    for index=1,7 do
+      entries[#entries+1]={category="COMBAT",message="combat-"..index}
+      entries[#entries+1]={category="CUSTOM_"..index,message="custom-"..index}
+    end
+    if mode=="hydrate" then assert(history:hydrate(entries))
+    else for index,entry in ipairs(entries) do eq(history:append(entry,index*4),true) end end
+    eq(#history:entries("WORLD"),1); eq(history:entries("WORLD")[1],entries[1])
+    eq(history.retentionCounts.WORLD,1); eq(history.retentionCounts.OTHER,3); eq(history.retentionCounts.COMBAT,3)
+    for index=1,7 do eq(history:append({category="WORLD",speaker="Traveler-"..index,message="has left the world."},100+index*4),true) end
+    eq(#history:entries("WORLD"),3); eq(history:entries("WORLD")[1].speaker,"Traveler-5")
+    eq(#history:entries("COMBAT"),3); eq(history.retentionCounts.OTHER,3); eq(#history:entries("STAFF"),1)
+    eq(#history.items,10); eq(#history:entries("ALL",{WORLD=false}),7)
+  end)
+end
 test("deduplicates only identical adjacent entries",function()
   local history=History.new(1000,3)
   local entry={category="ESP",speaker="Tekk",message="hello"}
@@ -186,7 +220,7 @@ test("clears only the visible in-memory history and resets dedupe state",functio
 end)
 
 -- Retention fixtures are synthetic and never read a Mudlet profile or chat log.
-local retentionBuckets={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","ALL","OTHER"}
+local retentionBuckets={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD","ALL","OTHER"}
 
 local function retentionFixture(limit)
   local entries,expected={},{}
@@ -212,9 +246,9 @@ local function sameRetained(actual,expected)
   end
 end
 
-test("retention exposes a thousand-entry bucket cap and ten-thousand-entry total bound",function()
+test("retention exposes a thousand-entry bucket cap and eleven-thousand-entry total bound",function()
   eq(History.MAX_ENTRIES,1000)
-  eq(History.MAX_RETAINED_ENTRIES,10000)
+  eq(History.MAX_RETAINED_ENTRIES,11000)
 end)
 
 for _,mode in ipairs({"append","hydrate"}) do
@@ -227,9 +261,9 @@ for _,mode in ipairs({"append","hydrate"}) do
       else for index,entry in ipairs(entries) do eq(history:append(entry,index*4),true) end end
       eq(history.limit,limit)
       sameRetained(history:entries("ALL"),expected)
-      eq(#history.items,10*limit)
+      eq(#history.items,11*limit)
       assert(#history.items<=History.MAX_RETAINED_ENTRIES)
-      for _,category in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}) do
+      for _,category in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}) do
         eq(#history:entries(category),limit)
       end
       -- History returns every matching retained private entry, even above limit.
@@ -320,8 +354,10 @@ test("hydrating every bucket deduplicates saved overlap preserves live dedupe an
   eq(history:append(live,103),false); sameRetained(history:entries("ALL"),merged)
   local nextStaff={category="STAFF",message="synthetic-next-staff"}
   eq(history:append(nextStaff,104),true)
-  sameRetained(history:entries("STAFF"),{expected[27],live,nextStaff})
-  eq(#history:entries("ALL"),30)
+  local newestSavedStaff
+  for _,entry in ipairs(expected) do if entry.category=="STAFF" then newestSavedStaff=entry end end
+  sameRetained(history:entries("STAFF"),{newestSavedStaff,live,nextStaff})
+  eq(#history:entries("ALL"),33)
 end)
 
 test("clearing all retained buckets resets their quotas dedupe and sibling state",function()
@@ -330,7 +366,7 @@ test("clearing all retained buckets resets their quotas dedupe and sibling state
   assert(history:hydrate(entries))
   local sibling=history:newSibling()
   eq(sibling.limit,3); eq(sibling.dedupeSeconds,4); eq(#sibling:entries(),0)
-  eq(history:clearVisible(),30)
+  eq(history:clearVisible(),33)
   eq(#history:entries(),0); eq(#history:categories(),0)
   eq(history.lastKey,nil); eq(history.lastEpoch,nil)
   for index,entry in ipairs(expected) do assert(history:append(entry,index*4)) end

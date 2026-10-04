@@ -78,6 +78,11 @@ local function builtIn(category,message,metadata,character,now,line)
   return entry(category,message,metadata,character,now,"builtin",line)
 end
 
+local function parseWorldNotice(line,character,now)
+  local speaker,message=OutputColorizer.worldNotice(line)
+  if speaker then return builtIn("WORLD",message,{speaker=speaker},character,now,line) end
+end
+
 local playerStats={strength=true,intelligence=true,wisdom=true,dexterity=true,agility=true,constitution=true,charisma=true,will=true,presence=true,perception=true,luck=true,voice=true,appearance=true}
 local function parseStatIncrease(line,character,now)
   -- Accept current and legacy stat names, not arbitrary "has increased" prose.
@@ -205,6 +210,8 @@ end
 function Parser.parse(line,character,now)
   line=plain(line)
   if not line then return nil end
+  local world=parseWorldNotice(line,character,now)
+  if world then return world end
   local statIncrease=parseStatIncrease(line,character,now)
   if statIncrease then return statIncrease end
   local assistance=parseAssistanceRequest(line,character,now)

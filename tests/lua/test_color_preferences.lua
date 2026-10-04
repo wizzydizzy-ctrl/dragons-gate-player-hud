@@ -88,7 +88,7 @@ test("color preferences keep absent toggles sparse and preserve every false togg
   local empty = assert(Preferences.snapshot({}))
   eq(next(empty.styles), nil); eq(empty.enabled, nil); eq(#empty.custom_rules, 0)
   local config = {enabled=false, highlights_enabled=false}
-  for _, feature in ipairs({"room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
+  for _, feature in ipairs({"room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","world"}) do
     config[feature.."_enabled"] = false
   end
   local decoded = assert(Preferences.decode(assert(Preferences.encode(config))))
@@ -125,7 +125,7 @@ test("color preferences save and reload 1000 maximum-length custom rules with ev
   local config={enabled=true,highlights_enabled=true,styles={},custom_rules={}}
   for _,feature in ipairs({
     "room","exits","currency","races","classes","portal","presence","attack",
-    "damage","danger","recovery","upkeep","spell","discovery","illumination","notice",
+    "damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world",
   }) do config[feature.."_enabled"]=true end
   for _,entry in ipairs(Styles.entries()) do config.styles[entry.id]=Styles.defaults(entry.id) end
   for index=1,1000 do

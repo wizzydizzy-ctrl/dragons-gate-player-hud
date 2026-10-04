@@ -1,12 +1,12 @@
 local History={}
 History.__index=History
 History.MAX_ENTRIES=1000
-History.MAX_RETAINED_ENTRIES=10000
+History.MAX_RETAINED_ENTRIES=11000
 
 local private={WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true}
 -- A busy source must not consume another source's history. Custom categories
 -- share one bounded bucket rather than allocating memory for arbitrary names.
-local retainedSources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true,ALL=true}
+local retainedSources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true,WORLD=true,ALL=true}
 
 local function normalized(value)
   return tostring(value or ""):lower():match("^%s*(.-)%s*$"):gsub("%s+"," ")

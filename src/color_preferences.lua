@@ -15,7 +15,7 @@ local toggles, toggleSet = {"enabled", "highlights_enabled"}, {}
 for _, feature in ipairs({
   "room", "exits", "currency", "races", "classes", "portal", "presence", "attack",
   "damage", "danger", "recovery", "upkeep", "spell", "discovery",
-  "illumination", "notice",
+  "illumination", "notice", "world",
 }) do
   toggles[#toggles+1] = feature.."_enabled"
 end

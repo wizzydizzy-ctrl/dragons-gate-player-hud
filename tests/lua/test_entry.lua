@@ -203,12 +203,12 @@ test("replacement entry keeps every source in a full chat handoff beyond one vis
 end)
 test("replacement entry bounds even an oversized full chat handoff",function()
   withEntryStubs(function()
-    local entries={}; for index=1,10002 do entries[index]={category="ROOM",message="line "..index} end
+    local entries={}; for index=1,11002 do entries[index]={category="ROOM",message="line "..index} end
     DGHUD={user_settings={},_chat_handoff={schema=1,filter="ROOM",entries=entries},shutdown=function() return true end}
     dofile("src/entry.lua")
     local restored=DGHUD.controller.chat_handoff
-    eq(restored.partial,false); eq(#restored.entries,10000)
-    eq(restored.entries[1].message,"line 3"); eq(restored.entries[10000].message,"line 10002")
+    eq(restored.partial,false); eq(#restored.entries,11000)
+    eq(restored.entries[1].message,"line 3"); eq(restored.entries[11000].message,"line 11002")
   end)
 end)
 test("replacement entry marks bounded sanitized view-only chat as partial",function()

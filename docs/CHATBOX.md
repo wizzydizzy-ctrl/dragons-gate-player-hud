@@ -14,7 +14,7 @@ The same settings window has a **SHOW IN ALL** section. Toggle any source to con
 
 ## Sound alerts
 
-Open **OPTIONS → CHAT SETTINGS → SOUND ALERTS**. Each tab has an **ON/OFF** control, a choice of nine short sounds, and a **PREVIEW** button. Each built-in tab starts with a different sound. **STAFF starts ON; all other alerts start OFF.** You can change the shared alert volume too. Changes save immediately for this Mudlet profile and survive restarts, character changes, and HUD updates.
+Open **OPTIONS → CHAT SETTINGS → SOUND ALERTS**. Each tab has an **ON/OFF** control, a choice of ten short sounds, and a **PREVIEW** button. Each built-in tab starts with a different sound. **STAFF starts ON; all other alerts start OFF.** You can change the shared alert volume too. Changes save immediately for this Mudlet profile and survive restarts, character changes, and HUD updates.
 
 Preview lets you hear a sound even when that tab's alerts are OFF; it does not turn the alert on. The sounds are created locally from tones included in the HUD—no external media download or account is required. Mudlet's **Mute all media** and your computer's audio settings still apply.
 
@@ -32,6 +32,7 @@ A message can appear in more than one filter, but plays only one sound: its spec
 - **CONTACT** — Thoughts echoing through the area.
 - **STAFF** — Recognized Guide, GM, Elder, sends, and voice formats.
 - **COMBAT** — Your attacks, incoming weapon attacks, hit/miss results, damage, movement blocks, spell threats, upkeep, and recovery. This tab keeps capturing and saving messages even when **SHOW IN ALL → COMBAT** is OFF.
+- **WORLD** — Character arrivals (green) and departures (red), including unexpected departures. It starts included in ALL. Turn **SHOW IN ALL → WORLD** OFF to keep these messages only in WORLD; capture and saved history continue. WORLD sound alerts start OFF. Customize the two colors independently in **Color Settings → Text Styles → World arrivals / World departures**.
 
 Drag any chat tab left or right to arrange the filters in the order you prefer. The order is saved for the whole Mudlet profile and survives character changes, reconnects, and HUD updates. A short click still selects the tab normally.
 
@@ -65,6 +66,15 @@ Recognized staff-style communication includes forms such as:
 Nythriss'a sends: check check
 You hear the voice of Wizzy say, "test"
 You hear the voice of Wizzy ask Tamalon, "ready?"
+```
+
+WORLD recognizes server notices with any character name, including full names:
+
+```text
+** Obatalla Ogoun just arrived in the world.
+** Xlade Vespar just arrived in the world.
+** Obatalla Ogoun has left the world.
+** Mael Soultis has left the world unexpectedly.
 ```
 
 Parsing is intentionally specific. DGHUD does not capture every line containing words such as `says` or `whispers`, because room scripts and NPC output can use those words too.

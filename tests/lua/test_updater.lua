@@ -180,6 +180,32 @@ local function withChatSettingsFiles(run)
   if not ok then error(err,0) end
 end
 
+test("WORLD source settings validate and survive native save/load without changing old choices",function()
+  local legacy=assert(Adapter.chatSettingsSnapshot({tab_order={"STAFF","ALL"},all_sources={ROOM=false,COMBAT=false}}))
+  eq(legacy.all_sources.WORLD,true)
+  eq(table.concat(legacy.tab_order,","),"STAFF,ALL")
+  for _,invalid in ipairs({"off",0,{}}) do
+    local value,err=Adapter.chatSettingsSnapshot({tab_order={"ALL"},all_sources={WORLD=invalid}})
+    eq(value,nil); assert(err:find("booleans",1,true))
+  end
+  withChatSettingsFiles(function(h)
+    local adapter=Adapter.new()
+    for _,enabled in ipairs({false,true,false}) do
+      local candidate={visible=false,tab_order={"STAFF","ALL","WORLD","ROOM"},all_sources={WORLD=enabled,ROOM=false,COMBAT=false}}
+      assert(adapter:saveChatSettings(candidate))
+      local loaded=assert(Adapter.loadChatSettings())
+      eq(loaded.all_sources.WORLD,enabled)
+      eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,false)
+      eq(loaded.visible,false); eq(table.concat(loaded.tab_order,","),"STAFF,ALL,WORLD,ROOM")
+      eq(candidate.all_sources.WORLD,enabled)
+    end
+    local original=h.files[h.path]; h.fail="install"
+    eq(adapter:saveChatSettings({tab_order={"ALL","WORLD"},all_sources={WORLD=true}}),nil)
+    eq(h.files[h.path],original)
+    eq(assert(Adapter.loadChatSettings()).all_sources.WORLD,false)
+  end)
+end)
+
 test("chat visibility snapshots preserve booleans and default legacy records to visible",function()
   for _,visible in ipairs({false,true}) do
     local config={visible=visible,tab_order={" staff ","ALL"},all_sources={ROOM=false,COMBAT=true}}
@@ -262,18 +288,19 @@ test("sound settings round trip all tabs and preserve other chat preferences",fu
   end)
 end)
 
-test("sound settings at the 64 total tab boundary survive save load and revalidation",function()
+test("sound settings preserve the legacy 55 custom tabs alongside the new WORLD tab",function()
   withChatSettingsFiles(function(h)
     local Sounds=require("chat_sounds"); local tabs={STAFF={enabled=false,sound="dragon"}}
     for index=1,55 do tabs["CUSTOM"..index]={enabled=index%2==0,sound="esp"} end
     local config={visible=false,tab_order={"STAFF","ALL"},all_sources={ROOM=false},sounds={volume=42,tabs=tabs}}
     local snapshot=assert(Adapter.chatSettingsSnapshot(config))
-    local count=0; for _ in pairs(snapshot.sounds.tabs) do count=count+1 end; eq(count,64)
+    local count=0; for _ in pairs(snapshot.sounds.tabs) do count=count+1 end; eq(count,Sounds.MAX_TABS)
     local adapter=Adapter.new(); assert(adapter:saveChatSettings(snapshot))
     local loaded=assert(Adapter.loadChatSettings()); local normalized=assert(Sounds.validate(loaded.sounds))
-    count=0; for _ in pairs(normalized.tabs) do count=count+1 end; eq(count,64)
+    count=0; for _ in pairs(normalized.tabs) do count=count+1 end; eq(count,Sounds.MAX_TABS)
     eq(loaded.visible,false); eq(loaded.all_sources.ROOM,false); eq(loaded.sounds.volume,42)
     eq(loaded.sounds.tabs.STAFF.enabled,false); eq(loaded.sounds.tabs.STAFF.sound,"dragon")
+    eq(loaded.sounds.tabs.WORLD.enabled,false); eq(loaded.sounds.tabs.WORLD.sound,"world")
     for index=1,55 do eq(loaded.sounds.tabs["CUSTOM"..index].enabled,index%2==0); eq(loaded.sounds.tabs["CUSTOM"..index].sound,"esp") end
     local serialized=h.files[h.path]; assert(adapter:saveChatSettings(loaded)); eq(h.files[h.path],serialized)
     assert(Adapter.loadChatSettings())
@@ -405,7 +432,7 @@ test("each built-in sound resolves through the catalog to its fixed cache filena
       eq(h.plays[#h.plays].name,h.directory.."/"..record.file)
       eq(h.files[h.directory.."/"..record.file],h.wav(record.id))
     end
-    eq(#h.plays,9); eq(#h.mkdirs,2)
+    eq(#h.plays,10); eq(#h.mkdirs,2)
   end)
 end)
 

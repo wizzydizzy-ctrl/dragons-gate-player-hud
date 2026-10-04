@@ -8,6 +8,7 @@ local baseColors = {
   attack={205,62,62}, damage={255,70,70},
   danger={205,135,45}, recovery={90,165,105}, upkeep={185,105,45}, spell={145,95,190},
   discovery={225,185,70}, illumination={220,200,85}, darkness={105,120,140}, notice={255,215,80},
+  world_arrival={90,165,105}, world_departure={205,62,62},
 }
 local raceColors = {
   ["go-blin-al"]={153,204,255}, ["muatana-al"]={102,153,204}, ["drag-al"]={0,204,204},
@@ -30,8 +31,9 @@ local classColors = {
 local baseOrder = {
   "room", "label", "direction", "gold", "silver", "portal", "presence", "presence_phrase", "attack", "damage",
   "danger", "recovery", "upkeep", "spell", "discovery", "illumination", "darkness", "notice",
+  "world_arrival", "world_departure",
 }
-local features = {label="exits", direction="exits", gold="currency", silver="currency", darkness="illumination", presence_phrase="presence"}
+local features = {label="exits", direction="exits", gold="currency", silver="currency", darkness="illumination", presence_phrase="presence", world_arrival="world", world_departure="world"}
 local styleFields = {foreground=true, background=true, bold=true, underline=true, enabled=true}
 
 local function rejected(value, err)
@@ -57,9 +59,9 @@ local function styleEquals(actual, expected)
   for key in pairs(styleFields) do eq(actual[key], expected[key]) end
 end
 
-test("style registry includes all 67 base and named palette entries with stable metadata", function()
+test("style registry includes all 69 base and named palette entries with stable metadata", function()
   local entries, again, seen = Styles.entries(), Styles.entries(), {}
-  eq(#entries, 67)
+  eq(#entries, 69)
   for index, entry in ipairs(entries) do
     eq(seen[entry.id], nil); seen[entry.id] = entry
     eq(again[index].id, entry.id)
@@ -76,7 +78,7 @@ test("style registry includes all 67 base and named palette entries with stable 
     end
   end
   for id in pairs(baseColors) do assert(seen[id]) end
-  local count = 18
+  local count = 20
   for _, palette in ipairs({{raceColors, "race", "races", "Races"}, {classColors, "class", "classes", "Classes"}}) do
     local names = {}
     for name, rgb in pairs(palette[1]) do
@@ -101,6 +103,7 @@ test("registry defaults match every existing parser segment kind and named palet
     "You expend 1 fatigue keeping up the ward.", "The acolyte casts a curse at you!",
     "You have discovered a secret path!", "This area is illuminated.",
     "This area is not illuminated.", "(There are new version notes.)",
+    "** Obatalla Ogoun just arrived in the world.", "** Mael Soultis has left the world unexpectedly.",
   }
   local seen = {}
   for _, line in ipairs(samples) do
@@ -281,9 +284,9 @@ end)
 test("registry and returned styles cannot be changed through caller-owned copies", function()
   local entries = Styles.entries()
   entries[1].id = "changed"; entries[1].default.foreground = "#000000"
-  entries[19].name = "changed"; entries[19].default.enabled = false; entries[2] = nil
-  eq(Styles.entries()[1].id, "room"); eq(Styles.entries()[19].name, "anthian")
-  eq(Styles.entries()[19].default.enabled, true); eq(#Styles.entries(), 67)
+  entries[21].name = "changed"; entries[21].default.enabled = false; entries[2] = nil
+  eq(Styles.entries()[1].id, "room"); eq(Styles.entries()[21].name, "anthian")
+  eq(Styles.entries()[21].default.enabled, true); eq(#Styles.entries(), 69)
   local defaults = Styles.defaults("room"); defaults.foreground = "#000000"
   eq(Styles.defaults("room").foreground, "#E0B84F")
   local config = {room_color={1,2,3},styles={room={background={4,5,6}}}}

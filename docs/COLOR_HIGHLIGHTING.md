@@ -26,6 +26,7 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 | Discovery / Loot | Recognized discovery messages. | Gold |
 | Illuminated Areas | Both illuminated and not-illuminated room status. | Yellow for illuminated; blue-gray for dark |
 | Important Game Notices | New version-notes announcements. | Gold text, dark red highlight, bold and underline |
+| World Arrivals / Departures | Standalone character arrival/departure notices in the main display and WORLD chat. Includes unexpected departures. | Green for arrival; red for departure |
 
 ## Using the settings box
 
@@ -77,10 +78,10 @@ dghud colors illumination status
 Valid feature names are:
 
 ```text
-room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice
+room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice world
 ```
 
-The `highlights` feature groups travel objects, attacks, damage, danger, recovery, costs, spells, discovery, and illumination. Race, profession, room-title, exit, and currency switches remain independently controllable.
+The `highlights` feature groups travel objects, attacks, damage, danger, recovery, costs, spells, discovery, illumination, version notices, and world notices. Race, profession, room-title, exit, and currency switches remain independently controllable.
 
 ## What to expect
 

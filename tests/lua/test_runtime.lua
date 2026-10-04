@@ -860,6 +860,24 @@ local function withChatVisibilityRuntime(overrides,run)
   if not ok then error(err,0) end
 end
 
+
+test("WORLD capture is independent of main-console color toggles and ALL visibility",function()
+  withChatVisibilityRuntime({chat={all_sources={WORLD=false}},colorization={enabled=false}},function(f,hud)
+    local lines={"** Obatalla Ogoun just arrived in the world.","** Xlade Vespar has left the world.",
+      "** Mael Soultis has left the world unexpectedly."}
+    for index,enabled in ipairs({false,true,false}) do
+      eq(hud:setColorizerEnabled(enabled),enabled)
+      f.epochValue=100+index*4; f.triggers[hud.chat.trigger](lines[index])
+      eq(f.chatStorageAppends,index); eq(#hud.chat:entries(),0)
+      assert(hud.chat:setFilter("WORLD")); eq(#hud.chat:entries(),index)
+      eq(hud.chat:entries()[index].category,"WORLD"); eq(hud.chat:entries()[index].line,lines[index])
+      assert(hud.chat:setFilter("ALL"))
+    end
+    eq(hud.chat.history:entries("WORLD")[3].speaker,"Mael Soultis")
+    eq(hud.chat.history:entries("WORLD")[3].message,"has left the world unexpectedly.")
+  end)
+end)
+
 test("chat sounds route live staff messages once and options persist without changing other chat choices",function()
   withChatVisibilityRuntime({chat={personal_option="keep"}},function(f,hud)
     local played={}
@@ -1032,6 +1050,106 @@ local function withChatVisibilityEntry(persisted,run)
   rawset(_G,"DGHUD",savedGlobal); rawset(_G,"getMudletHomeDir",savedHome); rawset(_G,"tempTimer",savedTimer)
   if not ok then error(err,0) end
 end
+
+
+test("WORLD settings snapshot keeps explicit false and defaults older source preferences to true",function()
+  local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT","WORLD"}
+  local snapshot=assert(MudletAdapter.chatSettingsSnapshot({tab_order=order,all_sources={WORLD=false,COMBAT=false,ROOM=true}}))
+  eq(snapshot.all_sources.WORLD,false); eq(snapshot.all_sources.COMBAT,false); eq(snapshot.all_sources.ROOM,true)
+  eq(table.concat(snapshot.tab_order,","),table.concat(order,","))
+  snapshot.tab_order[1]="WORLD"; eq(order[1],"STAFF")
+  local legacy=assert(MudletAdapter.chatSettingsSnapshot({tab_order={"STAFF","ALL","ROOM"},all_sources={COMBAT=false}}))
+  eq(legacy.all_sources.WORLD,true); eq(legacy.all_sources.COMBAT,false)
+  for _,value in ipairs({"false",0,1,{}}) do
+    local result,err=MudletAdapter.chatSettingsSnapshot({tab_order={"ALL","WORLD"},all_sources={WORLD=value}})
+    eq(result,nil); eq(err,"ALL tab source values must be booleans")
+  end
+end)
+
+test("WORLD hidden-from-ALL choice survives entry reload character changes and upgrade without losing captures",function()
+  local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT","WORLD"}
+  withChatVisibilityEntry({tab_order=order,all_sources={WORLD=false,COMBAT=false}},function(f,defaults)
+    dofile("src/entry.lua")
+    eq(DGHUD.settings.chat.all_sources.WORLD,false); eq(f.viewChatAllSources.WORLD,false)
+    eq(table.concat(DGHUD.settings.chat.tab_order,","),table.concat(order,","))
+    local controller=DGHUD.controller
+    f.triggers[controller.chat.trigger]("** Obatalla Ogoun just arrived in the world.")
+    eq(#controller.chat:entries(),0); assert(DGHUD.chat.setFilter("WORLD"))
+    eq(controller.chat:entries()[1].speaker,"Obatalla Ogoun")
+    eq(controller.chat:entries()[1].message,"just arrived in the world.")
+    local loads,appends=f.loadRecentCalls,f.chatStorageAppends
+    f.gmcp={Char={Status={name="Gia",surname="Afari"},Vitals={hp=1,hp_max=1}}}
+    f.callbacks["gmcp.Char.Status"]()
+    eq(controller.chat:entries()[1].speaker,"Obatalla Ogoun"); eq(f.loadRecentCalls,loads)
+    assert(DGHUD.reload()); eq(DGHUD.controller,controller)
+    -- An ordinary reload resets the selected filter to ALL, not the history.
+    assert(DGHUD.chat.setFilter("WORLD")); eq(controller.chat:entries()[1].speaker,"Obatalla Ogoun")
+    eq(DGHUD.settings.chat.all_sources.WORLD,false); eq(f.chatStorageAppends,appends)
+    local lease=MudletAdapter.markUpdateHandoff(DGHUD,defaults.view_schema,defaults.view_contract)
+    assert(lease); dofile("src/entry.lua")
+    local replacement=DGHUD.controller
+    eq(replacement==controller,false); eq(replacement.chat.filter,"WORLD")
+    eq(replacement.chat:entries()[1].speaker,"Obatalla Ogoun"); eq(f.chatStorageAppends,appends)
+    eq(DGHUD.settings.chat.all_sources.WORLD,false); eq(f.viewChatAllSources.WORLD,false)
+    f.epochValue=104
+    f.triggers[replacement.chat.trigger]("** Xlade Vespar has left the world unexpectedly.")
+    eq(#replacement.chat:entries(),2); eq(replacement.chat:entries()[2].speaker,"Xlade Vespar")
+    eq(replacement.chat:entries()[2].message,"has left the world unexpectedly.")
+    eq(replacement.chat:entries()[2].character,"Gia Afari")
+    assert(DGHUD.chat.setFilter("ALL")); eq(#replacement.chat:entries(),0)
+    eq(f.optionsActionCallback("chat_all_source","WORLD",true),true); eq(#replacement.chat:entries(),2)
+    eq(f.savedChatSettings.all_sources.WORLD,true)
+    eq(f.optionsActionCallback("chat_all_source","WORLD",false),false); eq(#replacement.chat:entries(),0)
+    eq(f.savedChatSettings.all_sources.WORLD,false)
+    assert(DGHUD.chat.setFilter("WORLD")); eq(#replacement.chat:entries(),2)
+  end)
+end)
+
+test("entry WORLD default remains on for legacy settings without reordering saved tabs",function()
+  local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT"}
+  withChatVisibilityEntry({tab_order=order,all_sources={COMBAT=false}},function(f)
+    dofile("src/entry.lua")
+    eq(DGHUD.settings.chat.all_sources.WORLD,true); eq(f.viewChatAllSources.WORLD,true)
+    for index,tab in ipairs(order) do eq(DGHUD.settings.chat.tab_order[index],tab) end
+    f.triggers[DGHUD.controller.chat.trigger]("** Xlade Vespar just arrived in the world.")
+    eq(#DGHUD.controller.chat:entries(),1); eq(DGHUD.controller.chat:entries()[1].category,"WORLD")
+    eq(f.chatSettingsSaves,nil)
+  end)
+end)
+
+test("entry upgrade carries all eleven full source buckets including hidden WORLD without truncation",function()
+  withChatVisibilityEntry({tab_order={"WORLD","STAFF","ALL"},all_sources={WORLD=false,COMBAT=false}},function(f,defaults)
+    local categories={"WORLD","ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","ALL","CUSTOM_FIXTURE"}
+    f.chatEntries={}
+    for _,category in ipairs(categories) do
+      for index=1,1000 do
+        local message="fixture-"..category.."-"..index
+        f.chatEntries[#f.chatEntries+1]={schema=1,timestamp="2026-10-04T12:00:00Z",character="Dace Alterac",
+          category=category,message=message,line=message,source="custom",speaker=category=="WORLD" and "Traveler-"..index or nil}
+      end
+    end
+    dofile("src/entry.lua"); assert(DGHUD.chat.setFilter("WORLD"))
+    local retiring=DGHUD.controller; eq(#retiring.chat.history.items,11000); eq(#retiring.chat:entries(),1000)
+    local appends,loads=f.chatStorageAppends or 0,f.loadRecentCalls
+    assert(MudletAdapter.markUpdateHandoff(DGHUD,defaults.view_schema,defaults.view_contract))
+    dofile("src/entry.lua")
+    local replacement=DGHUD.controller
+    eq(replacement==retiring,false); eq(#replacement.chat.history.items,11000); eq(replacement.chat.filter,"WORLD")
+    eq(#replacement.chat:entries(),1000); eq(replacement.chat:entries()[1].speaker,"Traveler-1")
+    eq(replacement.chat:entries()[1000].speaker,"Traveler-1000")
+    -- ALL is the aggregate filter, while ALL-source notices own a separate
+    -- retention bucket. Count that bucket directly instead of filtering ALL.
+    eq(#replacement.chat.history:entries("ALL"),11000)
+    local counts={}
+    for _,entry in ipairs(replacement.chat.history.items) do counts[entry.category]=(counts[entry.category] or 0)+1 end
+    for _,category in ipairs(categories) do
+      eq(counts[category],1000)
+      if category~="ALL" then eq(#replacement.chat.history:entries(category),1000) end
+    end
+    eq(DGHUD.settings.chat.all_sources.WORLD,false); eq(f.loadRecentCalls,loads)
+    eq(f.chatStorageAppends or 0,appends)
+  end)
+end)
 
 test("entry and upgrade keep saved chat alert choices and do not replay sounds",function()
   local sounds={volume=40,tabs={STAFF={enabled=false,sound="dragon"},ROOM={enabled=true,sound="private"}}}

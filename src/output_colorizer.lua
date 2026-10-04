@@ -4,7 +4,7 @@ local Travel=require("travel_highlights")
 local Preferences=require("color_preferences")
 local MAX_CUSTOM_MATCHES=256
 
-local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},gold={224,184,79},silver={192,192,192},portal={55,190,200},presence={136,190,153},presence_phrase={255,220,90},attack={205,62,62},damage={255,70,70},danger={205,135,45},recovery={90,165,105},upkeep={185,105,45},spell={145,95,190},discovery={225,185,70},illumination={220,200,85},darkness={105,120,140},notice={255,215,80}}
+local defaultColors={room={224,184,79},label={139,45,45},direction={191,91,33},gold={224,184,79},silver={192,192,192},portal={55,190,200},presence={136,190,153},presence_phrase={255,220,90},attack={205,62,62},damage={255,70,70},danger={205,135,45},recovery={90,165,105},upkeep={185,105,45},spell={145,95,190},discovery={225,185,70},illumination={220,200,85},darkness={105,120,140},notice={255,215,80},world_arrival={90,165,105},world_departure={205,62,62}}
 local directions={north=true,northeast=true,east=true,southeast=true,south=true,southwest=true,west=true,northwest=true,up=true,down=true,['in']=true,out=true,n=true,ne=true,e=true,se=true,s=true,sw=true,w=true,nw=true,u=true,d=true}
 local attackVerbs={attacks=true,swings=true,slashes=true,stabs=true,bites=true,claws=true,kicks=true,strikes=true,shoots=true,breathes=true,charges=true,pounces=true,throws=true}
 local raceColors={
@@ -48,6 +48,20 @@ local function whole(line,kind,colors)
   return first and last and {segment(first,last,kind,colors)} or nil
 end
 
+-- Shared by chat capture and console coloring so the same strict server
+-- notice is recognized in both places, not words inside quoted speech.
+function Colorizer.worldNotice(line)
+  if type(line)~="string" or #line>8192 then return nil end
+  line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%s*(.-)%s*$")
+  if line:find("%c") then return nil end
+  local prefix="^%*%*%s+([%w_%-'][%w_%-%' ]*)%s+"
+  local speaker,message=line:match(prefix.."(just arrived in the world%.)$")
+  if speaker and speaker:find("%a") then return speaker,message,"world_arrival" end
+  speaker,message=line:match(prefix.."(has left the world%.)$")
+  if not speaker then speaker,message=line:match(prefix.."(has left the world unexpectedly%.)$") end
+  if speaker and speaker:find("%a") then return speaker,message,"world_departure" end
+end
+
 local function specialSegments(line,lower,colors)
   local notice=lower:gsub("\r",""):match("^%s*(.-)%s*$")
   if notice:sub(1,1)=="(" and notice:sub(-1)==")" then notice=notice:sub(2,-2):match("^%s*(.-)%s*$") end
@@ -82,6 +96,10 @@ function Colorizer.parse(line,colors)
   colors=colors or defaultColors
   if type(line)~="string" or line=="" then return nil end
   line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
+  local _,_,worldKind=Colorizer.worldNotice(line)
+  -- Keep the entire world notice one color, even if a character is named
+  -- Gold, Silver, Dragon, or Fighter.
+  if worldKind then return whole(line,worldKind,colors) end
   local first,last=line:find("%[[^%[%]\r\n]+%]")
   if first and line:sub(1,first-1):match("^%s*$") and line:sub(last+1):match("^%s*$") then
     return {segment(first,last,"room",colors)}
@@ -302,10 +320,10 @@ end
 
 function Colorizer.new(adapter,enabled,settings)
   settings=type(settings)=="table" and getmetatable(settings)==nil and settings or {}
-  local colors={room=settings.room_color or defaultColors.room,label=settings.label_color or defaultColors.label,direction=settings.direction_color or defaultColors.direction,gold=settings.gold_color or defaultColors.gold,silver=settings.silver_color or defaultColors.silver,portal=settings.portal_color or defaultColors.portal,presence=settings.presence_color or defaultColors.presence,presence_phrase=settings.presence_phrase_color or defaultColors.presence_phrase,attack=settings.attack_color or defaultColors.attack,damage=settings.damage_color or defaultColors.damage,danger=settings.danger_color or defaultColors.danger,recovery=settings.recovery_color or defaultColors.recovery,upkeep=settings.upkeep_color or defaultColors.upkeep,spell=settings.spell_color or defaultColors.spell,discovery=settings.discovery_color or defaultColors.discovery,illumination=settings.illumination_color or defaultColors.illumination,darkness=settings.darkness_color or defaultColors.darkness,notice=settings.notice_color or defaultColors.notice}
+  local colors={room=settings.room_color or defaultColors.room,label=settings.label_color or defaultColors.label,direction=settings.direction_color or defaultColors.direction,gold=settings.gold_color or defaultColors.gold,silver=settings.silver_color or defaultColors.silver,portal=settings.portal_color or defaultColors.portal,presence=settings.presence_color or defaultColors.presence,presence_phrase=settings.presence_phrase_color or defaultColors.presence_phrase,attack=settings.attack_color or defaultColors.attack,damage=settings.damage_color or defaultColors.damage,danger=settings.danger_color or defaultColors.danger,recovery=settings.recovery_color or defaultColors.recovery,upkeep=settings.upkeep_color or defaultColors.upkeep,spell=settings.spell_color or defaultColors.spell,discovery=settings.discovery_color or defaultColors.discovery,illumination=settings.illumination_color or defaultColors.illumination,darkness=settings.darkness_color or defaultColors.darkness,notice=settings.notice_color or defaultColors.notice,world_arrival=settings.world_arrival_color or defaultColors.world_arrival,world_departure=settings.world_departure_color or defaultColors.world_departure}
   local legacyHighlights=settings.highlights_enabled~=false
   local features={room=settings.room_enabled~=false,exits=settings.exits_enabled~=false,currency=settings.currency_enabled~=false,races=settings.races_enabled~=false,classes=settings.classes_enabled~=false}
-  for _,kind in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
+  for _,kind in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do
     local configured=settings[kind.."_enabled"]
     if configured==nil then features[kind]=legacyHighlights else features[kind]=configured~=false end
   end
@@ -400,6 +418,7 @@ function Colorizer:onLine(line,number)
   for _,item in ipairs(segments) do
     local feature=item.kind
     if item.kind=="darkness" then feature="illumination"
+    elseif item.kind=="world_arrival" or item.kind=="world_departure" then feature="world"
     elseif item.kind=="presence_phrase" then feature="presence"
     elseif item.kind=="label" or item.kind=="direction" then feature="exits"
     elseif item.kind=="gold" or item.kind=="silver" then feature="currency" end
@@ -425,7 +444,7 @@ end
 function Colorizer:setEnabled(enabled) self.enabled=enabled==true; self.travel=Travel.new(true); self.line_history={}; return self.enabled end
 function Colorizer:setFeature(name,enabled)
   if name=="highlights" then
-    for _,kind in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do self.features[kind]=enabled==true end
+    for _,kind in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do self.features[kind]=enabled==true end
     return enabled==true
   end
   if self.features[name]==nil then return nil,"unknown color feature" end
@@ -435,7 +454,7 @@ function Colorizer:toggle() return self:setEnabled(not self.enabled) end
 function Colorizer:status()
   local result={enabled=self.enabled,started=self.started,trigger=self.trigger}
   for key,value in pairs(self.features) do result[key]=value end
-  result.highlights=result.portal and result.presence and result.attack and result.damage and result.danger and result.recovery and result.upkeep and result.spell and result.discovery and result.illumination and result.notice
+  result.highlights=result.portal and result.presence and result.attack and result.damage and result.danger and result.recovery and result.upkeep and result.spell and result.discovery and result.illumination and result.notice and result.world
   return result
 end
 function Colorizer:shutdown()

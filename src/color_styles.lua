@@ -45,6 +45,8 @@ add("discovery", "Discoveries", "Highlights", "discovery", nil, "discovery", "#E
 add("illumination", "Illuminated rooms", "Highlights", "illumination", nil, "illumination", "#DCC855")
 add("darkness", "Dark rooms", "Highlights", "darkness", nil, "illumination", "#69788C")
 add("notice", "Version notices", "Highlights", "notice", nil, "notice", "#FFD750")
+add("world_arrival", "World arrivals", "Highlights", "world_arrival", nil, "world", "#5AA569")
+add("world_departure", "World departures", "Highlights", "world_departure", nil, "world", "#CD3E3E")
 
 -- Aliases are individual editable entries, just as they are in the parser.
 local raceColors = {

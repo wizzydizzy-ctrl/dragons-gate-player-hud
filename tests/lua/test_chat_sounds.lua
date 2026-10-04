@@ -13,10 +13,57 @@ test("chat sound validation preserves explicit off and custom tab choices",funct
   eq(Sounds.tabKey("whisper"),"PRIVATE"); eq(Sounds.tabKey("OWN"),"ROOM")
   for _,bad in ipairs({false,"yes",{volume=0},{volume=101},{volume=0/0},{volume=1.5},{volume="60"},{tabs=false},{tabs={STAFF={enabled="no"}}},{tabs={STAFF={sound="../../file"}}},{tabs={["<script>"]={}}},{tabs={STAFF=false}}}) do eq(Sounds.validate(bad),nil) end
   local many={}; for i=1,65 do many["TAB"..i]={} end; eq(Sounds.validate({tabs=many}),nil)
-  local boundary={}; for i=1,55 do boundary["CUSTOM"..i]={enabled=false,sound="all"} end
+  local boundary={}; for i=1,Sounds.MAX_TABS-#Sounds.tabOrder do boundary["CUSTOM"..i]={enabled=false,sound="all"} end
   local normalized=assert(Sounds.validate({tabs=boundary})); assert(Sounds.validate(normalized))
-  boundary.CUSTOM56={}; eq(Sounds.validate({tabs=boundary}),nil)
+  boundary["CUSTOM"..(Sounds.MAX_TABS+1-#Sounds.tabOrder)]={}; eq(Sounds.validate({tabs=boundary}),nil)
 end)
+test("WORLD sound validation adds a silent default while preserving every prior sound choice",function()
+  local prior=Sounds.defaults(); prior.tabs.WORLD=nil; prior.volume=25
+  prior.tabs.ROOM={enabled=true,sound="esp"}; prior.tabs.STAFF={enabled=false,sound="combat"}; prior.tabs.QUEST={enabled=true,sound="secian"}
+  local config=assert(Sounds.validate(prior))
+  eq(config.tabs.WORLD.enabled,false); eq(config.tabs.WORLD.sound,"world"); eq(config.volume,25)
+  for key,setting in pairs(prior.tabs) do eq(config.tabs[key].enabled,setting.enabled); eq(config.tabs[key].sound,setting.sound) end
+  eq(prior.tabs.WORLD,nil); config.tabs.ROOM.sound="world"; eq(prior.tabs.ROOM.sound,"esp")
+  local saved=assert(Sounds.validate({tabs={WORLD={enabled=true,sound="staff"}}}))
+  eq(saved.tabs.WORLD.enabled,true); eq(saved.tabs.WORLD.sound,"staff")
+  eq(Sounds.tabKey(" world "),"WORLD"); eq(Sounds.tabOrder[#Sounds.tabOrder],"WORLD")
+  eq(Sounds.catalog[#Sounds.catalog].id,"world"); eq(Sounds.get("world").file,"chat-world-v1.wav")
+end)
+
+test("WORLD upgrades all legacy 64-tab sound settings without losing custom preferences",function()
+  local legacy={volume=75,tabs={}}; local before=0
+  for _,key in ipairs(Sounds.tabOrder) do if key~="WORLD" then legacy.tabs[key]={enabled=key=="ROOM",sound="private"}; before=before+1 end end
+  for index=1,55 do legacy.tabs["CUSTOM "..index]={enabled=index%2==0,sound=index%2==0 and "secian" or "combat"}; before=before+1 end
+  eq(before,64); eq(Sounds.MAX_TABS,65)
+  local updated=assert(Sounds.validate(legacy)); local count=0
+  for key,value in pairs(updated.tabs) do
+    count=count+1
+    if key=="WORLD" then eq(value.enabled,false); eq(value.sound,"world")
+    else eq(value.enabled,legacy.tabs[key].enabled); eq(value.sound,legacy.tabs[key].sound) end
+  end
+  eq(count,65); eq(updated.volume,75); eq(legacy.tabs.WORLD,nil)
+  assert(Sounds.validate(updated)); legacy.tabs.EXTRA={}; eq(Sounds.validate(legacy),nil)
+end)
+
+test("WORLD sound stays OFF by default and its own alert is independent of Show in ALL",function()
+  local config=Sounds.defaults(); eq(Sounds.choose(config,"WORLD",{WORLD=true}),nil)
+  config.tabs.ALL.enabled=true
+  local id,tab=Sounds.choose(config,"WORLD",{WORLD=true}); eq(id,"all"); eq(tab,"ALL")
+  eq(Sounds.choose(config,"WORLD",{WORLD=false}),nil)
+  config.tabs.WORLD.enabled=true
+  id,tab=Sounds.choose(config,"WORLD",{WORLD=false}); eq(id,"world"); eq(tab,"WORLD")
+  local adapter={now=100,played={}}
+  function adapter:epoch() return self.now end
+  function adapter:playChatSound(sound,volume) self.played[#self.played+1]={sound,volume}; return true end
+  local sounds=assert(Sounds.new(adapter))
+  eq(sounds:onEntry({category="WORLD"},{WORLD=true}),false); eq(#adapter.played,0)
+  assert(sounds:play("world")); eq(#adapter.played,1); eq(sounds.config.tabs.WORLD.enabled,false)
+  assert(sounds:setConfig(config)); assert(sounds:onEntry({category="WORLD"},{WORLD=false}))
+  eq(adapter.played[2][1],"world"); eq(adapter.played[2][2],60); eq(#adapter.played,2)
+  eq(sounds:onEntry({category="WORLD"},{WORLD=false}),false); eq(#adapter.played,2)
+  adapter.now=101; assert(sounds:onEntry({category="WORLD"},{WORLD=false})); eq(#adapter.played,3)
+end)
+
 test("sound selection never duplicates ALL PRIVATE and specific tab notifications",function()
   local config=Sounds.defaults(); config.tabs.ALL.enabled=true; config.tabs.PRIVATE.enabled=true
   config.tabs.ESP.enabled=true
@@ -58,7 +105,7 @@ end)
 local function uint(data,offset,bytes)
   local value=0; for i=bytes-1,0,-1 do value=value*256+data:byte(offset+i) end; return value
 end
-test("nine locally generated tones are distinct bounded valid PCM WAV files",function()
+test("ten locally generated tones are distinct bounded valid PCM WAV files",function()
   local seen={}
   for _,record in ipairs(Sounds.catalog) do
     local wav=assert(Sounds.wav(record.id)); eq(wav:sub(1,4),"RIFF"); eq(wav:sub(9,16),"WAVEfmt "); eq(wav:sub(37,40),"data")

@@ -260,6 +260,8 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
       self.echo_color=color
       if self.kind=="console" then
         self.echoes[#self.echoes+1]=value
+        self.echoFormats=self.echoFormats or {}
+        self.echoFormats[#self.echoFormats+1]={foreground=self.currentFg,background=self.currentBg,bold=self.currentBold,underline=self.currentUnderline}
         local first=self.lastLine+1
         local columns=math.max(1,tonumber(self.wrap) or 80)
         local rows=math.max(1,math.ceil(#tostring(value)/columns))
@@ -272,7 +274,12 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
       self.hechoes=self.hechoes or {}
       self.hechoes[#self.hechoes+1]=value
     end
-    function item:clear() self.clearCalls=(self.clearCalls or 0)+1; self.echoes={}; self.hechoes={}; self.lastLine=0; self.renderedEntries={} end
+    function item:setFgColor(r,g,b) self.currentFg=type(r)=="string" and r:upper() or string.format("#%02X%02X%02X",r,g,b) end
+    function item:setBgColor(r,g,b) self.currentBg=type(r)=="string" and r:upper() or string.format("#%02X%02X%02X",r,g,b) end
+    function item:setBold(value) self.currentBold=value end
+    function item:setUnderline(value) self.currentUnderline=value end
+    function item:resetFormat() self.currentFg=nil; self.currentBg=nil; self.currentBold=nil; self.currentUnderline=nil; self.formatResets=(self.formatResets or 0)+1 end
+    function item:clear() self.clearCalls=(self.clearCalls or 0)+1; self.echoes={}; self.echoFormats={}; self.hechoes={}; self.lastLine=0; self.renderedEntries={} end
     function item:setWrap(value) self.wrap=value; return true end
     function item:setFontSize(value) self.fontSize=value end
     function item:setFont(value) self.font=value end
@@ -1034,6 +1041,27 @@ test("color snapshot respects group switches and legacy highlights without chang
   eq(view.color_options.attack,false); eq(view.color_options.notice,false); eq(view.color_options.illumination,true); eq(view.color_options.currency,true)
 end)
 
+test("WORLD UI and chat honor legacy highlights fallback unless explicitly overridden",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showColorSettings()
+  local entries={{category="WORLD",message="just arrived in the world.",line=" ** Test just arrived in the world."},{category="WORLD",message="has left the world unexpectedly.",line=" ** Test has left the world unexpectedly."}}
+  for _,case in ipairs({
+    {{highlights_enabled=false},false},
+    {{highlights_enabled=true},true},
+    {{highlights_enabled=false,world_enabled=true},true},
+    {{highlights_enabled=true,world_enabled=false},false},
+  }) do
+    local config,wanted=case[1],case[2]; assert(view:setColorStyles(config))
+    eq(view.color_options.world,wanted); assert(view.color_option_buttons.world.message:find(wanted and "ON" or "OFF",1,true))
+    view:renderChat(entries,{"WORLD"},"WORLD"); eq(#view.chat_entries,2); eq(view.chat_active_filter,"WORLD")
+    for index,entry in ipairs(entries) do
+      local style=require("color_styles").resolve({},index==1 and "world_arrival" or "world_departure")
+      eq(view.chat_output.echoFormats[index].foreground,wanted and style.foreground or nil)
+      eq(view.chat_output.hechoes[index],wanted and style.foreground.."WORLD#r" or "#9eafc6WORLD#r")
+      eq(view.chat_output.echoes[index]," "..entry.line.."\n")
+    end
+  end
+end)
+
 test("color options menu exposes current and future feature toggles",function()
   local view=chatView(); local calls={}
   view:setColorToggleCallback(function() calls[#calls+1]={key="enabled"}; return false end)
@@ -1134,11 +1162,11 @@ test("chat settings separates visible clearing from confirmed saved-history dele
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_saved"); eq(view.chat_settings_clear_pending,false); eq(view.chat_settings_status.message:find("3 saved",1,true)~=nil,true)
   view.chat_settings_close.click(); eq(view.chat_settings_visible,false)
 end)
-test("chat sound defaults expose all nine labeled sounds through Options",function()
+test("chat sound defaults expose all ten labeled sounds through Options",function()
   local Sounds=require("chat_sounds"); local view=chatView(); local used={}
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); view.option_action_buttons.chat_settings.click()
-  eq(view.chat_settings_visible,true); eq(#view.chat_sound_order,9); eq(view.chat_sounds.volume,60)
-  for index,key in ipairs({"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}) do
+  eq(view.chat_settings_visible,true); eq(#view.chat_sound_order,10); eq(view.chat_sounds.volume,60)
+  for index,key in ipairs({"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}) do
     eq(view.chat_sound_order[index],key)
     local setting=view.chat_sounds.tabs[key]; local row=view.chat_sound_rows[key]
     eq(setting.enabled,key=="STAFF"); eq(setting.sound,key:lower()); eq(used[setting.sound],nil); used[setting.sound]=true
@@ -1164,7 +1192,7 @@ test("chat sound toggles send each tab and accept saved false only after persist
     eq(row.enabled.click(),original); eq(view:chatSoundSetting(key).enabled,original)
     eq(view.settings.chat.sounds.tabs[key].enabled,original)
   end
-  eq(#calls,18)
+  eq(#calls,20)
 end)
 test("chat sound selectors cycle the catalog in both directions with exact payloads",function()
   local Sounds=require("chat_sounds"); local view=chatView(); local calls={}
@@ -1178,8 +1206,8 @@ test("chat sound selectors cycle the catalog in both directions with exact paylo
     eq(view:chatSoundSetting(key).sound,nextId); assert(row.choice.message:find(Sounds.get(nextId).label,1,true))
     eq(row.previous.click(),key:lower()); eq(view:chatSoundSetting(key).sound,key:lower())
   end
-  eq(view.chat_sound_rows.ALL.previous.click(),"combat"); eq(view.chat_sound_rows.ALL.next.click(),"all")
-  eq(#calls,20)
+  eq(view.chat_sound_rows.ALL.previous.click(),"world"); eq(view.chat_sound_rows.ALL.next.click(),"all")
+  eq(#calls,22)
 end)
 test("chat sound previews work while OFF and never save or toggle settings",function()
   local view=chatView(); local calls={}; local saved=view.settings.chat.sounds
@@ -1193,7 +1221,7 @@ test("chat sound previews work while OFF and never save or toggle settings",func
     eq(calls[#calls][1],"chat_sound_preview"); eq(calls[#calls][2],key); eq(calls[#calls][3],key:lower())
     eq(view:chatSoundSetting(key).enabled,before); eq(view.settings.chat.sounds,saved)
   end
-  eq(#calls,9)
+  eq(#calls,#view.chat_sound_order)
   view:setOptionsActionCallback(function() return nil,"Media is muted" end)
   local ok,err=view.chat_sound_rows.ROOM.preview.click(); eq(ok,nil); eq(err,"Media is muted")
   eq(view:chatSoundSetting("ROOM").enabled,false); assert(view.chat_sound_status.message:find("Media is muted",1,true))
@@ -1257,7 +1285,7 @@ test("chat sound custom rows canonicalize actual tabs and default OFF with Soft 
   local view=chatView(); view.settings.chat.tab_order={"QUEST LOG","OWN","WHISPER","<BAD>"}
   view:applyLayout(require("layout").compute(1200,800))
   view:renderChat({},{"QUEST LOG","EVENTS-2","OWN","WHISPER","<BAD>",string.rep("A",33)},"ALL")
-  view:showChatSettings(); eq(#view.chat_sound_order,11)
+  view:showChatSettings(); eq(#view.chat_sound_order,12)
   eq(view.chat_sound_rows.OWN,nil); eq(view.chat_sound_rows.WHISPER,nil); eq(view.chat_sound_rows["<BAD>"],nil)
   for _,key in ipairs({"QUEST LOG","EVENTS-2"}) do
     local row=view.chat_sound_rows[key]; assert(row); eq(view:chatSoundSetting(key).enabled,false); eq(view:chatSoundSetting(key).sound,"all")
@@ -1269,7 +1297,7 @@ test("chat sound custom rows canonicalize actual tabs and default OFF with Soft 
   view:hideChatSettings(); view:showChatSettings(); eq(view:chatSoundSetting("QUEST LOG").enabled,true)
   local old=view.chat_sound_rows["EVENTS-2"].preview; view:renderChat({},{"QUEST LOG"},"ALL"); eq(old.deleted,true); eq(view.chat_sound_rows["EVENTS-2"],nil)
   local categories={}; for i=1,80 do categories[i]="CUSTOM "..i end
-  view:renderChat({},categories,"ALL"); eq(#view.chat_sound_order,64)
+  view:renderChat({},categories,"ALL"); eq(#view.chat_sound_order,require("chat_sounds").MAX_TABS)
 end)
 test("all chat sound controls scroll without overlap and Close stays fixed at small and large sizes",function()
   local view=chatView(); view:renderChat({},{string.rep("A",32)},"ALL"); view:showChatSettings()
@@ -1308,7 +1336,7 @@ test("all chat sound controls scroll without overlap and Close stays fixed at sm
     end
   end
 end)
-test("all nine sound rows fit without scrolling on regular desktop screens",function()
+test("all ten sound rows fit without scrolling on regular desktop screens",function()
   local view=chatView(); view:showChatSettings()
   for _,size in ipairs({{1024,768},{1200,800},{1366,768},{1920,1080}}) do
     view:applyLayout(require("layout").compute(size[1],size[2]))
@@ -1396,13 +1424,14 @@ test("hidden sound settings cache updates without painting until the dialog is s
     assert(view:setChatSounds(settings.chat.sounds)); assert(view:renderChatSounds()); assert(view:renderChatSettings())
     eq(nativeCalls,before); eq(echoes,0)
     view:applyLayout(require("layout").compute(1200,800)); eq(echoes,0)
-    assert(view:showChatSettings()); eq(echoes,60)
+    local redrawEchoes=6+#view.chat_sound_order*6
+    assert(view:showChatSettings()); eq(echoes,redrawEchoes)
     view:hideChatSettings(); before=nativeCalls
     local config=require("chat_sounds").defaults(); config.tabs.STAFF.enabled=false; config.tabs.STAFF.sound="room"; config.volume=30
     settings.chat.sounds=config -- Main updates its saved settings before notifying View.
     assert(view:setChatSounds(config)); assert(view:renderChatSounds()); assert(view:renderChatSettings())
-    eq(nativeCalls,before); eq(echoes,60); eq(view.chat_sounds.tabs.STAFF.enabled,false)
-    assert(view:showChatSettings()); eq(echoes,120)
+    eq(nativeCalls,before); eq(echoes,redrawEchoes); eq(view.chat_sounds.tabs.STAFF.enabled,false)
+    assert(view:showChatSettings()); eq(echoes,redrawEchoes*2)
     assert(view.chat_sound_rows.STAFF.enabled.message:find("OFF",1,true)); assert(view.chat_sound_rows.STAFF.choice.message:find("Room Chime",1,true))
     assert(view.chat_sound_volume.message:find("30%",1,true))
     view.root.hidden=true; before=nativeCalls
@@ -1410,7 +1439,7 @@ test("hidden sound settings cache updates without painting until the dialog is s
     view.root.hidden=nil; view.root.auto_hidden=true
     assert(view:setChatSounds(config)); assert(view:renderChatSounds()); assert(view:renderChatSettings()); eq(nativeCalls,before)
     view.root.auto_hidden=nil
-    view.root.hidden=nil; view:renderChatSounds(); eq(echoes,180)
+    view.root.hidden=nil; view:renderChatSounds(); eq(echoes,redrawEchoes*3)
   end,debug.traceback)
   Geyser=original; assert(ok,err)
 end)
@@ -2885,11 +2914,194 @@ test("chat rendering tolerates native buffer sizing failures",function()
   end
 end)
 
+test("WORLD is a reserved default tab and preserves all existing custom tab order",function()
+  eq(table.concat(View.chatFilterOrder({},nil),","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD")
+  local preferred={"QUEST","STAFF","SECIAN","ALL","COMBAT","ROOM","PRIVATE","CONTACT","ESP","DRAGON","EVENTS"}
+  local categories={"EVENTS","QUEST","SECIAN","WORLD","world"}
+  local order=View.chatFilterOrder(categories,preferred)
+  eq(table.concat(order,","),table.concat(preferred,",")..",WORLD")
+  local worldFirst=View.chatFilterOrder(categories,{"world","QUEST","STAFF","WORLD"})
+  eq(worldFirst[1],"WORLD"); eq(worldFirst[2],"QUEST"); eq(worldFirst[3],"STAFF")
+  local count=0; for _,key in ipairs(worldFirst) do if key=="WORLD" then count=count+1 end end; eq(count,1)
+end)
+
+test("WORLD arrivals use the editable green style and preserve the full statement",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800))
+  local line=" ** Obatalla Ogoun just arrived in the world."
+  view:renderChat({{category="WORLD",speaker="Obatalla Ogoun",message="just arrived in the world.",line=line}},{"WORLD"},"WORLD")
+  local style=assert(require("color_styles").resolve({},"world_arrival")); local rgb=assert(require("color_styles").toRGB(style.foreground))
+  assert(rgb[2]>rgb[1] and rgb[2]>rgb[3],"arrival default must be green")
+  eq(view.chat_output.hechoes[1],style.foreground.."WORLD#r")
+  eq(view.chat_output.echoFormats[1].foreground,style.foreground)
+  eq(view.chat_output.echoes[1]," "..line.."\n")
+  eq(view.chat_active_filter,"WORLD"); eq(view.chat_filter_order[#view.chat_filter_order],"WORLD")
+end)
+
+test("WORLD departures including unexpected departures use the editable red style",function()
+  local Styles=require("color_styles"); local style=assert(Styles.resolve({},"world_departure")); local rgb=assert(Styles.toRGB(style.foreground))
+  assert(rgb[1]>rgb[2] and rgb[1]>rgb[3],"departure default must be red")
+  local view=chatView(); local entries={}
+  for _,message in ipairs({"has left the world.","has left the world unexpectedly."}) do
+    entries[#entries+1]={category="WORLD",speaker="Obatalla Ogoun",message=message,line=" ** Obatalla Ogoun "..message}
+  end
+  entries[#entries+1]={category="ROOM",message="normal text",line="normal text"}
+  view:renderChat(entries,{"WORLD","ROOM"},"ALL")
+  for index=1,2 do eq(view.chat_output.hechoes[index],style.foreground.."WORLD#r"); eq(view.chat_output.echoFormats[index].foreground,style.foreground) end
+  eq(view.chat_output.echoFormats[3].foreground,nil); eq(view.chat_output.echoFormats[3].background,nil)
+  eq(view.chat_output.echoFormats[3].bold,nil); eq(view.chat_output.echoFormats[3].underline,nil)
+  eq(view.chat_output.formatResets,2)
+end)
+
+test("WORLD chat rendering honors saved foreground highlight bold and underline without interpreting game text",function()
+  local view=chatView(); local styles={world_arrival={foreground="#1289AB",background="#233445",bold=true,underline=true},world_departure={foreground="#E84B98",background=false,bold=false,underline=false}}
+  assert(view:setColorStyles({styles=styles}))
+  local line=" ** #123456<player>& just arrived in the world."
+  view:renderChat({{category="WORLD",speaker="#123456<player>&",message="just arrived in the world.",line=line},{category="WORLD",message="has left the world unexpectedly.",line=" ** Test has left the world unexpectedly."}},{"WORLD"},"WORLD")
+  eq(view.chat_output.hechoes[1],"#1289ABWORLD#r"); eq(view.chat_output.hechoes[2],"#E84B98WORLD#r")
+  eq(view.chat_output.echoes[1]," "..line.."\n")
+  local rendered=view.chat_output.echoFormats[1]
+  eq(rendered.foreground,"#1289AB"); eq(rendered.background,"#233445"); eq(rendered.bold,true); eq(rendered.underline,true)
+  eq(view.chat_output.echoFormats[2].background,nil); eq(view.chat_output.echoFormats[2].bold,false); eq(view.chat_output.echoFormats[2].underline,false)
+  eq(view.chat_output.currentFg,nil); eq(view.chat_output.currentBg,nil)
+end)
+
+test("WORLD highlighting controls never disable WORLD capture or dedicated display",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showColorSettings()
+  eq(view.color_option_buttons.world.option_text,"WORLD ARRIVALS / DEPARTURES"); eq(view.color_options.world,true)
+  assert(view.color_style_by_id.world_arrival); assert(view.color_style_by_id.world_departure)
+  view:setColorOptionsCallback(function(key,wanted)
+    eq(key,"world"); view:setColorStyles({world_enabled=wanted}); return wanted
+  end)
+  eq(view.color_option_buttons.world.click(),false); eq(view.color_options.world,false)
+  local entry={category="WORLD",message="just arrived in the world.",line=" ** Test just arrived in the world."}
+  for _,config in ipairs({{world_enabled=false},{enabled=false},{styles={world_arrival={enabled=false}}}}) do
+    assert(view:setColorStyles(config)); view:renderChat({entry},{"WORLD"},"WORLD")
+    eq(#view.chat_entries,1); eq(view.chat_active_filter,"WORLD")
+    eq(view.chat_output.hechoes[1],"#9eafc6WORLD#r"); eq(view.chat_output.echoFormats[1].foreground,nil)
+    eq(view.chat_output.echoes[1]," "..entry.line.."\n")
+  end
+  view:setColorStyles({}); eq(view.color_options.world,true)
+  for _,options in ipairs({{world=false},{enabled=false,world=true}}) do
+    view:setColorOptions(options); view:renderChat({entry},{"WORLD"},"WORLD")
+    eq(#view.chat_entries,1); eq(view.chat_output.echoFormats[1].foreground,nil)
+  end
+  view:setColorOptions({enabled=true,world=true})
+  local message="just arrived in the world. and said something unrelated"
+  view:renderChat({{category="WORLD",message=message,line=message}},{"WORLD"},"WORLD")
+  eq(view.chat_output.hechoes[1],"#9eafc6WORLD#r"); eq(view.chat_output.echoFormats[1].foreground,nil)
+end)
+
+test("WORLD arrival and departure styles have editable previews in Color Settings",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showColorSettings()
+  view.color_settings_styles_tab.click()
+  for _,case in ipairs({{"world_arrival","#5AA569","just arrived in the world."},{"world_departure","#CD3E3E","has left the world."}}) do
+    local id,color,sample=case[1],case[2],case[3]
+    assert(view.color_style_rows[id]); assert(view:selectColorStyle(id))
+    eq(view.color_style_fields.foreground.input.text,color); assert(view.color_style_preview.message:find(sample,1,true))
+    view.color_style_fields.foreground.input:print("#12AB34"); view:previewColorStyle()
+    assert(view.color_style_preview.message:find("#12AB34",1,true)); assert(view.color_style_preview.message:find(sample,1,true))
+    view:cancelColorStyle()
+  end
+end)
+
+test("WORLD remains selectable through narrow overflow and its active tab stays bounded",function()
+  local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout)
+  local entries={{category="WORLD",line=" ** Xlade Vespar just arrived in the world."}}; local selected
+  view:setChatFilterCallback(function(category) selected=category; view:renderChat(category=="WORLD" and entries or {},{"WORLD"},category); return true end)
+  view:renderChat({}, {"WORLD"}, "ALL")
+  local found=false; for _,key in ipairs(view.chat_overflow_categories) do if key=="WORLD" then found=true end end; eq(found,true)
+  for _=1,#view.chat_filter_order do if selected=="WORLD" then break end; view.chat_overflow_button.click() end
+  eq(selected,"WORLD"); eq(view.chat_active_filter,"WORLD"); eq(#view.chat_entries,1)
+  local visible=false
+  for _,button in ipairs(view.chat_buttons) do
+    if button.category=="WORLD" then visible=true end
+    eq(button.x>=0 and button.x+button.width<=layout.chat_width,true)
+  end
+  eq(visible,true)
+end)
+
+test("WORLD can be moved first and its saved position survives wide and narrow layouts",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1920,1080)); local saved
+  view:setChatOrderCallback(function(order) saved=table.concat(order,","); return true end)
+  view:renderChat({}, {"WORLD"}, "WORLD"); assert(view:reorderChatTab("WORLD",1))
+  eq(saved,"WORLD,ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT")
+  for _,width in ipairs({280,1200,1920}) do
+    view:applyLayout(require("layout").compute(width,800))
+    eq(view.chat_filter_order[1],"WORLD"); eq(table.concat(view.settings.chat.tab_order,","),saved)
+    eq(view.chat_active_filter,"WORLD")
+  end
+end)
+
+test("WORLD Show in ALL defaults ON and turning it OFF leaves dedicated capture and history intact",function()
+  local history=require("chat_history").new(); local view=chatView(); local sources={ROOM=true,COMBAT=false}
+  assert(history:append({category="WORLD",speaker="Obatalla Ogoun",message="just arrived in the world.",line=" ** Obatalla Ogoun just arrived in the world."},100))
+  assert(history:append({category="WORLD",speaker="Obatalla Ogoun",message="has left the world.",line=" ** Obatalla Ogoun has left the world."},101))
+  view:setChatAllSources(sources); view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
+  eq(view.chat_all_source_order[#view.chat_all_source_order],"WORLD"); eq(view.chat_all_sources.WORLD,true)
+  eq(view.chat_all_source_buttons.WORLD.option_text,"WORLD"); assert(view.chat_all_source_buttons.WORLD.message:find("WORLD: ON",1,true))
+  view:setOptionsActionCallback(function(action,key,wanted) eq(action,"chat_all_source"); eq(key,"WORLD"); sources[key]=wanted; return wanted end)
+  view:renderChat(history:entries("WORLD",sources),history:categories(),"WORLD")
+  eq(view.chat_all_source_buttons.WORLD.click(),false); eq(#view.chat_entries,2); eq(#history:entries("WORLD",sources),2)
+  assert(view.chat_all_source_buttons.WORLD.message:find("WORLD: OFF",1,true)); eq(sources.COMBAT,false); eq(sources.ROOM,true)
+  view:renderChat(history:entries("ALL",sources),history:categories(),"ALL"); eq(#view.chat_entries,0)
+  assert(history:append({category="WORLD",speaker="Xlade Vespar",message="just arrived in the world.",line=" ** Xlade Vespar just arrived in the world."},102))
+  view:renderChat(history:entries("ALL",sources),history:categories(),"ALL"); eq(#view.chat_entries,0)
+  view:renderChat(history:entries("WORLD",sources),history:categories(),"WORLD"); eq(#view.chat_entries,3)
+  eq(view.chat_all_source_buttons.WORLD.click(),true)
+  view:renderChat(history:entries("ALL",sources),history:categories(),"ALL"); eq(#view.chat_entries,3); eq(#history.items,3)
+end)
+
+test("WORLD sound controls keep all 55 legacy custom tabs accessible without dropping preferences",function()
+  local Sounds=require("chat_sounds"); local config=Sounds.defaults(); config.tabs.WORLD=nil
+  local preferred={}
+  for _,key in ipairs(Sounds.tabOrder) do if key~="WORLD" then preferred[#preferred+1]=key end end
+  for index=1,55 do
+    local key="CUSTOM "..index; preferred[#preferred+1]=key
+    config.tabs[key]={enabled=index%2==0,sound="contact"}
+  end
+  eq(#preferred,64)
+  local view=chatView(nil,nil,nil,nil,config); view.settings.chat.tab_order=preferred
+  view:applyLayout(require("layout").compute(320,700)); view:renderChat({},preferred,"WORLD"); view:showChatSettings()
+  eq(#view.chat_sound_order,Sounds.MAX_TABS); eq(view.chat_filter_order[#view.chat_filter_order],"WORLD")
+  for index,key in ipairs(preferred) do eq(view.chat_filter_order[index],key) end
+  for index=1,55 do
+    local key="CUSTOM "..index; local row=view.chat_sound_rows[key]; assert(row)
+    eq(view:chatSoundSetting(key).enabled,index%2==0); eq(view:chatSoundSetting(key).sound,"contact")
+    eq(row.preview.visible,true); eq(row.preview.y+row.preview.height<=view.chat_settings_content.content_height,true)
+  end
+  eq(view:chatSoundSetting("WORLD").enabled,false); eq(view:chatSoundSetting("WORLD").sound,"world")
+  assert(View.validateReusable(view,view.settings))
+end)
+
+test("WORLD sound settings are accessible while OFF and saved preferences survive view reuse",function()
+  local config={volume=35,tabs={STAFF={enabled=false,sound="private"},QUEST={enabled=true,sound="dragon"}}}
+  local view=chatView(nil,nil,nil,nil,config); view.settings.chat.tab_order={"QUEST","STAFF","ALL"}
+  view:applyLayout(require("layout").compute(1200,800)); view:showChatSettings()
+  local row=view.chat_sound_rows.WORLD; eq(view:chatSoundSetting("WORLD").enabled,false); eq(view:chatSoundSetting("WORLD").sound,"world")
+  eq(row.preview.visible,true); assert(row.choice.message:find("World Notice",1,true)); assert(row.enabled.message:find("OFF",1,true))
+  local calls={}; view:setOptionsActionCallback(function(action,tab,value) calls[#calls+1]={action,tab,value}; return action=="chat_sound_preview" and true or value end)
+  eq(row.preview.click(),true); eq(calls[1][1],"chat_sound_preview"); eq(calls[1][2],"WORLD"); eq(calls[1][3],"world")
+  eq(view:chatSoundSetting("WORLD").enabled,false); eq(row.enabled.click(),true); eq(row.next.click(),"all")
+  assert(view:prepareForReuse(view.settings)); view:showChatSettings()
+  eq(view:chatSoundSetting("WORLD").enabled,true); eq(view:chatSoundSetting("WORLD").sound,"all"); eq(view.chat_sound_rows.WORLD,row)
+  eq(view:chatSoundSetting("STAFF").enabled,false); eq(view:chatSoundSetting("STAFF").sound,"private")
+  eq(view:chatSoundSetting("QUEST").enabled,true); eq(view:chatSoundSetting("QUEST").sound,"dragon"); eq(view.chat_sounds.volume,35)
+  eq(table.concat(view.settings.chat.tab_order,","),"QUEST,STAFF,ALL")
+end)
+
+test("reusable sound views require the reserved WORLD row",function()
+  local view=chatView(); assert(View.validateReusable(view,view.settings))
+  view.chat_sound_rows.WORLD.preview=nil
+  local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("sound control",1,true))
+  view=chatView(); table.remove(view.chat_sound_order,#view.chat_sound_order)
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("sound tabs",1,true))
+end)
+
 test("chat tabs stay inside narrow panels and expose deterministic overflow",function()
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)
   view:renderChat({}, {"QUEST","EVENTS","QUEST<script>","LINE\nBREAK"}, "ALL")
-  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,QUEST,EVENTS")
+  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD,QUEST,EVENTS")
   eq(#view.chat_overflow_categories>0,true)
   for _,button in ipairs(view.chat_buttons) do
     eq(button.x+button.width<=layout.chat_width,true); eq(tostring(button.message):find("<script>",1,true),nil)
@@ -2899,7 +3111,7 @@ end)
 
 test("chat tab order sanitizes saved preferences and appends missing categories",function()
   local order=View.chatFilterOrder({"QUEST","EVENTS"},{" events ","ROOM","OWN","<BAD>","EVENTS","ALL"})
-  eq(table.concat(order,","),"EVENTS,ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,QUEST")
+  eq(table.concat(order,","),"EVENTS,ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD,QUEST")
 end)
 
 test("chat tabs drag left and right, persist once, and keep click filtering",function()
@@ -2908,7 +3120,7 @@ test("chat tabs drag left and right, persist once, and keep click filtering",fun
   view:setChatOrderCallback(function(order) saved=table.concat(order,","); calls=(calls or 0)+1; return true end)
   view:renderChat({}, {}, "ALL")
   local room=view.chat_buttons[2]; room.click({button="LeftButton",globalX=100}); room.release({button="LeftButton",globalX=20})
-  eq(saved,"ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT"); eq(calls,1); eq(view.chat_active_filter,"ALL")
+  eq(saved,"ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD"); eq(calls,1); eq(view.chat_active_filter,"ALL")
   local all=view.chat_buttons[2]; all.click({button="LeftButton",globalX=100}); all.release({button="LeftButton",globalX=101})
   eq(selected,"ALL"); eq(calls,1)
 end)

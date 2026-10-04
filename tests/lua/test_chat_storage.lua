@@ -96,6 +96,78 @@ local function withNativeLogs(logs,run)
   if not ok then error(err,0) end
 end
 
+
+test("WORLD storage round-trip preserves complete metadata across profile character changes",function()
+  local api=fakeStorageApi(); local records=0; api.decoded={}
+  api.encode=function(entry)
+    records=records+1; local token="world-fixture-"..records; local copy={}
+    for key,value in pairs(entry) do copy[key]=value end
+    api.decoded[token]=copy; return token
+  end
+  api.list=function(directory)
+    if directory=="/chat" then return {"profile"} end
+    local result={}
+    for pathname in pairs(api.files) do
+      if pathname:sub(1,#directory+1)==directory.."/" then result[#result+1]=pathname:sub(#directory+2) end
+    end
+    return result
+  end
+  local expected={}
+  local Parser=require("chat_parser")
+  for index,case in ipairs({
+    {speaker="Obatalla Ogoun",message="just arrived in the world.",character="Dace Alterac"},
+    {speaker="Xlade Vespar",message="just arrived in the world.",character="Gia Afari"},
+    {speaker="Obatalla Ogoun",message="has left the world unexpectedly.",character="Deklan Marrowen"},
+  }) do
+    local line="** "..case.speaker.." "..case.message
+    expected[index]=assert(Parser.parse(line,case.character,"2026-10-04T12:00:0"..index.."Z"))
+    assert(Storage.new(api,"/chat",1000):append(expected[index]))
+    eq(api.lastPath,"/chat/profile/2026-10-04.jsonl")
+  end
+  local reloaded=Storage.new(api,"/chat",1000)
+  for _,character in ipairs({"Dace Alterac","Gia Afari","Wizzy Dizzy"}) do
+    eq(reloaded:characterKey(character),"profile")
+    local entries=reloaded:loadRecent(character); eq(#entries,3)
+    for index,entry in ipairs(expected) do
+      for _,field in ipairs({"schema","timestamp","character","category","speaker","target","language","message","line","source"}) do
+        eq(entries[index][field],entry[field])
+      end
+    end
+  end
+  eq(#api.appends,3); eq(#api.removals,0); eq(reloaded:lastError(),nil)
+end)
+
+test("native WORLD recovery survives newer custom floods without sharing their retention quota",function()
+  local newer={}
+  for index=1,1005 do newer[#newer+1]="CUSTOM:custom-"..index end
+  withNativeLogs({
+    ["1999-01-01.jsonl"]={lines={"WORLD:rare old arrival","STAFF:rare old staff"}},
+    ["2026-10-04.jsonl"]={lines=newer},
+  },function(api,trace)
+    api.read=function() error("WORLD recovery must stream dated logs") end
+    local entries=Storage.new(api,"/profile/DGHUDData/chat",3):loadRecent()
+    eq(#entries,5); eq(entries[1].category,"WORLD"); eq(entries[1].message,"rare old arrival")
+    eq(entries[2].category,"STAFF"); eq(entries[3].message,"custom-1003")
+    local counts=bucketCounts(entries); eq(counts.WORLD,1); eq(counts.OTHER,3); eq(counts.STAFF,1)
+    eq(trace.opened,2); eq(trace.closed,2); eq(#trace.reports,0)
+  end)
+end)
+
+test("WORLD floods preserve the newest thousand world entries and independent old custom chat on disk reload",function()
+  local newer={}
+  for index=1,1005 do newer[index]="WORLD:world-"..index end
+  withNativeLogs({
+    ["1999-01-01.jsonl"]={lines={"CUSTOM:rare old custom","STAFF:rare old staff"}},
+    ["2026-10-04.jsonl"]={lines=newer},
+  },function(api,trace)
+    local entries=Storage.new(api,"/profile/DGHUDData/chat",1000):loadRecent()
+    eq(#entries,1002); eq(entries[1].message,"rare old custom"); eq(entries[2].message,"rare old staff")
+    eq(entries[3].message,"world-6"); eq(entries[1002].message,"world-1005")
+    local counts=bucketCounts(entries); eq(counts.WORLD,1000); eq(counts.OTHER,1); eq(counts.STAFF,1)
+    eq(trace.opened,2); eq(trace.closed,2); eq(#trace.reports,0)
+  end)
+end)
+
 test("appends profile-wide dated JSONL while retaining character metadata",function()
   local api=fakeStorageApi()
   local storage=Storage.new(api,"/profile/DGHUDData/chat",1000)
@@ -339,7 +411,7 @@ test("storage selection uses timestamps and stable line ordering even in unsorte
 end)
 
 test("streaming recovery bounds selected decoded records throughout every date and legacy copy",function()
-  local api=fakeStorageApi(); local categories={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","ALL","OTHER"}
+  local api=fakeStorageApi(); local categories={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD","ALL","OTHER"}
   api.listings={
     ["/chat"]={"profile","legacy"},
     ["/chat/profile"]={"2026-10-04.jsonl","2026-10-03.jsonl"},
@@ -364,8 +436,8 @@ test("streaming recovery bounds selected decoded records throughout every date a
   end
   api.read=function() error("whole-file fallback must not run when streaming is available") end
   local entries=Storage.new(api,"/chat",1000):loadRecent()
-  eq(scanned,4); eq(decoded,48040); eq(#entries,10000)
-  assert(peak>=10000); assert(peak<=10001)
+  eq(scanned,4); eq(decoded,52844); eq(#entries,11000)
+  assert(peak>=11000); assert(peak<=11001)
   local counts=bucketCounts(entries)
   for _,category in ipairs(categories) do eq(counts[category],1000) end
   for _,entry in ipairs(entries) do

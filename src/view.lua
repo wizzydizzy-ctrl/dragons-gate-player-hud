@@ -27,7 +27,7 @@ local function alignmentLabel(value)
   if key=="order" then return "Orderly" elseif key=="entropy" then return "Entropic" elseif key=="chaos" then return "Chaotic" end
   return raw
 end
-local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62"}
+local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62",WORLD="#9eafc6"}
 local CHAT_DISPLAY_LIMIT=1000
 local CHAT_NATIVE_LINES=100000
 local CHAT_NATIVE_DELETE_BATCH=1000
@@ -71,18 +71,40 @@ local function restoreChatScroll(output,state,ranges)
   end
   pcall(function() output:scrollTo(math.min(line,(ok and tonumber(last)) or line)) end)
 end
-function View.chatLine(entry,t,timestamps)
+function View.chatLine(entry,t,timestamps,colorConfig,colorOptions)
   entry=type(entry)=="table" and entry or {}
   local category=tostring(entry.category or "CHAT"):upper()
   local color=chat_colors[category] or t.accent
   if color=="text" then color=t.text elseif color=="jade" then color=t.jade end
+  local style
+  if category=="WORLD" then
+    colorConfig=type(colorConfig)=="table" and colorConfig or {}
+    colorOptions=type(colorOptions)=="table" and colorOptions or {}
+    local id=entry.message=="just arrived in the world." and "world_arrival" or
+      ((entry.message=="has left the world." or entry.message=="has left the world unexpectedly.") and "world_departure" or nil)
+    if id and colorConfig.enabled~=false and colorConfig.world_enabled~=false and colorOptions.enabled~=false and colorOptions.world~=false then
+      local resolved=ColorStyles.resolve(colorConfig,id)
+      if resolved and resolved.enabled then style=resolved; color=resolved.foreground end
+    end
+  end
   local stamp=""
   if timestamps~=false then
     local time=tostring(entry.timestamp or ""):match("T(%d%d:%d%d)")
     if time then stamp="#"..t.muted:gsub("^#","").."["..time.."]#r " end
   end
   local prefix=stamp.."#"..tostring(color):gsub("^#","")..safeText(category).."#r"
-  return prefix," "..safeChatText(entry.line or entry.message).."\n"
+  return prefix," "..safeChatText(entry.line or entry.message).."\n",style
+end
+local function applyChatStyle(output,style)
+  if not style then return end
+  -- Keep game text literal: apply validated colors through the native API,
+  -- never interpolate a player's name or statement into hecho/HTML markup.
+  for _,field in ipairs({{"foreground","setFgColor"},{"background","setBgColor"}}) do
+    local rgb=style[field[1]] and ColorStyles.toRGB(style[field[1]])
+    if rgb and type(output[field[2]])=="function" then pcall(output[field[2]],output,rgb[1],rgb[2],rgb[3]) end
+  end
+  if type(output.setBold)=="function" then pcall(output.setBold,output,style.bold==true) end
+  if type(output.setUnderline)=="function" then pcall(output.setUnderline,output,style.underline==true) end
 end
 function View.identityContent(character,t,layout,needs)
   local physical=character.physical or {}; local detail=""
@@ -401,8 +423,8 @@ function View.new(settings)
   self.color_settings_close=label("DGHUD.ColorSettings.Close",self.color_settings_panel,"background:#17231c;border:1px solid "..t.border..";border-radius:5px;color:"..t.text..";font-weight:700;")
   self:createColorStyleEditor()
   self.color_option_buttons={}
-  self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination"}
-  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",presence="OTHER OBJECTS / HERE",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS"}
+  self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","world"}
+  local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",presence="OTHER OBJECTS / HERE",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS",world="WORLD ARRIVALS / DEPARTURES"}
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)
@@ -455,8 +477,8 @@ function View.new(settings)
   end)
   self.chat_settings_text=label("DGHUD.ChatSettings.Text",self.chat_settings_content,"background:transparent;color:"..t.text..";")
   self.chat_settings_sources_caption=label("DGHUD.ChatSettings.SourcesCaption",self.chat_settings_content,"background:transparent;color:"..t.accent..";font-weight:700;")
-  self.chat_all_source_order={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}; self.chat_all_source_buttons={}; self.chat_all_sources={}
-  local sourceLabels={ROOM="ROOM + OWN",WHISPER="WHISPERS",ESP="ESP",DRAGON="DRAGON",SECIAN="SECIAN",CONTACT="CONTACT",STAFF="STAFF",COMBAT="COMBAT"}
+  self.chat_all_source_order={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}; self.chat_all_source_buttons={}; self.chat_all_sources={}
+  local sourceLabels={ROOM="ROOM + OWN",WHISPER="WHISPERS",ESP="ESP",DRAGON="DRAGON",SECIAN="SECIAN",CONTACT="CONTACT",STAFF="STAFF",COMBAT="COMBAT",WORLD="WORLD"}
   for _,key in ipairs(self.chat_all_source_order) do local sourceKey=key; local button=label("DGHUD.ChatSettings.Source."..sourceKey,self.chat_settings_content); button.option_text=sourceLabels[sourceKey]; button:setClickCallback(function() local wanted=not (self.chat_all_sources[sourceKey]~=false); if not self.options_action_callback then return nil,"chat source settings are unavailable" end; local saved,err=self.options_action_callback("chat_all_source",sourceKey,wanted); if saved==nil then self.chat_settings_status_text=tostring(err or "Could not save ALL tab source"); self:renderChatSettings(); return nil,err end; self.chat_all_sources[sourceKey]=saved==true; self.chat_settings_status_text=sourceLabels[sourceKey].." is now "..(self.chat_all_sources[sourceKey] and "shown" or "hidden").." in ALL."; self:renderChatSettings(); return saved end); self.chat_all_source_buttons[sourceKey]=button end
   self.chat_settings_clear_visible=label("DGHUD.ChatSettings.ClearVisible",self.chat_settings_content,"background:#17231c;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.chat_settings_clear_saved=label("DGHUD.ChatSettings.ClearSaved",self.chat_settings_content,"background:#3a1715;border:1px solid #a94d46;border-radius:5px;color:#ffb0a8;font-weight:700;")
@@ -723,8 +745,8 @@ function View:setChatVisible(visible)
   if self.chat_settings_visibility then self:renderChatSettings() end
   return self.chat_visible
 end
-local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"}
-local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,COMBAT=true,OWN=true,WHISPER=true}
+local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT","WORLD"}
+local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,COMBAT=true,WORLD=true,OWN=true,WHISPER=true}
 local function cleanChatCategory(value)
   local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
   if category=="" or #category>32 or category:find("[%c<>]") or category=="OWN" or category=="WHISPER" then return nil end
@@ -1691,7 +1713,7 @@ function View:setColorStyles(config)
   for _,key in ipairs(self.color_option_order) do
     if key~="mapper" and key~="enabled" then
       local value=config[key.."_enabled"]
-      if value==nil and ({portal=true,presence=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true,notice=true})[key] then value=config.highlights_enabled end
+      if value==nil and ({portal=true,presence=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true,notice=true,world=true})[key] then value=config.highlights_enabled end
       options[key]=value~=false
     end
   end
@@ -1755,7 +1777,7 @@ function View:renderColorStyle()
   self.color_style_heading:echo(View.withFont("<b>"..safeText(entry.label).."</b> · "..safeText(entry.group),font+1))
   self.color_style_help:echo(View.withFont(self.color_style_help.option_text,font))
   for _,field in pairs(self.color_style_fields) do field.caption:echo(View.withFont(field.caption.option_text.." (#RRGGBB)",font)) end
-  local samples={room="The town square",label="Obvious exits:",direction="north, east, up",gold="100 gold",silver="50 silver",portal="a shimmering portal",presence="a wooden chest",presence_phrase="is here / are here",attack="An enemy attacks you!",damage="You take damage!",danger="Your way is blocked.",recovery="You feel refreshed.",upkeep="Your spell draws energy.",spell="A spell flashes nearby.",discovery="You discover a hidden treasure.",illumination="The room is illuminated.",darkness="The room is dark.",notice="An important game notice."}
+  local samples={room="The town square",label="Obvious exits:",direction="north, east, up",gold="100 gold",silver="50 silver",portal="a shimmering portal",presence="a wooden chest",presence_phrase="is here / are here",attack="An enemy attacks you!",damage="You take damage!",danger="Your way is blocked.",recovery="You feel refreshed.",upkeep="Your spell draws energy.",spell="A spell flashes nearby.",discovery="You discover a hidden treasure.",illumination="The room is illuminated.",darkness="The room is dark.",notice="An important game notice.",world_arrival=" ** Test Player just arrived in the world.",world_departure=" ** Test Player has left the world."}
   local previewCSS="background:"..(preview.enabled and preview.background or "#080B0A")..";color:"..(preview.enabled and preview.foreground or t.text)..";border:1px solid "..t.border..";"
   previewCSS=previewCSS.."font-weight:"..(preview.enabled and preview.bold and "bold" or "normal")..";text-decoration:"..(preview.enabled and preview.underline and "underline" or "none")..";"
   self.color_style_preview:setStyleSheet(previewCSS)
@@ -1863,7 +1885,7 @@ function View:syncChatSoundRows()
   local order,seen={},{}
   local function add(value)
     local key=Sounds.tabKey(value)
-    if key and not seen[key] and #order<64 then order[#order+1]=key; seen[key]=true end
+    if key and not seen[key] and #order<Sounds.MAX_TABS then order[#order+1]=key; seen[key]=true end
   end
   for _,key in ipairs(Sounds.tabOrder) do add(key) end
   local preferred=self.settings.chat and self.settings.chat.tab_order
@@ -2719,9 +2741,11 @@ function View:renderChat(entries,categories,activeFilter,savedScroll)
   self.chat_line_ranges={}; self.chat_display_complete=true
   for index,entry in ipairs(self.chat_entries) do
     local before=chatLastLine(self.chat_output)
-    local prefix,message=View.chatLine(entry,self.settings.theme,chatSettings.timestamps)
+    local prefix,message,style=View.chatLine(entry,self.settings.theme,chatSettings.timestamps,self.color_styles_config or {},self.color_options)
     self.chat_output:hecho(prefix)
+    applyChatStyle(self.chat_output,style)
     self.chat_output:echo(message)
+    if style and type(self.chat_output.resetFormat)=="function" then pcall(self.chat_output.resetFormat,self.chat_output) end
     local after=chatLastLine(self.chat_output)
     if before==nil or after==nil or after<=before then self.chat_display_complete=false end
     before=before or 0; after=after or before

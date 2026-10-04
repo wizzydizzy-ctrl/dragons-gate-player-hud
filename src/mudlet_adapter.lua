@@ -762,7 +762,7 @@ end
 function Adapter:reportColorizerStatus(status)
   if type(status)~="table" then status={enabled=status==true} end
   local function word(value) return value and "ON" or "OFF" end
-  cecho("\n<gold>[DGHUD Options]<reset> All "..word(status.enabled).."  Room "..word(status.room).."  Exits "..word(status.exits).."  Currency "..word(status.currency).."  Races "..word(status.races).."  Classes "..word(status.classes).."  Travel "..word(status.portal).."  Attacks "..word(status.attack).."  Damage "..word(status.damage).."  Danger "..word(status.danger).."  Recovery "..word(status.recovery).."  Costs "..word(status.upkeep).."  Spells "..word(status.spell).."  Discovery "..word(status.discovery).."  Illumination "..word(status.illumination).."\n")
+  cecho("\n<gold>[DGHUD Options]<reset> All "..word(status.enabled).."  Room "..word(status.room).."  Exits "..word(status.exits).."  Currency "..word(status.currency).."  Races "..word(status.races).."  Classes "..word(status.classes).."  Travel "..word(status.portal).."  Attacks "..word(status.attack).."  Damage "..word(status.damage).."  Danger "..word(status.danger).."  Recovery "..word(status.recovery).."  Costs "..word(status.upkeep).."  Spells "..word(status.spell).."  Discovery "..word(status.discovery).."  Illumination "..word(status.illumination).."  World "..word(status.world).."\n")
   return true
 end
 function Adapter:reportRoller(message) cecho("\n<gold>[DGHUD Roller]<reset> "..tostring(message or "").."\n"); return true end
@@ -903,13 +903,14 @@ function Adapter.loadDisplaySettings()
   local snapshot=Adapter.displaySettingsSnapshot(value); return snapshot
 end
 local function chatSettingsPath() return Adapter.dataBase().."/chat-settings.lua" end
-local chatAllSourceOrder={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}
+local chatAllSourceOrder={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}
 function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
   if config.visible~=nil and type(config.visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local result={tab_order={},visible=config.visible~=false}; local seen={}
+  local tabLimit=require("chat_sounds").MAX_TABS
   for index,value in ipairs(order) do
-    if index>64 then break end
+    if index>tabLimit then break end
     local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
     if category~="" and #category<=32 and not category:find("[%c<>]") and category~="OWN" and category~="WHISPER" and not seen[category] then result.tab_order[#result.tab_order+1]=category; seen[category]=true end
   end

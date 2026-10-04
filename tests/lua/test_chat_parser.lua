@@ -1,5 +1,54 @@
 local Parser=require("chat_parser")
 
+
+test("WORLD parses anchored arrival departure and unexpected departure notifications with full speaker names",function()
+  local now="2026-10-04T12:34:56-04:00"
+  for _,speaker in ipairs({"Obatalla Ogoun","Xlade Vespar","Mael Soultis","Nythriss'a","Aeron Del'mar","Mue-Aradeia"}) do
+    for _,message in ipairs({"just arrived in the world.","has left the world.","has left the world unexpectedly."}) do
+      local line="** "..speaker.." "..message
+      for _,input in ipairs({line," \t"..line.." \r\n","\27[33m** \27[0m"..speaker.." \27[33m"..message.."\27[0m"}) do
+        local e=assert(Parser.parse(input,"Dace Alterac",now),line)
+        eq(e.schema,1); eq(e.category,"WORLD"); eq(e.source,"builtin")
+        eq(e.speaker,speaker); eq(e.message,message); eq(e.line,line)
+        eq(e.character,"Dace Alterac"); eq(e.timestamp,now); eq(e.target,nil); eq(e.language,nil)
+      end
+    end
+  end
+  local own=assert(Parser.parse("** Obatalla Ogoun just arrived in the world.","Obatalla Ogoun",now))
+  eq(own.category,"WORLD"); eq(own.speaker,"Obatalla Ogoun"); eq(own.message,"just arrived in the world.")
+end)
+
+test("WORLD never steals quoted room own private or staff chat",function()
+  local message="** Obatalla Ogoun just arrived in the world."
+  for _,case in ipairs({
+    {line='Eilan says, "'..message..'"',category="ROOM",speaker="Eilan"},
+    {line='Dace Alterac says, "'..message..'"',category="OWN",speaker="Dace Alterac"},
+    {line='Kaida whispers, "'..message..'"',category="WHISPER",speaker="Kaida"},
+    {line='[GM] Wizzy: '..message,category="STAFF",speaker="Wizzy"},
+  }) do
+    local e=assert(Parser.parse(case.line,"Dace Alterac"))
+    eq(e.category,case.category); eq(e.speaker,case.speaker); eq(e.message,message); eq(e.line,case.line)
+  end
+end)
+
+test("WORLD rejects room prose malformed names non-server prefixes and control or multiline notifications",function()
+  for _,line in ipairs({
+    "Obatalla Ogoun just arrived in the world.","* Obatalla Ogoun just arrived in the world.",
+    "*** Obatalla Ogoun just arrived in the world.","The sign reads: ** Obatalla Ogoun just arrived in the world.",
+    '"** Obatalla Ogoun just arrived in the world."',"** Obatalla Ogoun just arrived in the world. Again.",
+    "** Obatalla Ogoun just arrived in the world","** Obatalla Ogoun has left the world unexpectedly",
+    "** Obatalla Ogoun arrived in the world.","** Obatalla Ogoun has entered the world.",
+    "** just arrived in the world.","**  just arrived in the world.","** !!! has left the world.",
+    "** --- has left the world.","** '' has left the world.","** 12345 has left the world.",
+    "** <Obatalla> has left the world.","** Obatalla/Ogoun has left the world.",
+    "** Obatalla\0 Ogoun has left the world.","** Obatalla\7 Ogoun has left the world.",
+    "** Obatalla\127 Ogoun has left the world.","** Obatalla\nOgoun has left the world.",
+    "** Obatalla\rOgoun has left the world.","** Obatalla Ogoun has left\n the world.",
+    "** Obatalla Ogoun just arrived in the world.\n** Xlade Vespar has left the world.",
+  }) do
+    eq(Parser.parse(line,"Dace Alterac"),nil)
+  end
+end)
 test("captures generic skill improvement notices in ALL and rejects blank incomplete narrated or multiline output",function()
   local prefix="You now feel more skilled in "
   for _,skill in ipairs({"Biting","Sharp Weapons","Identify Gems-Minerals","Identify Gems/Minerals","Dragon's Breath","Future Skill of Tomorrow"}) do

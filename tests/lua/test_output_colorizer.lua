@@ -15,6 +15,79 @@ local function custom(phrase,extras)
   return rule
 end
 
+test("WORLD arrivals are green and normal or unexpected departures are red across full names",function()
+  for _,fixture in ipairs({
+    {" ** Obatalla Ogoun just arrived in the world.","world_arrival",{90,165,105}},
+    {" ** Xlade Vespar just arrived in the world.","world_arrival",{90,165,105}},
+    {" ** Obatalla Ogoun has left the world.","world_departure",{205,62,62}},
+    {" ** Mael Soultis has left the world unexpectedly.","world_departure",{205,62,62}},
+    {"** Gold Dragon just arrived in the world.","world_arrival",{90,165,105}},
+    {"** Silver Fighter has left the world.","world_departure",{205,62,62}},
+    {"\27[32m** Nythriss'a Del-mar just arrived in the world.\27[0m","world_arrival",{90,165,105}},
+  }) do
+    local line=fixture[1]:gsub("\27%[[0-?]*[ -/]*[@-~]","")
+    local parts=assert(Colorizer.parse(fixture[1])); eq(#parts,1)
+    eq(parts[1].kind,fixture[2]); eq(parts[1].start,line:find("%S"))
+    eq(parts[1].length,#line-line:find("%S")+1)
+    for channel=1,3 do eq(parts[1].color[channel],fixture[3][channel]) end
+    local f=fake(); local c=Colorizer.new(f,true,{}); assert(c:start())
+    assert(c:onLine(fixture[1],45)); eq(#f.applied[1],1)
+    eq(f.applied[1][1].kind,fixture[2])
+    for channel=1,3 do eq(f.applied[1][1].color[channel],fixture[3][channel]) end
+    c:shutdown()
+  end
+end)
+
+test("WORLD shared classification never treats quoted speech or malformed notices as world events",function()
+  for _,line in ipairs({
+    'Kaida says, "** Obatalla Ogoun just arrived in the world."',
+    "** Obatalla Ogoun has left the world without a notice.",
+    "** Obatalla Ogoun just arrived in the world",
+    "** 12345 just arrived in the world.",
+    "** --- just arrived in the world.",
+    "A sign reads ** Obatalla Ogoun just arrived in the world.",
+    "** Obatalla\tOgoun just arrived in the world.",
+  }) do
+    eq(Colorizer.worldNotice(line),nil)
+    for _,part in ipairs(Colorizer.parse(line) or {}) do
+      assert(part.kind~="world_arrival" and part.kind~="world_departure")
+    end
+  end
+  eq(Colorizer.worldNotice(false),nil)
+  eq(Colorizer.worldNotice(string.rep("a",8193)),nil)
+end)
+
+test("WORLD colors honor master and category toggles without affecting classification",function()
+  local line="** Mael Soultis has left the world unexpectedly."
+  local f=fake(); local c=Colorizer.new(f,true,{}); assert(c:start())
+  assert(c:onLine(line)); eq(c:setFeature("world",false),false)
+  eq(c:onLine(line),false); eq(#f.applied,1)
+  eq(Colorizer.worldNotice(line),"Mael Soultis")
+  assert(c:setFeature("world",true)); assert(c:onLine(line)); eq(#f.applied,2)
+  eq(c:setEnabled(false),false); eq(c:onLine(line),false); eq(#f.applied,2)
+  assert(c:setEnabled(true)); eq(c:setFeature("highlights",false),false)
+  eq(c:onLine(line),false); eq(c:status().world,false)
+  assert(c:setFeature("highlights",true)); assert(c:onLine(line)); c:shutdown()
+end)
+
+test("WORLD arrival and departure text styles are independent editable and persistable",function()
+  local Preferences=require("color_preferences")
+  local saved=assert(Preferences.decode(assert(Preferences.encode({
+    world_enabled=true,
+    styles={world_arrival={foreground="#12AB34",bold=true},world_departure={foreground="#AB1234",enabled=false}},
+  }))))
+  eq(saved.world_enabled,true)
+  local f=fake(); local c=Colorizer.new(f,true,saved); assert(c:start())
+  assert(c:onLine("** Xlade Vespar just arrived in the world.",66))
+  local part=f.applied[1][1]
+  eq(part.color[1],18); eq(part.color[2],171); eq(part.color[3],52); eq(part.bold,true)
+  eq(c:onLine("** Mael Soultis has left the world unexpectedly.",67),false)
+  saved.styles.world_departure.enabled=true
+  assert(c:setStyles(saved)); assert(c:onLine("** Obatalla Ogoun has left the world.",68))
+  part=f.applied[2][1]; eq(part.color[1],171); eq(part.color[2],18); eq(part.color[3],52)
+  c:shutdown()
+end)
+
 test("1000 custom highlights stay active and reuse preparation until rules change",function()
   local rules={}
   for index=1,1000 do rules[index]=custom("Phrase "..index) end

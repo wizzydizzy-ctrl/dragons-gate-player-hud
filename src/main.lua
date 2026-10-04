@@ -4,7 +4,7 @@ local Main={}; Main.__index=Main
 local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
-local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}
+local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
   local result={enabled=status.enabled}
@@ -257,7 +257,7 @@ function Main:setColorFeature(name,enabled)
   if type(enabled)~="boolean" then return nil,"color toggle must be a boolean" end
   if name~="highlights" and self.colorizer.features[name]==nil then return nil,"unknown color feature" end
   local candidate=Settings.merge({},self.settings.colorization or {}); candidate[name.."_enabled"]=enabled
-  if name=="highlights" then for _,feature in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do candidate[feature.."_enabled"]=enabled end end
+  if name=="highlights" then for _,feature in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do candidate[feature.."_enabled"]=enabled end end
   local saved,err=self:commitColorSettings(candidate); if not saved then return nil,err end
   return enabled
 end
@@ -607,7 +607,7 @@ end
 function Main:setChatVisible(visible)
   if type(visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local chatSettings=self.settings.chat or {}
-  local candidate={visible=visible,tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=chatSettings.all_sources,sounds=chatSettings.sounds}
+  local candidate={visible=visible,tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT","WORLD"},all_sources=chatSettings.all_sources,sounds=chatSettings.sounds}
   if self.adapter.saveChatSettings then
     local saved,err=self.adapter:saveChatSettings(candidate)
     if not saved then return nil,"Could not save chat visibility: "..tostring(err) end
@@ -625,7 +625,7 @@ function Main:setChatVisible(visible)
   self:applyResponsiveLayout()
   return visible
 end
-local chatAllSourceKeys={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true}
+local chatAllSourceKeys={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true,WORLD=true}
 function Main:setChatAllSource(category,enabled)
   category=tostring(category or ""):upper()
   if not chatAllSourceKeys[category] then return nil,"unknown ALL tab source" end
@@ -633,7 +633,7 @@ function Main:setChatAllSource(category,enabled)
   local chatSettings=self.settings.chat or {}; local sources={}
   for key,value in pairs(chatSettings.all_sources or {}) do sources[key]=value~=false end
   sources[category]=enabled
-  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT"},all_sources=sources,visible=chatSettings.visible~=false,sounds=chatSettings.sounds}
+  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT","WORLD"},all_sources=sources,visible=chatSettings.visible~=false,sounds=chatSettings.sounds}
   if self.adapter.saveChatSettings then local saved,err=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save ALL tab sources: "..tostring(err) end end
   self.settings.chat=chatSettings; chatSettings.all_sources=sources
   local root=rawget(_G,"DGHUD")
@@ -1252,7 +1252,7 @@ function Main:start()
   if self.view.setColorOptions then
     local initial={mapper=self:mapperEnabled(),enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
     local legacy=colorSettings.highlights_enabled~=false
-    for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do local value=colorSettings[name.."_enabled"]; if value==nil then initial[name]=legacy else initial[name]=value~=false end end
+    for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do local value=colorSettings[name.."_enabled"]; if value==nil then initial[name]=legacy else initial[name]=value~=false end end
     self.view:setColorOptions(initial)
   elseif self.view.setColorEnabled then self.view:setColorEnabled(self.colorizer_enabled) end
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
@@ -1481,7 +1481,7 @@ function Main:start()
     elseif action=="off" then enabled,err=self:setColorizerEnabled(false)
     elseif action=="toggle" or action=="" then enabled,err=self:setColorizerEnabled(not self.colorizer_enabled)
     elseif action=="status" then enabled=self.colorizer:status().enabled
-    else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|races|classes|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination|notice]" end
+    else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|races|classes|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination|notice|world]" end
     if enabled==nil then if self.adapter.reportCommandError then self.adapter:reportCommandError(err) end; return nil,err end
     if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled
   end)

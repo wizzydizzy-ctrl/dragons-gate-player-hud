@@ -52,6 +52,7 @@ local sourceCases={
   {category="SECIAN",source="SECIAN",line='You pick up Shayla\'s Secian link, "First Secian message." [r-1]',nextLine='You pick up Shayla\'s Secian link, "Second Secian message." [r-1]',combined="PRIVATE"},
   {category="CONTACT",source="CONTACT",line='Seaux thinks to you, "First contact message."',nextLine='Seaux thinks to you, "Second contact message."',combined="PRIVATE"},
   {category="STAFF",source="STAFF",line="[GUIDE] Aerin: First staff message.",nextLine="[GM] Aerin: Second staff message."},
+  {category="WORLD",source="WORLD",line="** Obatalla Ogoun just arrived in the world.",nextLine="** Xlade Vespar has left the world unexpectedly."},
 }
 
 local function allSources(overrides)
@@ -78,6 +79,65 @@ end
 
 local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
 
+
+test("WORLD notifications retain full metadata and hidden dedicated history across characters reload and handoff",function()
+  local f=fake(); local accepted={}; local redraws={}
+  local sources=allSources({WORLD=false})
+  local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,
+    function(entry) accepted[#accepted+1]=entry end,sources)
+  assert(controller:start()); local trigger=controller.trigger
+  local arrival="** Obatalla Ogoun just arrived in the world."
+  f:line("\27[33m"..arrival.."\27[0m"); f:line(arrival)
+  eq(#accepted,1); eq(f.storageAppends,1); eq(#controller:entries(),0)
+  eq(accepted[1].speaker,"Obatalla Ogoun"); eq(accepted[1].message,"just arrived in the world.")
+  eq(accepted[1].character,"Dace Alterac"); eq(accepted[1].line,arrival)
+  eq(accepted[1].timestamp,f.timestampValue); eq(accepted[1].source,"builtin"); eq(accepted[1].schema,1)
+  assert(controller:setFilter("WORLD")); sameEntries(controller:entries(),accepted); sameEntries(redraws[#redraws],accepted)
+  f.character="Gia Afari"; assert(controller:syncCharacter()); eq(f.loadRecentCalls,1)
+  f.epochValue=104; f:line("** Xlade Vespar has left the world unexpectedly.")
+  eq(#accepted,2); eq(accepted[2].speaker,"Xlade Vespar"); eq(accepted[2].message,"has left the world unexpectedly.")
+  eq(accepted[2].character,"Gia Afari"); sameEntries(controller:entries(),accepted)
+  local handoff=controller:handoff(); eq(handoff.filter,"WORLD"); eq(handoff.character_key,"profile")
+  sameEntries(handoff.entries,accepted); eq(f.storageClears,0); assert(controller:shutdown()); eq(f.triggers[trigger],nil)
+
+  local nextProfile=fake(f.appendedEntries); nextProfile.character="Deklan Marrowen"
+  local restored=makeController(nextProfile,nil,nil,sources)
+  assert(restored:start()); eq(#restored:entries(),0); eq(nextProfile.loadRecentCalls,1)
+  assert(restored:setFilter("WORLD")); sameEntries(restored:entries(),accepted); eq(nextProfile.storageAppends,0)
+  assert(restored:shutdown())
+  local upgradeProfile=fake(); upgradeProfile.character="Wizzy Dizzy"; upgradeProfile.epochValue=104
+  local replacement=makeController(upgradeProfile,nil,nil,sources)
+  assert(replacement:restoreHandoff(handoff)); assert(replacement:start(true))
+  eq(upgradeProfile.loadRecentCalls,0); eq(upgradeProfile.storageAppends,0)
+  eq(replacement.filter,"WORLD"); sameEntries(replacement:entries(),accepted)
+  upgradeProfile:line("** Xlade Vespar has left the world unexpectedly."); eq(upgradeProfile.storageAppends,0)
+  upgradeProfile.epochValue=108; upgradeProfile:line("** Obatalla Ogoun has left the world.")
+  eq(upgradeProfile.storageAppends,1); eq(#replacement:entries(),3)
+  eq(replacement:entries()[3].message,"has left the world."); eq(replacement:entries()[3].character,"Wizzy Dizzy")
+  assert(replacement:setFilter("ALL")); eq(#replacement:entries(),0)
+  assert(replacement:setAllSources(allSources({WORLD=true}))); eq(#replacement:entries(),3)
+  eq(upgradeProfile.storageClears,0); assert(replacement:shutdown())
+end)
+
+test("WORLD and unknown source floods retain independent quotas without consuming STAFF or ROOM",function()
+  local f=fake(); local history=History.new(3,0)
+  local controller=Controller.new(f,Parser,history,f.storage,function() end,function() return f.character end,allSources({WORLD=false}))
+  assert(controller:start())
+  f:line('[GM] Wizzy: protected staff'); f:line('Eilan says, "protected room"')
+  local world={}
+  for index=1,7 do
+    f.epochValue=100+index*4
+    f:line("** Traveler-"..index.." just arrived in the world.")
+    world[index]=f.appendedEntries[#f.appendedEntries]
+  end
+  for index=1,7 do assert(controller:capture("CUSTOM_"..index,"unrelated custom "..index)) end
+  eq(history.retentionCounts.WORLD,3); eq(history.retentionCounts.OTHER,3)
+  eq(history.retentionCounts.STAFF,1); eq(history.retentionCounts.ROOM,1)
+  assert(controller:setFilter("WORLD")); sameEntries(controller:entries(),{world[5],world[6],world[7]})
+  assert(controller:setFilter("STAFF")); eq(controller:entries()[1].message,"protected staff")
+  assert(controller:setFilter("ROOM")); eq(controller:entries()[1].message,"protected room")
+  eq(#history.items,8); eq(f.storageAppends,16); eq(f.storageClears,0); assert(controller:shutdown())
+end)
 test("generic skill improvements save and render in ALL with COMBAT hidden deduplicate and reload",function()
   local f=fake(); local redraws={}; local sources=allSources({COMBAT=false})
   local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,nil,sources)
@@ -675,7 +735,7 @@ end
 local function controllerRetentionFixture(limit)
   local entries,expected={},{}
   for index=1,limit+2 do
-    for _,bucket in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","ALL","OTHER"}) do
+    for _,bucket in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD","ALL","OTHER"}) do
       local category=bucket
       if bucket=="ROOM" and index%2==0 then category="OWN" end
       if bucket=="OTHER" then
@@ -768,7 +828,7 @@ test("controller renders newest configured limit AFTER ALL source and PRIVATE fi
   local settingsBefore=copyRetentionValue(settings)
   assert(controller:start()); sameEntries(controller.history:entries("ALL"),retained)
   local visible=controller.history:entries("ALL",sources)
-  eq(#visible,21); sameEntries(controller:entries(),newestRetentionEntries(visible,3))
+  eq(#visible,24); sameEntries(controller:entries(),newestRetentionEntries(visible,3))
   sameEntries(redraw,controller:entries()); eq(controller:status().visible_count,3)
   assert(controller:setFilter("PRIVATE"))
   local private=controller.history:entries("PRIVATE",sources)
@@ -782,7 +842,7 @@ test("controller renders newest configured limit AFTER ALL source and PRIVATE fi
   sameRetentionValue(settings,settingsBefore); assert(controller:shutdown())
 end)
 
-test("full update handoff copies every retained bucket up to ten thousand even from a filtered tab",function()
+test("full update handoff copies every retained bucket up to eleven thousand even from a filtered tab",function()
   local saved,retained=controllerRetentionFixture(1000)
   local f=syntheticAdapter(saved); local accepted=0
   local controller,settings=retentionController(f,1000,allSources(),nil,function() accepted=accepted+1 end)
@@ -791,7 +851,7 @@ test("full update handoff copies every retained bucket up to ten thousand even f
   eq(#controller:entries(),1000); eq(#controller.history:entries("PRIVATE"),5000)
   local handoff=controller:handoff()
   eq(handoff.schema,1); eq(handoff.filter,"PRIVATE"); eq(handoff.partial,nil)
-  eq(#handoff.entries,10000); sameEntries(handoff.entries,retained)
+  eq(#handoff.entries,11000); sameEntries(handoff.entries,retained)
   for index,entry in ipairs(handoff.entries) do assert(entry~=retained[index],"handoff must copy retained entry "..index) end
   handoff.entries[1].message="synthetic-mutated-snapshot"
   sameEntries(controller.history:entries("ALL"),retained)
@@ -810,7 +870,7 @@ for _,limit in ipairs({3,1000}) do
     local settingsBefore=copyRetentionValue(settings); local expected=copyRetentionValue(retained)
     assert(controller:restoreHandoff(handoff)); assert(controller:start(true))
     sameEntries(controller.history:entries("ALL"),expected)
-    eq(#controller.history.items,10*limit); assert(#controller.history.items<=10000)
+    eq(#controller.history.items,11*limit); assert(#controller.history.items<=11000)
     eq(#controller.history:entries("PRIVATE"),5*limit)
     sameEntries(controller:entries(),newestRetentionEntries(controller.history:entries("PRIVATE"),limit))
     eq(controller.filter,"PRIVATE"); eq(controller.history.limit,limit)

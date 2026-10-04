@@ -1,6 +1,38 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+
+test("WORLD defaults to its own tab and inclusion in ALL for fresh and older settings",function()
+  eq(defaults.chat.all_sources.WORLD,true)
+  local count=0; for _,tab in ipairs(defaults.chat.tab_order) do if tab=="WORLD" then count=count+1 end end
+  eq(count,1)
+  local legacyOrder={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT"}
+  for _,user in ipairs({{}, {schema=0,chat={tab_order=legacyOrder,all_sources={COMBAT=false}}},
+    {schema=1,chat={tab_order={"STAFF","ALL","ROOM"},all_sources={ROOM=false}}}}) do
+    local resolved=Settings.resolve(defaults,user)
+    eq(resolved.chat.all_sources.WORLD,true)
+    -- The resolver preserves saved array slots; View adds/deduplicates missing
+    -- built-in tabs. Do not demand a settings-layer tab-order migration.
+    if not user.chat then eq(table.concat(resolved.chat.tab_order,","),table.concat(defaults.chat.tab_order,",")) end
+    for index,tab in ipairs(user.chat and user.chat.tab_order or {}) do eq(resolved.chat.tab_order[index],tab) end
+    if user.chat then eq(user.chat.all_sources.WORLD,nil) end
+  end
+  eq(table.concat(legacyOrder,","),"STAFF,ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,COMBAT")
+end)
+
+test("explicit WORLD false survives migration and repeated resolution without disabling its tab",function()
+  for _,schema in ipairs({0,1}) do
+    local user={schema=schema,chat={tab_order={"WORLD","STAFF","ALL","ROOM"},all_sources={WORLD=false,ROOM=false,COMBAT=true},personal_option="keep"}}
+    local resolved,migrated=Settings.resolve(defaults,user)
+    eq(resolved.chat.all_sources.WORLD,false); eq(migrated.chat.all_sources.WORLD,false); eq(user.chat.all_sources.WORLD,false)
+    eq(resolved.chat.all_sources.ROOM,false); eq(resolved.chat.all_sources.COMBAT,true); eq(resolved.chat.enabled,true)
+    eq(resolved.chat.tab_order[1],"WORLD"); eq(resolved.chat.tab_order[2],"STAFF")
+    eq(resolved.chat.personal_option,"keep")
+    local reloaded=Settings.resolve(defaults,migrated)
+    eq(reloaded.chat.all_sources.WORLD,false); eq(reloaded.chat.tab_order[1],"WORLD")
+    eq(defaults.chat.all_sources.WORLD,true)
+  end
+end)
 test("saved roller thresholds migrate by characteristic slot without changing the original",function()
   local old={schema=1,roller={min_stats={VOI=7,APP=6,INT=5}}}
   local resolved,migrated,changed=Settings.resolve(defaults,old)

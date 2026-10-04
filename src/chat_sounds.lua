@@ -1,6 +1,8 @@
 local Sounds={}
 Sounds.__index=Sounds
-Sounds.tabOrder={"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}
+Sounds.tabOrder={"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}
+-- Keep room for all 55 custom tabs accepted before WORLD was introduced.
+Sounds.MAX_TABS=#Sounds.tabOrder+55
 Sounds.catalog={
   {id="all",label="Soft Bell",file="chat-all-v1.wav"},
   {id="room",label="Room Chime",file="chat-room-v1.wav"},
@@ -11,6 +13,7 @@ Sounds.catalog={
   {id="contact",label="Mind Echo",file="chat-contact-v1.wav"},
   {id="staff",label="Staff Three-Tone",file="chat-staff-v1.wav"},
   {id="combat",label="Combat Pulse",file="chat-combat-v1.wav"},
+  {id="world",label="World Notice",file="chat-world-v1.wav"},
 }
 local byId={}; for _,sound in ipairs(Sounds.catalog) do byId[sound.id]=sound end
 function Sounds.get(id) return type(id)=="string" and byId[id] or nil end
@@ -44,7 +47,7 @@ function Sounds.validate(config)
       if not key or seen[key] or type(value)~="table" then return nil,"invalid sound tab settings" end
       seen[key]=true
       if not result.tabs[key] then count=count+1 end
-      if count>64 then return nil,"too many sound tabs" end
+      if count>Sounds.MAX_TABS then return nil,"too many sound tabs" end
       local entry=result.tabs[key] or {enabled=false,sound="all"}
       if value.enabled~=nil then
         if type(value.enabled)~="boolean" then return nil,"sound ON/OFF must be a boolean" end
@@ -68,6 +71,7 @@ local tones={
   dragon={{261.63,.16},{392,.28}}, secian={{1046.5,.09},{1318.51,.09},{1567.98,.16}},
   contact={{783.99,.16},{587.33,.22}}, staff={{659.25,.16},{880,.16},{1108.73,.30}},
   combat={{220,.12},{293.66,.12},{220,.12}},
+  world={{523.25,.14},{698.46,.22}},
 }
 local function little(n,bytes)
   local result={}; for i=1,bytes do result[i]=string.char(n%256); n=math.floor(n/256) end; return table.concat(result)
