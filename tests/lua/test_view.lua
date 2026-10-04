@@ -1581,6 +1581,247 @@ test("zoom-aware POI tags truncate suppress overlap and retain full tooltips",fu
   local zoomed=View.poiTags({{x=2,y=2,text="Ancient Temple"}},2,10); eq(zoomed[1].text,"Ancient T…"); eq(zoomed[1].tooltip,"Ancient Temple")
 end)
 
+local function rollerSessionFixture()
+  local summary={active=true,rolls=12,stat_rolls=12,pool_rolls=0,best_total=66,average=60,maximum=77,phase="Waiting for next roll",stats={},pool={},unmet={}}
+  for _,name in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}) do
+    summary.stats[#summary.stats+1]={name=name,value=6,label="Good",roll=12,target=7,target_label="Great"}
+  end
+  return summary
+end
+local function rollerSessionHtml(view) return view.roller_session_best.message or "" end
+
+test("autoroller session snapshots are defensive and never open the modal",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280))
+  local summary=rollerSessionFixture(); summary.pool={{slot=1,value=7,label="Great",roll=5}}; summary.unmet={summary.stats[1]}
+  assert(view:setRollerSession(summary))
+  summary.rolls=999; summary.stats[1].label="changed"; summary.pool[1].label="changed"; summary.unmet[1].target=1
+  eq(view.roller_session.rolls,12); eq(view.roller_session.stats[1].label,"Good"); eq(view.roller_session.pool[1].label,"Great"); eq(view.roller_session.unmet[1].target,7)
+  eq(view.roller_settings_visible,false); eq(view.roller_overlay.visible,false); eq(view.roller_session_best.visible,false)
+  view:showRollerSettings({use_min_stats=true,min_stats={STR=7}})
+  assert(rollerSessionHtml(view):find("Confirmed rolls: 12",1,true)); assert(rollerSessionHtml(view):find("Best total: 66/77",1,true))
+  eq(view.roller_session_best.parent,view.roller_content); eq(view.roller_action_buttons.roller_start.y,0)
+  eq(view.roller_session_best.y>view.roller_action_buttons.roller_start.height,true)
+end)
+
+test("autoroller session defaults to eleven empty current stat rows",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showRollerSettings({})
+  local html=rollerSessionHtml(view)
+  assert(html:find("Best total: —/77",1,true)); assert(html:find("Observed highs are not confirmed race/class limits; targets never auto lowered.",1,true))
+  for _,name in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}) do
+    assert(html:find("<td>"..name.."</td><td>—</td><td>—</td><td>—</td>",1,true))
+  end
+  local _,rows=html:gsub("<tr>",""); eq(rows,12)
+  assert(view:setRollerSession({stats={}})); eq(rollerSessionHtml(view),html)
+  view:setRollerSession(rollerSessionFixture()); assert(view:setRollerSession(nil)); eq(rollerSessionHtml(view),html)
+  eq(view.roller_draft.min_stats.STR,nil)
+end)
+
+test("autoroller shows supplied ranks and orange unmet targets without claiming a cap",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showRollerSettings({})
+  local summary=rollerSessionFixture(); summary.stats[2].target=6; summary.stats[2].target_label="Good"; summary.stats[3].target=nil
+  summary.stats[4].value=nil; summary.stats[4].label=nil; summary.stats[4].roll=nil
+  view:setRollerSession(summary); local html=rollerSessionHtml(view)
+  assert(html:find("<td>STR</td><td><span style='color:#ffb347'><b>Great (7)</b></span></td><td>Good (6)</td><td>12</td>",1,true))
+  assert(html:find("<td>INT</td><td>Good (6)</td><td>Good (6)</td>",1,true))
+  assert(html:find("<td>WIS</td><td>—</td><td>Good (6)</td>",1,true))
+  assert(html:find("<td>DEX</td><td><span style='color:#ffb347'><b>Great (7)</b></span></td><td>—</td><td>—</td>",1,true))
+  eq(html:find("capped",1,true),nil); eq(summary.stats[1].target,7)
+  for _,row in ipairs(summary.stats) do row.target=nil end
+  view:setRollerSession(summary); eq(rollerSessionHtml(view):find("color:#ffb347",1,true),nil)
+end)
+
+test("autoroller uses captured legacy names instead of assigning current names",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showRollerSettings({})
+  local summary=rollerSessionFixture(); summary.stats[9].name="VOI"; summary.stats[11].name="APP"
+  summary.stats[12]={name="MP",value=7,label="Great",roll=4}
+  view:setRollerSession(summary); local html=rollerSessionHtml(view)
+  for _,name in ipairs({"VOI","APP","MP"}) do assert(html:find("<td>"..name.."</td>",1,true)) end
+  eq(html:find("<td>PRE</td>",1,true),nil); eq(html:find("<td>LUK</td>",1,true),nil)
+end)
+
+test("autoroller pool highs stay explicitly unassigned until named stats are captured",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showRollerSettings({})
+  local summary=rollerSessionFixture(); summary.stat_rolls=0; summary.pool_rolls=5; summary.rolls=5
+  for _,row in ipairs(summary.stats) do row.value=nil; row.label=nil; row.roll=nil end
+  summary.pool={{slot=1,value=7,label="Great",roll=5},{slot=2,value=6,label="Good",roll=2}}
+  view:setRollerSession(summary); local html=rollerSessionHtml(view)
+  assert(html:find("Pool values are unassigned; per-stat limits cannot be inferred.",1,true))
+  assert(html:find("<td>1</td><td>Great (7)</td><td>5</td>",1,true))
+  assert(html:find("<td>2</td><td>Good (6)</td><td>2</td>",1,true))
+  eq(html:find("<td>STR</td>",1,true),nil); eq(html:find("<b>Target</b>",1,true),nil)
+  summary.stat_rolls=1; summary.stats[1].value=5; summary.stats[1].label="Fair"; summary.stats[1].roll=6
+  view:setRollerSession(summary); html=rollerSessionHtml(view)
+  assert(html:find("<td>STR</td>",1,true)); assert(html:find("RANKED POOL-SLOT HIGHS",1,true))
+end)
+
+test("autoroller escapes every supplied label name phase and late warning",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800)); view:showRollerSettings({})
+  local summary=rollerSessionFixture(); summary.stat_rolls=100; summary.phase="<phase&>"; summary.stats[1].name="<STR&>"
+  summary.stats[1].label="<Good&>"; summary.stats[1].target_label="<Great&>"; summary.pool={{slot=1,value=7,label="<Pool&>",roll=5}}
+  summary.warning="After 100 complete stat rolls, <minimum&> unseen. Observed highs are not confirmed limits."
+  view:setRollerSession(summary); local html=rollerSessionHtml(view)
+  for _,label in ipairs({"phase","STR","Good","Great","Pool","minimum"}) do
+    assert(html:find("&lt;"..label.."&amp;&gt;",1,true)); eq(html:find("<"..label,1,true),nil)
+  end
+end)
+
+test("autoroller conditional warning appears after 100 stat rolls without shifting controls",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); view:showRollerSettings({})
+  local summary=rollerSessionFixture(); summary.stat_rolls=99; summary.rolls=199; summary.pool_rolls=100
+  summary.warning="After 100 complete stat rolls, some configured minimums have not been seen. Observed highs are not confirmed limits."
+  view:setRollerSession(summary); eq(rollerSessionHtml(view):find("After 100",1,true),nil)
+  local y,height=view.roller_fields.STR.input.y,view.roller_content.content_height
+  summary.stat_rolls=100; view:setRollerSession(summary)
+  assert(rollerSessionHtml(view):find("After 100",1,true)); eq(view.roller_fields.STR.input.y,y); eq(view.roller_content.content_height,height)
+  summary.warning=nil; view:setRollerSession(summary); eq(rollerSessionHtml(view):find("After 100",1,true),nil)
+end)
+
+test("autoroller live refresh stop and reset preserve all inputs draft error and scroll",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280))
+  view:showRollerSettings({use_min_stats=true,arrange_mode="minimums",min_stats={STR=7}})
+  local draft=view.roller_draft; view.roller_error="unsaved validation error"; local inputs={}
+  for key,field in pairs(view.roller_fields) do
+    local text="unsaved "..key; field.input:print(text); inputs[key]={widget=field.input,text=text,x=field.input.x,y=field.input.y}
+    field.input.print=function() error("live session update repopulated a settings field") end
+    field.input.move=function() error("routine session update moved a settings field") end
+  end
+  view.roller_content.currentScroll=800
+  view.roller_content.move=function() error("session refresh moved the scrollbox") end
+  view.roller_content.resize=function() error("session refresh resized the scrollbox") end
+  view.roller_content.scrollTo=function() error("session refresh reset the scroll") end
+  for _,summary in ipairs({rollerSessionFixture(),{active=false,rolls=12,stat_rolls=12,stats=rollerSessionFixture().stats},{rolls=0,stats={}},{}}) do
+    assert(view:setRollerSession(summary)); eq(view.roller_draft,draft); eq(view.roller_error,"unsaved validation error")
+    eq(view.roller_settings_visible,true); eq(view.roller_content.currentScroll,800); eq(draft.min_stats.STR,7); eq(draft.arrange_mode,"minimums")
+    for key,input in pairs(inputs) do eq(view.roller_fields[key].input,input.widget); eq(input.widget.text,input.text); eq(input.widget.x,input.x); eq(input.widget.y,input.y) end
+  end
+end)
+
+test("autoroller section growth preserves scroll and never shrinks the open scroll extent",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); view:showRollerSettings({min_stats={STR=7}})
+  local draft=view.roller_draft; local y,height=view.roller_fields.STR.input.y,view.roller_content.content_height
+  view.roller_content.currentScroll=500; view.roller_fields.STR.input:print("unsaved 7")
+  local summary=rollerSessionFixture()
+  for slot=1,11 do summary.pool[slot]={slot=slot,value=6,label="Good",roll=slot} end
+  view:setRollerSession(summary)
+  eq(view.roller_content.currentScroll,500); eq(view.roller_draft,draft); eq(view.roller_fields.STR.input.text,"unsaved 7")
+  local delta=view.roller_content.content_height-height
+  eq(delta>0,true); eq(view.roller_fields.STR.input.y,y+delta)
+  height=view.roller_content.content_height; y=view.roller_fields.STR.input.y
+  view:setRollerSession(nil); eq(view.roller_content.content_height,height); eq(view.roller_fields.STR.input.y,y); eq(view.roller_content.currentScroll,500)
+end)
+
+test("autoroller session layout fits narrow modals and keeps the section before settings",function()
+  local view=chatView(); local summary=rollerSessionFixture()
+  for slot=1,11 do summary.pool[slot]={slot=slot,value=7,label="Great",roll=slot} end
+  view:setRollerSession(summary); view:showRollerSettings({})
+  for _,size in ipairs({{420,280},{420,500},{760,700},{1200,800},{1920,1080}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local section=view.roller_session_best; eq(section.visible,true); eq(section.parent,view.roller_content)
+    for _,key in ipairs({"roller_start","roller_stop","roller_stats"}) do
+      local action=view.roller_action_buttons[key]; eq(action.y,0); eq(action.visible,true)
+      eq(action.y+action.height<section.y,true); eq(action.x+action.width<=view.roller_content.width,true)
+    end
+    eq(section.x+section.width<=view.roller_content.width,true)
+    eq(view.roller_arrange_caption.y>section.y+section.height,true)
+    eq(view.roller_fields.target_total.caption.y>section.height,true)
+    eq(view.roller_content.content_height>section.height,true); eq(view.roller_content.height>0,true)
+    if size[1]==420 then eq(rollerSessionHtml(view):find("Seen on roll",1,true),nil) else assert(rollerSessionHtml(view):find("Seen on roll",1,true)) end
+    eq(view.roller_save.y+view.roller_save.height<=view.roller_panel.height,true)
+  end
+end)
+
+test("autoroller SESSION BEST button keeps the existing stats action and draft",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); view:showRollerSettings({})
+  local draft=view.roller_draft; view.roller_fields.STR.input:print("7")
+  view:setOptionsActionCallback(function(action) eq(action,"roller_stats"); view:setRollerSession(rollerSessionFixture()); return true end)
+  local button=view.roller_action_buttons.roller_stats
+  eq(button.option_text,"SESSION BEST"); assert(button.message:find("SESSION BEST",1,true)); assert(button.click())
+  eq(view.roller_settings_visible,true); eq(view.roller_draft,draft); eq(view.roller_fields.STR.input.text,"7")
+end)
+
+test("autoroller session widget participates in reuse visibility and retirement",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); view:showRollerSettings({})
+  view:setRollerSession(rollerSessionFixture()); local label=view.roller_session_best
+  view:hideRollerSettings(); eq(label.visible,false); view:setRollerSession({rolls=4}); eq(label.visible,false)
+  view:showRollerSettings({}); assert(rollerSessionHtml(view):find("Confirmed rolls: 4",1,true))
+  assert(View.validateReusable(view,view.settings)); assert(view:prepareForReuse(view.settings))
+  eq(view.roller_session,nil); eq(label.visible,false); eq(view.roller_session_best,label)
+  view:showRollerSettings({}); assert(rollerSessionHtml(view):find("Confirmed rolls: 0",1,true))
+  view:delete(); local message=label.message; local ok=view:setRollerSession(rollerSessionFixture())
+  eq(ok,nil); eq(view.roller_session,nil); eq(label.message,message); eq(view:renderRollerSession(),false)
+  view=chatView(); view.roller_session_best=nil
+  local valid,err=View.validateReusable(view,view.settings); eq(valid,nil); assert(err:find("roller_session_best",1,true))
+end)
+
+test("autoroller high callbacks retain unsaved values through phases and confirmed roll counts",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280))
+  view:showRollerSettings({use_min_stats=true,min_stats={STR=7}})
+  local draft=view.roller_draft; view.roller_fields.STR.input:print("pending Great"); view.roller_fields.target_total.input:print("pending 70")
+  local summary=rollerSessionFixture(); local y=view.roller_fields.STR.input.y
+  for _,phase in ipairs({"Capturing roll","Waiting for prompt","Reroll delay","Waiting for next roll","Result held","Idle"}) do
+    summary.phase=phase; summary.rolls=1000; summary.stat_rolls=100
+    summary.warning="After 100 complete stat rolls, some configured minimums have not been seen. Observed highs are not confirmed limits."
+    view:setRollerSession(summary)
+    eq(view.roller_draft,draft); eq(view.roller_fields.STR.input.text,"pending Great"); eq(view.roller_fields.target_total.input.text,"pending 70")
+    eq(view.roller_fields.STR.input.y,y); eq(view.roller_settings_visible,true)
+    assert(rollerSessionHtml(view):find("Confirmed rolls: 1,000",1,true)); assert(rollerSessionHtml(view):find(phase,1,true))
+  end
+end)
+
+test("autoroller mixed twelve then eleven pool slots refresh locally in a narrow modal",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); view:showRollerSettings({min_stats={STR=7}})
+  local summary=rollerSessionFixture(); summary.pool_rolls=1
+  for slot=1,12 do summary.pool[slot]={slot=slot,value=6,label="Good",roll=slot} end
+  view:setRollerSession(summary); local label=view.roller_session_best; local draft=view.roller_draft
+  view.roller_content.currentScroll=700; view.roller_fields.STR.input:print("unsaved 7")
+  local y,height=view.roller_fields.STR.input.y,view.roller_content.content_height
+  assert(rollerSessionHtml(view):find("<td>12</td><td>Good (6)</td>",1,true))
+  summary.pool[12]=nil; summary.pool_rolls=2; summary.rolls=14; view:setRollerSession(summary)
+  eq(view.roller_session_best,label); eq(view.roller_draft,draft); eq(view.roller_fields.STR.input.text,"unsaved 7")
+  eq(view.roller_content.currentScroll,700); eq(view.roller_fields.STR.input.y,y); eq(view.roller_content.content_height,height)
+  eq(rollerSessionHtml(view):find("<td>12</td><td>Good (6)</td>",1,true),nil)
+  assert(rollerSessionHtml(view):find("<td>11</td><td>Good (6)</td>",1,true)); assert(rollerSessionHtml(view):find("<td>STR</td>",1,true))
+  eq(rollerSessionHtml(view):find("Seen on roll",1,true),nil)
+  for _,key in ipairs({"roller_start","roller_stop","roller_stats"}) do eq(view.roller_action_buttons[key].y,0) end
+end)
+
+test("autoroller closed-modal callbacks store snapshots without rendering HTML",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); view:showRollerSettings({}); view:hideRollerSettings()
+  local label=view.roller_session_best; local echo=label.echo
+  label.echo=function() error("closed-modal callback rendered session HTML") end
+  eq(view:renderRollerSession(),false); assert(view:renderRollerSettings(false))
+  for _,phase in ipairs({"Observing","Capturing roll","Waiting for next roll","Idle"}) do
+    local summary=rollerSessionFixture(); summary.phase=phase; assert(view:setRollerSession(summary)); eq(view.roller_session.phase,phase)
+    eq(view.roller_settings_visible,false); eq(label.visible,false); eq(view.roller_overlay.visible,false)
+  end
+  label.echo=echo; view:showRollerSettings({}); assert(rollerSessionHtml(view):find("Idle",1,true))
+end)
+
+test("autoroller reserves wrapped metrics and warning space at narrow widths and larger fonts",function()
+  local view=chatView(); local summary=rollerSessionFixture()
+  summary.phase="Waiting for the game to confirm a complete assignment board and an empty pool."
+  local wide,wideHeight=View.rollerSessionContent(summary,view.settings.theme,14,760)
+  local narrow,narrowHeight=View.rollerSessionContent(summary,view.settings.theme,14,376)
+  eq(narrowHeight>wideHeight,true); assert(narrow:find("font-size:14px",1,true)); assert(wide:find("Seen on roll",1,true))
+  summary.stat_rolls=100; summary.warning="Some minimums have not been seen after 100 complete stat rolls. Observed highs are not confirmed race/class limits; targets are unchanged."
+  local warned,warnedHeight=View.rollerSessionContent(summary,view.settings.theme,14,376)
+  eq(warnedHeight,narrowHeight); assert(warned:find(summary.warning,1,true))
+  for _,font in ipairs({14,20,30}) do
+    local layout=require("layout").compute(420,280); layout.body_font=font
+    view:applyLayout(layout); view:setRollerSession(summary); view:showRollerSettings({})
+    if font>=20 then eq(view.roller_session_best.height>=warnedHeight,true) end
+    eq(view.roller_session_best.height>=12*24,true)
+    eq(view.roller_arrange_caption.y>view.roller_session_best.y+view.roller_session_best.height,true)
+    eq(view.roller_content.height>0,true); eq(view.roller_save.y+view.roller_save.height<=view.roller_panel.height,true)
+    for _,key in ipairs({"roller_start","roller_stop","roller_stats"}) do eq(view.roller_action_buttons[key].y,0) end
+  end
+end)
+
+test("autoroller rejects a preserved summary label in the wrong scroll container",function()
+  local view=chatView(); view.roller_session_best.parent=view.root
+  local valid,err=View.validateReusable(view,view.settings); eq(valid,nil); assert(err:find("autoroller session parent",1,true))
+end)
+
 test("autoroller settings modal validates through one save callback and remains bounded",function()
   local view=chatView(); local received; view:setRollerSettingsCallback(function(values) received=values; if values.target_total=="bad" then return nil,"bad target" end; return true end)
   view:showRollerSettings({target_total=53,hard_stop=62,max_rolls=nil,reroll_delay=.1,reroll_command="reroll",arrange_mode="manual",minimum_greats=2,minimum_good_plus=5,auto_start_on_name=true,use_min_stats=true,require_min_stats_to_stop=true,logging_enabled=true,log_folder="rolls",master_file="master.txt",min_stats={STR=5,INT=5,WIS=5,DEX=5,AGI=5,CON=5,CHA=5,WIL=5,PRE=5,PER=5,LUK=5}})

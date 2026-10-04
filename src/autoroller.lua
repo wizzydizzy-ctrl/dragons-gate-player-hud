@@ -14,6 +14,7 @@ local rankLabels={[1]="Awful",[2]="Poor",[3]="Low",[4]="Aver",[5]="Fair",[6]="Go
 -- archived/partially-updated screens cannot confuse capture, but all current
 -- limits and defaults are based on the eleven live characteristics.
 local maximumTotal=#order*7
+local observationWarningInterval=100
 local arrangeOrders={[11]=order,[12]=oldOrder}
 local captureLineLimit=8
 local arrangeModes={manual=true,game_auto=true,minimums=true}
@@ -123,7 +124,7 @@ local function arrangeModeText(mode)
   return ({manual="LET ME PLACE (manual)",game_auto="GAME AUTO (game_auto)",minimums="MY MINIMUMS + AUTO (minimums)"})[mode] or "LET ME PLACE (manual)"
 end
 
-function Roller.new(adapter,settings,onConfig,onAlert)
+function Roller.new(adapter,settings,onConfig,onAlert,onSession)
   local config=copy(settings or {})
   -- Older DGHUD releases persisted "n" for the retired body prompt. The new
   -- creator uses a named command; normalize the old value without losing any
@@ -135,7 +136,7 @@ function Roller.new(adapter,settings,onConfig,onAlert)
   if config.min_stats.PRE==nil and config.min_stats.VOI~=nil then config.min_stats.PRE=config.min_stats.VOI end
   if config.min_stats.LUK==nil and config.min_stats.APP~=nil then config.min_stats.LUK=config.min_stats.APP end
   for _,key in ipairs(supportedStats) do if config.min_stats[key]==false then config.min_stats[key]=nil end end
-  local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert},Roller); self:reset(); return self
+  local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert,onSession=onSession},Roller); self:reset(); return self
 end
 function Roller:echo(message) if self.adapter.reportRoller then self.adapter:reportRoller(message) end end
 function Roller:cancelReroll()
@@ -152,7 +153,73 @@ function Roller:reset()
   local timerGeneration=0
   if self.state then self:cancelReroll(); timerGeneration=tonumber(self.state.timer_generation) or 0 end
   if self.state and self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log) end
-  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,expected=nil,partial=nil,pending_stats=nil,pending_pool=nil,arrangement=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil,result_held=false,held_protocol=nil,awaiting_new_roll=false,phase="idle",expected_echo=nil,owned_outgoing=nil,latent_psion=false}; return true
+  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,observed_rolls=0,observed_sum=0,observed_best=nil,observed_worst=nil,observed_last=nil,observed_capture=nil,observation_transaction=0,observed_transaction=nil,stat_rolls=0,pool_rolls=0,stat_highs={},pool_highs={},stat_order=nil,pool_size=nil,warning_roll_checkpoint=0,expected=nil,partial=nil,pending_stats=nil,pending_pool=nil,arrangement=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil,result_held=false,held_protocol=nil,awaiting_new_roll=false,phase="idle",expected_echo=nil,owned_outgoing=nil,latent_psion=false}; self:notifySession(); return true
+end
+-- A fixed number of scalar maxima, not an ever-growing list of rolls. These
+-- observations never claim a racial/profession cap or change minimum settings.
+function Roller:sessionSummary()
+  local s=self.state or {}; local best=s.observed_best; local summary={active=s.active==true,rolls=s.observed_rolls or 0,stat_rolls=s.stat_rolls or 0,pool_rolls=s.pool_rolls or 0,best_total=best and best.total or nil,average=(s.observed_rolls or 0)>0 and s.observed_sum/s.observed_rolls or 0,maximum=best and best.maximum or maximumTotal,phase=self:phaseText(),stats={},pool={},unmet={}}
+  for _,name in ipairs(s.stat_order or order) do
+    local high=(s.stat_highs or {})[name]; local target=self.cfg.use_min_stats==true and minimumFor(self.cfg,name) or nil
+    if not rankLabels[target] then target=nil end
+    local row={name=name,value=high and high.value or nil,label=high and rankLabels[high.value] or nil,roll=high and high.roll or nil,target=target,target_label=target and rankLabels[target] or nil}
+    summary.stats[#summary.stats+1]=row
+    if target and high and high.value<target then summary.unmet[#summary.unmet+1]=copy(row) end
+  end
+  for slot,high in ipairs(s.pool_highs or {}) do summary.pool[#summary.pool+1]={slot=slot,value=high.value,label=rankLabels[high.value],roll=high.roll} end
+  if summary.stat_rolls>=observationWarningInterval and #summary.unmet>0 then summary.warning="Some minimums have not been seen after "..summary.stat_rolls.." complete stat rolls. Observed highs are not confirmed race/class limits; targets are unchanged." end
+  return summary
+end
+function Roller:notifySession()
+  if type(self.onSession)=="function" then pcall(self.onSession,self:sessionSummary()) end
+  return true
+end
+function Roller:confirmSessionRoll(protocol)
+  local s=self.state; local roll=s.last
+  -- A captured table is provisional until the exact matching decision prompt.
+  -- This excludes assignment screens and repeated redraws before a decision.
+  if not s.active or not s.fresh_roll or not roll or roll.protocol~=protocol or s.observed_capture==roll.roll or s.observed_transaction==s.observation_transaction then return false end
+  s.observed_capture=roll.roll; s.observed_transaction=s.observation_transaction; s.observed_rolls=s.observed_rolls+1; s.observed_sum=s.observed_sum+roll.total
+  local observed=copy(roll); observed.roll=s.observed_rolls; s.observed_last=observed
+  if not s.observed_best or roll.total>s.observed_best.total then s.observed_best=observed end
+  if not s.observed_worst or roll.total<s.observed_worst.total then s.observed_worst=observed end
+  if roll.pool then
+    if s.pool_size~=#roll.pool then s.pool_highs={}; s.pool_rolls=0; s.pool_size=#roll.pool end
+    s.pool_rolls=s.pool_rolls+1; local sorted=copy(roll.pool); table.sort(sorted,function(a,b) return a>b end)
+    for slot,value in ipairs(sorted) do local high=s.pool_highs[slot]; if not high or value>high.value then s.pool_highs[slot]={value=value,roll=s.observed_rolls} end end
+  else
+    local same=type(s.stat_order)=="table" and #s.stat_order==#roll.order
+    if same then for index,name in ipairs(roll.order) do if s.stat_order[index]~=name then same=false; break end end end
+    if not same then s.stat_order=copy(roll.order); s.stat_highs={}; s.stat_rolls=0; s.warning_roll_checkpoint=0 end
+    s.stat_rolls=s.stat_rolls+1
+    for _,name in ipairs(roll.order) do local high=s.stat_highs[name]; if not high or roll.stats[name]>high.value then s.stat_highs[name]={value=roll.stats[name],roll=s.observed_rolls} end end
+  end
+  self:notifySession(); if not roll.pool then self:warnUnseenMinimums() end; return true
+end
+function Roller:sessionLines()
+  local summary=self:sessionSummary(); local lines={"BEST SEEN THIS SESSION — observations, not confirmed limits"}
+  if summary.stat_rolls>0 or summary.pool_rolls==0 then
+    lines[#lines+1]=string.format("%-5s %-8s %-9s %s","Stat","Target","Best seen","First roll")
+    for _,row in ipairs(summary.stats) do lines[#lines+1]=string.format("%-5s %-8s %-9s %s",row.name,row.target_label or "off",row.label or "--",row.roll and ("#"..row.roll) or "--") end
+    lines[#lines+1]="Each stat's high can come from a different roll; this is not one available character."
+  end
+  if summary.pool_rolls>0 then
+    lines[#lines+1]="Pool values are unassigned: per-stat limits cannot be inferred."
+    lines[#lines+1]=string.format("%-5s %-9s %s","Slot","Best seen","First roll")
+    for _,row in ipairs(summary.pool) do lines[#lines+1]=string.format("%-5s %-9s #%d",row.slot,row.label,row.roll) end
+    lines[#lines+1]="Slots are sorted highest to lowest on each pool; highs can come from different rolls."
+  end
+  if summary.warning then lines[#lines+1]=summary.warning end
+  return lines
+end
+function Roller:warnUnseenMinimums()
+  local s=self.state; local count=s.stat_rolls or 0
+  if count<observationWarningInterval or count%observationWarningInterval~=0 or s.warning_roll_checkpoint==count then return true end
+  s.warning_roll_checkpoint=count
+  local summary=self:sessionSummary(); if not summary.warning then return true end
+  local unmet={}; for _,row in ipairs(summary.unmet) do unmet[#unmet+1]=row.name..": target "..row.target_label..", best seen "..row.label end
+  self:echo("MINIMUMS NOT YET SEEN ("..count.." stat rolls): "..table.concat(unmet,"; ").."\nPossible rare roll or race/class limit — not a confirmed cap. Review SESSION BEST in Options > Autoroller or rr stats. This notice does not stop rolling or change targets.")
+  return true
 end
 function Roller:log(message)
   if not self.state.log or not self.adapter.appendRollerLog then return end
@@ -204,22 +271,22 @@ function Roller:start()
   self:reset(); self.state.active=true; self.state.phase="observing"
   if self.cfg.logging_enabled~=false and self.adapter.startRollerLog then local ok,log,err=pcall(self.adapter.startRollerLog,self.adapter,self.cfg); if ok then self.state.log=log; if not log then self:echo("Logging unavailable: "..tostring(err or "unknown error")) end else self:echo("Logging unavailable: "..tostring(log)) end end
   self:log("Started")
-  self:echo("Started — target "..tostring(limit(self.cfg.target_total) or "disabled").." / "..maximumTotal.." (11 characteristics)."); return true
+  self:echo("Started — target "..tostring(limit(self.cfg.target_total) or "disabled").." / "..maximumTotal.." (11 characteristics). See live SESSION BEST in Options > Autoroller or rr stats."); self:notifySession(); return true
 end
 function Roller:stop(reason,holdResult)
   local heldProtocol=self.state.protocol or self.state.held_protocol
   self.state.active=false; self:cancelReroll(); self:clearCapture(); self.state.result_held=holdResult==true; self.state.held_protocol=holdResult==true and heldProtocol or nil; self.state.phase=holdResult==true and "held" or "idle"
   self:report(reason or "Stopped"); self:log(reason or "Stopped")
   if not holdResult and self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end
-  return true
+  self:notifySession(); return true
 end
 function Roller:rollText(roll)
   if roll.pool then local labels={}; for _,value in ipairs(roll.pool) do labels[#labels+1]=rankLabels[value] end; return "Roll #"..roll.roll.."  Total="..roll.total.."/"..roll.maximum.."  Pool: "..table.concat(labels," ") end
   return "Roll #"..roll.roll.."  Total="..roll.total.."/"..roll.maximum.."  "..statText(roll.stats,roll.order)
 end
 function Roller:report(reason)
-  local s=self.state; local lines={reason or "Roller statistics","Rolls: "..s.rolls.."  Average: "..string.format("%.2f",s.rolls>0 and s.sum/s.rolls or 0)}
-  if s.best then lines[#lines+1]="Best: "..self:rollText(s.best) end; if s.worst then lines[#lines+1]="Worst: "..self:rollText(s.worst) end; self:echo(table.concat(lines,"\n")); return true
+  local s=self.state; local summary=self:sessionSummary(); local lines={reason or "Roller statistics","Confirmed rolls: "..summary.rolls.."  Average: "..string.format("%.2f",summary.average)}
+  if s.observed_best then lines[#lines+1]="Best: "..self:rollText(s.observed_best) end; if s.observed_worst then lines[#lines+1]="Worst: "..self:rollText(s.observed_worst) end; for _,line in ipairs(self:sessionLines()) do lines[#lines+1]=line end; self:echo(table.concat(lines,"\n")); return true
 end
 function Roller:waitReason()
   local s=self.state or {}
@@ -262,6 +329,7 @@ function Roller:onLatentPsion()
   if s.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,s.log); s.log=nil end
   self:echo(latentPsionAlert)
   if type(self.onAlert)=="function" then pcall(self.onAlert,latentPsionAlert) end
+  self:notifySession()
   return true
 end
 function Roller:statusLines()
@@ -317,13 +385,15 @@ function Roller:settingsText()
   return table.concat(lines,"\n")
 end
 function Roller:record(stats,protocol,names)
-  local total=0; for _,name in ipairs(names) do local value=stats[name]; if not value then return false end; total=total+value end
+  if type(stats)~="table" or type(names)~="table" or (#names~=11 and #names~=12) then return false end
+  local total=0; for _,name in ipairs(names) do local value=stats[name]; if not rankLabels[value] then return false end; total=total+value end
   local s=self.state; s.rolls=s.rolls+1; s.sum=s.sum+total
   local roll={roll=s.rolls,total=total,maximum=#names*7,stats=copy(stats),order=copy(names),protocol=protocol}; s.last=roll
   if not s.best or total>s.best.total then s.best=roll end; if not s.worst or total<s.worst.total then s.worst=roll end
-  s.protocol=protocol; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
+  s.protocol=protocol; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); self:notifySession(); return true
 end
 function Roller:recordPool(pool)
+  if type(pool)~="table" then return false end
   local activeOrder=self.state.characteristic_order
   if type(activeOrder)~="table" or #activeOrder~=#pool then activeOrder=arrangeOrders[#pool] end
   if not activeOrder then return false end
@@ -331,14 +401,14 @@ function Roller:recordPool(pool)
   local s=self.state; s.rolls=s.rolls+1; s.sum=s.sum+total
   local roll={roll=s.rolls,total=total,maximum=#activeOrder*7,pool=copy(pool),order=copy(activeOrder),protocol="arrange"}; s.last=roll
   if not s.best or total>s.best.total then s.best=roll end; if not s.worst or total<s.worst.total then s.worst=roll end
-  s.protocol="arrange"; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.pending_pool=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); return true
+  s.protocol="arrange"; s.fresh_roll=true; s.expected=nil; s.partial=nil; s.pending_pool=nil; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="awaiting_prompt"; local text=self:rollText(roll); if self.cfg.show_every_roll~=false then self:echo(text) end; self:log(text); self:notifySession(); return true
 end
 function Roller:beginBlock(protocol,names,resetPartial)
   if not self.state.active then return false end
   local s=self.state; s.protocol=protocol; s.fresh_roll=false; s.expected=names; s.capture_lines=0; s.awaiting_new_roll=false; s.phase="capturing"
   if resetPartial then self:cancelReroll(); s.partial={}
   elseif type(s.partial)~="table" then s.partial={} end
-  return true
+  self:notifySession(); return true
 end
 function Roller:captureExpected(line)
   local s=self.state; if type(s.expected)~="table" then return false end
@@ -358,7 +428,8 @@ function Roller:captureExpected(line)
   return true
 end
 function Roller:prepareForReroll(protocol)
-  local s=self.state; self:cancelReroll(); s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.characteristic_order=nil; s.capture_lines=0; s.passive_lines=0; s.fresh_roll=false; s.result_held=false; s.held_protocol=nil; s.protocol=protocol or s.protocol; s.awaiting_new_roll=true; s.phase="waiting_new_roll"; return true
+  self.state.observation_transaction=self.state.observation_transaction+1
+  local s=self.state; self:cancelReroll(); s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.characteristic_order=nil; s.capture_lines=0; s.passive_lines=0; s.fresh_roll=false; s.result_held=false; s.held_protocol=nil; s.protocol=protocol or s.protocol; s.awaiting_new_roll=true; s.phase="waiting_new_roll"; self:notifySession(); return true
 end
 function Roller:rearmForManualReroll(protocol)
   local s=self.state; local controlled=s.active or s.result_held or s.held_protocol~=nil
@@ -412,18 +483,20 @@ function Roller:reroll(protocol)
     if self.state.timer_generation~=generation or self.state.phase~="reroll_delay" then return end
     self.state.timer=nil
     if self.state.active then
-      self.state.awaiting_new_roll=true; self.state.phase="waiting_new_roll"; self.state.expected_echo=command
+      self.state.observation_transaction=self.state.observation_transaction+1
+      self.state.awaiting_new_roll=true; self.state.phase="waiting_new_roll"; self.state.expected_echo=command; self:notifySession()
       local sent,sendErr=self:sendOwnedCommand(command); if not sent then self:stop("Could not send reroll: "..tostring(sendErr),true) end
     end
   end)
   if not called then err=id or "timer unavailable"; id=nil end
-  if not id then self:stop("Could not schedule reroll: "..tostring(err)); return nil,err end; self.state.timer=id; return true
+  if not id then self:stop("Could not schedule reroll: "..tostring(err)); return nil,err end; self.state.timer=id; self:notifySession(); return true
 end
 function Roller:sendArrangementCommand(entry)
   local sequence=self.state.arrangement; entry.confirmed=false; entry.pool_confirmed=false; entry.pool_empty=false; entry.board_complete=false; sequence.awaiting=entry
   if entry.auto then sequence.display_expected=nil; sequence.display_stats={}; sequence.auto_board_complete=false end
   local sent,err=self:sendOwnedCommand(entry.command)
   if not sent then return self:stop("Could not send arrangement command: "..tostring(err),true) end
+  self:notifySession()
   return true
 end
 function Roller:advanceArrangement()
@@ -591,6 +664,7 @@ function Roller:onLine(line)
   if protocol then
     if self.state.partial and not self.state.fresh_roll then self.state.expected=nil; self.state.partial=nil; self.state.capture_lines=0; return false end
     local roll=self.state.last; if not roll or not self.state.fresh_roll or roll.protocol~=protocol then return false end
+    self:confirmSessionRoll(protocol)
     self.state.fresh_roll=false; local cap=limit(self.cfg.max_rolls); if cap and self.state.rolls>=cap then return self:stop("Reached max rolls "..cap) end
     local target,hard=limit(self.cfg.target_total),limit(self.cfg.hard_stop)
     if not cap and not ((target and target<=roll.maximum) or (hard and hard<=roll.maximum)) then return self:stop("Configured total cannot be reached by this "..roll.maximum.."-point roll format") end
@@ -647,7 +721,7 @@ function Roller:configure(values,silent)
   if not candidate.target_total and not candidate.hard_stop and not candidate.max_rolls then return nil,"enable a target, hard stop, or maximum rolls" end
   if candidate.use_min_stats then local any=false; for _,key in ipairs(supportedStats) do if candidate.min_stats[key] then any=true; break end end; if not any then return nil,"enable at least one stat minimum or turn minimums off" end end
   if self.onConfig then local saved,err=self.onConfig(copy(candidate)); if saved==nil or saved==false then return nil,err or "could not save settings" end end
-  self.cfg=candidate; if not silent then self:echo("Settings saved.") end; return true
+  self.cfg=candidate; if not silent then self:echo("Settings saved.") end; self:notifySession(); return true
 end
 function Roller:command(action)
   action=trim(action); local lower=action:lower()
@@ -656,5 +730,5 @@ function Roller:command(action)
   self:echo("Commands: rr start|stop|status|show|stats|last|reset|help; rr set total|hard|max|delay|greats|goodplus|arrange|STAT <value>. Use rr status to see what the roller is waiting for and rr show to display every saved setting. Roll-and-arrange modes: manual, game_auto, minimums. The HUD never sends done."); return true
 end
 function Roller:shutdown() self:cancelReroll(); self.state.active=false; self:clearCapture(); if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end; return true end
-Roller.order=order; Roller.ranks=ranks; Roller.maximumTotal=maximumTotal
+Roller.order=order; Roller.ranks=ranks; Roller.maximumTotal=maximumTotal; Roller.observationWarningInterval=observationWarningInterval
 return Roller

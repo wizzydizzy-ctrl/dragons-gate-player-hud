@@ -127,7 +127,7 @@ Tokens expire after 30 seconds. There is no force-delete command.
 | `rr stop` | Stop automatic rolling and cancel queued work. |
 | `rr status` | Explain whether the roller is active and exactly what it is waiting for. |
 | `rr show` | Show every saved roller setting in clear groups. |
-| `rr stats` | Show roll count, average, best, and worst. |
+| `rr stats` | Show session roll count, average, best/worst rolls, and highest observed ranks beside your saved minimums. Also available as SESSION BEST in Options → Autoroller. |
 | `rr last` | Show the newest captured roll. |
 | `rr reset` | Clear the current roller session state and counters. |
 | `rr help` | Show the short roller command list. |

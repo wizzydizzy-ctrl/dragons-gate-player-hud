@@ -65,6 +65,7 @@ local function fake()
     setMapLibraryMode=function(self,mode) f.mapLibraryMode=mode; return true end,
     setMapLibraryCatalog=function(self,entries,status) f.mapLibraryCatalog=entries; f.mapLibraryCatalogStatus=status; return true end,
     setRollerSettingsCallback=function(self,callback) f.rollerSettingsCallback=callback end,
+    setRollerSession=function(self,summary) f.rollerSession=require("settings").merge({},summary); f.rollerSessionUpdates=(f.rollerSessionUpdates or 0)+1; return true end,
     setMapCenterCallback=function(self,callback) f.mapCenterCallback=callback end,
     setMapZoomCallback=function(self,callback) f.mapZoomCallback=callback; f.mapZoomCallbackSets=(f.mapZoomCallbackSets or 0)+1 end,
     setMapClearAllCallback=function(self,callback) f.mapClearAllCallback=callback end,
@@ -1650,6 +1651,25 @@ end)
 test("public autoroller status returns defensive configuration copies",function()
   local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=53,hard_stop=62,reroll_command="n",min_stats={STR=5}}}); assert(hud:start()); DGHUD={controller=hud}; Main.installChatApi(DGHUD)
   local status=DGHUD.roller.status(); status.config.target_total=77; status.config.min_stats.STR=1; eq(hud.roller.cfg.target_total,53); eq(hud.roller.cfg.min_stats.STR,5); hud:shutdown(); DGHUD=nil
+end)
+test("autoroller session display follows rolls settings and reset without issuing commands",function()
+  local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=77,auto_start_on_name=false,use_min_stats=true,min_stats={STR=7},show_every_roll=false}}); assert(hud:start())
+  eq(f.rollerSession.rolls,0); eq(f.rollerSession.stats[1].name,"STR"); eq(f.rollerSession.stats[1].target_label,"Great")
+  assert(hud.roller:start()); local stats={}; for _,name in ipairs(require("autoroller").order) do stats[name]=5 end; stats.STR=6
+  assert(hud.roller:record(stats,"creator",require("autoroller").order)); eq(f.rollerSession.rolls,0); assert(hud.roller:confirmSessionRoll("creator")); eq(f.rollerSession.rolls,1); eq(f.rollerSession.stats[1].label,"Good"); eq(f.rollerSession.active,true)
+  stats.STR=3; hud.roller:prepareForReroll("creator"); assert(hud.roller:record(stats,"creator",require("autoroller").order)); assert(hud.roller:confirmSessionRoll("creator")); eq(f.rollerSession.stats[1].value,6)
+  assert(f.rollerSettingsCallback({min_stats={STR="6"}})); eq(f.rollerSession.stats[1].target_label,"Good"); eq(f.rollerSession.rolls,2)
+  local before=f.rollerSessionUpdates; assert(f.optionsActionCallback("roller_settings")); eq(f.rollerSessionUpdates,before+1)
+  assert(f.optionsActionCallback("roller_stop")); eq(f.rollerSession.active,false); eq(f.rollerSession.stats[1].value,6)
+  assert(f.optionsActionCallback("roller_reset")); eq(f.rollerSession.rolls,0); eq(f.rollerSession.stats[1].value,nil); eq(#(f.sentCommands or {}),0)
+  hud:shutdown()
+end)
+test("public autoroller session API returns defensive observed highs",function()
+  local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=77,auto_start_on_name=false,use_min_stats=true,min_stats={STR=7}}}); assert(hud:start()); DGHUD={controller=hud}; Main.installChatApi(DGHUD)
+  assert(hud.roller:start()); local stats={}; for _,name in ipairs(require("autoroller").order) do stats[name]=6 end; assert(hud.roller:record(stats,"creator",require("autoroller").order)); assert(hud.roller:confirmSessionRoll("creator"))
+  local session=DGHUD.roller.session(); eq(session.stats[1].label,"Good"); eq(session.stats[1].target_label,"Great"); session.stats[1].value=1; session.unmet[1].target=1
+  eq(DGHUD.roller.session().stats[1].value,6); eq(DGHUD.roller.status().session.stats[1].target,7)
+  hud:shutdown(); local result,err=DGHUD.roller.session(); eq(result,nil); eq(err,"autoroller is not running"); DGHUD=nil
 end)
 test("rune API exposes sorted trigger-safe variables and copies",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); DGHUD={controller=hud}; Main.installChatApi(DGHUD)

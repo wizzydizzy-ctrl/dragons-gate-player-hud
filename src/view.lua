@@ -568,6 +568,8 @@ function View.new(settings)
   self.roller_panel=Geyser.Container:new({name="DGHUD.RollerSettings.Panel",x=0,y=0,width=760,height=560},self.root)
   self.roller_bg=label("DGHUD.RollerSettings.Background",self.roller_panel,"background:"..t.panel..";border:2px solid "..t.border..";border-radius:8px;")
   self.roller_content=Geyser.ScrollBox:new({name="DGHUD.RollerSettings.Content",x=14,y=44,width=732,height=440},self.roller_panel)
+  self.roller_session_best=label("DGHUD.RollerSettings.SessionBest",self.roller_content,"background:#15231b;border:1px solid "..t.jade..";border-radius:5px;color:"..t.text..";padding:6px;",self.geyser)
+  self.roller_session_best:hide()
   self.roller_title=label("DGHUD.RollerSettings.Title",self.roller_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.roller_status=label("DGHUD.RollerSettings.Status",self.roller_panel,"background:transparent;color:"..t.muted..";")
   self.roller_save=label("DGHUD.RollerSettings.Save",self.roller_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
@@ -580,7 +582,7 @@ function View.new(settings)
   for _,key in ipairs(self.roller_toggle_order) do local button=label("DGHUD.RollerSettings.Toggle."..key,self.roller_content); button.option_text=toggleLabels[key]; button:setClickCallback(function() self.roller_draft[key]=not self.roller_draft[key]; self:renderRollerSettings(false); return self.roller_draft[key] end); self.roller_toggles[key]=button end
   self.roller_arrange_caption=label("DGHUD.RollerSettings.ArrangeCaption",self.roller_content,"background:transparent;color:"..t.muted..";"); self.roller_arrange_buttons={}; self.roller_arrange_order={"manual","game_auto","minimums"}; local arrangeLabels={manual="LET ME PLACE",game_auto="GAME AUTO",minimums="MY MINIMUMS + AUTO"}
   for _,mode in ipairs(self.roller_arrange_order) do local button=label("DGHUD.RollerSettings.ArrangeMode."..mode,self.roller_content); button.option_text=arrangeLabels[mode]; button:setClickCallback(function() self.roller_draft.arrange_mode=mode; self:renderRollerSettings(false); return mode end); if button.setToolTip then button:setToolTip(mode=="manual" and "Stop on a qualifying pool so you can place every value." or mode=="game_auto" and "Ask Dragon's Gate to place the qualifying pool." or "Place your configured raw pool-label minimums first, then ask the game to fill the rest. Racial and profession modifiers may change final shown ranks.") end; self.roller_arrange_buttons[mode]=button end
-  self.roller_action_order={"roller_start","roller_stop","roller_status","roller_show","roller_stats","roller_last","roller_reset","roller_help"}; self.roller_action_buttons={}; local rollerActionLabels={roller_start="START ROLLER",roller_stop="STOP ROLLER",roller_status="WHAT IS IT WAITING FOR?",roller_show="SHOW SAVED SETTINGS",roller_stats="SESSION STATS",roller_last="SHOW LAST ROLL",roller_reset="RESET SESSION",roller_help="ROLLER HELP"}
+  self.roller_action_order={"roller_start","roller_stop","roller_status","roller_show","roller_stats","roller_last","roller_reset","roller_help"}; self.roller_action_buttons={}; local rollerActionLabels={roller_start="START ROLLER",roller_stop="STOP ROLLER",roller_status="WHAT IS IT WAITING FOR?",roller_show="SHOW SAVED SETTINGS",roller_stats="SESSION BEST",roller_last="SHOW LAST ROLL",roller_reset="RESET SESSION",roller_help="ROLLER HELP"}
   for _,key in ipairs(self.roller_action_order) do local button=label("DGHUD.RollerSettings.Action."..key,self.roller_content); button.option_text=rollerActionLabels[key]; button:setClickCallback(function() if self.options_action_callback then return self.options_action_callback(key) end; return nil,"autoroller action is unavailable" end); self.roller_action_buttons[key]=button end
   self.roller_save:setClickCallback(function() return self:saveRollerSettings() end); self.roller_cancel:setClickCallback(function() return self:hideRollerSettings() end); self.roller_overlay:setClickCallback(function() return self:hideRollerSettings() end)
   self.roller_settings_visible=false
@@ -2093,8 +2095,128 @@ function View:showKeybindingSettings(config) self:hideHelp(); self:hideMapSettin
 function View:hideKeybindingSettings() self.keybindings_visible=false; self.keybindings_draft=nil; self.keybindings_error=nil; if self.layout then self:layoutKeybindingSettings(self.layout) end; return true end
 function View:keybindingSettingsValues() local result={enabled=self.keybindings_draft.enabled==true,commands={}}; for _,key in ipairs(self.keybinding_order) do local field=self.keybinding_fields[key]; result.commands[key]=field.input.getText and field.input:getText() or "" end; return result end
 function View:saveKeybindingSettings() if not self.keybindings_settings_callback then return nil,"keybinding settings callback is unavailable" end; local ok,err,config,status=self.keybindings_settings_callback(self:keybindingSettingsValues()); if not ok then self.keybindings_error=err or "Could not save keybindings"; self:renderKeybindingSettings(false); return nil,self.keybindings_error end; self.keybindings_error=nil; if status and status.conflicts and #status.conflicts>0 then self.keybindings_status_text="Saved, but inactive because: "..table.concat(status.conflicts,", "); self.keybindings_draft=config; self:renderKeybindingSettings(true); return true,config,status end; self:hideKeybindingSettings(); return true,config,status end
+local rollerStatNames={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
+local function rollerNumber(value)
+  local number=tonumber(value)
+  if number and number==number and number>=0 and number<math.huge then return number end
+end
+local function rollerRank(value,label)
+  local number=rollerNumber(value)
+  if not number then return "—" end
+  return (label~=nil and safeText(label).." " or "").."("..safeText(number)..")"
+end
+local function rollerTextHeight(text,width,font)
+  local columns=math.max(1,math.floor(math.max(1,width)/(font*.72)))
+  return math.max(1,math.ceil(#tostring(text)/columns))*math.ceil(font*1.6)
+end
+function View.rollerSessionContent(summary,theme,font,width)
+  summary=type(summary)=="table" and summary or {}
+  local stats=type(summary.stats)=="table" and summary.stats or {}
+  local pool=type(summary.pool)=="table" and summary.pool or {}
+  local named=(rollerNumber(summary.stat_rolls) or 0)>0
+  for _,row in ipairs(stats) do if type(row)=="table" and rollerNumber(row.value) then named=true end end
+  local showStats=named or #pool==0
+  if showStats and #stats==0 then stats={}; for _,name in ipairs(rollerStatNames) do stats[#stats+1]={name=name} end end
+  local showRoll=(tonumber(width) or 700)>=480
+  local bodyWidth=math.max(1,(tonumber(width) or 700)-16)
+  local lineHeight=math.ceil(font*1.6); local rowHeight=lineHeight+6
+  local metrics="Confirmed rolls: "..groupedNumber(rollerNumber(summary.rolls) or 0).."    Best total: "..tostring(rollerNumber(summary.best_total) or "—").."/"..tostring(rollerNumber(summary.maximum) or 77)
+  local status=(summary.active==true and "Active" or "Stopped")..(summary.phase~=nil and " · "..tostring(summary.phase) or "").." · Stat rolls: "..groupedNumber(rollerNumber(summary.stat_rolls) or 0).." · Pool rolls: "..groupedNumber(rollerNumber(summary.pool_rolls) or 0)
+  local caution="Observed highs are not confirmed race/class limits; targets never auto lowered. Each high can come from a different roll."
+  -- Reserve the full late warning before it appears, at the current width and
+  -- font. Count wrapped metrics separately from the aligned table rows.
+  local warningHeight=rollerTextHeight(string.rep("M",200),bodyWidth,font)
+  if type(summary.warning)=="string" then warningHeight=math.max(warningHeight,rollerTextHeight(summary.warning,bodyWidth,font)) end
+  local metricsHeight=math.max(rollerTextHeight(metrics,bodyWidth,font),rollerTextHeight(string.rep("M",70),bodyWidth,font))
+  local statusHeight=math.max(rollerTextHeight(status,bodyWidth,font),rollerTextHeight(string.rep("M",130),bodyWidth,font))
+  local height=rollerTextHeight("SESSION BEST",bodyWidth,font+3)+metricsHeight+statusHeight+rollerTextHeight(caution,bodyWidth,font)+warningHeight+lineHeight+20
+  local parts={"<span style='color:"..theme.accent..";font-size:"..(font+3).."px'><b>SESSION BEST</b></span><br>",
+    "<b>Confirmed rolls: "..safeText(groupedNumber(rollerNumber(summary.rolls) or 0)).." &nbsp; Best total: "..
+    safeText(rollerNumber(summary.best_total) or "—").."/"..safeText(rollerNumber(summary.maximum) or 77).."</b><br>",
+    "<span style='color:"..theme.muted.."'>"..(summary.active==true and "Active" or "Stopped")..
+    (summary.phase~=nil and " · "..safeText(summary.phase) or "").." · Stat rolls: "..
+    safeText(groupedNumber(rollerNumber(summary.stat_rolls) or 0)).." · Pool rolls: "..
+    safeText(groupedNumber(rollerNumber(summary.pool_rolls) or 0)).."</span><br>",
+    "<span style='color:"..theme.accent.."'>"..safeText(caution).."</span><br>"}
+  local tableWidths
+  local function tableRowHeight(cells)
+    local tallest=rowHeight
+    for index,cell in ipairs(cells) do
+      local text=cell:gsub("<[^>]*>",""):gsub("&lt;","<"):gsub("&gt;",">"):gsub("&amp;","&")
+      tallest=math.max(tallest,rollerTextHeight(text,bodyWidth*tableWidths[index]/100-6,font)+6)
+    end
+    return tallest
+  end
+  local function tableStart(headings,widths)
+    tableWidths=widths
+    local cells={}
+    for index,heading in ipairs(headings) do cells[#cells+1]="<td width='"..widths[index].."%'><b>"..heading.."</b></td>" end
+    parts[#parts+1]="<table width='100%' cellspacing='0' cellpadding='3' style='font-size:"..font.."px'><tr>"..table.concat(cells).."</tr>"
+    height=height+tableRowHeight(headings)
+  end
+  if showStats then
+    tableStart(showRoll and {"Stat","Target","Best seen","Seen on roll"} or {"Stat","Target","Best seen"},showRoll and {14,28,32,26} or {16,42,42})
+    for _,row in ipairs(stats) do
+      row=type(row)=="table" and row or {}
+      local target,value=rollerNumber(row.target),rollerNumber(row.value)
+      local targetText=target and rollerRank(target,row.target_label) or "—"
+      if target and (not value or target>value) then targetText="<span style='color:#ffb347'><b>"..targetText.."</b></span>" end
+      parts[#parts+1]="<tr><td>"..safeText(row.name).."</td><td>"..targetText.."</td><td>"..
+        rollerRank(value,row.label).."</td>"..(showRoll and "<td>"..safeText(value and rollerNumber(row.roll) or "—").."</td>" or "").."</tr>"
+      height=height+tableRowHeight({safeText(row.name),targetText,rollerRank(value,row.label),showRoll and safeText(value and rollerNumber(row.roll) or "—") or nil})
+    end
+    parts[#parts+1]="</table>"
+  end
+  if #pool>0 then
+    parts[#parts+1]="<b>RANKED POOL-SLOT HIGHS</b><br><span style='color:"..theme.accent.."'>Pool values are unassigned; per-stat limits cannot be inferred.</span><br>"
+    height=height+rollerTextHeight("RANKED POOL-SLOT HIGHS",bodyWidth,font)+rollerTextHeight("Pool values are unassigned; per-stat limits cannot be inferred.",bodyWidth,font)
+    tableStart(showRoll and {"Pool slot","Best seen","Seen on roll"} or {"Pool slot","Best seen"},showRoll and {22,48,30} or {28,72})
+    for _,row in ipairs(pool) do
+      row=type(row)=="table" and row or {}
+      parts[#parts+1]="<tr><td>"..safeText(rollerNumber(row.slot) or "—").."</td><td>"..rollerRank(row.value,row.label).."</td>"..
+        (showRoll and "<td>"..safeText(rollerNumber(row.value) and rollerNumber(row.roll) or "—").."</td>" or "").."</tr>"
+      height=height+tableRowHeight({safeText(rollerNumber(row.slot) or "—"),rollerRank(row.value,row.label),showRoll and safeText(rollerNumber(row.value) and rollerNumber(row.roll) or "—") or nil})
+    end
+    parts[#parts+1]="</table>"
+  end
+  if (rollerNumber(summary.stat_rolls) or 0)>=100 and type(summary.warning)=="string" and summary.warning~="" then
+    parts[#parts+1]="<br><span style='color:#ffb347'><b>"..safeText(summary.warning).."</b></span>"
+  end
+  return View.withFont(table.concat(parts),font),height
+end
+function View:renderRollerSession()
+  if self.disposed or not self.roller_settings_visible or not self.roller_session_best then return false end
+  local font=self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-3)) or 11
+  local width=self.roller_content and tonumber(self.roller_content.width) or 700
+  local html,height=View.rollerSessionContent(self.roller_session,self.settings.theme,font,width)
+  self.roller_session_best:echo(html)
+  return height
+end
+function View:setRollerSession(summary)
+  if self.disposed then return nil,"HUD view is unavailable." end
+  self.roller_session=type(summary)=="table" and viewCopy(summary) or nil
+  if self.roller_settings_visible then
+    local height=self:renderRollerSession()
+    if height and self.roller_session_height and height>self.roller_session_height then
+      -- Only grow an open section. Never shrink the scroll extent during a
+      -- reset, or repopulate inputs while a settings draft is being edited.
+      local delta=height-self.roller_session_height
+      self.roller_session_height=height
+      self.roller_session_best:resize(self.roller_session_best.width,height)
+      local widgets={self.roller_arrange_caption}
+      for _,button in pairs(self.roller_arrange_buttons or {}) do widgets[#widgets+1]=button end
+      for _,field in pairs(self.roller_fields or {}) do widgets[#widgets+1]=field.caption; widgets[#widgets+1]=field.input end
+      for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end
+      for key,button in pairs(self.roller_action_buttons or {}) do if key~="roller_start" and key~="roller_stop" and key~="roller_stats" then widgets[#widgets+1]=button end end
+      for _,widget in ipairs(widgets) do widget:move(widget.x,widget.y+delta) end
+      self.roller_content.content_height=self.roller_content.content_height+delta
+    end
+  end
+  return true
+end
 function View:layoutRollerSettings(layout)
   local widgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel,self.roller_arrange_caption}; for _,button in pairs(self.roller_arrange_buttons or {}) do widgets[#widgets+1]=button end; for _,entry in pairs(self.roller_fields or {}) do widgets[#widgets+1]=entry.caption; widgets[#widgets+1]=entry.input end; for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.roller_action_buttons or {}) do widgets[#widgets+1]=button end
+  widgets[#widgets+1]=self.roller_session_best
   if not self.roller_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width=math.max(1,tonumber(layout.window_width) or 1200); local height=math.max(1,tonumber(layout.window_height) or 800); local margin=math.min(18,math.max(6,math.floor(math.min(width,height)*.025)))
   local panelWidth=math.min(820,math.max(1,width-margin*2)); local panelHeight=math.min(650,math.max(1,height-margin*2)); local x=math.floor((width-panelWidth)/2); local y=math.floor((height-panelHeight)/2)
@@ -2103,19 +2225,27 @@ function View:layoutRollerSettings(layout)
   place(self.roller_title,14,9,panelWidth-28,header-10); self.roller_title:echo(View.withFont("<b>AUTOROLLER SETTINGS</b>",font+2))
   local gap=10; local contentWidth=math.max(1,panelWidth-28); local compact=layout.mode=="compact"; local columns=not compact and panelWidth>=400 and 2 or 1; local columnWidth=columns==2 and (contentWidth-gap)/2 or contentWidth; local contentTop=header; local viewportHeight=math.max(1,panelHeight-header-footer); local rowHeight=42; local modeSectionHeight=compact and 110 or 64
   place(self.roller_content,14,contentTop,contentWidth,viewportHeight)
+  local actionGap=6; local actionWidth=(contentWidth-actionGap*2)/3; local actionHeight=math.max(30,font+20)
+  for index,key in ipairs({"roller_start","roller_stop","roller_stats"}) do place(self.roller_action_buttons[key],(index-1)*(actionWidth+actionGap),0,actionWidth,actionHeight) end
+  local sessionTop=actionHeight+8
+  local sessionHeight=math.max(self.roller_session_height or 0,self:renderRollerSession())
+  self.roller_session_height=sessionHeight
+  place(self.roller_session_best,0,sessionTop,contentWidth,sessionHeight)
+  local modeTop=sessionTop+sessionHeight+10
+  modeSectionHeight=modeSectionHeight+modeTop
   local modeGap=6
   if compact then
     local halfWidth=(contentWidth-modeGap)/2
-    place(self.roller_arrange_caption,0,0,contentWidth,28)
-    place(self.roller_arrange_buttons.manual,0,30,halfWidth,34)
-    place(self.roller_arrange_buttons.game_auto,halfWidth+modeGap,30,halfWidth,34)
-    place(self.roller_arrange_buttons.minimums,0,70,contentWidth,34)
+    place(self.roller_arrange_caption,0,modeTop,contentWidth,28)
+    place(self.roller_arrange_buttons.manual,0,modeTop+30,halfWidth,34)
+    place(self.roller_arrange_buttons.game_auto,halfWidth+modeGap,modeTop+30,halfWidth,34)
+    place(self.roller_arrange_buttons.minimums,0,modeTop+70,contentWidth,34)
   else
-    place(self.roller_arrange_caption,0,0,contentWidth,22)
+    place(self.roller_arrange_caption,0,modeTop,contentWidth,22)
     local modeWidth=(contentWidth-modeGap*2)/3
-    for index,mode in ipairs(self.roller_arrange_order) do place(self.roller_arrange_buttons[mode],(index-1)*(modeWidth+modeGap),24,modeWidth,34) end
+    for index,mode in ipairs(self.roller_arrange_order) do place(self.roller_arrange_buttons[mode],(index-1)*(modeWidth+modeGap),modeTop+24,modeWidth,34) end
   end
-  local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_start","roller_stop","roller_status","roller_show","roller_stats","roller_last","roller_reset","roller_help"}
+  local left={"target_total","hard_stop","max_rolls","reroll_delay","log_folder","master_file","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","roller_status","roller_show","roller_last","roller_reset","roller_help"}
   local right={"minimum_greats","minimum_good_plus","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   local function layoutColumn(items,column)
     local cx=(column-1)*(columnWidth+gap)
@@ -2399,6 +2529,7 @@ function View:renderColorOptions()
   return true
 end
 function View:showRollerSettings(config)
+  self.roller_session_height=nil
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
@@ -2433,6 +2564,7 @@ function View:saveMapSettings()
 end
 function View:hideRollerSettings() self.roller_settings_visible=false; self.roller_draft=nil; self.roller_error=nil; if self.layout then self:layoutRollerSettings(self.layout) end; return true end
 function View:renderRollerSettings(populate)
+  self:renderRollerSession()
   if not self.roller_draft then return true end; local t=self.settings.theme; local font=self.layout and math.max(10,(self.layout.body_font or 14)-3) or 11
   for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=key:match("^[A-Z]+$") and (self.roller_draft.min_stats or {})[key] or self.roller_draft[key]; if value==nil then value="off" end; field.caption:echo(View.withFont(field.label,font)); if populate and field.input.print then field.input:print(tostring(value)) end end
   for _,key in ipairs(self.roller_toggle_order) do local enabled=self.roller_draft[key]==true; local button=self.roller_toggles[key]; button:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
@@ -2677,7 +2809,7 @@ local reusableWidgetNames={
   "left_bg","identity","details","left","equipment","inventory","inventory_title","inventory_output","inventory_content","inventory_footer","inventory_scroll_footer","runes","runes_title","runes_output","runes_content","skills","skills_title","skills_output","skills_content","list_measure",
   "right","right_bg","right_title","vitals_right","hp","fatigue","carry","psi","web","room","mapper_frame","mapper","map_zoom_out","map_center","map_zoom_in","map_clear_all","compass_area","compass_center","utility_area","roundtime_bar","bottom","compact",
   "help_overlay","help_panel","help_bg","help_title","help_close","help_copy","help_output","help_content",
-  "roller_overlay","roller_panel","roller_bg","roller_content","roller_title","roller_status","roller_save","roller_cancel","roller_arrange_caption",
+  "roller_overlay","roller_panel","roller_bg","roller_content","roller_title","roller_status","roller_save","roller_cancel","roller_arrange_caption","roller_session_best",
   "latent_alert_overlay","latent_alert_panel","latent_alert_bg","latent_alert_title","latent_alert_text","latent_alert_close",
   "map_settings_overlay","map_settings_panel","map_settings_bg","map_settings_content","map_settings_title","map_settings_status","map_settings_save","map_settings_cancel","map_settings_clear_current","map_settings_clear_all","map_settings_library","map_settings_area_name","map_settings_subarea_name","map_settings_rename_area","map_settings_rename_subarea",
   "feedback_overlay","feedback_panel","feedback_bg","feedback_title","feedback_explanation","feedback_kind","feedback_summary_label","feedback_summary","feedback_details_label","feedback_details","feedback_status","feedback_send","feedback_cancel",
@@ -2767,6 +2899,7 @@ function View.validateReusable(candidate,settings)
   for index=1,#Navigation.utilities do if type(candidate.utility_buttons)~="table" or type(candidate.utility_buttons[index])~="table" or not reusableLabel(candidate.utility_buttons[index].label) then return nil,"preserved HUD utility controls are incomplete" end end
   local rollerRequired={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   for _,name in ipairs(rollerRequired) do local field=type(candidate.roller_fields)=="table" and candidate.roller_fields[name] or nil; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD autoroller view is incomplete" end end
+  if candidate.roller_session_best.parent~=candidate.roller_content then return nil,"preserved HUD autoroller session parent is invalid" end
   local mapSettingsRequired={"minimum_height","height_percent","maximum_height","zoom_step","zoom_min","zoom_max","walk_timeout","special_timeout"}
   if type(candidate.map_settings_field_order)~="table" or type(candidate.map_settings_fields)~="table" then return nil,"preserved HUD mapper settings are incomplete" end
   for index,name in ipairs(mapSettingsRequired) do local field=candidate.map_settings_fields[name]; if candidate.map_settings_field_order[index]~=name or type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD mapper settings are incomplete" end end
@@ -2782,6 +2915,7 @@ function View:prepareForReuse(settings)
   self.options_action_callback=nil; self.base_ui_status_callback=nil; self.feedback_callback=nil; self.copy_text_callback=nil; self.map_library_action_callback=nil
   self.map_collection_action_callback=nil; self.roller_settings_callback=nil; self.keybindings_settings_callback=nil; self.map_settings_callback=nil; self.map_settings_action_callback=nil
   self.map_zoom_callback=nil; self.map_clear_all_callback=nil
+  self.roller_session=nil; self.roller_session_height=nil
   -- Force the first refresh under the new runtime to repaint list content even
   -- when the character data itself did not change across the update.
   self.inventory_signature=nil; self.runes_signature=nil; self.skills_signature=nil
@@ -2808,6 +2942,7 @@ function View:delete()
   -- Native deletion may deliver callbacks before it returns. Retire this view
   -- first so retained closures cannot save preferences or repaint old labels.
   self.disposed=true; self.chat_settings_visible=false
+  self.roller_session=nil
   for key,value in pairs(self) do if type(key)=="string" and key:match("_callback$") and type(value)=="function" then self[key]=nil end end
   -- Rejected or partially constructed views may lack editor widgets. Their
   -- root still needs deleting before the replacement uses the same names.

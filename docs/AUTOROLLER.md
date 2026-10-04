@@ -267,7 +267,7 @@ rr help
 - `rr stop` cancels queued rolling and suppresses automatic action until you explicitly restart.
 - `rr status` gives a short, non-sensitive live report: active or inactive state, detected rolling protocol, current phase, what DGHUD is waiting for, session roll count, and auto-start state.
 - `rr show` displays the live status plus every current setting in grouped form. `rr config` and `rr settings` are equivalent aliases.
-- `rr stats` shows roll count, average, best, and worst.
+- `rr stats` shows roll count, average, best and worst complete rolls, and each characteristic's highest observed rank beside its saved minimum.
 - `rr last` shows the newest captured roll.
 - `rr reset` clears the current session statistics and state. It does not erase old log files.
 - `rr help` prints the short command summary.
@@ -366,6 +366,16 @@ Roll and arrange:
 `TARGET HIT` means DGHUD has stopped sending rerolls. It does not mean the character was accepted. Inspect the game screen and enter `done` yourself only when satisfied.
 
 ## Tips and tricks
+
+### See which minimums you have actually rolled
+
+Open **Options → Autoroller** while rolling. **SESSION BEST** at the top updates automatically, showing each characteristic's **Target**, **Best seen**, and the first roll that reached that high. A roll contributes only after its matching rolling decision prompt is confirmed, not from an incomplete table or assignment-method screen. You can leave this window open while the roller continues; updates to this display do not overwrite settings you are editing. The **SESSION BEST** button, or `rr stats`, prints the same breakdown in the main console.
+
+For example, after 425 rolls you might see **STR — Target: Great — Best seen: Good**. Unreached minimums are highlighted. After every 100 complete named-stat rolls, the roller also prints a reminder about any saved minimum it has never observed. This can help you investigate a race or profession restriction, but **the highest observed roll is not a confirmed limit**: a rarer higher result might still be possible. DGHUD does not lower your minimums or stop rolling because of this reminder. Review your settings yourself if the target appears unrealistic.
+
+Each characteristic's high may come from a different roll. These highs are not one character you can accept. Stopping preserves the breakdown for review; starting a new run after stopping, or using **RESET SESSION** / `rr reset`, clears it. After changing race or profession, use **STOP ROLLER**, then **START ROLLER** so you are comparing the right character. Pressing Start while already running does not reset the session. A change in the characteristic format resets that format's highs and sample count, so old VOI/APP or 12-slot samples cannot imply a limit for a newer screen. HUD reloads and profile restarts begin a fresh observed session. Old roll log files are not deleted.
+
+**Roll-and-arrange pools:** values have not been assigned to characteristics, so the display tracks the highest observed value in each sorted pool slot instead. Slot 1 means the highest value in a pool, not STR. It never uses an unassigned pool to claim a characteristic's limit, and pool-only sessions do not trigger per-stat minimum warnings.
 
 - Start broad, then tighten one rule at a time. This makes it obvious which setting makes a search too rare.
 - Use `rr stats` to judge whether a target is realistic for the rolls you are seeing.

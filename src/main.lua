@@ -191,7 +191,8 @@ function Main.installRollerApi(namespace)
   local function active() local root=rawget(_G,"DGHUD"); local controller=root and root.controller; return controller and controller.roller end
   api.command=function(action) local roller=active(); if not roller then return nil,"autoroller is not running" end; return roller:command(action) end
   api.configure=function(values) local roller=active(); if not roller then return nil,"autoroller is not running" end; return roller:configure(values) end
-  api.status=function() local roller=active(); if not roller then return nil,"autoroller is not running" end; local function copy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=copy(item) end; return out end; return {active=roller.state.active,rolls=roller.state.rolls,last=copy(roller.state.last),best=copy(roller.state.best),config=copy(roller.cfg)} end
+  api.status=function() local roller=active(); if not roller then return nil,"autoroller is not running" end; local function copy(value) if type(value)~="table" then return value end; local out={}; for key,item in pairs(value) do out[key]=copy(item) end; return out end; return {active=roller.state.active,rolls=roller.state.rolls,last=copy(roller.state.last),best=copy(roller.state.best),config=copy(roller.cfg),session=roller:sessionSummary()} end
+  api.session=function() local roller=active(); if not roller then return nil,"autoroller is not running" end; return roller:sessionSummary() end
   return api
 end
 local function runeCopy(item) return item and {name=item.name,remaining=item.remaining} or nil end
@@ -1232,6 +1233,8 @@ function Main:start()
   end,function(message)
     if self.adapter.alertLatentPsion then pcall(self.adapter.alertLatentPsion,self.adapter) end
     if self.view and self.view.showLatentPsionAlert then pcall(self.view.showLatentPsionAlert,self.view,message) end
+  end,function(summary)
+    if self.view and self.view.setRollerSession then self.view:setRollerSession(summary) end
   end)
   self.keybindings=Keybindings.new(self.adapter,self.settings.keybindings); self.keybindings:start()
   if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled,err=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
@@ -1266,7 +1269,7 @@ function Main:start()
     if action=="chat_sound_choice" then return self:setChatSound(key,"sound",wanted) end
     if action=="chat_sound_volume" then return self:setChatSoundVolume(wanted) end
     if action=="chat_sound_preview" then return self:previewChatSound(key,wanted) end
-    if action=="roller_settings" then return self.roller and self.roller.cfg end
+    if action=="roller_settings" then if self.roller then self.roller:notifySession(); return self.roller.cfg end; return nil end
     if action=="keybindings_settings" then return self.keybindings and self.keybindings:snapshot() end
     if action=="base_ui_toggle" then return self:setBaseUIVisible(not self:baseUIStatus().visible) end
     if action=="auto_update" then

@@ -37,6 +37,10 @@ Choose **OPTIONS → Refresh Character Data** or run `dghud refresh` whenever in
 
 The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a five-row scrollable Runes card above Skills. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
 
+## Autoroller session highs
+
+**Autoroller session breakdown:** Options → Autoroller shows a live **SESSION BEST** table comparing each characteristic's target with its highest observed rank. Unreached minimums are highlighted, with a reminder every 100 named-stat rolls. These are observations, not proven race/class caps; minimums never change automatically. Use the SESSION BEST button or `rr stats` for a console copy. Arranged pools are tracked separately and never attributed to named stats.
+
 ## Local build and install
 
 ### One-time safe upgrade from 0.3.15 or older
