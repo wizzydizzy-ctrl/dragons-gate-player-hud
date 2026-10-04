@@ -246,7 +246,15 @@ local function call(api, name, ...)
 end
 
 local function missing(err, code)
-  return err == nil or code == 2 or code == "ENOENT"
+  if code ~= nil then return tonumber(code) == 2 or code == "ENOENT" end
+  if err == nil then return true end
+  -- LuaFileSystem builds can return an absent-file message without errno.
+  -- Only known absence messages are harmless; permission/unknown errors still
+  -- fail closed and leave the existing preferences untouched.
+  local message = tostring(err):lower()
+  return message:match("no such file or directory%.?%s*$") ~= nil
+    or message:match("cannot find the file specified%.?%s*$") ~= nil
+    or message:match("cannot find the path specified%.?%s*$") ~= nil
 end
 
 local function nativeApi()

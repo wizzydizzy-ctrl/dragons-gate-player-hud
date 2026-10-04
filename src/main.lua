@@ -1459,7 +1459,7 @@ function Main:start()
   }
   for _,entry in ipairs(cleanupAliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(entry[1],entry[2]) end
   local transferAliases={
-    {"^dghud map library$",function() self.view:showMapLibrary(); self.view:setMapLibraryMode("library"); return self.view.map_library_actions.browse.click() end},
+    {"^dghud map library$",function() self.view:showMapLibrary(); self.view:setMapLibraryMode("library"); return self.view.map_library_action_callback("browse") end},
     {"^dghud map folder$",function() local path=self.adapter:openMapTransferFolder(); self:reportMapTransfer("Map folder: "..tostring(path),false); return path end},
     {"^dghud map export ([\\w_-]+) ([\\w-]+)$",function(value) local first,second;if type(value)=="table" then first,second=value[2],value[3] elseif type(_G.matches)=="table" then first,second=_G.matches[2],_G.matches[3] end; return self:exportMapTransfer(first,second) end},
     {"^dghud map import ([\\w_-]+)$",function(value) return self:previewMapTransfer(aliasArgument(value)) end},

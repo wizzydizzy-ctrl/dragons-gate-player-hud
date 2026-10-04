@@ -404,6 +404,43 @@ test("color preferences fail closed on permission and read errors", function()
   reject(Preferences.load, HOME, api)
 end)
 
+test("color preferences recognize absent-file messages without errno", function()
+  for _,message in ipairs({
+    "cannot obtain information from file '/profile/DGHUDData/color-settings.dat': No such file or directory",
+    "The system cannot find the file specified.",
+    "The system cannot find the path specified.",
+  }) do
+    local api = fake()
+    api.symlinkattributes = function(path)
+      if path == HOME or path == DIR then return {mode="directory"} end
+      if api.files[path] ~= nil then return {mode="file"} end
+      return nil, message
+    end
+    api.read = function(path, limit)
+      if api.files[path] ~= nil then return api.files[path]:sub(1, limit) end
+      return nil, message
+    end
+    local value, err = Preferences.load(HOME, api)
+    eq(value, nil); eq(err, nil); eq(api.mutations, 0)
+    assert(Preferences.save(HOME, {enabled=false}, api))
+    eq(api.files[PATH], HEADER.."toggle|enabled|0\n")
+  end
+end)
+
+test("color preferences do not classify permission or ambiguous errors as absence", function()
+  for _,message in ipairs({"Permission denied", "Access is denied.", "Unknown filesystem error",
+    "cannot obtain information from file '/profile/No such file or directory/data': Permission denied"}) do
+    local api = fake({[PATH]=HEADER})
+    api.symlinkattributes = function() return nil, message end
+    reject(Preferences.load, HOME, api); reject(Preferences.save, HOME, {}, api)
+    eq(api.mutations, 0); eq(api.files[PATH], HEADER)
+  end
+  local api = fake({[PATH]=HEADER})
+  api.symlinkattributes = function() return nil, "No such file or directory", 13 end
+  reject(Preferences.load, HOME, api); reject(Preferences.save, HOME, {}, api)
+  eq(api.mutations, 0); eq(api.files[PATH], HEADER)
+end)
+
 test("color preferences request bounded reads and reject an oversized file", function()
   local api = fake({[PATH]=HEADER..string.rep("x", 100000)})
   reject(Preferences.load, HOME, api); reject(Preferences.save, HOME, {}, api)

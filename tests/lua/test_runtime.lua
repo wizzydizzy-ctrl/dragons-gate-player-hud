@@ -60,10 +60,11 @@ local function fake()
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
-    setMapLibraryActionCallback=function(self,callback) f.mapLibraryActionCallback=callback end,
+    setMapLibraryActionCallback=function(self,callback) self.map_library_action_callback=callback; f.mapLibraryActionCallback=callback end,
     showMapLibrary=function(self) f.mapLibraryShown=true; return true end,
     setMapLibraryMode=function(self,mode) f.mapLibraryMode=mode; return true end,
     setMapLibraryCatalog=function(self,entries,status) f.mapLibraryCatalog=entries; f.mapLibraryCatalogStatus=status; return true end,
+    setMapLibraryImportPending=function(self,pending) self.map_library_import_pending=pending==true; return true end,
     setRollerSettingsCallback=function(self,callback) f.rollerSettingsCallback=callback end,
     setRollerSession=function(self,summary) f.rollerSession=require("settings").merge({},summary); f.rollerSessionUpdates=(f.rollerSessionUpdates or 0)+1; return true end,
     setMapCenterCallback=function(self,callback) f.mapCenterCallback=callback end,
@@ -72,7 +73,7 @@ local function fake()
     setMapClearPending=function(self,pending) f.mapClearPending=pending end,
     centerMap=function(self,roomID) f.centeredRooms=f.centeredRooms or {}; f.centeredRooms[#f.centeredRooms+1]=roomID; return true end,
     delete=function() f.deleted=f.deleted+1 end,
-  }; view.map_library_actions={browse={click=function() return f.mapLibraryActionCallback("browse") end}}; return view end
+  }; view.map_library_actions={browse={clickCallback=function() return view.map_library_action_callback("browse") end}}; return view end
   function f:adoptView(view,settings) self.viewAdoptions=(self.viewAdoptions or 0)+1; view.adoptedSettings=settings; return view end
   function f:addEvent(name,fn) self.next=self.next+1; self.callbacks[name]=fn; local id="event-"..self.next; self.events[id]=name; return id end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end
@@ -1634,8 +1635,55 @@ test("help alias opens the owned responsive guide",function()
   local f=fake(); local shown=0; local view=f:createView(); function view:showHelp() shown=shown+1; return true end; function f:createView() return view end
   local hud=Main.new(f,{layout={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud help$")()); eq(shown,1); hud:shutdown()
 end)
-test("map library alias opens and loads the in-HUD library without a browser",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud map library$")()); eq(f.mapLibraryShown,true); eq(f.mapLibraryMode,"library"); eq(type(f.mapLibraryCatalog),"table"); hud:shutdown()
+test("map library alias loads a validated catalog directly without label clicks",function()
+  local f=fake(); local complete,requests
+  function f:fetchMapCatalog(done)
+    requests=(requests or 0)+1; complete=done
+    eq(self.mapLibraryShown,true); eq(self.mapLibraryMode,"library")
+    eq(#self.mapLibraryCatalog,0); eq(self.mapLibraryCatalogStatus,"Loading community map catalog…")
+    return true
+  end
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  eq(hud.view.map_library_actions.browse.click,nil)
+  hud.view.map_library_actions.browse.clickCallback=function() error("command invoked a label callback") end
+  hud.view:setMapLibraryImportPending(true)
+  local browse=assert(aliasCallback(f,"^dghud map library$")); assert(browse())
+  eq(requests,1); eq(hud.view.map_library_import_pending,false)
+  complete({schema=2,maps={{slug="test-map",name="Test Map",author="Test Author",publisher="test-author",description="",version="1.0.0",areas={"Test Area"},room_count=1,bytes=100,sha256=string.rep("a",64),download_url="https://raw.githubusercontent.com/wizzydizzy-ctrl/dragons-gate-map-library/main/maps/test-author/test-map.json"}}})
+  eq(#f.mapLibraryCatalog,1); eq(f.mapLibraryCatalog[1].name,"Test Map")
+  eq(f.mapLibraryCatalog[1].scope,"full_map"); eq(hud.map_catalog.maps,f.mapLibraryCatalog)
+  assert(hud:reload()); hud.view.map_library_actions=nil
+  assert(aliasCallback(f,"^dghud map library$")()); eq(requests,2)
+  complete({schema=2,maps={}}); eq(#f.mapLibraryCatalog,0)
+  eq(f.sent,nil); eq(f.submittedFeedback,nil); hud:shutdown()
+end)
+test("map library alias returns catalog start failures through the controller",function()
+  local f=fake(); function f:fetchMapCatalog() return nil,"catalog download unavailable" end
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local started,err=aliasCallback(f,"^dghud map library$")()
+  eq(started,nil); eq(err,"catalog download unavailable")
+  eq(f.mapLibraryShown,true); eq(f.mapLibraryMode,"library"); eq(#f.mapLibraryCatalog,0)
+  eq(f.mapLibraryCatalogStatus,"Could not load library: "..err)
+  local report=assert(hud.failure_reports:lastReport()); eq(report.category,"map_library")
+  eq(report.context.operation,"browse"); eq(report.context.stage,"start")
+  eq(f.submittedFeedback,nil); hud:shutdown()
+end)
+test("map library alias retains asynchronous download and validation failure handling",function()
+  for _,failure in ipairs({
+    {message="catalog request failed",stage="download"},
+    {raw={schema=99,maps={}},stage="validation"},
+  }) do
+    local f=fake(); local complete
+    function f:fetchMapCatalog(done) complete=done; return true end
+    local hud=Main.new(f,{layout={}}); assert(hud:start())
+    assert(aliasCallback(f,"^dghud map library$")())
+    complete(failure.raw,failure.message)
+    eq(#f.mapLibraryCatalog,0); eq(hud.map_catalog,nil)
+    assert(f.mapLibraryCatalogStatus:find(failure.message or "invalid map catalog",1,true))
+    local report=assert(hud.failure_reports:lastReport()); eq(report.category,"map_library")
+    eq(report.context.operation,"browse"); eq(report.context.stage,failure.stage)
+    eq(f.submittedFeedback,nil); hud:shutdown()
+  end
 end)
 test("map debug alias submits a sanitized diagnostic anonymously",function()
   local f=fake(); local hud=Main.new(f,{layout={},edition="player",version="test",mapper={}}); assert(hud:start()); assert(aliasCallback(f,"^dghud map debug$")()); eq(f.submittedFeedback.kind,"feedback"); eq(f.submittedFeedback.summary,"Automatic mapper diagnostic"); eq(f.submittedFeedback.details:find("DGHUD mapper diagnostic",1,true)~=nil,true); eq(f.cleanupReports[#f.cleanupReports].message:find("DG%-MAP")~=nil,true); hud:shutdown()

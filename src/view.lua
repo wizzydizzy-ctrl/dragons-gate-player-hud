@@ -2865,7 +2865,9 @@ function View.validateReusable(candidate,settings)
   if type(candidate.custom_highlight_rules)~="table" or type(candidate.custom_highlight_rows)~="table" or type(candidate.custom_highlight_fields)~="table" or type(candidate.custom_highlight_toggles)~="table" or type(candidate.custom_highlight_palette_targets)~="table" or type(candidate.custom_highlight_swatches)~="table" or type(candidate.custom_highlight_toggle_order)~="table" then return nil,"preserved HUD custom highlights are incomplete" end
   if #candidate.custom_highlight_rules>50 or #candidate.custom_highlight_rows<#candidate.custom_highlight_rules then return nil,"preserved HUD custom highlights are incomplete" end
   for index=1,#candidate.custom_highlight_rules do if not reusableLabel(candidate.custom_highlight_rows[index]) then return nil,"preserved HUD custom highlight row is incomplete" end end
-  for index,row in ipairs(candidate.custom_highlight_rows) do if not reusableLabel(row) or not row.parent or row.parent~=candidate.custom_highlight_list then return nil,"preserved HUD custom highlight row is incomplete" end end
+  -- Geyser's .parent refers to a superclass; .container owns the widget.
+  -- Validate actual containment without mistaking inheritance for corruption.
+  for index,row in ipairs(candidate.custom_highlight_rows) do if not reusableLabel(row) or row.container~=candidate.custom_highlight_list then return nil,"preserved HUD custom highlight row is incomplete" end end
   for _,key in ipairs({"foreground","background"}) do
     local field=candidate.custom_highlight_fields[key]
     if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) or not reusableLabel(candidate.custom_highlight_palette_targets[key]) then return nil,"preserved HUD custom highlight inputs are incomplete" end
@@ -2899,7 +2901,7 @@ function View.validateReusable(candidate,settings)
   for index=1,#Navigation.utilities do if type(candidate.utility_buttons)~="table" or type(candidate.utility_buttons[index])~="table" or not reusableLabel(candidate.utility_buttons[index].label) then return nil,"preserved HUD utility controls are incomplete" end end
   local rollerRequired={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   for _,name in ipairs(rollerRequired) do local field=type(candidate.roller_fields)=="table" and candidate.roller_fields[name] or nil; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD autoroller view is incomplete" end end
-  if candidate.roller_session_best.parent~=candidate.roller_content then return nil,"preserved HUD autoroller session parent is invalid" end
+  if candidate.roller_session_best.container~=candidate.roller_content then return nil,"preserved HUD autoroller session parent is invalid" end
   local mapSettingsRequired={"minimum_height","height_percent","maximum_height","zoom_step","zoom_min","zoom_max","walk_timeout","special_timeout"}
   if type(candidate.map_settings_field_order)~="table" or type(candidate.map_settings_fields)~="table" then return nil,"preserved HUD mapper settings are incomplete" end
   for index,name in ipairs(mapSettingsRequired) do local field=candidate.map_settings_fields[name]; if candidate.map_settings_field_order[index]~=name or type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD mapper settings are incomplete" end end

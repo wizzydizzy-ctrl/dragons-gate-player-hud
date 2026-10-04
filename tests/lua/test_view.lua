@@ -240,7 +240,7 @@ end)
 local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   glyphWidth=tonumber(glyphWidth) or 6
   local function widget(cons,parent,kind)
-    local item={name=cons.name,parent=parent,kind=kind,visible=true,echoes={},currentScroll=0,lastLine=0}
+    local item={name=cons.name,parent=parent,container=parent,kind=kind,visible=true,echoes={},currentScroll=0,lastLine=0}
     function item:setStyleSheet(value) self.style=value end
     function item:move(x,y) self.x=x; self.y=y end
     function item:resize(width,height) self.width=width; self.height=height end
@@ -1818,8 +1818,44 @@ test("autoroller reserves wrapped metrics and warning space at narrow widths and
 end)
 
 test("autoroller rejects a preserved summary label in the wrong scroll container",function()
-  local view=chatView(); view.roller_session_best.parent=view.root
+  local view=chatView(); view.roller_session_best.container=view.root
   local valid,err=View.validateReusable(view,view.settings); eq(valid,nil); assert(err:find("autoroller session parent",1,true))
+end)
+
+test("reusable view uses Geyser containers rather than superclass parents",function()
+  withColorViewAdapter(function(adapter,settings)
+    local view=adapter:createView(settings); local root=view.root
+    view:setColorStyles({custom_rules={{phrase="gate",foreground="#FFFFFF",background=false,bold=false,underline=false,enabled=true}}})
+    -- Real Geyser stores the owner in .container and inherits .parent from
+    -- its widget class. setClickCallback stores .clickCallback, not .click.
+    local superclass={name="WindowClass"}
+    for _,widget in ipairs({view.roller_session_best,view.custom_highlight_rows[1]}) do
+      local owner=widget.container
+      widget.parent=nil
+      setmetatable(widget,{__index={parent=superclass}})
+      widget.clickCallback=widget.click; widget.click=nil
+      eq(widget.parent,superclass); eq(widget.container,owner)
+    end
+    assert(View.validateReusable(view,settings))
+    eq(assert(adapter:adoptView(view,settings)),view); eq(view.root,root); eq(root.deleted,nil)
+    assert(View.validateReusable(view,settings))
+  end)
+end)
+
+test("reusable view rejects missing and mismatched actual containers",function()
+  for _,missing in ipairs({false,true}) do
+    local view=chatView()
+    view.roller_session_best.parent=view.roller_content
+    if missing then view.roller_session_best.container=nil else view.roller_session_best.container=view.root end
+    local valid,err=View.validateReusable(view,view.settings)
+    eq(valid,nil); assert(err:find("autoroller session parent",1,true))
+    view=chatView()
+    view:setColorStyles({custom_rules={{phrase="gate",foreground="#FFFFFF",background=false,bold=false,underline=false,enabled=true}}})
+    view.custom_highlight_rows[1].parent=view.custom_highlight_list
+    if missing then view.custom_highlight_rows[1].container=nil else view.custom_highlight_rows[1].container=view.root end
+    valid,err=View.validateReusable(view,view.settings)
+    eq(valid,nil); assert(err:find("custom highlight row",1,true))
+  end
 end)
 
 test("autoroller settings modal validates through one save callback and remains bounded",function()
