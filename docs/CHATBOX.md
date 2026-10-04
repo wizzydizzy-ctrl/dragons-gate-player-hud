@@ -24,18 +24,18 @@ A message can appear in more than one filter, but plays only one sound: its spec
 
 ## Built-in filters
 
-- **ALL** — Every captured category.
+- **ALL** — Captured categories enabled under **SHOW IN ALL**.
 - **ROOM** — Nearby speech and your own speech.
 - **PRIVATE** — Whispers, ESP, Dragon links, Secian links, and contact-style thoughts together.
 - **ESP** — ESP messages only.
 - **DRAGON** — Mental and Dragon link messages.
 - **CONTACT** — Thoughts echoing through the area.
 - **STAFF** — Recognized Guide, GM, Elder, sends, and voice formats.
-- **COMBAT** — Conservative incoming attacks, damage, movement blocks, spell threats, upkeep, recovery, and similar high-value combat lines.
+- **COMBAT** — Your attacks, incoming weapon attacks, hit/miss results, damage, movement blocks, spell threats, upkeep, and recovery. This tab keeps capturing and saving messages even when **SHOW IN ALL → COMBAT** is OFF.
 
 Drag any chat tab left or right to arrange the filters in the order you prefer. The order is saved for the whole Mudlet profile and survives character changes, reconnects, and HUD updates. A short click still selects the tab normally.
 
-If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too, and can be reordered after they appear. The built-in Combat filter uses the same narrow matching rules as DGHUD's optional combat coloring, so ordinary room prose is not copied into it.
+If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too, and can be reordered after they appear. Combat capture recognizes specific game messages independently of color settings; turning off a highlight does not stop chat capture. Ordinary room prose is not copied into COMBAT.
 
 ## Examples DGHUD recognizes
 

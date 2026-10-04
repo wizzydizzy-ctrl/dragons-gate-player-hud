@@ -3,7 +3,7 @@ local Parser=require("chat_parser")
 local History=require("chat_history")
 
 local function fake(entries)
-  local f={next=0,triggers={},timers={},storageAppends=0,storageClears=0,storageEntries=entries or {},storedCharacters={},errors=0,epochValue=100,timestampValue="2026-08-31T13:00:00-04:00",character="Dace Alterac",loadRecentCalls=0,loadedCharacterKeys={}}
+  local f={next=0,triggers={},timers={},storageAppends=0,storageClears=0,storageEntries=entries or {},appendedEntries={},storedCharacters={},errors=0,epochValue=100,timestampValue="2026-08-31T13:00:00-04:00",character="Dace Alterac",loadRecentCalls=0,loadedCharacterKeys={}}
   function f:addLineTrigger(fn) if self.triggerFailure then error(self.triggerFailure) end; self.next=self.next+1; local id="trigger-"..self.next; self.triggers[id]=fn; return id end
   function f:killTrigger(id) self.triggers[id]=nil end
   function f:line(value) for _,fn in pairs(self.triggers) do fn(value) end end
@@ -27,6 +27,7 @@ local function fake(entries)
     f.storageAppends=f.storageAppends+1
     f.storedCharacters[#f.storedCharacters+1]=entry.character
     if f.storageFailure then return nil,"disk full" end
+    f.appendedEntries[#f.appendedEntries+1]=entry
     return true
   end
   function f.storage:clearProfileHistory(confirmed)
@@ -40,6 +41,229 @@ end
 local function makeController(f,onChange,onAccepted,allSources)
   return Controller.new(f,Parser,History.new(1000,3),f.storage,onChange or function() end,function() return f.character end,allSources,onAccepted)
 end
+
+local sourceCases={
+  {category="COMBAT",source="COMBAT",line="Your head takes 8 points of impact damage!",nextLine="The dark hound claws at you!"},
+  {category="ROOM",source="ROOM",line='Aerin says, "First room message."',nextLine='Aerin asks, "Second room message?"',combined="ROOM"},
+  {category="OWN",source="ROOM",line='Dace Alterac says, "First own message."',nextLine='You ask Aerin, "Second own message?"',combined="ROOM"},
+  {category="WHISPER",source="WHISPER",line='Aerin whispers to you, "First whisper."',nextLine='Aerin whispers to you, "Second whisper."',combined="PRIVATE"},
+  {category="ESP",source="ESP",line='Tekk (ESP): "First ESP message."',nextLine='Tekk (ESP): "Second ESP message."',combined="PRIVATE"},
+  {category="DRAGON",source="DRAGON",line='You pick up Losmir\'s mental link, "First dragon message."',nextLine='You pick up Losmir\'s mental link, "Second dragon message."',combined="PRIVATE"},
+  {category="SECIAN",source="SECIAN",line='You pick up Shayla\'s Secian link, "First Secian message." [r-1]',nextLine='You pick up Shayla\'s Secian link, "Second Secian message." [r-1]',combined="PRIVATE"},
+  {category="CONTACT",source="CONTACT",line='Seaux thinks to you, "First contact message."',nextLine='Seaux thinks to you, "Second contact message."',combined="PRIVATE"},
+  {category="STAFF",source="STAFF",line="[GUIDE] Aerin: First staff message.",nextLine="[GM] Aerin: Second staff message."},
+}
+
+local function allSources(overrides)
+  local sources={}
+  for category,enabled in pairs(require("defaults").chat.all_sources) do sources[category]=enabled end
+  for category,enabled in pairs(overrides or {}) do sources[category]=enabled end
+  return sources
+end
+
+local function hiddenSources()
+  local sources=allSources()
+  for category in pairs(sources) do sources[category]=false end
+  return sources
+end
+
+local function sameEntries(actual,expected)
+  eq(#actual,#expected)
+  for index,entry in ipairs(expected) do
+    for _,field in ipairs({"schema","timestamp","character","category","speaker","target","language","message","line","source"}) do
+      eq(actual[index][field],entry[field])
+    end
+  end
+end
+
+for _,case in ipairs(sourceCases) do
+  test("hiding "..case.category.." in ALL preserves owned-trigger capture storage and its own filter",function()
+    local f=fake(); local accepted={}; local redraws={}
+    local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,
+      function(entry) accepted[#accepted+1]=entry end,allSources({[case.source]=false}))
+    if case.category=="COMBAT" then eq(require("defaults").chat.all_sources.COMBAT,false) end
+    assert(controller:start()); eq(f:count(f.triggers),1)
+    f:line("\27[32m"..case.line.."\27[0m")
+    eq(#accepted,1); eq(f.storageAppends,1); eq(#f.appendedEntries,1)
+    local entry=accepted[1]
+    eq(entry.category,case.category); eq(entry.source,"builtin"); eq(entry.line,case.line)
+    eq(entry.character,f.character); eq(entry.timestamp,f.timestampValue)
+    eq(controller.history.items[1],entry); eq(f.appendedEntries[1],entry)
+    eq(#controller:entries(),0); eq(#redraws[#redraws],0)
+    eq(table.concat(controller.history:categories(),","),case.category)
+    assert(controller:setFilter(case.category)); sameEntries(controller:entries(),accepted)
+    if case.combined then assert(controller:setFilter(case.combined)); sameEntries(controller:entries(),accepted) end
+    eq(f.storageAppends,1); eq(#accepted,1); eq(f.loadRecentCalls,1)
+    assert(controller:shutdown()); eq(f:count(f.triggers),0)
+  end)
+
+  test("live "..case.category.." ALL source toggles retain past and future captures",function()
+    local f=fake(); local accepted={}; local redraws={}
+    local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,
+      function(entry) accepted[#accepted+1]=entry end,allSources({[case.source]=false}))
+    assert(controller:start()); local trigger=controller.trigger
+    f:line(case.line); eq(#controller:entries(),0); eq(f.storageAppends,1)
+    assert(controller:setAllSources(allSources({[case.source]=true})))
+    sameEntries(controller:entries(),accepted); sameEntries(redraws[#redraws],accepted)
+    f.epochValue=104; f:line(case.nextLine); eq(#accepted,2)
+    sameEntries(controller:entries(),accepted)
+    assert(controller:setAllSources(allSources({[case.source]=false})))
+    eq(#controller:entries(),0); eq(#redraws[#redraws],0)
+    assert(controller:setFilter(case.category)); sameEntries(controller:entries(),accepted)
+    assert(controller:setAllSources(allSources({[case.source]=true})))
+    eq(controller.filter,case.category); sameEntries(controller:entries(),accepted)
+    assert(controller:setAllSources(allSources({[case.source]=false})))
+    eq(controller.filter,case.category); sameEntries(controller:entries(),accepted)
+    assert(controller:setFilter("ALL"))
+    f.epochValue=108; f:line(case.line); eq(#accepted,3); eq(#controller:entries(),0)
+    assert(controller:setAllSources(allSources({[case.source]=true})))
+    sameEntries(controller:entries(),accepted); sameEntries(redraws[#redraws],accepted)
+    sameEntries(controller.history:entries("ALL"),accepted); sameEntries(f.appendedEntries,accepted)
+    eq(accepted[1].line,case.line); eq(accepted[2].line,case.nextLine); eq(accepted[3].line,case.line)
+    eq(f.storageAppends,3); eq(f.storageClears,0); eq(f.loadRecentCalls,1)
+    eq(controller.trigger,trigger); eq(f:count(f.triggers),1)
+    assert(controller:shutdown())
+  end)
+end
+
+test("real weapon swings own attacks and attack results are captured while COMBAT is hidden in ALL",function()
+  local f=fake(); local accepted={}; local redraws={}
+  local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,
+    function(entry) accepted[#accepted+1]=entry end,allSources({COMBAT=false}))
+  assert(controller:start()); local trigger=controller.trigger
+  local lines={
+    "The academy bully swings a jagged quartz rock at you!",
+    "The enticing forest siren punches at you!",
+    "You swing your two-handed simple wooden broadsword at the fighting puppet!",
+    "The attack is a well-delivered blow to the torso.",
+    "The swing barely misses.",
+  }
+  for index,line in ipairs(lines) do
+    f.epochValue=100+index*4; f:line("\27[32m"..line.."\27[0m")
+    eq(#accepted,index); eq(f.storageAppends,index); eq(#f.appendedEntries,index)
+    local entry=accepted[index]
+    eq(entry.category,"COMBAT"); eq(entry.source,"builtin"); eq(entry.message,line); eq(entry.line,line)
+    eq(f.appendedEntries[index],entry); eq(controller.history.items[index],entry)
+    eq(#controller:entries(),0); eq(#redraws[#redraws],0)
+  end
+  assert(controller:setFilter("COMBAT")); sameEntries(controller:entries(),accepted)
+  assert(controller:setFilter("ALL")); eq(#controller:entries(),0)
+  assert(controller:setAllSources(allSources({COMBAT=true}))); sameEntries(controller:entries(),accepted)
+  assert(controller:setAllSources(allSources({COMBAT=false}))); eq(#controller:entries(),0)
+  sameEntries(controller.history:entries("ALL"),accepted); sameEntries(f.appendedEntries,accepted)
+  eq(f.storageAppends,#lines); eq(f.storageClears,0); eq(controller.trigger,trigger)
+  assert(controller:shutdown())
+end)
+
+test("profile reload hydrates hidden sources and continues capturing them",function()
+  local first=fake(); local original=makeController(first,nil,nil,hiddenSources())
+  assert(original:start())
+  for _,case in ipairs(sourceCases) do first:line(case.line) end
+  eq(#original:entries(),0); eq(first.storageAppends,#sourceCases)
+  local stored=first.appendedEntries; eq(#stored,#sourceCases)
+  sameEntries(original.history:entries("ALL"),stored); assert(original:shutdown())
+
+  local second=fake(stored); local accepted={}
+  local restored=makeController(second,nil,function(entry) accepted[#accepted+1]=entry end,hiddenSources())
+  assert(restored:start()); eq(#restored:entries(),0); eq(second.loadRecentCalls,1)
+  eq(second.storageAppends,0); eq(#accepted,0)
+  sameEntries(restored.history:entries("ALL"),stored)
+  for index,case in ipairs(sourceCases) do
+    local expected=case.category=="ROOM" and {stored[2],stored[3]} or {stored[index]}
+    assert(restored:setFilter(case.category)); sameEntries(restored:entries(),expected)
+  end
+  assert(restored:setFilter("ALL")); second.character="Gia"; assert(restored:syncCharacter())
+  eq(#restored:entries(),0); sameEntries(restored.history:entries("ALL"),stored); eq(second.loadRecentCalls,1)
+  second:line(sourceCases[1].nextLine)
+  eq(second.storageAppends,1); eq(#accepted,1); eq(accepted[1].category,"COMBAT"); eq(accepted[1].character,"Gia")
+  eq(#restored:entries(),0); assert(restored:setFilter("COMBAT"))
+  sameEntries(restored:entries(),{stored[1],accepted[1]})
+  assert(restored:setFilter("ALL")); local sources=hiddenSources(); sources.COMBAT=true
+  assert(restored:setAllSources(sources)); sameEntries(restored:entries(),{stored[1],accepted[1]})
+  eq(second.storageClears,0); assert(restored:shutdown())
+end)
+
+test("handoff retains every hidden source and preserves later capture without reloading storage",function()
+  local first=fake(); local original=makeController(first,nil,nil,hiddenSources())
+  assert(original:start())
+  for _,case in ipairs(sourceCases) do first:line(case.line) end
+  eq(#original:entries(),0); eq(first.storageAppends,#sourceCases)
+  local stored=first.appendedEntries; local handoff=original:handoff()
+  eq(handoff.filter,"ALL"); sameEntries(handoff.entries,stored)
+  assert(original:shutdown()); eq(first:count(first.triggers),0)
+
+  local second=fake(); local accepted={}; local restored=makeController(second,nil,
+    function(entry) accepted[#accepted+1]=entry end,hiddenSources())
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(restored.filter,"ALL"); eq(#restored:entries(),0); eq(#accepted,0)
+  eq(second.loadRecentCalls,0); eq(second.storageAppends,0)
+  sameEntries(restored.history:entries("ALL"),stored)
+  for index,case in ipairs(sourceCases) do
+    local expected=case.category=="ROOM" and {stored[2],stored[3]} or {stored[index]}
+    assert(restored:setFilter(case.category)); sameEntries(restored:entries(),expected)
+  end
+  assert(restored:setFilter("ALL")); second:line(sourceCases[#sourceCases].line)
+  eq(second.storageAppends,0); eq(#accepted,0)
+  second.epochValue=104; second:line(sourceCases[1].nextLine)
+  eq(second.storageAppends,1); eq(#accepted,1); eq(accepted[1].category,"COMBAT"); eq(#restored:entries(),0)
+  assert(restored:setFilter("COMBAT")); sameEntries(restored:entries(),{stored[1],accepted[1]})
+  assert(restored:setFilter("ALL")); assert(restored:setAllSources(allSources({COMBAT=true})))
+  local expected={}; for index,entry in ipairs(stored) do expected[index]=entry end; expected[#expected+1]=accepted[1]
+  sameEntries(restored:entries(),expected); sameEntries(restored:handoff().entries,expected)
+  eq(second.storageAppends,1); eq(second.storageClears,0); assert(restored:shutdown())
+end)
+
+test("partial ALL handoff merges persisted hidden COMBAT and deduplicates the visible ROOM overlap",function()
+  local first=fake(); local original=makeController(first,nil,nil,allSources())
+  assert(original:start()); first:line(sourceCases[1].line); first:line(sourceCases[2].line)
+  local stored=first.appendedEntries
+  eq(#stored,2); eq(stored[1].category,"COMBAT"); eq(stored[2].category,"ROOM")
+  local handoff=original:handoff()
+  handoff.partial=true; handoff.entries=original:entries()
+  eq(handoff.filter,"ALL"); sameEntries(handoff.entries,{stored[2]})
+  assert(original:shutdown())
+
+  local second=fake(stored); local accepted={}
+  local restored=makeController(second,nil,function(entry) accepted[#accepted+1]=entry end,allSources())
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(second.loadRecentCalls,1); eq(second.storageAppends,0); eq(#accepted,0)
+  eq(restored.allSources.COMBAT,false); eq(restored.filter,"ALL")
+  sameEntries(restored:entries(),{stored[2]}); sameEntries(restored.history:entries("ALL"),stored)
+  eq(table.concat(restored.history:categories(),","),"COMBAT,ROOM")
+  eq(restored.history.lastKey,handoff.last_key); eq(restored.history.lastEpoch,handoff.last_epoch)
+  second:line(sourceCases[2].line)
+  eq(second.storageAppends,0); eq(#accepted,0); sameEntries(restored.history:entries("ALL"),stored)
+  assert(restored:setFilter("COMBAT")); sameEntries(restored:entries(),{stored[1]})
+  assert(restored:setFilter("ALL")); assert(restored:setAllSources(allSources({COMBAT=true})))
+  sameEntries(restored:entries(),stored)
+  assert(restored:setAllSources(allSources())); sameEntries(restored:entries(),{stored[2]})
+  second.epochValue=104; second:line(sourceCases[1].nextLine)
+  eq(second.storageAppends,1); eq(#accepted,1); eq(accepted[1].category,"COMBAT")
+  sameEntries(restored:entries(),{stored[2]})
+  assert(restored:setFilter("COMBAT")); sameEntries(restored:entries(),{stored[1],accepted[1]})
+  sameEntries(restored:handoff().entries,{stored[1],stored[2],accepted[1]})
+  eq(second.loadRecentCalls,1); eq(second.storageClears,0); assert(restored:shutdown())
+end)
+
+test("authoritative cleared handoff skips persisted hidden sources and keeps the cleared view empty",function()
+  local first=fake(); local original=makeController(first,nil,nil,allSources())
+  assert(original:start()); first:line(sourceCases[1].line); first:line(sourceCases[2].line)
+  local stored=first.appendedEntries; eq(#stored,2)
+  assert(original:clearVisibleHistory()); local handoff=original:handoff()
+  eq(#handoff.entries,0); eq(handoff.partial,nil); assert(original:shutdown())
+
+  local second=fake(stored); local restored=makeController(second,nil,nil,allSources())
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(second.loadRecentCalls,0); eq(second.storageAppends,0); eq(second.storageClears,0)
+  eq(#restored:entries(),0); eq(#restored.history:entries("ALL"),0)
+  assert(restored:setFilter("COMBAT")); eq(#restored:entries(),0)
+  assert(restored:setFilter("ALL")); assert(restored:setAllSources(allSources({COMBAT=true})))
+  eq(#restored:entries(),0)
+  second:line(sourceCases[1].line)
+  eq(second.storageAppends,1); eq(#restored:entries(),1)
+  eq(restored:entries()[1].category,"COMBAT"); eq(restored:entries()[1].line,sourceCases[1].line)
+  assert(restored:shutdown())
+end)
 
 test("accepted callback receives each live entry once after history and storage append",function()
   local f=fake(); local accepted={}; local observations={}; local controller

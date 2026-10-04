@@ -26,9 +26,9 @@ local function captureChatHandoff(hud)
     if ok then handoff={schema=1,character_key=active.currentCharacterKey,filter=active.filter,entries=entries,last_key=active.history.lastKey,last_epoch=active.history.lastEpoch} end
   end
   if not handoff and type(hud._chat_handoff)=="table" then handoff=hud._chat_handoff end
-  if not handoff and controller and controller.view and type(controller.view.chat_entries)=="table" then handoff={schema=1,character_key="unknown",filter=controller.view.chat_active_filter,entries=controller.view.chat_entries} end
+  if not handoff and controller and controller.view and type(controller.view.chat_entries)=="table" then handoff={schema=1,partial=true,character_key="unknown",filter=controller.view.chat_active_filter,entries=controller.view.chat_entries} end
   if type(handoff)~="table" then return nil end
-  return {schema=1,character_key=handoff.character_key,filter=handoff.filter,entries=copyChatEntries(handoff.entries),last_key=handoff.last_key,last_epoch=handoff.last_epoch}
+  return {schema=1,partial=handoff.partial==true,character_key=handoff.character_key,filter=handoff.filter,entries=copyChatEntries(handoff.entries),last_key=handoff.last_key,last_epoch=handoff.last_epoch}
 end
 local chatHandoff=captureChatHandoff(previous)
 if updateReinstallPending and previous and type(previous.controller)=="table" then

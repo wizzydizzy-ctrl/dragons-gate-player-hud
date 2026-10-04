@@ -104,6 +104,78 @@ test("ALL source settings hide only selected categories and map OWN to ROOM",fun
   eq(#history:entries("ROOM",sources),2); eq(#history:entries("COMBAT",sources),1); eq(#history:entries("PRIVATE",sources),2)
 end)
 
+test("ALL source visibility changes never remove stored entries or category filters",function()
+  local history=History.new(20,3)
+  local categories={"COMBAT","ROOM","OWN","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","QUEST"}
+  local entries={}; local sources={}
+  for index,category in ipairs(categories) do
+    local entry={category=category,message=category=="COMBAT" and "Your head takes 8 points of impact damage!" or category}
+    entries[index]=entry; sources[category]=false; eq(history:append(entry,index),true)
+  end
+  local lastKey,lastEpoch=history.lastKey,history.lastEpoch
+  eq(#history:entries("ALL",sources),0)
+  for index,category in ipairs(categories) do
+    local source=category=="OWN" and "ROOM" or category
+    local filtered=history:entries(category,sources)
+    eq(#filtered,category=="ROOM" and 2 or 1); eq(filtered[1],entries[index])
+    if category=="ROOM" then eq(filtered[2],entries[3]) end
+    sources[source]=true
+    local visible=history:entries("ALL",sources)
+    eq(#visible,source=="ROOM" and 2 or 1)
+    if source=="ROOM" then eq(visible[1],entries[2]); eq(visible[2],entries[3]) else eq(visible[1],entries[index]) end
+    sources[source]=false; eq(#history:entries("ALL",sources),0)
+  end
+  eq(#history:entries("PRIVATE",sources),5); eq(#history.items,#entries)
+  for index,entry in ipairs(entries) do eq(history.items[index],entry) end
+  eq(table.concat(history:categories(),","),table.concat(categories,","))
+  eq(history.lastKey,lastKey); eq(history.lastEpoch,lastEpoch)
+  eq(#history:entries("ALL"),#entries)
+end)
+
+test("hidden COMBAT entries appended before and after live toggles keep their order and dedupe",function()
+  local history=History.new(10,3); local sources={COMBAT=false}
+  local first={category="COMBAT",message="Your head takes 8 points of impact damage!"}
+  local second={category="COMBAT",message="The dark hound claws at you!"}
+  eq(history:append(first,100),true); eq(#history:entries("ALL",sources),0)
+  sources.COMBAT=true; eq(history:entries("ALL",sources)[1],first)
+  eq(history:append(second,104),true); eq(#history:entries("ALL",sources),2)
+  local lastKey,lastEpoch=history.lastKey,history.lastEpoch
+  sources.COMBAT=false; eq(#history:entries("ALL",sources),0)
+  eq(#history:entries("COMBAT",sources),2)
+  eq(history:append(second,105),false); eq(history.lastKey,lastKey); eq(history.lastEpoch,lastEpoch)
+  eq(history:append(first,108),true); eq(#history:entries("ALL",sources),0)
+  sources.COMBAT=true
+  for _,filter in ipairs({"ALL","COMBAT"}) do
+    local entries=history:entries(filter,sources)
+    eq(#entries,3); eq(entries[1],first); eq(entries[2],second); eq(entries[3],first)
+  end
+  eq(table.concat(history:categories(),","),"COMBAT")
+end)
+
+test("hydration retains hidden source overlap and future live entries",function()
+  local history=History.new(10,3); local sources={COMBAT=false,ROOM=false,ESP=false,STAFF=false}
+  local damage={schema=1,timestamp="2026-08-31T12:00:00-04:00",category="COMBAT",message="Your head takes 8 points of impact damage!",source="builtin"}
+  local room={schema=1,timestamp="2026-08-31T12:01:00-04:00",category="ROOM",message="nearby",source="builtin"}
+  local esp={schema=1,timestamp="2026-08-31T12:02:00-04:00",category="ESP",message="private",source="builtin"}
+  local staff={schema=1,timestamp="2026-08-31T12:03:00-04:00",category="STAFF",message="staff",source="builtin"}
+  eq(history:append(esp,100),true); eq(history:append(staff,104),true)
+  local lastKey,lastEpoch=history.lastKey,history.lastEpoch
+  assert(history:hydrate({damage,room,esp})); eq(#history:entries("ALL",sources),0)
+  local expected={damage,room,esp,staff}
+  eq(#history.items,#expected)
+  for index,entry in ipairs(expected) do
+    eq(history.items[index],entry); eq(history:entries(entry.category,sources)[1],entry)
+  end
+  eq(table.concat(history:categories(),","),"COMBAT,ROOM,ESP,STAFF")
+  eq(history.lastKey,lastKey); eq(history.lastEpoch,lastEpoch); eq(history:append(staff,105),false)
+  local attack={category="COMBAT",message="The dark hound claws at you!",source="builtin"}
+  eq(history:append(attack,108),true); eq(#history:entries("ALL",sources),0)
+  sources.COMBAT=true
+  local visible=history:entries("ALL",sources)
+  eq(#visible,2); eq(visible[1],damage); eq(visible[2],attack)
+  eq(#history.items,5); eq(#history:entries("PRIVATE",sources),1)
+end)
+
 test("clears only the visible in-memory history and resets dedupe state",function()
   local history=History.new(10,3)
   local entry={category="ESP",speaker="Tekk",message="repeatable"}

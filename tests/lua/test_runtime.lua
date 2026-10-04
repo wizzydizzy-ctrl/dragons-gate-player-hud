@@ -786,6 +786,33 @@ test("ALL source toggles persist and never disable capture or dedicated tabs",fu
   DGHUD=nil
 end)
 
+test("Show in ALL controls only display for real combat output even with colors off",function()
+  DGHUD={user_settings={}}
+  local settings=Settings.resolve(require("defaults"),{colorization={enabled=false},chat={all_sources={COMBAT=false}}})
+  local f=fake(); local hud=Main.new(f,settings); assert(hud:start())
+  local function output(line) for _,fn in pairs(f.triggers) do fn(line) end end
+  local lines={
+    "The fighting puppet swings a sharpened dried bamboo stake at you!",
+    "You swing your simple wooden broadsword at the fighting puppet!",
+    "The swing is a well-delivered blow to the left arm.",
+  }
+  for _,line in ipairs(lines) do output(line) end
+  eq(f.chatStorageAppends,3); eq(#f.renderedChat.entries,0); eq(f.coloredSegments,nil)
+  assert(f.chatFilterCallback("COMBAT")); eq(f.renderedChat.filter,"COMBAT"); eq(#f.renderedChat.entries,3)
+  eq(f.optionsActionCallback("chat_all_source","COMBAT",true),true)
+  eq(f.renderedChat.filter,"COMBAT"); eq(#f.renderedChat.entries,3)
+  assert(f.chatFilterCallback("ALL")); eq(#f.renderedChat.entries,3)
+  eq(f.optionsActionCallback("chat_all_source","COMBAT",false),false)
+  eq(f.savedChatSettings.all_sources.COMBAT,false); eq(#f.renderedChat.entries,0)
+  output("The attack misses."); eq(f.chatStorageAppends,4); eq(#f.renderedChat.entries,0)
+  assert(f.chatFilterCallback("COMBAT")); eq(#f.renderedChat.entries,4)
+  assert(hud:reload()); eq(hud.settings.chat.all_sources.COMBAT,false)
+  assert(f.chatFilterCallback("COMBAT"))
+  eq(f.renderedChat.filter,"COMBAT"); eq(#f.renderedChat.entries,4); eq(f.chatStorageAppends,4)
+  for index,line in ipairs(lines) do eq(f.renderedChat.entries[index].line,line) end
+  assert(hud:shutdown()); DGHUD=nil
+end)
+
 local function withChatVisibilityRuntime(overrides,run)
   local previous=rawget(_G,"DGHUD")
   local f=fake(); local settings=Settings.resolve(require("defaults"),overrides)

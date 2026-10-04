@@ -97,7 +97,35 @@ local function parseAssistanceHandling(line,character,now)
 end
 
 local combatKinds={attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true}
+local combatActions={attack="attacks",swing="swings",slash="slashes",stab="stabs",bite="bites",claw="claws",kick="kicks",punch="punches",strike="strikes",shoot="shoots",fire="fires",breathe="breathes",charge="charges",pounce="pounces",throw="throws"}
+local combatResultKinds={"blow","gouge","kick","punch","shot","slash"}
+local function aimedAttack(line,actor,verb,target)
+  for _,preposition in ipairs({"at","towards"}) do
+    if line:match("^"..actor.." "..verb.." "..preposition.." "..target.."!$") or line:match("^"..actor.." "..verb.." .+ "..preposition.." "..target.."!$") then return true end
+  end
+  return false
+end
+
 local function parseCombat(line,character,now)
+  -- Chat capture is independent of highlight switches and ALL membership.
+  local lower=line:lower()
+  local narrative=lower:match("%f[%a]depicts%f[%A]") or lower:match("%f[%a]shows%f[%A]") or lower:match("%f[%a]reads%f[%A]")
+  if lower:sub(1,4)=="you " then
+    for own in pairs(combatActions) do
+      if aimedAttack(lower,"you",own,".+") then return builtIn("COMBAT",line,nil,character,now,line) end
+    end
+  elseif lower:sub(1,4)=="the " and not narrative then
+    for _,other in pairs(combatActions) do
+      if aimedAttack(lower,"the .+",other,"you") then return builtIn("COMBAT",line,nil,character,now,line) end
+    end
+  end
+  local action,result=lower:match("^the (%a+) (.+)$")
+  if action=="attack" or action=="swing" then
+    if result=="misses." or result=="barely misses." then return builtIn("COMBAT",line,nil,character,now,line) end
+    for _,kind in ipairs(combatResultKinds) do
+      if result:match("^is an? [%w %-]+ "..kind.." to the .+[%.!]$") then return builtIn("COMBAT",line,nil,character,now,line) end
+    end
+  end
   local segments=OutputColorizer.parse(line)
   for _,segment in ipairs(type(segments)=="table" and segments or {}) do
     if combatKinds[segment.kind] then return builtIn("COMBAT",line,nil,character,now,line) end

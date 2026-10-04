@@ -180,6 +180,37 @@ test("normalizes ANSI before parsing",function()
   eq(e.speaker,"Tekk"); eq(e.line,'Tekk (ESP): "ahhh and she returns"')
 end)
 
+test("captures weapon attacks and combat results independently of highlighting",function()
+  for _,line in ipairs({
+    "The fighting puppet swings a sharpened dried bamboo stake at you!",
+    "The academy bully punches at you!",
+    "You swing your two-handed simple wooden broadsword at the fighting puppet!",
+    "You kick at the academy bully!",
+    "You fire your bow at the academy bully!",
+    "The swing is a well-delivered blow to the left arm.",
+    "The swing is an exceptional blow to the head.",
+    "The attack is an amazing shot to the torso.",
+    "The attack is a decent punch to the torso.",
+    "The swing barely misses.",
+    "The attack misses.",
+    "The attack is a decent blow to the torso, but is totally deflected by your wooden shield!",
+  }) do
+    local e=assert(Parser.parse("\27[32m"..line.."\27[0m","Dace Alterac"),line)
+    eq(e.category,"COMBAT"); eq(e.message,line); eq(e.line,line); eq(e.source,"builtin")
+  end
+  for _,line in ipairs({
+    'Eilan says, "You swing your broadsword at the fighting puppet!"',
+    "The mural depicts a fighting puppet that swings a stake at you!",
+    "The sign reads: The attack misses.",
+    "You swing the gate open.",
+    "The fighting puppet swings a stake at Atrax!",
+    "You now feel prepared to train further in Sharp Weapons.",
+  }) do
+    local e=Parser.parse(line,"Dace Alterac")
+    eq(e and e.category=="COMBAT" or false,false)
+  end
+end)
+
 test("captures only conservatively recognized combat lines",function()
   local damage=assert(Parser.parse("Your head takes 8 points of impact damage!","Dace Alterac"))
   eq(damage.category,"COMBAT"); eq(damage.message,"Your head takes 8 points of impact damage!"); eq(damage.source,"builtin")

@@ -182,6 +182,50 @@ test("replacement entry carries live chat history and filter into the new contro
     dofile("src/entry.lua")
     eq(DGHUD.controller.chat_handoff.character_key,"wizzy"); eq(DGHUD.controller.chat_handoff.filter,"DRAGON")
     eq(DGHUD.controller.chat_handoff.entries[1].message,"still visible"); eq(DGHUD._chat_handoff,nil)
+    eq(DGHUD.controller.chat_handoff.partial,false)
+  end)
+end)
+test("replacement entry marks bounded sanitized view-only chat as partial",function()
+  withEntryStubs(function()
+    local entries={}
+    for index=1,1002 do entries[index]={category="DRAGON",message="visible "..index} end
+    entries[3].epoch=100; entries[3].confirmed=true
+    entries[3].nested={private=true}; entries[3].callback=function() end; entries[3][1]="discard"
+    DGHUD={user_settings={},controller={view={chat_entries=entries,chat_active_filter="DRAGON"}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    local handoff=DGHUD.controller.chat_handoff
+    eq(handoff.partial,true); eq(handoff.character_key,"unknown"); eq(handoff.filter,"DRAGON")
+    eq(#handoff.entries,1000); eq(handoff.entries[1].message,"visible 3"); eq(handoff.entries[1000].message,"visible 1002")
+    eq(handoff.entries[1].epoch,100); eq(handoff.entries[1].confirmed,true)
+    eq(handoff.entries[1].nested,nil); eq(handoff.entries[1].callback,nil); eq(handoff.entries[1][1],nil)
+    assert(handoff.entries~=entries); assert(handoff.entries[1]~=entries[3])
+    eq(#entries,1002); eq(entries[3].nested.private,true)
+  end)
+end)
+test("replacement entry preserves a passed partial chat handoff across failure and retry",function()
+  withEntryStubs(function(context)
+    local handoff={schema=1,partial=true,character_key="wizzy",filter="DRAGON",entries={{category="DRAGON",message="preserved"}},last_key="dedupe",last_epoch=100}
+    DGHUD={user_settings={},_chat_handoff=handoff,controller={view={chat_entries={{message="stale view"}}}},shutdown=function() return true end}
+    context.install("defaults",function() error("replacement require failed") end)
+    eq(pcall(dofile,"src/entry.lua"),false)
+    eq(DGHUD._chat_handoff.partial,true); eq(DGHUD._chat_handoff.entries[1].message,"preserved")
+    assert(DGHUD._chat_handoff~=handoff); assert(DGHUD._chat_handoff.entries[1]~=handoff.entries[1])
+    context.install("defaults",context.stubs.defaults)
+    eq(pcall(dofile,"src/entry.lua"),true)
+    local restored=DGHUD.controller.chat_handoff
+    eq(restored.partial,true); eq(restored.character_key,"wizzy"); eq(restored.filter,"DRAGON")
+    eq(restored.entries[1].message,"preserved"); eq(restored.last_key,"dedupe"); eq(restored.last_epoch,100)
+    eq(DGHUD._chat_handoff,nil)
+  end)
+end)
+test("replacement entry keeps an empty full controller chat handoff authoritative",function()
+  withEntryStubs(function()
+    local handoff={schema=1,character_key="wizzy",filter="ALL",entries={}}
+    local retiring={chat={handoff=function() return handoff end,history={entries=function() error("must use controller handoff") end}},view={chat_entries={{message="stale view"}}}}
+    DGHUD={user_settings={},_chat_handoff={partial=true,entries={{message="stale partial"}}},controller=retiring,shutdown=function() return true end}
+    dofile("src/entry.lua")
+    local restored=DGHUD.controller.chat_handoff
+    eq(restored.partial,false); eq(restored.character_key,"wizzy"); eq(restored.filter,"ALL"); eq(#restored.entries,0)
   end)
 end)
 

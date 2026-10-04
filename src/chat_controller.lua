@@ -163,6 +163,13 @@ function Controller:restoreHandoff(handoff)
   local filter=self.parser.category(handoff.filter) or "ALL"
   local key="profile"
   self.history:hydrate(copyEntries(handoff.entries))
+  if handoff.partial==true then
+    -- A view-only snapshot omits sources hidden from ALL. Restore their saved
+    -- records too; a full handoff must still preserve an explicitly cleared view.
+    local recent,loadErr=call(self.storage,"loadRecent")
+    if loadErr then self:reportStorageError(loadErr) end
+    self.history:hydrate(type(recent)=="table" and recent or {})
+  end
   self.history.lastKey=type(handoff.last_key)=="string" and handoff.last_key or nil
   self.history.lastEpoch=tonumber(handoff.last_epoch)
   self.filter=filter
