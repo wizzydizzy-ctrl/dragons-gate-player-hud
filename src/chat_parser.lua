@@ -76,6 +76,13 @@ local function builtIn(category,message,metadata,character,now,line)
   return entry(category,message,metadata,character,now,"builtin",line)
 end
 
+local playerStats={strength=true,intelligence=true,wisdom=true,dexterity=true,agility=true,constitution=true,charisma=true,will=true,presence=true,perception=true,luck=true,voice=true,appearance=true}
+local function parseStatIncrease(line,character,now)
+  -- Accept current and legacy stat names, not arbitrary "has increased" prose.
+  local stat=line:lower():match("^your (%a+) has increased!$")
+  if stat and playerStats[stat] then return builtIn("ALL",line,nil,character,now,line) end
+end
+
 local function parseAssistanceRequest(line,character,now)
   local speaker,room,pending=line:match('^%[GUIDE%] '..activeName..' %(room (%d+)%) requests your assistance%.%s+%((%d+) total requests pending%.%)$')
   if not speaker then return nil end
@@ -196,6 +203,8 @@ end
 function Parser.parse(line,character,now)
   line=plain(line)
   if not line then return nil end
+  local statIncrease=parseStatIncrease(line,character,now)
+  if statIncrease then return statIncrease end
   local assistance=parseAssistanceRequest(line,character,now)
   if assistance then return assistance end
   local cancellation=parseAssistanceCancellation(line,character,now)

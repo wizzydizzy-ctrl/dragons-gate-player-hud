@@ -76,6 +76,44 @@ local function sameEntries(actual,expected)
   end
 end
 
+local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
+
+test("all thirteen stat increases display and persist in ALL with COMBAT hidden and survive reload",function()
+  local f=fake(); local accepted={}; local redraws={}
+  local sources=allSources({COMBAT=false})
+  local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,
+    function(entry) accepted[#accepted+1]=entry end,sources)
+  assert(controller:start()); eq(controller.allSources.COMBAT,false); eq(f:count(f.triggers),1)
+  for index,stat in ipairs(playerStatNames) do
+    local line="Your "..stat.." has increased!"
+    f:line(" \t\27[32m"..line.."\27[0m \r\n")
+    eq(#accepted,index); eq(f.storageAppends,index); eq(#controller:entries(),index)
+    local e=accepted[index]
+    eq(e.category,"ALL"); eq(e.source,"builtin"); eq(e.message,line); eq(e.line,line)
+    eq(e.character,f.character); eq(e.timestamp,f.timestampValue)
+    eq(e.speaker,nil); eq(e.target,nil); eq(e.language,nil)
+    eq(f.appendedEntries[index],e); eq(controller.history.items[index],e)
+    f:line(line); eq(#accepted,index); eq(f.storageAppends,index)
+  end
+  sameEntries(controller:entries(),accepted); sameEntries(redraws[#redraws],accepted)
+  eq(table.concat(controller.history:categories(),","),"ALL")
+  for _,filter in ipairs({"ROOM","OWN","PRIVATE","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}) do
+    assert(controller:setFilter(filter)); eq(#controller:entries(),0)
+  end
+  assert(controller:setFilter("ALL")); sameEntries(controller:entries(),accepted)
+  sameEntries(f.appendedEntries,accepted); eq(f.storageClears,0); assert(controller:shutdown())
+  eq(f:count(f.triggers),0)
+
+  local reloaded=fake(f.appendedEntries); local reloadRedraws={}
+  local restored=makeController(reloaded,function(entries) reloadRedraws[#reloadRedraws+1]=entries end,nil,sources)
+  assert(restored:start()); eq(restored.allSources.COMBAT,false)
+  sameEntries(restored:entries(),accepted); sameEntries(reloadRedraws[#reloadRedraws],accepted)
+  eq(reloaded.loadRecentCalls,1); eq(reloaded.storageAppends,0)
+  assert(restored:setFilter("COMBAT")); eq(#restored:entries(),0)
+  assert(restored:setFilter("ALL")); sameEntries(restored:entries(),accepted)
+  assert(restored:shutdown())
+end)
+
 for _,case in ipairs(sourceCases) do
   test("hiding "..case.category.." in ALL preserves owned-trigger capture storage and its own filter",function()
     local f=fake(); local accepted={}; local redraws={}

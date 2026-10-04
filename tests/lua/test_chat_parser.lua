@@ -1,5 +1,44 @@
 local Parser=require("chat_parser")
 
+local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
+
+test("captures all thirteen current and legacy stat increases with case ANSI and whitespace normalization",function()
+  for _,stat in ipairs(playerStatNames) do
+    local line="Your "..stat.." has increased!"
+    local e=assert(Parser.parse(line,"Dace Alterac","2026-08-31T13:00:00-04:00"),line)
+    eq(e.schema,1); eq(e.category,"ALL"); eq(e.source,"builtin")
+    eq(e.message,line); eq(e.line,line); eq(e.character,"Dace Alterac"); eq(e.timestamp,"2026-08-31T13:00:00-04:00")
+    eq(e.speaker,nil); eq(e.target,nil); eq(e.language,nil)
+    local mixedCase="yOuR "..stat:upper().." hAs InCrEaSeD!"
+    local input=" \t\27[1;32myOuR \27[0m"..stat:upper().." hAs InCrEaSeD!\27[0m \r\n"
+    local normalized=assert(Parser.parse(input,"Dace Alterac"),stat)
+    eq(normalized.category,"ALL"); eq(normalized.source,"builtin")
+    eq(normalized.message,mixedCase); eq(normalized.line,mixedCase)
+  end
+end)
+
+test("stat increases reject unrelated names malformed notices and surrounding narration",function()
+  for _,line in ipairs({
+    "Your health has increased!","Your fatigue has increased!","Your skill has increased!",
+    "Your willpower has increased!","Your voice training has increased!","Your  has increased!",
+    "Your will has decreased!","Your constitution has increased.","Your strength has increased",
+    "The sign reads: Your will has increased!","Your constitution has increased! Again.",
+    '"Your will has increased!"',"Your strength has increased!\nYour will has increased!",
+  }) do
+    eq(Parser.parse("\27[32m"..line.."\27[0m","Dace Alterac"),nil)
+  end
+end)
+
+test("speech quoting every accepted stat increase retains ROOM and the original full line",function()
+  for _,stat in ipairs(playerStatNames) do
+    local message="Your "..stat.." has increased!"
+    local line='Eilan says, "'..message..'"'
+    local e=assert(Parser.parse("\27[32m"..line.."\27[0m","Dace Alterac"),line)
+    eq(e.category,"ROOM"); eq(e.source,"builtin"); eq(e.speaker,"Eilan")
+    eq(e.message,message); eq(e.line,line); eq(e.target,nil); eq(e.language,nil)
+  end
+end)
+
 test("captures training-ready notices for any nonempty skill in ALL",function()
   for _,skill in ipairs({"Biting.","Sharp Weapons.","Identify Gems/Minerals.","Dragon's Breath"}) do
     local line="You now feel prepared to train further in "..skill
