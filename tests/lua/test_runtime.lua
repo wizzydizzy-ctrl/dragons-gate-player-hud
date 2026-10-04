@@ -1085,6 +1085,115 @@ end)
 test("controller merges collector snapshots and removes owned trigger runtime",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),5); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
+test("registered raw and collector callbacks apply a no-condition INFO exactly once in either order",function()
+  for _,collectorFirst in ipairs({false,true}) do
+    local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+    local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
+    local collector=assert(f.triggers[hud.collector.runtime.triggers[1]])
+    local raw=assert(f.triggers[hud.runtime.triggers[#hud.runtime.triggers]])
+    local function deliver(line)
+      if collectorFirst then collector(line); raw(line) else raw(line); collector(line) end
+    end
+    raw("You are ravenous. You are parched.")
+    local changes=0; local onChange=hud.needs.onChange
+    hud.needs.onChange=function(...)
+      changes=changes+1; return onChange(...)
+    end
+    hud.collector:onOutgoing("info")
+    deliver("You are Synthetic Tester, a stocky bodied 28 year old Entropic Male young Human.")
+    deliver([[You are 6'0" and weigh 180 lbs.]])
+    eq(changes,0); eq(hud.last_state.needs.hunger.status,"ravenous"); eq(hud.last_state.needs.thirst.status,"parched")
+    deliver(">"); eq(changes,1); eq(hud.collector.active,nil); eq(hud.collector.snapshot.info.condition_text,"")
+    for _,need in ipairs({"hunger","thirst"}) do
+      eq(hud.last_state.needs[need].status,"ok"); eq(hud.last_state.needs[need].source,"info")
+      eq(hud.view.state.needs[need].status,"ok")
+    end
+    deliver(">"); eq(changes,1)
+    assert(hud:shutdown())
+  end
+end)
+test("tracked prompt-prefixed wrapped INFO waits for a real prompt and applies missing and explicit needs",function()
+  for _,collectorFirst in ipairs({false,true}) do
+    for _,prefix in ipairs({"> ","[199] 301/301 hp, 173/173 ftg > "}) do
+      for _,case in ipairs({
+        {lines={},hunger="ok",thirst="ok"},
+        {lines={"You are","hungry."},hunger="hungry",thirst="ok"},
+        {lines={"You are","thirsty."},hunger="ok",thirst="thirsty"},
+        {lines={"You are","satiated. Your thirst is","quenched."},hunger="satiated",thirst="quenched"},
+        {lines={"You are hungry. You are","thirsty."},hunger="hungry",thirst="thirsty"},
+      }) do
+        local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+        local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
+        local collector=assert(f.triggers[hud.collector.runtime.triggers[1]])
+        local raw=assert(f.triggers[hud.runtime.triggers[#hud.runtime.triggers]])
+        local function deliver(line)
+          if collectorFirst then collector(line); raw(line) else raw(line); collector(line) end
+        end
+        raw("You are ravenous. You are parched.")
+        hud.collector:onOutgoing("info"); local active=hud.collector.active
+        deliver("\27[32m"..prefix.."You are Synthetic Tester, a stocky bodied 28 year old Entropic Male young Human.\27[0m")
+        deliver([[You are 6'0" and weigh 180 lbs.]])
+        for _,line in ipairs(case.lines) do deliver(line); eq(hud.collector.active,active) end
+        eq(hud.collector.active,active); eq(hud.collector.snapshot.info,nil)
+        deliver(prefix:match("^%s*(.-)%s*$")); eq(hud.collector.active,nil)
+        eq(hud.collector.snapshot.info.character.full_name,"Synthetic Tester")
+        eq(hud.last_state.needs.hunger.status,case.hunger); eq(hud.last_state.needs.thirst.status,case.thirst)
+        eq(hud.view.state.needs.hunger.status,case.hunger); eq(hud.view.state.needs.thirst.status,case.thirst)
+        eq(hud.last_state.needs.hunger.source,"info"); eq(hud.last_state.needs.thirst.source,"info")
+        assert(hud:shutdown())
+      end
+    end
+  end
+end)
+test("both INFO callback orders replace complete needs and ignore retained stale conditions on partial refresh",function()
+  for _,collectorFirst in ipairs({false,true}) do
+    local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+    local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
+    local function deliver(line)
+      if collectorFirst then hud.collector:onLine(line); hud.needs:onLine(line)
+      else hud.needs:onLine(line); hud.collector:onLine(line) end
+    end
+    eq(hud.last_state.needs.hunger.status,"unknown"); eq(hud.last_state.needs.thirst.status,"unknown")
+    local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian. You are 7'0" and weigh 247 lbs.]]
+    for _,case in ipairs({{"","ok","ok"},{" You are hungry.","hungry","ok"},
+      {" You are thirsty.","ok","thirsty"},{" You are satiated. Your thirst is quenched.","satiated","quenched"}}) do
+      deliver("You are ravenous. You are parched.")
+      hud.collector:onOutgoing("info"); deliver(biography..case[1]); deliver(">")
+      eq(hud.last_state.needs.hunger.status,case[2]); eq(hud.last_state.needs.thirst.status,case[3])
+      eq(hud.view.state.needs.hunger.status,case[2]); eq(hud.view.state.needs.thirst.status,case[3])
+    end
+    deliver("You are hungry. You are thirsty.")
+    for _,lines in ipairs({
+      {"Str Int Wis Dex Agi Con Cha Wil Pre Per Luk","Good Good Good Good Good Good Good Good Good Good Good",">"},
+      {"HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.",">"},
+      {"You are Dace Alterac, a young Monitanian.","HP: 213 of 213",">"},
+    }) do
+      hud.collector:onOutgoing("info"); for _,line in ipairs(lines) do deliver(line) end
+      eq(hud.collector.snapshot.info.condition_text,"You are satiated. Your thirst is quenched.")
+      eq(hud.last_state.needs.hunger.status,"hungry"); eq(hud.last_state.needs.thirst.status,"thirsty")
+    end
+    assert(hud:shutdown())
+  end
+end)
+test("unsolicited prompt-prefixed wrapped ANSI INFO resets rendered needs without an outgoing command",function()
+  local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+  local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
+  local function emit(line) for _,fn in pairs(f.triggers) do fn(line) end end
+  for _,prefix in ipairs({"","> ","[199] 301/301 hp, 173/173 ftg > "}) do
+    emit("You are ravenous. You are parched."); eq(hud.collector.active,nil)
+    emit("\27[32m"..prefix.."You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.\27[0m")
+    emit([[You are 7'0" and weigh 247 lbs.]])
+    eq(hud.last_state.needs.hunger.status,"ravenous"); eq(hud.last_state.needs.thirst.status,"parched")
+    emit("[199] 301/301 hp, 173/173 ftg >")
+    eq(hud.last_state.needs.hunger.status,"ok"); eq(hud.last_state.needs.thirst.status,"ok")
+    eq(hud.view.state.needs.hunger.status,"ok"); eq(hud.view.state.needs.thirst.status,"ok")
+    emit("You are hungry."); eq(hud.last_state.needs.thirst.status,"ok")
+    emit("You are thirsty."); eq(hud.last_state.needs.hunger.status,"hungry")
+    emit("You eat some bread."); emit("You drink some water."); emit("The room is quiet."); emit(">"); emit("")
+    eq(hud.last_state.needs.hunger.status,"hungry"); eq(hud.last_state.needs.thirst.status,"thirsty")
+  end
+  assert(hud:shutdown())
+end)
 test("supplied healthy INFO reaches runtime and rendered state through the collector",function()
   local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.  You are 7'0" and weigh 247 lbs.  You are satiated.]]
   for _,lines in ipairs({

@@ -117,6 +117,28 @@ test("updated info replaces old characteristic names without losing physical det
   eq(c.snapshot.info.physical.age,28); eq(c.snapshot.info.attributes.PRE,"Fair")
   eq(c.snapshot.info.attributes.LUK,"Low"); eq(c.snapshot.info.attributes.VOI,nil); eq(c.snapshot.info.attributes.APP,nil)
 end)
+test("INFO callbacks distinguish empty completed conditions from absent partial deltas",function()
+  local f=fake(); local deltas={}; local n=require("needs_tracker").new({epoch=function() return 10 end})
+  local c=Collector.new(f,Parser,function(_,key,parsed)
+    if key=="info" then deltas[#deltas+1]=parsed; n:onInfo(parsed) end
+  end); assert(c:start())
+  local biography=[[You are Dace Alterac, a young Monitanian bodied 28 year old Entropic Male young Monitanian. You are 7'0" and weigh 247 lbs.]]
+  f:outgoing("info"); f:lines({biography.." You are ravenous. You are parched.",">"})
+  eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+  f:outgoing("info"); f:line(biography); eq(#deltas,1)
+  f:line(">"); eq(#deltas,2); eq(deltas[2].condition_text,"")
+  eq(c.snapshot.info.condition_text,""); eq(n:status().hunger.status,"ok"); eq(n:status().thirst.status,"ok")
+  n:onLine("You are hungry. You are thirsty.")
+  for _,lines in ipairs({
+    {"Str Int Wis Dex Agi Con Cha Wil Pre Per Luk","Good Good Good Good Good Good Good Good Good Good Good",">"},
+    {"HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.",">"},
+  }) do
+    f:outgoing("info"); f:lines(lines); eq(deltas[#deltas].condition_text,nil)
+    eq(c.snapshot.info.character.full_name,"Dace Alterac"); eq(c.snapshot.info.condition_text,"")
+    eq(n:status().hunger.status,"hungry"); eq(n:status().thirst.status,"thirsty")
+  end
+  c:shutdown(); eq(f:owned(),0)
+end)
 test("collector exposes only the newly parsed wrapped info payload to callbacks",function()
   local f=fake(); local delta; local c=Collector.new(f,Parser,function(_,key,parsed) if key=="info" then delta=parsed end end); c:start(); f:outgoing("info")
   f:lines({"You are Deklan Marrowen, a skinny bodied 21 year old Entropic Male 1st stage Dragon. You are 7'6\" and weigh 292 lbs. You are hungry. You are","thirsty.","HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.","Str Int Wis Dex Agi Con Cha Wil Voi Per App","Godly Super Excel Super Super Super Super Super Super Super Super",">"})

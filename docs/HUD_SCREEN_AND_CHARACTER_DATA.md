@@ -35,16 +35,15 @@ The Identity section may show:
 - race and profession;
 - a dragon's stage in place of a missing profession;
 - age, sex, and height;
-- religious rank and deity;
-- favors;
+- deity, devotion level, and favor count together, such as **Unknown · Novitiate · 57,000**;
 - religious balance and alignment; and
 - Food and Water status.
 
 Alignment wording is made more readable in the HUD: order becomes **Orderly**, entropy becomes **Entropic**, and chaos becomes **Chaotic**.
 
-Food and Water begin unknown. DGHUD changes them only after a confirmed status phrase. Eating or drinking an item does not automatically mean the character is full.
+Food and Water begin unknown. A complete character INFO description updates both: any reported hunger or thirst status is shown, while a missing status shows **Ok** in green. This works whenever that description appears in game output, including wrapped lines, not just during the startup command sequence.
 
-`You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green. These messages also update the HUD when they appear in a wrapped `info` response. Later hunger or thirst messages replace the corresponding status independently.
+`You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green. Later hunger or thirst messages replace the corresponding status independently. A lone hunger notice does not reset Water, and eating or drinking alone does not prove either status is healthy. Incomplete INFO responses do not clear previous warnings.
 
 Identity and characteristics come from GMCP plus `info` and `info religion`.
 

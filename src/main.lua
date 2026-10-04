@@ -1373,7 +1373,7 @@ function Main:start()
   self:applyResponsiveLayout()
   self.collector=Collector.new(self.adapter,Parser,function(snapshot,key,parsed)
     if key=="time" then self:onClockSync(snapshot.time); return end
-    if key=="info" and parsed and parsed.condition_text and self.needs and self.needs:onLine(parsed.condition_text,"info") then return end
+    if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
     self:refresh()
   end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end
@@ -1489,7 +1489,8 @@ function Main:start()
     -- These consumers are independent. One optional tracker must never stop
     -- the autoroller from receiving the same game output.
     pcall(self.posture.onLine,self.posture,line)
-    pcall(self.needs.onLine,self.needs,line,"output")
+    local collectingInfo=self.collector and self.collector.active and self.collector.active.command=="info"
+    pcall(self.needs.onLine,self.needs,line,"output",not collectingInfo)
     local ok,err=pcall(self.roller.onLine,self.roller,line)
     if not ok then self:captureFailure("autoroller",err,{operation="line_capture"}) end
   end)

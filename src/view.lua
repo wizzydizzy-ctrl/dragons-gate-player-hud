@@ -68,23 +68,23 @@ end
 function View.identityContent(character,t,layout,needs)
   local physical=character.physical or {}; local detail=""
   if physical.age or physical.sex or physical.height then detail="<br><span style='color:"..t.muted.."'>"..esc(physical.age or "")..(physical.age and " · " or "")..esc(physical.sex or "")..(physical.height and " · "..esc(physical.height) or "").."</span>" end
-  local faith=""; if character.deity or character.religion then
-    local values={}; if character.religion and character.religion~="" then values[#values+1]=esc(character.religion) end; if character.deity and character.deity~="" then values[#values+1]=esc(character.deity) end
-    faith="<br><span style='color:"..t.muted.."'>"..table.concat(values," · ").."</span>"
-  end
-  local favorsLine=character.favors~=nil and "<br><span style='color:"..t.muted.."'>Favors: "..groupedNumber(character.favors).."</span>" or ""
+  local faithValues={}
+  if character.deity and character.deity~="" then faithValues[#faithValues+1]=esc(character.deity) end
+  if character.religion and character.religion~="" then faithValues[#faithValues+1]=esc(character.religion) end
+  if character.favors~=nil then faithValues[#faithValues+1]=groupedNumber(character.favors) end
+  local faith=#faithValues>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(faithValues," · ").."</span>" or ""
   local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
   local standingLine=#standing>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(standing," · ").."</span>" or ""
   needs=type(needs)=="table" and needs or {}; local hunger=needs.hunger or {}; local thirst=needs.thirst or {}
-  local hungerText={unknown="—",satiated="Satiated",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",quenched="Quenched",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
-  local hungerColor={unknown=t.muted,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,quenched=t.jade,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
+  local hungerText={unknown="—",ok="Ok",satiated="Satiated",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",ok="Ok",quenched="Quenched",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
+  local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
   local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
   local role=character.class
   if tostring(character.race or ""):lower()=="dragon" then
     local ordinal=tostring(physical.life_stage or ""):lower():match("^(%d+[a-z][a-z])%s+stage$")
     if ordinal then role=ordinal.." Stage" end
   end
-  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..favorsLine..standingLine..needsLine,layout.body_font)
+  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..standingLine..needsLine,layout.body_font)
 end
 function View.headerContent(layout,t,fullName)
   local detail=layout.mode=="compact" and " &nbsp; <span style='color:"..t.text.."'><b>"..esc(fullName).."</b></span>" or ""

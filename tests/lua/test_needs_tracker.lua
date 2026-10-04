@@ -1,6 +1,100 @@
 local Needs=require("needs_tracker")
 local function eq(a,b) assert(a==b,tostring(a).." ~= "..tostring(b)) end
 
+local Parser=require("command_parser")
+local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian. You are 7'0" and weigh 247 lbs.]]
+
+test("quoted room biographies cannot default either need to ok",function()
+  local prose=[[You are in a gallery, where a plaque reads "You are Synthetic Tester, a stocky bodied 28 year old Entropic Male young Human. You are 6'0" and weigh 180 lbs."]]
+  for _,lines in ipairs({
+    {prose,">"},
+    {"\27[32m"..prose.."\27[0m",">"},
+    {[[You are in a gallery, where a plaque reads "You are Synthetic Tester,]],
+      [[a stocky bodied 28 year old Entropic Male young Human. You are 6'0" and weigh 180 lbs."]],">"},
+  }) do
+    eq(Parser.parseInfo(lines),nil)
+    local changes=0
+    local n=Needs.new({epoch=function() return 10 end},function() changes=changes+1 end)
+    assert(n:onLine("You are ravenous. You are parched."))
+    local before=n:status()
+    for _,line in ipairs(lines) do n:onLine(line) end
+    local after=n:status()
+    for _,need in ipairs({"hunger","thirst"}) do
+      for _,field in ipairs({"status","timestamp","source","raw"}) do eq(after[need][field],before[need][field]) end
+    end
+    eq(changes,1)
+  end
+end)
+
+test("complete INFO overwrites both needs and defaults each missing condition to ok",function()
+  for _,case in ipairs({{"","ok","ok"},{" You are hungry.","hungry","ok"},
+    {" You are thirsty.","ok","thirsty"},{" You are satiated. Your thirst is quenched.","satiated","quenched"}}) do
+    local stamp=10; local n=Needs.new({epoch=function() return stamp end})
+    assert(n:onLine("You are ravenous. You are parched.")); stamp=11
+    assert(n:onInfo(assert(Parser.parseInfo({biography..case[1],">"}))))
+    local s=n:status(); eq(s.hunger.status,case[2]); eq(s.thirst.status,case[3])
+    eq(s.hunger.timestamp,11); eq(s.thirst.timestamp,11)
+    assert(n:onLine("You are starving.")); eq(n:status().thirst.status,case[3])
+    assert(n:onLine("You are very thirsty.")); eq(n:status().hunger.status,"starving")
+  end
+end)
+
+test("attribute and vitals INFO deltas cannot reset needs even with retained biography elsewhere",function()
+  local n=Needs.new({epoch=function() return 10 end}); assert(n:onLine("You are ravenous. You are parched."))
+  for _,lines in ipairs({
+    {"Str Int Wis Dex Agi Con Cha Wil Pre Per Luk","Good Good Good Good Good Good Good Good Good Good Good",">"},
+    {"HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.",">"},
+    {"You are Dace Alterac, a delicate boned young Monitanian.","HP: 213 of 213",">"},
+  }) do
+    local parsed=assert(Parser.parseInfo(lines)); eq(parsed.condition_text,nil); eq(n:onInfo(parsed),false)
+    eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+  end
+  eq(n:onInfo(nil),false); eq(n:onInfo({}),false)
+end)
+
+test("unsolicited INFO accepts plain wrapped ANSI and prompt-prefixed biographies only at a real prompt",function()
+  local cases={
+    {lines={biography},prompt=">",hunger="ok",thirst="ok"},
+    {lines={"> "..biography.." You are hungry."},prompt=">",hunger="hungry",thirst="ok"},
+    {lines={"\27[32m[199] 301/301 hp, 173/173 ftg > "..biography.." You are thirsty.\27[0m"},
+      prompt="[199] 301/301 hp, 173/173 ftg >",hunger="ok",thirst="thirsty"},
+    {lines={"\27[32m> You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.\27[0m",
+      [[You are 7'0" and weigh 247 lbs. You are]],"satiated. Your thirst is","quenched."},
+      prompt=">",hunger="satiated",thirst="quenched"},
+  }
+  for _,case in ipairs(cases) do
+    local n=Needs.new({epoch=function() return 10 end}); n:onLine("You are ravenous. You are parched.")
+    for _,line in ipairs(case.lines) do n:onLine(line) end
+    if case.hunger=="ok" then eq(n:status().hunger.status,"ravenous") end
+    if case.thirst=="ok" then eq(n:status().thirst.status,"parched") end
+    n:onLine(case.prompt); eq(n:status().hunger.status,case.hunger); eq(n:status().thirst.status,case.thirst)
+  end
+end)
+
+test("startup prompts prose actions and incomplete or malformed biographies never infer ok",function()
+  for _,seed in ipairs({false,true}) do
+    local n=Needs.new({epoch=function() return 10 end})
+    if seed then n:onLine("You are ravenous. You are parched.") end
+    for _,line in ipairs({"",">","[199] 301/301 hp, 173/173 ftg >","The room is quiet.",
+      "You eat the last of your bread.","You drink the last of your water.",
+      "You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.",">",
+      [[You are Dace Alterac, a young Monitanian. You are tall and weigh many lbs.]],">",biography}) do n:onLine(line) end
+    eq(n:status().hunger.status,seed and "ravenous" or "unknown")
+    eq(n:status().thirst.status,seed and "parched" or "unknown")
+  end
+end)
+
+test("unsolicited INFO overflow does not reset needs and a new bounded biography recovers",function()
+  for _,overflow in ipairs({"lines","bytes"}) do
+    local n=Needs.new({epoch=function() return 10 end}); n:onLine("You are ravenous. You are parched.")
+    n:onLine(biography)
+    if overflow=="lines" then for _=1,65 do n:onLine("Harmless extra INFO detail.") end
+    else n:onLine(string.rep("x",16385)) end
+    n:onLine(">"); eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+    n:onLine(biography); n:onLine(">"); eq(n:status().hunger.status,"ok"); eq(n:status().thirst.status,"ok")
+  end
+end)
+
 test("standalone and ANSI healthy notices update only their own need",function()
   for _,ansi in ipairs({false,true}) do
     local stamp=10; local n=Needs.new({epoch=function() return stamp end})

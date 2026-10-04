@@ -38,6 +38,22 @@ test("identity displays food and water while vital bars remain resource-only",fu
   eq(identity:find("Food:",1,true)~=nil,true); eq(identity:find("Ravenous",1,true)~=nil,true)
   eq(identity:find("Water:",1,true)~=nil,true); eq(identity:find("Parched",1,true)~=nil,true)
 end)
+test("names pane distinguishes startup unknown and per-side jade Ok defaults",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  for _,case in ipairs({
+    {"unknown","unknown","—","—",theme.muted,theme.muted},
+    {"ok","ok","Ok","Ok",theme.jade,theme.jade},
+    {"hungry","ok","Hungry","Ok","#d6a84b",theme.jade},
+    {"ok","thirsty","Ok","Thirsty",theme.jade,"#d6a84b"},
+    {"satiated","quenched","Satiated","Quenched",theme.jade,theme.jade},
+  }) do
+    local identity=View.identityContent({full_name="Dace Alterac",race="Monitanian",class="Fighter"},theme,layout,
+      {hunger={status=case[1]},thirst={status=case[2]}})
+    for index,label in ipairs({"Food","Water"}) do
+      eq(identity:find(label..": </span><span style='color:"..case[index+4].."'><b>"..case[index+2].."</b>",1,true)~=nil,true)
+    end
+  end
+end)
 test("names pane shows Food Satiated and Water Quenched in jade",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
   local identity=View.identityContent({full_name="Dace Alterac",race="Monitanian",class="Fighter"},theme,layout,
@@ -131,7 +147,41 @@ end)
 test("identity includes compact religion information",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
   local identity=View.identityContent({full_name="Test Tester",race="Monitanian",class="Fighter",alignment="entropy",religion="Novitiate",deity="Unknown",favors=57000,religious_balance="Balanced"},theme,layout)
-  eq(identity:find("Novitiate · Unknown",1,true)~=nil,true); eq(identity:find("Favors: 57,000",1,true)~=nil,true); eq(identity:find("Unknown (57,000 favors)",1,true),nil); eq(identity:find("Balanced · Entropic",1,true)~=nil,true)
+  eq(identity:find("Unknown · Novitiate · 57,000",1,true)~=nil,true); eq(identity:find("Novitiate · Unknown",1,true),nil)
+  eq(identity:lower():find("favors",1,true),nil); eq(identity:find("Balanced · Entropic",1,true)~=nil,true)
+end)
+test("identity keeps grouped favors including zero inline after deity and devotion",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  for _,case in ipairs({{0,"0"},{12,"12"},{1000,"1,000"},{57000,"57,000"},{1234567,"1,234,567"}}) do
+    local identity=View.identityContent({full_name="Synthetic Tester",race="Human",class="Fighter",
+      deity="Unknown",religion="Novitiate",favors=case[1],religious_balance="Balanced",alignment="order"},theme,layout)
+    local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
+    eq(visible:find("\nUnknown · Novitiate · "..case[2].."\n",1,true)~=nil,true)
+    eq(visible:lower():find("favors",1,true),nil)
+    local _,breaks=identity:gsub("<br>",""); eq(breaks,4)
+    local _,counts=visible:gsub(case[2],""); eq(counts,1)
+  end
+end)
+test("identity safely renders captured favors before faith and never invents a missing count",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  for _,faith in ipairs({{},{deity="",religion=""},{deity="Unknown"},{religion="Novitiate"}}) do
+    local character={full_name="Synthetic Tester",race="Human",class="Fighter",
+      deity=faith.deity,religion=faith.religion,favors=57000}
+    local identity=View.identityContent(character,theme,layout)
+    local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
+    eq(visible:find("57,000",1,true)~=nil,true); eq(visible:lower():find("favors",1,true),nil)
+    eq(visible:find("nil",1,true),nil); eq(visible:find(" ·  · ",1,true),nil)
+    if faith.deity and faith.deity~="" then eq(visible:find("\nUnknown · 57,000\n",1,true)~=nil,true) end
+    if faith.religion and faith.religion~="" then eq(visible:find("\nNovitiate · 57,000\n",1,true)~=nil,true) end
+    character.favors=nil
+    visible=View.identityContent(character,theme,layout):gsub("<br>","\n"):gsub("<[^>]+>","")
+    eq(visible:find("57,000",1,true),nil); eq(visible:find("0",1,true),nil); eq(visible:find("nil",1,true),nil)
+    eq(visible:lower():find("favors",1,true),nil)
+  end
+  local identity=View.identityContent({full_name="Synthetic Tester",race="Human",class="Fighter",
+    deity="Unknown",religion="Novitiate"},theme,layout)
+  local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
+  eq(visible:find("\nUnknown · Novitiate\n",1,true)~=nil,true); eq(visible:find("0",1,true),nil)
 end)
 test("right rail details keep combat information without attributes",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25,details_columns=2}

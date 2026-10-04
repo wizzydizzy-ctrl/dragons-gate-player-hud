@@ -9,6 +9,9 @@ local function clean(value)
   return tostring(value or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("%s+$","")
 end
 local function trim(value) return clean(value):match("^%s*(.-)%s*$") end
+local function infoLine(value)
+  return trim(value):gsub("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>%s*",""):gsub("^>%s*","")
+end
 local function isPrompt(value)
   local line=clean(value)
   return line:match("^>%s*$")~=nil or line:match("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>%s*$")~=nil
@@ -22,11 +25,11 @@ local function infoBoundary(line)
 end
 local function infoBlock(lines,startPattern,limit)
   for start=1,#lines do
-    local first=trim(lines[start])
+    local first=infoLine(lines[start])
     if first:match(startPattern) then
       local parts={first}
       for index=start+1,math.min(#lines,start+(limit or 6)) do
-        local line=trim(lines[index]); if infoBoundary(line) then break end; parts[#parts+1]=line
+        local line=infoLine(lines[index]); if infoBoundary(line) then break end; parts[#parts+1]=line
       end
       return table.concat(parts," ")
     end
@@ -68,7 +71,7 @@ function Parser.parseInfo(lines)
   lines=lines or {}
   local result={physical={},attributes={}}
   local biography=infoBlock(lines,"^You are .-,",64)
-  local _,last,full,description,age,alignment,sex,stageAndRace,height,weight=biography:find("You are (.-), (.-) (%d+) year old (%S+) (%S+) (.-)%.%s+You are (.-) and weigh (%d+%.?%d*) lbs%.")
+  local _,last,full,description,age,alignment,sex,stageAndRace,height,weight=biography:find('^You are ([^,"]+), ([^"]-) (%d+) year old (%S+) (%S+) (.-)%.%s+You are (.-) and weigh (%d+%.?%d*) lbs%.')
   if full then
     stageAndRace=trim(stageAndRace); local race=stageAndRace:match("(%S+)$"); local stage=trim(stageAndRace:sub(1,#stageAndRace-#tostring(race or "")))
     if race then
@@ -76,7 +79,7 @@ function Parser.parseInfo(lines)
       result.physical={description=description,age=tonumber(age),sex=sex,life_stage=stage~="" and stage or nil,height=height,weight=tonumber(weight)}
       local tail=trim(biography:sub(last+1)):gsub("%s+"," "); local lower=tail:lower(); local stop
       for _,needle in ipairs({" hp:"," str int wis"," use: info"}) do local at=lower:find(needle,1,true); if at and (not stop or at<stop) then stop=at end end
-      if stop then tail=trim(tail:sub(1,stop-1)) end; if tail~="" then result.condition_text=tail end
+      if stop then tail=trim(tail:sub(1,stop-1)) end; result.condition_text=tail
     end
   end
   local vitals=infoBlock(lines,"^HP:%s*",3)

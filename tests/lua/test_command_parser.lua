@@ -32,6 +32,21 @@ test("info tolerates condition text appended to the physical sentence",function(
   with_conditions[1]=with_conditions[1].." You are hungry. You are thirsty."
   local r=assert(Parser.parseInfo(with_conditions)); eq(r.physical.weight,309); eq(r.attributes.APP,"Fair")
 end)
+test("complete unconditioned INFO has an empty condition delta while partial INFO has none",function()
+  local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian. You are 7'0" and weigh 247 lbs.]]
+  for _,lines in ipairs({{biography,">"},{"\27[32m"..biography.."\27[0m",">"},
+    {"You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.",
+      [[You are 7'0" and weigh 247 lbs.]],">"}}) do
+    local parsed=assert(Parser.parseInfo(lines)); eq(parsed.condition_text,""); eq(Parser.isComplete("info",lines),true)
+  end
+  for _,lines in ipairs({
+    {"Str Int Wis Dex Agi Con Cha Wil Pre Per Luk","Good Good Good Good Good Good Good Good Good Good Good",">"},
+    {"HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.",">"},
+    {"You are Dace Alterac, a young Monitanian.","HP: 213 of 213",">"},
+  }) do eq(assert(Parser.parseInfo(lines)).condition_text,nil) end
+  eq(Parser.isComplete("info",{biography}),false)
+  eq(Parser.isComplete("info",{"You are Dace Alterac, a young Monitanian.",">"}),false)
+end)
 test("healthy INFO preserves satiated and quenched conditions across standalone ANSI combined and wrapped lines",function()
   local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.  You are 7'0" and weigh 247 lbs.  You are satiated.]]
   for _,lines in ipairs({
