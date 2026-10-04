@@ -1,5 +1,20 @@
 local Parser=require("chat_parser")
 
+test("captures only exact diligent-training fatigue notices in ALL",function()
+  local line="Due to your diligent training, you have gained additional fatigue!"
+  for _,input in ipairs({line," \t\27[32m"..line.."\27[0m \r\n"}) do
+    local e=assert(Parser.parse(input,"Dace Alterac"))
+    eq(e.category,"ALL"); eq(e.source,"builtin"); eq(e.message,line); eq(e.line,line)
+    eq(e.speaker,nil); eq(e.target,nil); eq(e.language,nil)
+  end
+  for _,input in ipairs({"Due to your diligent training,",line:sub(1,-2),
+    "The sign reads: "..line,line.." Again."}) do eq(Parser.parse(input),nil) end
+  local quoted='Eilan says, "'..line..'"'
+  local speech=assert(Parser.parse(quoted,"Dace Alterac"))
+  eq(speech.category,"ROOM"); eq(speech.source,"builtin"); eq(speech.speaker,"Eilan")
+  eq(speech.message,line); eq(speech.line,quoted)
+end)
+
 local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
 
 test("captures all thirteen current and legacy stat increases with case ANSI and whitespace normalization",function()

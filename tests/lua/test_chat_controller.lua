@@ -78,6 +78,26 @@ end
 
 local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
 
+test("diligent-training fatigue displays and saves in ALL with COMBAT hidden deduplicates and reloads",function()
+  local f=fake(); local redraws={}; local sources=allSources({COMBAT=false})
+  local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,nil,sources)
+  assert(controller:start()); eq(controller.allSources.COMBAT,false)
+  local line="Due to your diligent training, you have gained additional fatigue!"
+  f:line(" \t\27[32m"..line.."\27[0m \r\n"); f:line(line)
+  local entries=controller:entries(); eq(#entries,1); eq(f.storageAppends,1)
+  local e=entries[1]
+  eq(e.category,"ALL"); eq(e.source,"builtin"); eq(e.message,line); eq(e.line,line)
+  eq(e.character,f.character); eq(e.timestamp,f.timestampValue)
+  eq(f.appendedEntries[1],e); sameEntries(redraws[#redraws],entries)
+  assert(controller:setFilter("COMBAT")); eq(#controller:entries(),0)
+  assert(controller:setFilter("ALL")); sameEntries(controller:entries(),entries)
+  assert(controller:shutdown())
+  local reloaded=fake(f.appendedEntries); local restored=makeController(reloaded,nil,nil,sources)
+  assert(restored:start()); eq(restored.allSources.COMBAT,false)
+  sameEntries(restored:entries(),entries); eq(reloaded.loadRecentCalls,1); eq(reloaded.storageAppends,0)
+  assert(restored:shutdown())
+end)
+
 test("all thirteen stat increases display and persist in ALL with COMBAT hidden and survive reload",function()
   local f=fake(); local accepted={}; local redraws={}
   local sources=allSources({COMBAT=false})

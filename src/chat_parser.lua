@@ -49,6 +49,7 @@ local function entry(category,message,metadata,character,now,source,line)
 end
 
 local rules={
+  {category="ALL",pattern="^(Due to your diligent training, you have gained additional fatigue!)$",message=1},
   {category="ALL",pattern="^(You now feel prepared to train further in%s+%S.*)$",message=1},
   {category="ESP",pattern='^'..name..' %(ESP%): "(.*)"$',speaker=1,message=2},
   {category="ESP",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
