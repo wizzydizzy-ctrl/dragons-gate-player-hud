@@ -126,6 +126,22 @@ test("one owned line trigger captures and persists recognized chat",function()
   eq(controller:entries()[1].category,"ESP"); eq(f.storageAppends,1); eq(f:count(f.triggers),1)
 end)
 
+test("training-ready notices persist in ALL with combat excluded and other tabs unchanged",function()
+  local f=fake(); local controller=makeController(f,nil,nil,{COMBAT=false})
+  assert(controller:start())
+  local line="You now feel prepared to train further in Sharp Weapons."
+  f:line(line); f:line(line)
+  eq(#controller:entries(),1); eq(controller:entries()[1].category,"ALL"); eq(controller:entries()[1].line,line)
+  eq(f.storageAppends,1)
+  for _,filter in ipairs({"ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}) do
+    assert(controller:setFilter(filter)); eq(#controller:entries(),0)
+  end
+  assert(controller:setFilter("ALL")); eq(#controller:entries(),1)
+  local restored=makeController(fake()); assert(restored:restoreHandoff(controller:handoff())); assert(restored:start(true))
+  eq(#restored:entries(),1); eq(restored:entries()[1].line,line)
+  restored:shutdown(); controller:shutdown()
+end)
+
 test("direct thoughts flow through the owned trigger into contact and private filters",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("CONTACT"))
   f:line('Seaux thinks to you, "Hello"')

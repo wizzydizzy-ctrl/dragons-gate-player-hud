@@ -1,5 +1,17 @@
 local Parser=require("chat_parser")
 
+test("captures training-ready notices for any nonempty skill in ALL",function()
+  for _,skill in ipairs({"Biting.","Sharp Weapons.","Identify Gems/Minerals.","Dragon's Breath"}) do
+    local line="You now feel prepared to train further in "..skill
+    local e=assert(Parser.parse("\27[32m"..line.."\27[0m","Dace Alterac"))
+    eq(e.category,"ALL"); eq(e.message,line); eq(e.line,line); eq(e.source,"builtin"); eq(e.speaker,nil)
+  end
+  eq(Parser.parse("You now feel prepared to train further in"),nil)
+  eq(Parser.parse("You now feel prepared to train further in   "),nil)
+  eq(Parser.parse("The sign reads: You now feel prepared to train further in Biting."),nil)
+  eq(assert(Parser.parse('Eilan says, "You now feel prepared to train further in Biting."')).category,"ROOM")
+end)
+
 test("parses room speech target and verb",function()
   local e=assert(Parser.parse('Ocinaiya says to Suupidosutaa, "Especially you."',"Dace Alterac","2026-08-31T13:00:00-04:00"))
   eq(e.schema,1); eq(e.timestamp,"2026-08-31T13:00:00-04:00"); eq(e.character,"Dace Alterac")
