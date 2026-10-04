@@ -44,6 +44,8 @@ Alignment wording is made more readable in the HUD: order becomes **Orderly**, e
 
 Food and Water begin unknown. DGHUD changes them only after a confirmed status phrase. Eating or drinking an item does not automatically mean the character is full.
 
+`You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green. These messages also update the HUD when they appear in a wrapped `info` response. Later hunger or thirst messages replace the corresponding status independently.
+
 Identity and characteristics come from GMCP plus `info` and `info religion`.
 
 ## Equipment readiness

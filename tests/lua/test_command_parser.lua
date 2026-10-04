@@ -32,6 +32,23 @@ test("info tolerates condition text appended to the physical sentence",function(
   with_conditions[1]=with_conditions[1].." You are hungry. You are thirsty."
   local r=assert(Parser.parseInfo(with_conditions)); eq(r.physical.weight,309); eq(r.attributes.APP,"Fair")
 end)
+test("healthy INFO preserves satiated and quenched conditions across standalone ANSI combined and wrapped lines",function()
+  local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.  You are 7'0" and weigh 247 lbs.  You are satiated.]]
+  for _,lines in ipairs({
+    {biography,"Your thirst is quenched.",">"},
+    {"\27[32m"..biography.."\27[0m"," \t\27[36mYour thirst is quenched.\27[0m ",">"},
+    {biography.." Your thirst is quenched.",">"},
+    {"You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.",
+      [[You are 7'0" and weigh 247 lbs. You are]],"satiated. Your thirst is","quenched.",">"},
+  }) do
+    local r=assert(Parser.parseInfo(lines)); eq(Parser.isComplete("info",lines),true)
+    eq(r.character.full_name,"Dace Alterac"); eq(r.character.race,"Monitanian")
+    eq(r.physical.age,28); eq(r.physical.height,[[7'0"]]); eq(r.physical.weight,247)
+    eq(r.condition_text,"You are satiated. Your thirst is quenched.")
+    local hunger,thirst=require("needs_tracker").detected(r.condition_text)
+    eq(hunger,"satiated"); eq(thirst,"quenched")
+  end
+end)
 test("info parses multiword Dragon stage and all attributes",function()
   local lines={"You are Deklan Marrowen, a average boned and wiry-tough bodied 21 year old Entropic Male 1st stage Dragon.  You are 7'1\" and weigh 312 lbs."," Str Int Wis Dex Agi Con Cha Wil Voi Per App","Good Good Great Good Good Good Good Good Good Great Good",">"}
   local r=assert(Parser.parseInfo(lines)); eq(r.character.race,"Dragon"); eq(r.physical.life_stage,"1st stage"); eq(r.attributes.APP,"Good")

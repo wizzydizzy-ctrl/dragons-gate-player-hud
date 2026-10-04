@@ -38,6 +38,17 @@ test("identity displays food and water while vital bars remain resource-only",fu
   eq(identity:find("Food:",1,true)~=nil,true); eq(identity:find("Ravenous",1,true)~=nil,true)
   eq(identity:find("Water:",1,true)~=nil,true); eq(identity:find("Parched",1,true)~=nil,true)
 end)
+test("names pane shows Food Satiated and Water Quenched in jade",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  local identity=View.identityContent({full_name="Dace Alterac",race="Monitanian",class="Fighter"},theme,layout,
+    {hunger={status="satiated"},thirst={status="quenched"}})
+  local visible=identity:gsub("<[^>]+>","")
+  eq(visible:find("Food: Satiated",1,true)~=nil,true); eq(visible:find("Water: Quenched",1,true)~=nil,true)
+  for _,label in ipairs({"Satiated","Quenched"}) do
+    eq(identity:find("<span style='color:"..theme.jade.."'><b>"..label.."</b></span>",1,true)~=nil,true)
+  end
+  eq(visible:find("Food: OK",1,true),nil)
+end)
 test("dragon identity displays its lifecycle stage instead of an empty class",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
   for _,stage in ipairs({"1st stage","2nd stage","3rd stage","4th stage"}) do

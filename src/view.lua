@@ -76,8 +76,8 @@ function View.identityContent(character,t,layout,needs)
   local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
   local standingLine=#standing>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(standing," · ").."</span>" or ""
   needs=type(needs)=="table" and needs or {}; local hunger=needs.hunger or {}; local thirst=needs.thirst or {}
-  local hungerText={unknown="—",satiated="OK",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
-  local hungerColor={unknown=t.muted,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
+  local hungerText={unknown="—",satiated="Satiated",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",quenched="Quenched",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
+  local hungerColor={unknown=t.muted,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,quenched=t.jade,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
   local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
   local role=character.class
   if tostring(character.race or ""):lower()=="dragon" then

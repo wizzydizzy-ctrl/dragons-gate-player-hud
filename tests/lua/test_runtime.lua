@@ -1085,6 +1085,25 @@ end)
 test("controller merges collector snapshots and removes owned trigger runtime",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),5); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
+test("supplied healthy INFO reaches runtime and rendered state through the collector",function()
+  local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.  You are 7'0" and weigh 247 lbs.  You are satiated.]]
+  for _,lines in ipairs({
+    {biography,"Your thirst is quenched.",">"},
+    {"\27[32mYou are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.\27[0m",
+      [[You are 7'0" and weigh 247 lbs. You are]],"satiated. Your thirst is","quenched.",">"},
+  }) do
+    local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+    local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
+    hud.collector:onOutgoing("info"); eq(hud.collector.active.command,"info")
+    for _,line in ipairs(lines) do hud.collector:onLine(line) end
+    eq(hud.collector.snapshot.info.condition_text,"You are satiated. Your thirst is quenched.")
+    eq(hud.last_state.character.full_name,"Dace Alterac"); eq(hud.last_state.character.physical.weight,247)
+    eq(hud.last_state.needs.hunger.status,"satiated"); eq(hud.last_state.needs.thirst.status,"quenched")
+    eq(hud.last_state.needs.hunger.source,"info"); eq(hud.last_state.needs.thirst.source,"info")
+    eq(hud.view.state.needs.hunger.status,"satiated"); eq(hud.view.state.needs.thirst.status,"quenched")
+    assert(hud:shutdown())
+  end
+end)
 test("wrapped INFO output updates identity needs vitals and expanded attributes",function()
   local f=fake(); f.gmcp={Char={Status={},Vitals={}}}; local hud=Main.new(f,{layout={}}); assert(hud:start()); hud.collector:onOutgoing("info")
   for _,line in ipairs({"You are Deklan Marrowen, a delicate boned and skinny bodied 21 year old Entropic Male 1st stage Dragon. You are 7'6\" and weigh 292 lbs. You are hungry. You are","thirsty.","HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.","Str Int Wis Dex Agi Con Cha Wil Voi Per App","Godly Super Excel Super Super Super Super Super Super Super Super",">"}) do hud.collector:onLine(line) end
