@@ -1,18 +1,16 @@
 local Controller={}
 Controller.__index=Controller
+local History=require("chat_history")
 
 local HANDOFF_SCHEMA=1
-local MAX_HANDOFF_ENTRIES=1000
 local STAFF_MESSAGE_FLUSH_DELAY=.4
 local STAFF_MESSAGE_MAX_LINES=20
 local STAFF_MESSAGE_MAX_CHARS=4000
 
 local function copyEntries(entries)
-  local source=type(entries)=="table" and entries or {}
+  local source=History.retained(entries,History.MAX_ENTRIES)
   local result={}
-  local first=math.max(1,#source-MAX_HANDOFF_ENTRIES+1)
-  for index=first,#source do
-    local entry=source[index]
+  for _,entry in ipairs(source) do
     if type(entry)=="table" then
       local copy={}
       for key,value in pairs(entry) do
@@ -52,7 +50,13 @@ function Controller:notify()
 end
 
 function Controller:entries()
-  return self.history:entries(self.filter,self.allSources)
+  local retained=self.history:entries(self.filter,self.allSources)
+  local visible={}
+  -- Limit the rendered view only after filtering. Hidden combat cannot push
+  -- ordinary conversations out of ALL, and dedicated histories remain intact.
+  local first=math.max(1,#retained-self.history.limit+1)
+  for index=first,#retained do visible[#visible+1]=retained[index] end
+  return visible
 end
 
 function Controller:setAllSources(sources)

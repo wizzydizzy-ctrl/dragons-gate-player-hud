@@ -2334,6 +2334,145 @@ test("chat rendering keeps only the newest thousand and isolates untrusted text 
   eq(view.chat_output.hechoes[#view.chat_output.hechoes]:find("#75857c",1,true)~=nil,true)
 end)
 
+local function copiedChatEntries(entries)
+  local copied={}
+  for index,entry in ipairs(entries) do copied[index]={}; for key,value in pairs(entry) do copied[index][key]=value end end
+  return copied
+end
+local function finiteChatBuffer(output,limit,batch,supportsSizing)
+  output.bufferLimit=limit; output.bufferBatch=batch; output.evictedLines=0
+  local echo=output.echo
+  function output:echo(value,color)
+    echo(self,value,color)
+    while self.lastLine>self.bufferLimit do
+      self.lastLine=self.lastLine-self.bufferBatch; self.evictedLines=self.evictedLines+self.bufferBatch
+      local retained={}
+      for _,range in ipairs(self.renderedEntries) do
+        if range.last>self.bufferBatch then retained[#retained+1]={first=math.max(1,range.first-self.bufferBatch),last=range.last-self.bufferBatch} end
+      end
+      self.renderedEntries=retained
+    end
+  end
+  if supportsSizing then
+    function output:setBufferSize(lines,deletion)
+      self.bufferLimit=lines; self.bufferBatch=deletion; self.bufferSizeCalls=(self.bufferSizeCalls or 0)+1
+    end
+  end
+end
+
+test("chat display matching preserves a healthy adopted display and reading position",function()
+  local view=chatView(); local entries={}
+  for index=1,12 do entries[index]={schema=1,timestamp="2026-10-04T12:00:00Z",character="Synthetic",category="ROOM",speaker="Test",target="",language="Common",message="message-"..index,line=string.rep("wrapped-"..index.." ",40),source="test"} end
+  view:renderChat(entries,{"ROOM","QUEST"},"room"); local output=view.chat_output
+  output.currentScroll=view.chat_line_ranges[5].first+1
+  local line,clears,scrolls,ranges=output.currentScroll,output.clearCalls,#output.scrollCalls,view.chat_line_ranges
+  assert(view:prepareForReuse(view.settings)); local buttons=view.chat_buttons
+  eq(view:chatDisplayMatches(copiedChatEntries(entries),{"ROOM","QUEST"},"ROOM"),true)
+  eq(output.clearCalls,clears); eq(#output.scrollCalls,scrolls); eq(output.currentScroll,line)
+  eq(view.chat_line_ranges,ranges); eq(view.chat_buttons,buttons)
+  -- A healthy view rendered by the previous runtime may have only its ranges.
+  view.chat_last_line=nil
+  eq(view:chatDisplayMatches(copiedChatEntries(entries),{"ROOM","QUEST"},"ROOM"),true)
+end)
+
+test("chat display matching compares every scalar record field and filter categories",function()
+  local view=chatView(); local entries={{schema=1,timestamp="2026-10-04T12:00:00Z",character="Synthetic",category="ROOM",speaker="Test",target="Target",language="Common",message="message",line="line",source="test"}}
+  view:renderChat(entries,{"ROOM","QUEST"},"ALL")
+  for _,field in ipairs({"schema","timestamp","character","category","speaker","target","language","message","line","source"}) do
+    local copied=copiedChatEntries(entries); copied[1][field]=field=="schema" and 2 or "changed"
+    eq(view:chatDisplayMatches(copied,{"ROOM","QUEST"},"ALL"),false)
+  end
+  eq(view:chatDisplayMatches(entries,{"ROOM","QUEST"},"ROOM"),false)
+  eq(view:chatDisplayMatches(entries,{"QUEST","ROOM"},"ALL"),false)
+  eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false)
+  eq(view:chatDisplayMatches({}, {"ROOM","QUEST"},"ALL"),false)
+  local copied=copiedChatEntries(entries); copied[1].schema="1"
+  eq(view:chatDisplayMatches(copied,{"ROOM","QUEST"},"ALL"),false)
+  copied=copiedChatEntries(entries); copied[1].source={}
+  eq(view:chatDisplayMatches(copied,{"ROOM","QUEST"},"ALL"),false)
+end)
+
+test("chat display matching compares only the requested latest thousand entries",function()
+  local view=chatView(); local entries={}
+  for index=1,1200 do entries[index]={category="ROOM",line="line-"..index} end
+  view:renderChat(entries,{"ROOM"},"ALL"); local copied=copiedChatEntries(entries)
+  copied[1].line="outside the display"
+  eq(#view.chat_entries,1000); eq(view:chatDisplayMatches(copied,{"ROOM"},"ALL"),true)
+  copied[201].line="changed visible record"
+  eq(view:chatDisplayMatches(copied,{"ROOM"},"ALL"),false)
+end)
+
+test("chat display matching rejects empty truncated extended and unverifiable native buffers",function()
+  local view=chatView(); local entries={{category="ROOM",line=string.rep("wrapped ",40)},{category="ROOM",line="last"}}
+  view:renderChat(entries,{"ROOM"},"ALL"); local output=view.chat_output; local last=output.lastLine
+  for _,nativeLast in ipairs({0,last-1,last+1}) do output.lastLine=nativeLast; eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false) end
+  output.lastLine=last; eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),true)
+  local getLast=output.getLastLineNumber
+  function output:getLastLineNumber() error("synthetic unavailable buffer") end
+  eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false)
+  function output:getLastLineNumber() return nil end
+  eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false)
+  output.getLastLineNumber=getLast
+  view.chat_line_ranges[2].first=view.chat_line_ranges[2].first+1
+  eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false)
+  view:renderChat(entries,{"ROOM"},"ALL"); view.chat_line_ranges[2]=nil
+  eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false)
+end)
+
+test("chat display matching accepts a rendered empty filter and rejects an unrendered view",function()
+  local view=chatView(); eq(view:chatDisplayMatches({}, {},"ALL"),false)
+  view:renderChat({}, {"ROOM"},"PRIVATE")
+  eq(view:chatDisplayMatches({}, {"ROOM"},"private"),true)
+  view.chat_output.lastLine=1; eq(view:chatDisplayMatches({}, {"ROOM"},"PRIVATE"),false)
+end)
+
+test("copied chat anchors retain the same wrapped record and offset after bounded append",function()
+  local view=chatView(); local entries={}
+  for index=1,1000 do entries[index]={schema=1,timestamp="2026-10-04T12:00:00Z",character="Synthetic",category="ROOM",speaker="Test",target="",language="Common",message="message-"..index,line=string.rep("wrapped-"..index.." ",40),source="test"} end
+  view:renderChat(entries,{"ROOM"},"ROOM"); local output=view.chat_output
+  output.currentScroll=view.chat_line_ranges[100].first+2
+  local copied=copiedChatEntries(entries); copied[1001]={category="ROOM",line="new message"}
+  view:renderChat(copied,{"ROOM"},"ROOM")
+  eq(#view.chat_entries,1000); eq(view.chat_entries[99].message,"message-100")
+  eq(output.currentScroll,view.chat_line_ranges[99].first+2)
+  output.currentScroll=output.lastLine; copied[1002]={category="ROOM",line="next message"}
+  view:renderChat(copiedChatEntries(copied),{"ROOM"},"ROOM")
+  eq(output.scrollCalls[#output.scrollCalls],"bottom")
+end)
+
+test("synthetic finite buffers demonstrate wrapped eviction without a sizing API",function()
+  local view=chatView(); local output=view.chat_output; finiteChatBuffer(output,10000,1000,false)
+  local entries={}; for index=1,1000 do entries[index]={category="ROOM",line=string.rep("wrapped message ",100)} end
+  view:renderChat(entries,{"ROOM"},"ALL")
+  assert(output.evictedLines>0); assert(#output.renderedEntries<1000)
+  eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),false)
+end)
+
+test("bounded native sizing prevents synthetic wrapped eviction and stays finite",function()
+  local view=chatView(); local output=view.chat_output; finiteChatBuffer(output,10000,1000,true)
+  local entries={}; for index=1,1000 do entries[index]={category="ROOM",line=string.rep("wrapped message ",100)} end
+  view:renderChat(entries,{"ROOM"},"ALL")
+  eq(output.evictedLines,0); eq(#output.renderedEntries,1000); eq(#view.chat_entries,1000)
+  assert(output.bufferLimit>10000 and output.bufferLimit<=100000)
+  assert(output.bufferBatch>0 and output.bufferBatch<output.bufferLimit)
+  eq(view:chatDisplayMatches(copiedChatEntries(entries),{"ROOM"},"ALL"),true)
+  local calls=output.bufferSizeCalls; view:renderChat(entries,{"ROOM"},"ALL"); eq(output.bufferSizeCalls,calls)
+  entries[1].line=string.rep("large ",20000); output.wrap=1
+  view:renderChat(entries,{"ROOM"},"ALL"); assert(output.bufferLimit<=100000); assert(output.evictedLines>0)
+end)
+
+test("chat rendering tolerates native buffer sizing failures",function()
+  for _,failure in ipairs({"throw","reject","error"}) do
+    local view=chatView()
+    function view.chat_output:setBufferSize()
+      if failure=="throw" then error("synthetic sizing failure") elseif failure=="reject" then return false else return nil,"synthetic sizing failure" end
+    end
+    local entries={{category="ROOM",line="synthetic message"}}
+    eq(view:renderChat(entries,{"ROOM"},"ALL"),true)
+    eq(view:chatDisplayMatches(entries,{"ROOM"},"ALL"),true)
+  end
+end)
+
 test("chat tabs stay inside narrow panels and expose deterministic overflow",function()
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)

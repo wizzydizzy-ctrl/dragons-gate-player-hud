@@ -1,8 +1,12 @@
 local History={}
 History.__index=History
 History.MAX_ENTRIES=1000
+History.MAX_RETAINED_ENTRIES=10000
 
 local private={WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true}
+-- A busy source must not consume another source's history. Custom categories
+-- share one bounded bucket rather than allocating memory for arbitrary names.
+local retainedSources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true,ALL=true}
 
 local function normalized(value)
   return tostring(value or ""):lower():match("^%s*(.-)%s*$"):gsub("%s+"," ")
@@ -35,8 +39,33 @@ function History.visibleLimit(limit)
   return math.min(History.MAX_ENTRIES,math.max(1,math.floor(tonumber(limit) or History.MAX_ENTRIES)))
 end
 
+function History.retentionKey(entry)
+  local category=tostring(type(entry)=="table" and entry.category or ""):upper():match("^%s*(.-)%s*$")
+  if category=="OWN" then category="ROOM" end
+  return retainedSources[category] and category or "OTHER"
+end
+
+function History.retained(entries,limit)
+  limit=History.visibleLimit(limit)
+  local source=type(entries)=="table" and entries or {}
+  local reversed,counts={},{}
+  for index=#source,1,-1 do
+    local entry=source[index]
+    if type(entry)=="table" then
+      local bucket=History.retentionKey(entry)
+      if (counts[bucket] or 0)<limit then
+        counts[bucket]=(counts[bucket] or 0)+1
+        reversed[#reversed+1]=entry
+      end
+    end
+  end
+  local result={}
+  for index=#reversed,1,-1 do result[#result+1]=reversed[index] end
+  return result,counts
+end
+
 function History.new(limit,dedupeSeconds)
-  return setmetatable({limit=History.visibleLimit(limit),dedupeSeconds=math.max(0,tonumber(dedupeSeconds) or 3),items={},categoryOrder={},knownCategories={}},History)
+  return setmetatable({limit=History.visibleLimit(limit),dedupeSeconds=math.max(0,tonumber(dedupeSeconds) or 3),items={},retentionCounts={},retentionBuckets={},categoryOrder={},knownCategories={}},History)
 end
 function History:newSibling() return History.new(self.limit,self.dedupeSeconds) end
 
@@ -49,7 +78,16 @@ function History:append(entry,epoch)
   self.lastKey=entryKey
   self.lastEpoch=epoch
   self.items[#self.items+1]=entry
-  while #self.items>self.limit do table.remove(self.items,1) end
+  local bucket=History.retentionKey(entry)
+  self.retentionBuckets[#self.retentionBuckets+1]=bucket
+  self.retentionCounts[bucket]=(self.retentionCounts[bucket] or 0)+1
+  if self.retentionCounts[bucket]>self.limit then
+    for index,existingBucket in ipairs(self.retentionBuckets) do
+      if existingBucket==bucket then table.remove(self.items,index); table.remove(self.retentionBuckets,index); break end
+    end
+    self.retentionCounts[bucket]=self.limit
+    if bucket=="OTHER" then rebuildCategories(self) end
+  end
   local category=tostring(entry.category or ""):upper()
   if category~="" and not self.knownCategories[category] then
     self.knownCategories[category]=true
@@ -69,9 +107,9 @@ function History:hydrate(entries)
   end
   for _,entry in ipairs(type(entries)=="table" and entries or {}) do include(entry) end
   for _,entry in ipairs(self.items) do include(entry) end
-  local first=math.max(1,#combined-self.limit+1)
-  self.items={}
-  for index=first,#combined do self.items[#self.items+1]=combined[index] end
+  self.items,self.retentionCounts=History.retained(combined,self.limit)
+  self.retentionBuckets={}
+  for index,entry in ipairs(self.items) do self.retentionBuckets[index]=History.retentionKey(entry) end
   rebuildCategories(self)
   return true
 end
@@ -102,6 +140,8 @@ end
 function History:clearVisible()
   local removed=#self.items
   self.items={}
+  self.retentionCounts={}
+  self.retentionBuckets={}
   self.categoryOrder={}
   self.knownCategories={}
   self.lastKey=nil

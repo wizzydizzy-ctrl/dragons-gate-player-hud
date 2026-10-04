@@ -81,7 +81,9 @@ Chat text wraps to the current width of the center display. DGHUD recalculates t
 
 The scroll bar lets you read older visible entries. When you are already at the bottom, new messages keep the view at the bottom. When you are reading older messages, DGHUD tries to preserve that reading position.
 
-The in-memory view is limited to the newest 1,000 valid entries by default. The local history files are not automatically pruned.
+Each message source keeps its own recent history (up to 1,000 entries by default). A busy COMBAT channel no longer pushes ordinary conversations out of their tabs, even when combat is hidden from ALL. Your own speech shares ROOM's history, and custom categories share a separate allowance. Updates carry all of these histories forward, not just the current tab.
+
+Each displayed tab shows the newest 1,000 matching entries. ALL first applies your SHOW IN ALL choices, then its display limit. Older messages remain in the dated local history files, which are not automatically pruned or uploaded.
 
 ## Duplicate messages
 

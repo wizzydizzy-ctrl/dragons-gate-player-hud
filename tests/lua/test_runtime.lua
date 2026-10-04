@@ -33,6 +33,17 @@ local function fake()
     updateClock=function(self,clock) self.state.clock=clock; f.clockUpdates=(f.clockUpdates or 0)+1 end,
     applyLayout=function(self,layout) f.layouts[#f.layouts+1]=layout end,
     renderChat=function(self,entries,categories,filter) f.chatRenders=(f.chatRenders or 0)+1; f.renderedChat={entries=entries,categories=categories,filter=filter} end,
+    chatDisplayMatches=function(self,entries,categories,filter)
+      local shown=f.renderedChat
+      if not shown or shown.filter~=filter or #shown.entries~=#entries or #shown.categories~=#categories then return false end
+      for index,category in ipairs(categories) do if shown.categories[index]~=category then return false end end
+      for index,entry in ipairs(entries) do
+        for _,field in ipairs({"schema","timestamp","character","category","speaker","target","language","message","line","source"}) do
+          if shown.entries[index][field]~=entry[field] then return false end
+        end
+      end
+      return f.chatDisplayUnhealthy~=true
+    end,
     setChatFilterCallback=function(self,callback) f.chatFilterCallback=callback end,
     setChatOrderCallback=function(self,callback) f.chatOrderCallback=callback end,
     setColorToggleCallback=function(self,callback) f.colorToggleCallback=callback end,
@@ -671,6 +682,28 @@ test("compatible update handoff preserves and adopts one live HUD view",function
   eq(replacement.chat.filter,"QUEST"); eq(replacement.chat:entries()[1].message,"visible through update"); eq(f.chatRenders,renders); eq(f.chatStorageAppends,appends)
   assert(replacement:shutdown()); eq(f.deleted,1)
 end)
+for _,mode in ipairs({"empty","partial","native_lost","cleared"}) do
+  test("compatible update repairs an adopted "..mode.." chat display without changing saved history",function()
+    local f=fake(); local contract=string.rep("a",64); local settingsContract=string.rep("b",64)
+    local settings={layout={},view_schema=1,view_contract=contract,view_settings_contract=settingsContract}
+    local retiring=Main.new(f,settings); assert(retiring:start()); local view=retiring.view
+    assert(retiring.chat:capture("QUEST","synthetic first")); assert(retiring.chat:capture("QUEST","synthetic second"))
+    assert(retiring.chat:setFilter("QUEST")); local handoff=retiring.chat:handoff()
+    local renders,appends=f.chatRenders,f.chatStorageAppends
+    if mode=="empty" then f.renderedChat.entries={}
+    elseif mode=="partial" then f.renderedChat.entries={f.renderedChat.entries[2]}
+    elseif mode=="native_lost" then f.chatDisplayUnhealthy=true
+    elseif mode=="cleared" then handoff.entries={} end
+    retiring.update_handoff=true; retiring.update_preserve_view=true; assert(retiring:shutdown())
+    local replacement=Main.new(f,settings,{schema=1,contract=contract,settings_contract=settingsContract,view=view},handoff)
+    assert(replacement:start()); eq(replacement.view,view); eq(f.chatRenders,renders+1)
+    eq(f.chatStorageAppends,appends); eq(replacement.chat.filter,"QUEST")
+    eq(#replacement.chat:entries(),mode=="cleared" and 0 or 2)
+    eq(#f.renderedChat.entries,mode=="cleared" and 0 or 2)
+    if mode~="cleared" then eq(f.renderedChat.entries[1].message,"synthetic first") end
+    assert(replacement:shutdown())
+  end)
+end
 test("failed replacement startup deletes an adopted HUD view so rollback rebuilds cleanly",function()
   local f=fake(); local contract=string.rep("a",64); local settingsContract=string.rep("b",64); local settings={layout={},view_schema=1,view_contract=contract,view_settings_contract=settingsContract}; local view=f:createView(settings); f.failChatTrigger=true
   local replacement=Main.new(f,settings,{schema=1,contract=contract,settings_contract=settingsContract,view=view}); local started,err=replacement:start()

@@ -132,7 +132,7 @@ Captured entries are append-only JSON Lines stored permanently under the active 
 <Mudlet home>/DGHUDData/chat/profile/YYYY-MM-DD.jsonl
 ```
 
-The HUD reads at most the newest 1,000 valid entries into memory, but leaves older dated logs intact. On the first profile-wide load it also reads prior character-named chat directories, combines their newest entries chronologically, and removes exact duplicates in memory; future entries are written to `chat/profile`. Reloading, updating, rolling back, or uninstalling the HUD does not delete these files. Delete the relevant files yourself if you want to remove retained history.
+The HUD keeps up to 1,000 recent entries per message source, so a busy COMBAT channel cannot erase ROOM, STAFF, or private conversations. Your own speech shares the ROOM allowance; custom categories share a separate bounded allowance. Each displayed tab shows up to 1,000 matching entries, with ALL choices applied before that display limit. Older dated logs remain intact. Profile-wide loading also reads prior character-named chat directories, combines entries chronologically, and removes exact duplicates in memory; future entries are written to `chat/profile`. Reloading, updating, rolling back, or uninstalling the HUD does not delete these files. Use the confirmed saved-history clear action only when you want to permanently remove them.
 
 Private communications such as whispers, ESP, Dragon, Secian, and Contact traffic are saved locally in these plain JSONL files. Anyone with access to your Mudlet profile, computer account, backups, or copied profile data may be able to read them. The HUD does not transmit chat logs, but you should treat the directory as sensitive local data.
 

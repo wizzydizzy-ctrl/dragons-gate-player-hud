@@ -636,3 +636,316 @@ test("failed saved clear retains memory and reports the storage failure",functio
   local ok,err=controller:clearSavedHistory(true)
   eq(ok,nil); eq(err,"delete denied"); eq(#controller:entries(),1); eq(f.storageClears,1); eq(f.errors,1)
 end)
+
+-- All retention scenarios use generated records and the in-memory fake storage.
+local function copyRetentionValue(value)
+  if type(value)~="table" then return value end
+  local copy={}
+  for key,item in pairs(value) do copy[key]=copyRetentionValue(item) end
+  return copy
+end
+
+local function sameRetentionValue(actual,expected)
+  if type(expected)~="table" then eq(actual,expected); return end
+  eq(type(actual),"table")
+  for key,value in pairs(expected) do sameRetentionValue(actual[key],value) end
+  for key in pairs(actual) do assert(expected[key]~=nil,"unexpected setting "..tostring(key)) end
+end
+
+local function syntheticAdapter(entries)
+  local f=fake(entries)
+  f.character="SyntheticAlpha"; f.timestampValue="2026-10-04T00:00:00Z"
+  return f
+end
+
+local function retentionController(f,limit,sources,onChange,onAccepted)
+  local settings={visible_limit=limit or 1000,dedupe_seconds=3,all_sources=sources or allSources(),
+    timestamps=false,tab_order={"STAFF","ALL","ROOM","PRIVATE","COMBAT"},personal_option="synthetic-option"}
+  local controller=Controller.new(f,Parser,History.new(settings.visible_limit,settings.dedupe_seconds),f.storage,
+    onChange or function() end,function() return f.character end,settings.all_sources,onAccepted)
+  return controller,settings
+end
+
+local function newestRetentionEntries(entries,limit)
+  local result={}
+  for index=math.max(1,#entries-limit+1),#entries do result[#result+1]=entries[index] end
+  return result
+end
+
+local function controllerRetentionFixture(limit)
+  local entries,expected={},{}
+  for index=1,limit+2 do
+    for _,bucket in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","ALL","OTHER"}) do
+      local category=bucket
+      if bucket=="ROOM" and index%2==0 then category="OWN" end
+      if bucket=="OTHER" then
+        category="SYNTHETIC_"..index
+        if index%3==0 then category=nil elseif index%2==0 then category="" end
+      end
+      local entry={schema=1,timestamp="2026-10-04T00:00:00Z",character="SyntheticAlpha",
+        category=category,message="synthetic-"..bucket.."-"..index,line="synthetic-"..bucket.."-"..index,source="custom"}
+      entries[#entries+1]=entry
+      if index>2 then expected[#expected+1]=entry end
+    end
+  end
+  return entries,expected
+end
+
+local function captureRetentionFlood(controller,f)
+  local lines={
+    'SyntheticNeighbor says, "synthetic-room-seed."',
+    'You say "synthetic-own-seed."',
+    'SyntheticNeighbor whispers to you, "synthetic-whisper-seed."',
+    'SyntheticRemote (ESP): "synthetic-esp-seed."',
+    'You pick up SyntheticDragon\'s mental link, "synthetic-dragon-seed."',
+    'You pick up SyntheticSecian\'s Secian link, "synthetic-secian-seed." [r-1]',
+    'SyntheticContact thinks to you, "synthetic-contact-seed."',
+    '[GUIDE] SyntheticGuide: synthetic-staff-seed.',
+    'Your strength has increased!',
+  }
+  for _,line in ipairs(lines) do f.epochValue=f.epochValue+4; f:line(line) end
+  f.epochValue=f.epochValue+4; assert(controller:capture("SYNTHETIC_QUEST","synthetic-custom-seed"))
+  eq(f.storageAppends,10)
+  local conversations={}
+  for index,entry in ipairs(f.appendedEntries) do conversations[index]=entry end
+  eq(table.concat(controller.history:categories(),","),"ROOM,OWN,WHISPER,ESP,DRAGON,SECIAN,CONTACT,STAFF,ALL,SYNTHETIC_QUEST")
+  for index=1,1005 do
+    f.epochValue=f.epochValue+4
+    f:line("Your head takes "..index.." points of impact damage!")
+  end
+  eq(f.storageAppends,1015)
+  local combat=newestRetentionEntries(f.appendedEntries,1000)
+  local retained={}
+  for _,entry in ipairs(conversations) do retained[#retained+1]=entry end
+  for _,entry in ipairs(combat) do retained[#retained+1]=entry end
+  return conversations,combat,retained
+end
+
+local function assertRetentionFlood(controller,conversations,combat,retained)
+  sameEntries(controller.history:entries("ALL"),retained)
+  eq(#retained,1010)
+  assert(controller:setFilter("ALL")); sameEntries(controller:entries(),conversations)
+  assert(controller:setFilter("ROOM")); sameEntries(controller:entries(),{conversations[1],conversations[2]})
+  assert(controller:setFilter("OWN")); sameEntries(controller:entries(),{conversations[2]})
+  for index,category in ipairs({"WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF"}) do
+    assert(controller:setFilter(category)); sameEntries(controller:entries(),{conversations[index+2]})
+  end
+  assert(controller:setFilter("PRIVATE"))
+  sameEntries(controller:entries(),{conversations[3],conversations[4],conversations[5],conversations[6],conversations[7]})
+  assert(controller:setFilter("SYNTHETIC_QUEST")); sameEntries(controller:entries(),{conversations[10]})
+  assert(controller:setFilter("COMBAT")); sameEntries(controller:entries(),combat)
+  eq(combat[1].line,"Your head takes 6 points of impact damage!")
+  eq(combat[1000].line,"Your head takes 1005 points of impact damage!")
+  assert(controller:setFilter("ALL")); sameEntries(controller:entries(),conversations)
+end
+
+test("over a thousand live COMBAT lines preserve older chat with COMBAT off ALL and keep its own newest thousand",function()
+  local f=syntheticAdapter(); local accepted=0; local redraw
+  local defaultsBefore=copyRetentionValue(require("defaults").chat)
+  local controller,settings=retentionController(f,1000,allSources(),function(entries) redraw=entries end,
+    function() accepted=accepted+1 end)
+  local settingsBefore=copyRetentionValue(settings)
+  assert(controller:start())
+  local conversations,combat,retained=captureRetentionFlood(controller,f)
+  sameEntries(redraw,conversations); assertRetentionFlood(controller,conversations,combat,retained)
+  eq(accepted,1015); eq(f.loadRecentCalls,1); eq(f.storageClears,0)
+  local sourcesBefore=copyRetentionValue(controller.allSources)
+  assert(controller:setAllSources(allSources({COMBAT=true})))
+  sameEntries(controller:entries(),combat); sameEntries(redraw,combat)
+  sameEntries(controller.history:entries("ALL"),retained)
+  assert(controller:setAllSources(settings.all_sources)); sameEntries(controller:entries(),conversations)
+  sameRetentionValue(controller.allSources,sourcesBefore)
+  f:line(combat[1000].line); eq(accepted,1015); eq(f.storageAppends,1015)
+  sameRetentionValue(settings,settingsBefore); sameRetentionValue(require("defaults").chat,defaultsBefore)
+  assert(controller:shutdown())
+end)
+
+test("controller renders newest configured limit AFTER ALL source and PRIVATE filtering while history returns all matches",function()
+  local saved,retained=controllerRetentionFixture(3)
+  local f=syntheticAdapter(saved); local redraw
+  local sources=allSources({ROOM=false,WHISPER=false,COMBAT=false})
+  local controller,settings=retentionController(f,3,sources,function(entries) redraw=entries end)
+  local settingsBefore=copyRetentionValue(settings)
+  assert(controller:start()); sameEntries(controller.history:entries("ALL"),retained)
+  local visible=controller.history:entries("ALL",sources)
+  eq(#visible,21); sameEntries(controller:entries(),newestRetentionEntries(visible,3))
+  sameEntries(redraw,controller:entries()); eq(controller:status().visible_count,3)
+  assert(controller:setFilter("PRIVATE"))
+  local private=controller.history:entries("PRIVATE",sources)
+  eq(#private,15); sameEntries(controller:entries(),newestRetentionEntries(private,3))
+  sameEntries(redraw,controller:entries())
+  assert(controller:setFilter("ROOM")); eq(#controller:entries(),3)
+  assert(controller:setFilter("COMBAT")); eq(#controller:entries(),3)
+  assert(controller:setFilter("ALL")); sameEntries(controller:entries(),newestRetentionEntries(visible,3))
+  sameEntries(controller.history:entries("ALL"),retained)
+  eq(controller.history.limit,3); eq(f.loadRecentCalls,1); eq(f.storageAppends,0); eq(f.storageClears,0)
+  sameRetentionValue(settings,settingsBefore); assert(controller:shutdown())
+end)
+
+test("full update handoff copies every retained bucket up to ten thousand even from a filtered tab",function()
+  local saved,retained=controllerRetentionFixture(1000)
+  local f=syntheticAdapter(saved); local accepted=0
+  local controller,settings=retentionController(f,1000,allSources(),nil,function() accepted=accepted+1 end)
+  local settingsBefore=copyRetentionValue(settings)
+  assert(controller:start()); assert(controller:setFilter("PRIVATE"))
+  eq(#controller:entries(),1000); eq(#controller.history:entries("PRIVATE"),5000)
+  local handoff=controller:handoff()
+  eq(handoff.schema,1); eq(handoff.filter,"PRIVATE"); eq(handoff.partial,nil)
+  eq(#handoff.entries,10000); sameEntries(handoff.entries,retained)
+  for index,entry in ipairs(handoff.entries) do assert(entry~=retained[index],"handoff must copy retained entry "..index) end
+  handoff.entries[1].message="synthetic-mutated-snapshot"
+  sameEntries(controller.history:entries("ALL"),retained)
+  eq(accepted,0); eq(f.storageAppends,0); eq(f.storageClears,0); eq(f.loadRecentCalls,1)
+  sameRetentionValue(settings,settingsBefore); assert(controller:shutdown())
+end)
+
+for _,limit in ipairs({3,1000}) do
+  test("full handoff restore bounds EACH bucket including shared OTHER at configured limit "..limit,function()
+    local saved,retained=controllerRetentionFixture(limit)
+    local handoff={schema=1,character_key="profile",filter="PRIVATE",entries=saved}
+    local f=syntheticAdapter({{category="STAFF",message="synthetic-disk-must-not-load"}})
+    local accepted,redraws=0,0
+    local controller,settings=retentionController(f,limit,allSources({COMBAT=false,ROOM=false}),
+      function() redraws=redraws+1 end,function() accepted=accepted+1 end)
+    local settingsBefore=copyRetentionValue(settings); local expected=copyRetentionValue(retained)
+    assert(controller:restoreHandoff(handoff)); assert(controller:start(true))
+    sameEntries(controller.history:entries("ALL"),expected)
+    eq(#controller.history.items,10*limit); assert(#controller.history.items<=10000)
+    eq(#controller.history:entries("PRIVATE"),5*limit)
+    sameEntries(controller:entries(),newestRetentionEntries(controller.history:entries("PRIVATE"),limit))
+    eq(controller.filter,"PRIVATE"); eq(controller.history.limit,limit)
+    eq(redraws,0); eq(accepted,0); eq(f.loadRecentCalls,0); eq(f.storageAppends,0); eq(f.storageClears,0)
+    handoff.entries[21].message="synthetic-mutated-input"
+    sameEntries(controller.history:entries("ALL"),expected)
+    sameRetentionValue(settings,settingsBefore); assert(controller:shutdown())
+  end)
+end
+
+test("combat-flood full update survives identity gaps character switches reconnect and silent duplicate suppression",function()
+  local first=syntheticAdapter(); local original,settings=retentionController(first)
+  local settingsBefore=copyRetentionValue(settings)
+  assert(original:start())
+  local conversations,combat,retained=captureRetentionFlood(original,first)
+  assert(original:setFilter("ROOM"))
+  local handoff=original:handoff(); sameEntries(handoff.entries,retained)
+  eq(handoff.filter,"ROOM"); eq(handoff.last_key,original.history.lastKey); eq(handoff.last_epoch,first.epochValue)
+  assert(original:shutdown()); eq(first:count(first.triggers),0)
+
+  local second=syntheticAdapter(first.appendedEntries); second.character=nil; second.epochValue=first.epochValue
+  local accepted,redraws=0,0
+  local restored,restoredSettings=retentionController(second,settings.visible_limit,copyRetentionValue(settings.all_sources),
+    function() redraws=redraws+1 end,function() accepted=accepted+1 end)
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(restored.filter,"ROOM"); sameEntries(restored:entries(),{conversations[1],conversations[2]})
+  eq(restored.history.lastKey,handoff.last_key); eq(restored.history.lastEpoch,handoff.last_epoch)
+  eq(redraws,0); eq(accepted,0); eq(second.storageAppends,0); eq(second.loadRecentCalls,0)
+  second:line(combat[1000].line)
+  eq(accepted,0); eq(second.storageAppends,0); eq(redraws,0)
+  for _,character in ipairs({"SyntheticBeta",false,"SyntheticAlpha"}) do
+    second.character=character or nil; assert(restored:syncCharacter())
+    sameEntries(restored.history:entries("ALL"),retained)
+    eq(restored.currentCharacterKey,"profile")
+  end
+  assert(restored:shutdown()); eq(second:count(second.triggers),0)
+  assert(restored:start(true)); eq(second:count(second.triggers),1)
+  eq(second.loadRecentCalls,0); eq(accepted,0); eq(second.storageAppends,0); eq(redraws,0)
+  assertRetentionFlood(restored,conversations,combat,retained)
+  second.epochValue=second.epochValue+4; second:line('You say "synthetic-own-after-update."')
+  second.epochValue=second.epochValue+4; second:line("[GUIDE] SyntheticGuide: synthetic-staff-after-update.")
+  eq(accepted,2); eq(second.storageAppends,2); eq(second.storedCharacters[1],"SyntheticAlpha")
+  assert(restored:setFilter("ROOM")); eq(#restored:entries(),3)
+  sameEntries(newestRetentionEntries(restored:entries(),1),{second.appendedEntries[1]})
+  assert(restored:setFilter("STAFF")); sameEntries(restored:entries(),{conversations[8],second.appendedEntries[2]})
+  assert(restored:setFilter("COMBAT")); sameEntries(restored:entries(),combat)
+  eq(second.storageClears,0)
+  sameRetentionValue(settings,settingsBefore); sameRetentionValue(restoredSettings,settingsBefore)
+  assert(restored:shutdown())
+end)
+
+for _,transition in ipairs({"character switches","reconnect","profile hydration"}) do
+  test("combat-flood retention persists across "..transition.." without replay alerts or saved-history writes",function()
+    local f=syntheticAdapter(); local accepted=0
+    local controller,settings=retentionController(f,1000,allSources(),nil,function() accepted=accepted+1 end)
+    local settingsBefore=copyRetentionValue(settings)
+    assert(controller:start())
+    local conversations,combat,retained=captureRetentionFlood(controller,f)
+    eq(accepted,1015)
+    if transition=="character switches" then
+      for _,character in ipairs({"SyntheticBeta",false,"SyntheticAlpha"}) do
+        f.character=character or nil; assert(controller:syncCharacter())
+        sameEntries(controller.history:entries("ALL"),retained)
+      end
+    elseif transition=="reconnect" then
+      assert(controller:shutdown()); eq(f:count(f.triggers),0)
+      assert(controller:start()); assert(controller:start()); eq(f:count(f.triggers),1)
+    else
+      local saved={}
+      for _,entry in ipairs(f.appendedEntries) do saved[#saved+1]=entry end
+      saved[#saved+1]=conversations[1]; saved[#saved+1]=combat[1000]
+      assert(controller:shutdown())
+      f=syntheticAdapter(saved); accepted=0
+      controller=retentionController(f,1000,settings.all_sources,nil,function() accepted=accepted+1 end)
+      assert(controller:start()); eq(accepted,0); eq(f.storageAppends,0)
+      assert(controller.history:hydrate(saved)); assert(controller.history:hydrate(saved))
+    end
+    assertRetentionFlood(controller,conversations,combat,retained)
+    eq(accepted,transition=="profile hydration" and 0 or 1015)
+    eq(f.storageAppends,transition=="profile hydration" and 0 or 1015)
+    eq(f.loadRecentCalls,1); eq(f.storageClears,0); eq(controller.currentCharacterKey,"profile")
+    sameRetentionValue(settings,settingsBefore); assert(controller:shutdown())
+  end)
+end
+
+test("partial visible handoff hydrates all retained combat-flood buckets silently and deduplicates the overlap",function()
+  local first=syntheticAdapter(); local original=retentionController(first)
+  assert(original:start())
+  local conversations,combat,retained=captureRetentionFlood(original,first)
+  local handoff=original:handoff(); handoff.partial=true; handoff.entries=original:entries()
+  sameEntries(handoff.entries,conversations); assert(original:shutdown())
+  local second=syntheticAdapter(first.appendedEntries); second.epochValue=first.epochValue
+  local accepted,redraws=0,0
+  local restored=retentionController(second,1000,allSources(),function() redraws=redraws+1 end,
+    function() accepted=accepted+1 end)
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  eq(second.loadRecentCalls,1); eq(second.storageAppends,0); eq(accepted,0); eq(redraws,0)
+  sameEntries(restored.history:entries("ALL"),retained)
+  second:line(combat[1000].line); eq(second.storageAppends,0); eq(accepted,0)
+  assertRetentionFlood(restored,conversations,combat,retained)
+  sameEntries(restored:handoff().entries,retained)
+  eq(second.storageClears,0); assert(restored:shutdown())
+end)
+
+test("explicit clear after combat overflow is authoritative through full update character switches and reconnect",function()
+  local first=syntheticAdapter(); local original=retentionController(first)
+  assert(original:start())
+  local _,combat=captureRetentionFlood(original,first)
+  assert(original:setFilter("COMBAT"))
+  local ok,removed=original:clearVisibleHistory()
+  eq(ok,true); eq(removed,1010); eq(#original.history:entries("ALL"),0)
+  eq(#original.history:categories(),0); eq(original.history.lastKey,nil); eq(original.history.lastEpoch,nil)
+  local handoff=original:handoff()
+  eq(#handoff.entries,0); eq(handoff.filter,"COMBAT"); eq(handoff.partial,nil)
+  eq(handoff.last_key,nil); eq(handoff.last_epoch,nil)
+  eq(first.storageClears,0); eq(first.storageAppends,1015); assert(original:shutdown())
+
+  local second=syntheticAdapter(first.appendedEntries); second.epochValue=first.epochValue; second.character=nil
+  local accepted=0
+  local restored,settings=retentionController(second,1000,allSources(),nil,function() accepted=accepted+1 end)
+  local settingsBefore=copyRetentionValue(settings)
+  assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
+  second.character="SyntheticBeta"; assert(restored:syncCharacter())
+  assert(restored:shutdown()); assert(restored:start(true))
+  for _,filter in ipairs({"ALL","ROOM","OWN","PRIVATE","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","SYNTHETIC_QUEST"}) do
+    assert(restored:setFilter(filter)); eq(#restored:entries(),0)
+  end
+  eq(#restored:handoff().entries,0); eq(second.loadRecentCalls,0); eq(second.storageAppends,0); eq(accepted,0)
+  sameRetentionValue(settings,settingsBefore)
+  assert(restored:setFilter("ALL")); assert(restored:setAllSources(allSources({COMBAT=true})))
+  eq(#restored:entries(),0)
+  second:line(combat[1000].line)
+  eq(second.storageAppends,1); eq(accepted,1); eq(#restored.history:entries("COMBAT"),1)
+  second.epochValue=second.epochValue+4; second:line('SyntheticNeighbor says, "synthetic-after-clear."')
+  eq(second.storageAppends,2); eq(accepted,2); eq(#restored.history:entries("ALL"),2)
+  assert(restored:setFilter("ROOM")); sameEntries(restored:entries(),{second.appendedEntries[2]})
+  eq(second.storageClears,0); assert(restored:shutdown())
+end)

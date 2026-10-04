@@ -568,7 +568,14 @@ function Main:startChat()
       return true
     end)
   end
-  local started,err=self.chat:start(restored and self.view_adopted==true)
+  local preserveDisplay=false
+  if restored and self.view_adopted==true and self.view and type(self.view.chatDisplayMatches)=="function" then
+    local checked,matches=pcall(self.view.chatDisplayMatches,self.view,self.chat:entries(),self.chat.history:categories(),self.chat.filter)
+    preserveDisplay=checked and matches==true
+  end
+  -- Reuse a healthy native display without blanking it. Repaint from retained
+  -- history if the old console is empty, truncated, stale, or unverifiable.
+  local started,err=self.chat:start(preserveDisplay)
   if started then self.chat_handoff=nil end
   return started,err
 end

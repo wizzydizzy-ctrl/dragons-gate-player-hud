@@ -184,3 +184,159 @@ test("clears only the visible in-memory history and resets dedupe state",functio
   eq(#history:entries("ALL"),0); eq(#history:categories(),0); eq(history.lastKey,nil); eq(history.lastEpoch,nil)
   eq(history:append(entry,100),true); eq(#history:entries("ALL"),1)
 end)
+
+-- Retention fixtures are synthetic and never read a Mudlet profile or chat log.
+local retentionBuckets={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","ALL","OTHER"}
+
+local function retentionFixture(limit)
+  local entries,expected={},{}
+  for index=1,limit+2 do
+    for _,bucket in ipairs(retentionBuckets) do
+      local category=bucket
+      if bucket=="ROOM" and index%2==0 then category="OWN" end
+      if bucket=="OTHER" then category="SYNTHETIC_"..index end
+      local entry={schema=1,timestamp="2026-10-04T00:00:00Z",character="SyntheticAlpha",
+        category=category,message="synthetic-"..bucket.."-"..index,source="custom"}
+      entries[#entries+1]=entry
+      if index>2 then expected[#expected+1]=entry end
+    end
+  end
+  return entries,expected
+end
+
+local function sameRetained(actual,expected)
+  eq(#actual,#expected)
+  for index,entry in ipairs(expected) do
+    eq(actual[index].category,entry.category)
+    eq(actual[index].message,entry.message)
+  end
+end
+
+test("retention exposes a thousand-entry bucket cap and ten-thousand-entry total bound",function()
+  eq(History.MAX_ENTRIES,1000)
+  eq(History.MAX_RETAINED_ENTRIES,10000)
+end)
+
+for _,mode in ipairs({"append","hydrate"}) do
+  for _,requestedLimit in ipairs({1,3,1500}) do
+    test(mode.." retains the newest entries in EACH fixed bucket at limit "..requestedLimit,function()
+      local limit=math.min(requestedLimit,1000)
+      local history=History.new(requestedLimit,3)
+      local entries,expected=retentionFixture(limit)
+      if mode=="hydrate" then assert(history:hydrate(entries))
+      else for index,entry in ipairs(entries) do eq(history:append(entry,index*4),true) end end
+      eq(history.limit,limit)
+      sameRetained(history:entries("ALL"),expected)
+      eq(#history.items,10*limit)
+      assert(#history.items<=History.MAX_RETAINED_ENTRIES)
+      for _,category in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT"}) do
+        eq(#history:entries(category),limit)
+      end
+      -- History returns every matching retained private entry, even above limit.
+      eq(#history:entries("PRIVATE"),5*limit)
+      local notices=0
+      for _,entry in ipairs(history:entries("ALL")) do
+        if entry.category=="ALL" then notices=notices+1 end
+      end
+      eq(notices,limit)
+      eq(#history:entries("SYNTHETIC_1"),0)
+      eq(#history:entries("SYNTHETIC_"..(limit+2)),1)
+    end)
+  end
+
+  test(mode.." makes OWN consume ROOM quota while independent STAFF survives",function()
+    local history=History.new(3,3)
+    local entries={
+      {category="ROOM",message="synthetic-room-old"},
+      {category="OWN",message="synthetic-own-old"},
+      {category="STAFF",message="synthetic-staff"},
+      {category="ROOM",message="synthetic-room-middle"},
+      {category="OWN",message="synthetic-own-middle"},
+      {category="ROOM",message="synthetic-room-new"},
+      {category="OWN",message="synthetic-own-new"},
+    }
+    if mode=="hydrate" then assert(history:hydrate(entries))
+    else for index,entry in ipairs(entries) do assert(history:append(entry,index*4)) end end
+    sameRetained(history:entries("ALL"),{entries[3],entries[5],entries[6],entries[7]})
+    sameRetained(history:entries("ROOM"),{entries[5],entries[6],entries[7]})
+    sameRetained(history:entries("OWN"),{entries[5],entries[7]})
+  end)
+
+  test(mode.." bounds custom unknown PRIVATE OTHER empty and missing categories together",function()
+    local history=History.new(3,3)
+    local entries={{category="STAFF",message="synthetic-protected-staff"}}
+    for index=1,1005 do
+      local category="SYNTHETIC_CATEGORY_"..index
+      if index==1001 then category="PRIVATE"
+      elseif index==1002 then category="OTHER"
+      elseif index==1003 then category=""
+      elseif index==1004 then category=nil end
+      entries[#entries+1]={category=category,message="synthetic-other-"..index}
+    end
+    if mode=="hydrate" then assert(history:hydrate(entries))
+    else for index,entry in ipairs(entries) do assert(history:append(entry,index*4)) end end
+    sameRetained(history:entries("ALL"),{entries[1],entries[1004],entries[1005],entries[1006]})
+    eq(#history:entries("STAFF"),1)
+    eq(#history:entries("SYNTHETIC_CATEGORY_1"),0)
+    eq(#history:entries("PRIVATE"),0)
+    eq(#history:entries("OTHER"),0)
+  end)
+end
+
+test("more than a thousand hidden COMBAT entries retain earlier conversations and ALL notices",function()
+  local history=History.new(1000,3)
+  local conversations={}
+  for index,category in ipairs({"ROOM","OWN","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","ALL","SYNTHETIC"}) do
+    conversations[index]={category=category,message="synthetic-saved-"..category}
+    assert(history:append(conversations[index],index*4))
+  end
+  for index=1,1005 do assert(history:append({category="COMBAT",message="synthetic-combat-"..index},100+index*4)) end
+  local sources={COMBAT=false}
+  sameRetained(history:entries("ALL",sources),conversations)
+  eq(#history:entries("ALL"),1010)
+  local combat=history:entries("COMBAT",sources)
+  eq(#combat,1000); eq(combat[1].message,"synthetic-combat-6"); eq(combat[1000].message,"synthetic-combat-1005")
+  sources.COMBAT=true; eq(#history:entries("ALL",sources),1010)
+  sources.COMBAT=false; sameRetained(history:entries("ALL",sources),conversations)
+end)
+
+test("hydrating every bucket deduplicates saved overlap preserves live dedupe and trims within each bucket",function()
+  local history=History.new(3,3)
+  local saved,expected=retentionFixture(3)
+  local live={category="STAFF",message="synthetic-live-staff"}
+  assert(history:append(live,100))
+  local lastKey,lastEpoch=history.lastKey,history.lastEpoch
+  saved[#saved+1]=saved[#saved]
+  assert(history:hydrate(saved))
+  -- The live STAFF entry replaces only the oldest of the three saved STAFF entries.
+  local merged={}
+  for _,entry in ipairs(expected) do
+    if entry.message~="synthetic-STAFF-3" then merged[#merged+1]=entry end
+  end
+  merged[#merged+1]=live
+  sameRetained(history:entries("ALL"),merged)
+  assert(history:hydrate(saved)); sameRetained(history:entries("ALL"),merged)
+  eq(history.lastKey,lastKey); eq(history.lastEpoch,lastEpoch)
+  eq(history:append(live,103),false); sameRetained(history:entries("ALL"),merged)
+  local nextStaff={category="STAFF",message="synthetic-next-staff"}
+  eq(history:append(nextStaff,104),true)
+  sameRetained(history:entries("STAFF"),{expected[27],live,nextStaff})
+  eq(#history:entries("ALL"),30)
+end)
+
+test("clearing all retained buckets resets their quotas dedupe and sibling state",function()
+  local history=History.new(3,4)
+  local entries,expected=retentionFixture(3)
+  assert(history:hydrate(entries))
+  local sibling=history:newSibling()
+  eq(sibling.limit,3); eq(sibling.dedupeSeconds,4); eq(#sibling:entries(),0)
+  eq(history:clearVisible(),30)
+  eq(#history:entries(),0); eq(#history:categories(),0)
+  eq(history.lastKey,nil); eq(history.lastEpoch,nil)
+  for index,entry in ipairs(expected) do assert(history:append(entry,index*4)) end
+  sameRetained(history:entries(),expected)
+  eq(history:append(expected[#expected],#expected*4),false)
+  eq(#sibling:entries(),0)
+  assert(sibling:append({category="ROOM",message="synthetic-sibling"},200))
+  sameRetained(history:entries(),expected)
+end)

@@ -3,8 +3,11 @@ local userSettings=previous and previous.user_settings
 local updateReinstallPending=previous and previous._update_reinstall_pending
 local viewHandoff=previous and previous._view_handoff
 local mainWrapBaseline=previous and (previous._main_wrap_baseline or (type(previous.controller)=="table" and previous.controller.original_main_console_wrap))
-local function copyChatEntries(entries)
-  local source=type(entries)=="table" and entries or {}; local result={}; local first=math.max(1,#source-999)
+local function copyChatEntries(entries,partial)
+  -- Capture before replacing loaded modules. A full controller snapshot carries
+  -- ten bounded source histories; a view-only fallback carries one visible tab.
+  local limit=partial==true and 1000 or 10000
+  local source=type(entries)=="table" and entries or {}; local result={}; local first=math.max(1,#source-limit+1)
   for index=first,#source do
     local entry=source[index]
     if type(entry)=="table" then
@@ -28,7 +31,7 @@ local function captureChatHandoff(hud)
   if not handoff and type(hud._chat_handoff)=="table" then handoff=hud._chat_handoff end
   if not handoff and controller and controller.view and type(controller.view.chat_entries)=="table" then handoff={schema=1,partial=true,character_key="unknown",filter=controller.view.chat_active_filter,entries=controller.view.chat_entries} end
   if type(handoff)~="table" then return nil end
-  return {schema=1,partial=handoff.partial==true,character_key=handoff.character_key,filter=handoff.filter,entries=copyChatEntries(handoff.entries),last_key=handoff.last_key,last_epoch=handoff.last_epoch}
+  return {schema=1,partial=handoff.partial==true,character_key=handoff.character_key,filter=handoff.filter,entries=copyChatEntries(handoff.entries,handoff.partial),last_key=handoff.last_key,last_epoch=handoff.last_epoch}
 end
 local chatHandoff=captureChatHandoff(previous)
 if updateReinstallPending and previous and type(previous.controller)=="table" then

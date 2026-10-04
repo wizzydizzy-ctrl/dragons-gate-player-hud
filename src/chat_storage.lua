@@ -1,6 +1,7 @@
+local History=require("chat_history")
 local Storage={}
 Storage.__index=Storage
-Storage.MAX_ENTRIES=1000
+Storage.MAX_ENTRIES=History.MAX_ENTRIES
 
 local function trim(value)
   return tostring(value or ""):match("^%s*(.-)%s*$")
@@ -28,18 +29,58 @@ local function datedFiles(files)
   return result
 end
 
-local function lines(text)
-  local result={}
-  for line in (tostring(text or "").."\n"):gmatch("(.-)\n") do
-    if line~="" then result[#result+1]=line end
-  end
-  return result
-end
-
 local function entryIdentity(entry)
   local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source"}; local values={}
   for index,name in ipairs(fields) do values[index]=tostring(entry[name] or "") end
   return table.concat(values,"\0")
+end
+
+local function earlier(a,b)
+  if a.timestamp~=b.timestamp then return a.timestamp<b.timestamp end
+  if a.lineIndex~=b.lineIndex then return a.lineIndex<b.lineIndex end
+  if a.directory~=b.directory then return a.directory<b.directory end
+  return a.sequence<b.sequence
+end
+
+-- Keep an oldest-first heap for each fixed retention bucket. The identity map
+-- contains only selected records, so a large day or repeated legacy copies
+-- cannot accumulate unbounded decoded entries or deduplication keys.
+local function siftDown(heap,index)
+  local record=heap[index]
+  while index*2<=#heap do
+    local child=index*2
+    if child<#heap and earlier(heap[child+1],heap[child]) then child=child+1 end
+    if not earlier(heap[child],record) then break end
+    heap[index]=heap[child]; heap[index].index=index; index=child
+  end
+  heap[index]=record; record.index=index
+end
+
+local function selectRecord(buckets,seen,limit,record)
+  local bucket=History.retentionKey(record.entry)
+  local heap=buckets[bucket]
+  if not heap then heap={}; buckets[bucket]=heap end
+  record.identity=entryIdentity(record.entry)
+  local duplicate=seen[record.identity]
+  if duplicate then
+    -- Use the newest occurrence as the stable representative of an overlap.
+    -- A previously evicted copy can only return if its occurrence ranks newer.
+    if earlier(duplicate,record) then
+      heap[duplicate.index]=record; seen[record.identity]=record
+      siftDown(heap,duplicate.index)
+    end
+  elseif #heap<limit then
+    local index=#heap+1
+    while index>1 do
+      local parent=math.floor(index/2)
+      if not earlier(record,heap[parent]) then break end
+      heap[index]=heap[parent]; heap[index].index=index; index=parent
+    end
+    heap[index]=record; record.index=index; seen[record.identity]=record
+  elseif earlier(heap[1],record) then
+    seen[heap[1].identity]=nil
+    heap[1]=record; seen[record.identity]=record; siftDown(heap,1)
+  end
 end
 
 local function call(api,name,...)
@@ -50,7 +91,7 @@ end
 
 function Storage.new(api,basePath,visibleLimit)
   assert(type(api)=="table","storage api is required")
-  visibleLimit=math.min(Storage.MAX_ENTRIES,math.max(1,math.floor(tonumber(visibleLimit) or Storage.MAX_ENTRIES)))
+  visibleLimit=History.visibleLimit(visibleLimit)
   return setmetatable({api=api,basePath=tostring(basePath or ""),visibleLimit=visibleLimit,reportedMalformed=false},Storage)
 end
 
@@ -123,29 +164,40 @@ function Storage:loadRecent()
     elseif candidate==directory and listErr then self:reportFailure(listErr) end
   end
   local dates={}; for file in pairs(dateSet) do dates[#dates+1]=file end; table.sort(dates,function(a,b) return a>b end)
-  local records,seen={},{}; local sequence=0
+  local buckets,seen={},{}; local sequence=0
   for _,file in ipairs(dates) do
     for _,candidate in ipairs(byDate[file]) do
-      local content,readErr=call(self.api,"read",path(candidate,file)); if readErr then self:reportFailure(readErr) end
-      for lineIndex,line in ipairs(lines(content)) do
+      local lineIndex=0
+      local function include(line)
+        if line=="" then return end
+        lineIndex=lineIndex+1
         local ok,entry=pcall(self.api.decode,line)
         if ok and type(entry)=="table" then
-          local identity=entryIdentity(entry)
-          if not seen[identity] then
-            seen[identity]=true; sequence=sequence+1
-            records[#records+1]={entry=entry,order=tostring(entry.timestamp or file).."\0"..string.format("%08d",lineIndex).."\0"..candidate,sequence=sequence}
-          end
+          sequence=sequence+1
+          selectRecord(buckets,seen,self.visibleLimit,{entry=entry,timestamp=tostring(entry.timestamp or file),lineIndex=lineIndex,directory=candidate,sequence=sequence})
         else self:reportMalformed() end
       end
+      if type(self.api.eachLine)=="function" then
+        local read,readErr=call(self.api,"eachLine",path(candidate,file),include)
+        if not read then self:reportFailure(readErr or "could not read chat log") end
+      else
+        -- Small injected/fake APIs may still supply read(). Avoid building a
+        -- second table of all lines even when streaming is unavailable.
+        local content,readErr=call(self.api,"read",path(candidate,file))
+        if readErr then self:reportFailure(readErr) end
+        for line in tostring(content or ""):gmatch("[^\n]+") do include(line) end
+      end
     end
-    if #records>=self.visibleLimit then break end
+    -- Scan every date: even a full COMBAT bucket says nothing about older
+    -- STAFF or private conversations. Selection stays bounded across dates.
   end
-  table.sort(records,function(a,b) if a.order==b.order then return a.sequence<b.sequence end; return a.order<b.order end)
-  local unique={}
-  for _,record in ipairs(records) do unique[#unique+1]=record.entry end
-  local chronological={}; local first=math.max(1,#unique-self.visibleLimit+1)
-  for index=first,#unique do chronological[#chronological+1]=unique[index] end
-  return chronological
+  local records={}
+  for _,heap in pairs(buckets) do for _,record in ipairs(heap) do records[#records+1]=record end end
+  table.sort(records,earlier)
+  local chronological={}
+  for _,record in ipairs(records) do chronological[#chronological+1]=record.entry end
+  local retained=History.retained(chronological,self.visibleLimit)
+  return retained
 end
 
 function Storage:clearProfileHistory(confirmed)
@@ -260,6 +312,27 @@ function Storage.mudletApi(home,dataFolder)
       file:close()
       if content==nil then return nil,readErr or "could not read chat log" end
       return content
+    end,
+    eachLine=function(pathname,consume)
+      local file,err=open(pathname,"rb")
+      if not file then return nil,err or "could not open chat log" end
+      -- Both read and callback errors must close the native handle. Decode
+      -- failures are handled by the consumer without exposing chat contents.
+      local ok,readErr=pcall(function()
+        while true do
+          local line,lineErr=file:read("*l")
+          if line==nil then
+            if lineErr then error(lineErr,0) end
+            break
+          end
+          consume(line)
+        end
+      end)
+      local closed,closeResult,closeErr=pcall(file.close,file)
+      if not ok then return nil,tostring(readErr) end
+      if not closed then return nil,tostring(closeResult) end
+      if not closeResult then return nil,closeErr or "could not close chat log" end
+      return true
     end,
     remove=function(pathname)
       local relative=safeRelative(pathname,root,true)

@@ -70,6 +70,29 @@ test("chat clear aliases keep saved logs unless the full confirmation command is
   local confirm=findAlias(runtime,"^dghud chat clear saved confirm$"); local saved,count=confirm(); eq(saved,true); eq(count,2); eq(#hud.chat:entries(),0); hud:shutdown(); DGHUD=nil
 end)
 
+test("restored adopted chat skips repaint only for a verified matching display",function()
+  for _,mode in ipairs({"matching","empty","stale","throws","unavailable","cleared"}) do
+    local runtime=fakeChatRuntimeWithPersonalTrigger()
+    local hud=Main.new(runtime,{layout={},chat={enabled=true,visible_limit=1000,dedupe_seconds=3}})
+    local saved={{category="STAFF",message="synthetic retained message",line="synthetic retained message"}}
+    hud.chat_handoff={schema=1,character_key="profile",filter="STAFF",entries=mode=="cleared" and {} or saved}
+    hud.view_adopted=true
+    local checks,repaints=0,0
+    hud.view={renderChat=function(_,entries,categories,filter)
+      repaints=repaints+1; eq(#entries,mode=="cleared" and 0 or 1); eq(filter,"STAFF")
+      if #entries>0 then eq(entries[1].message,saved[1].message); eq(categories[1],"STAFF") end
+    end}
+    if mode~="unavailable" then hud.view.chatDisplayMatches=function(_,entries,categories,filter)
+      checks=checks+1; eq(#entries,mode=="cleared" and 0 or 1); eq(filter,"STAFF")
+      if mode=="throws" then error("synthetic native console unavailable") end
+      return mode=="matching"
+    end end
+    assert(hud:startChat()); eq(repaints,mode=="matching" and 0 or 1)
+    eq(checks,mode=="unavailable" and 0 or 1); eq(#hud.chat:entries(),mode=="cleared" and 0 or 1)
+    eq(hud.chat_handoff,nil); assert(hud.chat:shutdown())
+  end
+end)
+
 test("disabled chat leaves personal trigger runtime untouched",function()
   local runtime=fakeChatRuntimeWithPersonalTrigger()
   local personal=runtime:addLineTrigger(function() runtime.personalTrigger=true end)

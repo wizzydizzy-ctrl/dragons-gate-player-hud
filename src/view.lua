@@ -27,6 +27,24 @@ local function alignmentLabel(value)
   return raw
 end
 local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62"}
+local CHAT_DISPLAY_LIMIT=1000
+local CHAT_NATIVE_LINES=100000
+local CHAT_NATIVE_DELETE_BATCH=1000
+local chat_record_fields={"schema","timestamp","character","category","speaker","target","language","message","line","source"}
+local function chatEntryEqual(left,right)
+  if type(left)~="table" or type(right)~="table" then return false end
+  for _,field in ipairs(chat_record_fields) do
+    local value=left[field]; local kind=type(value)
+    if kind~="nil" and kind~="string" and kind~="number" and kind~="boolean" then return false end
+    if value~=right[field] then return false end
+  end
+  return true
+end
+local function chatLastLine(output)
+  local ok,line=pcall(function() return output:getLastLineNumber() end)
+  line=ok and tonumber(line) or nil
+  if line and line>=0 and line<math.huge and line==math.floor(line) then return line end
+end
 local function chatScroll(output,ranges)
   local okCurrent,current=pcall(function() return output:getScroll() end)
   local okLast,last=pcall(function() return output:getLastLineNumber() end)
@@ -46,7 +64,7 @@ local function restoreChatScroll(output,state,ranges)
   local ok,last=pcall(function() return output:getLastLineNumber() end)
   local line=state.line
   for index,range in ipairs(ranges or {}) do
-    if range.entry==state.entry or (state.entry==nil and index==state.index) then
+    if chatEntryEqual(range.entry,state.entry) or (state.entry==nil and index==state.index) then
       line=range.first+math.min(math.max(0,state.offset or 0),range.last-range.first); break
     end
   end
@@ -2530,25 +2548,54 @@ function View:renderSkills(s)
   local lines={}; for _,skill in ipairs(items) do lines[#lines+1]=fixed(View.skillLine(skill,nameWidth,self.skill_column_gaps,self.skill_level_width,self.skill_use_width)) end
   self.skills_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.skills_content:move(0,0); self.skills_content:resize(self.skills_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height)); self.skills_content:show()
 end
+function View:chatDisplayMatches(entries,categories,activeFilter)
+  entries=type(entries)=="table" and entries or {}; categories=type(categories)=="table" and categories or {}
+  if self.disposed or self.chat_display_complete==false or type(self.chat_entries)~="table" or type(self.chat_categories)~="table" or type(self.chat_line_ranges)~="table" then return false end
+  local first=math.max(1,#entries-CHAT_DISPLAY_LIMIT+1); local count=math.min(#entries,CHAT_DISPLAY_LIMIT)
+  if #self.chat_entries~=count or #self.chat_categories~=#categories or #self.chat_line_ranges~=count then return false end
+  if self.chat_active_filter~=tostring(activeFilter or "ALL"):upper() then return false end
+  for index,value in ipairs(categories) do if value~=self.chat_categories[index] then return false end end
+  local last=chatLastLine(self.chat_output); if last==nil then return false end
+  local previous=0
+  for index,entry in ipairs(self.chat_entries) do
+    if not chatEntryEqual(entry,entries[first+index-1]) then return false end
+    local range=self.chat_line_ranges[index]
+    if type(range)~="table" or not chatEntryEqual(range.entry,entry) or range.first~=previous+1 or type(range.last)~="number" or range.last<range.first or range.last>last or range.last~=math.floor(range.last) then return false end
+    previous=range.last
+  end
+  -- Older adopted views have ranges but no separately recorded last line.
+  -- Checking both catches a native clear/truncation without reading chat text.
+  local recorded=self.chat_last_line; if recorded==nil then recorded=previous end
+  return last==previous and last==recorded
+end
 function View:renderChat(entries,categories,activeFilter,savedScroll)
   entries=type(entries)=="table" and entries or {}; categories=type(categories)=="table" and categories or {}
-  local state=savedScroll or chatScroll(self.chat_output,self.chat_line_ranges); local first=math.max(1,#entries-999)
+  local state=savedScroll or chatScroll(self.chat_output,self.chat_line_ranges); local first=math.max(1,#entries-CHAT_DISPLAY_LIMIT+1)
   self.chat_entries={}; for index=first,#entries do self.chat_entries[#self.chat_entries+1]=entries[index] end
   self.chat_categories={}; for index,value in ipairs(categories) do self.chat_categories[index]=value end
   self.chat_active_filter=tostring(activeFilter or "ALL"):upper()
   self:renderChatTabs(self.chat_categories,self.chat_active_filter)
   self.chat_output:clear()
+  -- A thousand wrapped records can exceed a small native line buffer. Keep a
+  -- finite ceiling; do not assume a particular Mudlet default or grow forever.
+  if type(self.chat_output.setBufferSize)=="function" and self.chat_buffer_limit~=CHAT_NATIVE_LINES then
+    local ok,applied,why=pcall(self.chat_output.setBufferSize,self.chat_output,CHAT_NATIVE_LINES,CHAT_NATIVE_DELETE_BATCH)
+    if ok and applied~=false and not (applied==nil and why~=nil) then self.chat_buffer_limit=CHAT_NATIVE_LINES end
+  end
   local chatSettings=self.settings.chat or {}
-  self.chat_line_ranges={}
+  self.chat_line_ranges={}; self.chat_display_complete=true
   for index,entry in ipairs(self.chat_entries) do
-    local okBefore,before=pcall(function() return self.chat_output:getLastLineNumber() end)
+    local before=chatLastLine(self.chat_output)
     local prefix,message=View.chatLine(entry,self.settings.theme,chatSettings.timestamps)
     self.chat_output:hecho(prefix)
     self.chat_output:echo(message)
-    local okAfter,after=pcall(function() return self.chat_output:getLastLineNumber() end)
-    before=okBefore and tonumber(before) or 0; after=okAfter and tonumber(after) or before
+    local after=chatLastLine(self.chat_output)
+    if before==nil or after==nil or after<=before then self.chat_display_complete=false end
+    before=before or 0; after=after or before
     self.chat_line_ranges[index]={entry=entry,first=before+1,last=math.max(before+1,after)}
   end
+  self.chat_last_line=chatLastLine(self.chat_output)
+  if self.chat_last_line==nil then self.chat_display_complete=false end
   restoreChatScroll(self.chat_output,state,self.chat_line_ranges)
   if not self:isChatVisible() then self:applyChatVisibility() end
   return true

@@ -185,6 +185,32 @@ test("replacement entry carries live chat history and filter into the new contro
     eq(DGHUD.controller.chat_handoff.partial,false)
   end)
 end)
+test("replacement entry keeps every source in a full chat handoff beyond one visible window",function()
+  withEntryStubs(function()
+    local entries={{category="STAFF",message="keep staff"},{category="ROOM",message="keep room"}}
+    for index=1,1000 do entries[#entries+1]={category="COMBAT",message="combat "..index} end
+    entries[1].nested={private=true}; entries[1].callback=function() end
+    local handoff={schema=1,character_key="profile",filter="ALL",entries=entries,last_key="last",last_epoch=1010}
+    DGHUD={user_settings={},controller={chat={handoff=function() return handoff end}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    local restored=DGHUD.controller.chat_handoff
+    eq(restored.partial,false); eq(#restored.entries,1002)
+    eq(restored.entries[1].category,"STAFF"); eq(restored.entries[2].category,"ROOM")
+    eq(restored.entries[1002].message,"combat 1000"); eq(restored.last_key,"last"); eq(restored.last_epoch,1010)
+    eq(restored.entries[1].nested,nil); eq(restored.entries[1].callback,nil)
+    assert(restored.entries~=entries); assert(restored.entries[1]~=entries[1]); eq(entries[1].nested.private,true)
+  end)
+end)
+test("replacement entry bounds even an oversized full chat handoff",function()
+  withEntryStubs(function()
+    local entries={}; for index=1,10002 do entries[index]={category="ROOM",message="line "..index} end
+    DGHUD={user_settings={},_chat_handoff={schema=1,filter="ROOM",entries=entries},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    local restored=DGHUD.controller.chat_handoff
+    eq(restored.partial,false); eq(#restored.entries,10000)
+    eq(restored.entries[1].message,"line 3"); eq(restored.entries[10000].message,"line 10002")
+  end)
+end)
 test("replacement entry marks bounded sanitized view-only chat as partial",function()
   withEntryStubs(function()
     local entries={}
