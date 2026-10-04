@@ -78,6 +78,30 @@ end
 
 local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
 
+test("generic skill improvements save and render in ALL with COMBAT hidden deduplicate and reload",function()
+  local f=fake(); local redraws={}; local sources=allSources({COMBAT=false})
+  local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,nil,sources)
+  assert(controller:start()); eq(controller.allSources.COMBAT,false)
+  for index,skill in ipairs({"Biting","Sharp Weapons","Identify Gems-Minerals","Identify Gems/Minerals","Dragon's Breath","Future Skill of Tomorrow"}) do
+    local line="You now feel more skilled in "..skill.."."
+    f:line(" \t\27[32m"..line.."\27[0m \r\n"); f:line(line)
+    local entries=controller:entries(); eq(#entries,index); eq(f.storageAppends,index)
+    local e=entries[index]
+    eq(e.category,"ALL"); eq(e.source,"builtin"); eq(e.message,line); eq(e.line,line)
+    eq(e.character,f.character); eq(e.timestamp,f.timestampValue); eq(f.appendedEntries[index],e)
+  end
+  local entries=controller:entries()
+  sameEntries(redraws[#redraws],entries); sameEntries(f.appendedEntries,entries)
+  assert(controller:setFilter("COMBAT")); eq(#controller:entries(),0)
+  assert(controller:setFilter("ALL")); sameEntries(controller:entries(),entries)
+  assert(controller:shutdown())
+  local reloaded=fake(f.appendedEntries); local reloadRedraws={}
+  local restored=makeController(reloaded,function(items) reloadRedraws[#reloadRedraws+1]=items end,nil,sources)
+  assert(restored:start()); eq(restored.allSources.COMBAT,false)
+  sameEntries(restored:entries(),entries); sameEntries(reloadRedraws[#reloadRedraws],entries)
+  eq(reloaded.loadRecentCalls,1); eq(reloaded.storageAppends,0); assert(restored:shutdown())
+end)
+
 test("diligent-training fatigue displays and saves in ALL with COMBAT hidden deduplicates and reloads",function()
   local f=fake(); local redraws={}; local sources=allSources({COMBAT=false})
   local controller=makeController(f,function(entries) redraws[#redraws+1]=entries end,nil,sources)

@@ -1,5 +1,23 @@
 local Parser=require("chat_parser")
 
+test("captures generic skill improvement notices in ALL and rejects blank incomplete narrated or multiline output",function()
+  local prefix="You now feel more skilled in "
+  for _,skill in ipairs({"Biting","Sharp Weapons","Identify Gems-Minerals","Identify Gems/Minerals","Dragon's Breath","Future Skill of Tomorrow"}) do
+    local line=prefix..skill.."."
+    for _,input in ipairs({line," \t\27[32m"..line.."\27[0m \r\n"}) do
+      local e=assert(Parser.parse(input,"Dace Alterac"),line)
+      eq(e.category,"ALL"); eq(e.source,"builtin"); eq(e.message,line); eq(e.line,line)
+      eq(e.speaker,nil); eq(e.target,nil); eq(e.language,nil)
+    end
+    local quoted='Eilan says, "'..line..'"'
+    local speech=assert(Parser.parse(quoted,"Dace Alterac"))
+    eq(speech.category,"ROOM"); eq(speech.speaker,"Eilan"); eq(speech.message,line); eq(speech.line,quoted)
+  end
+  for _,input in ipairs({prefix..".",prefix.." \t .","You now feel more skilled in",prefix.."Biting",
+    "The sign reads: "..prefix.."Biting.",prefix.."Biting.\n"..prefix.."Sharp Weapons.",
+    prefix.."Biting\nSharp Weapons."}) do eq(Parser.parse(input),nil) end
+end)
+
 test("captures only exact diligent-training fatigue notices in ALL",function()
   local line="Due to your diligent training, you have gained additional fatigue!"
   for _,input in ipairs({line," \t\27[32m"..line.."\27[0m \r\n"}) do

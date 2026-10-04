@@ -24,7 +24,7 @@ A message can appear in more than one filter, but plays only one sound: its spec
 
 ## Built-in filters
 
-- **ALL** — Captured categories enabled under **SHOW IN ALL**, plus skill-training readiness, stat increases, and fatigue gains from diligent training.
+- **ALL** — Captured categories enabled under **SHOW IN ALL**, plus skill improvements, skill-training readiness, stat increases, and fatigue gains from diligent training.
 - **ROOM** — Nearby speech and your own speech.
 - **PRIVATE** — Whispers, ESP, Dragon links, Secian links, and contact-style thoughts together.
 - **ESP** — ESP messages only.
@@ -72,6 +72,8 @@ Parsing is intentionally specific. DGHUD does not capture every line containing 
 Stat increases such as `Your will has increased!` and `Your constitution has increased!` are saved directly to **ALL**, even when COMBAT is excluded there. Supported stats are strength, intelligence, wisdom, dexterity, agility, constitution, charisma, will, presence, perception, and luck, plus the older voice and appearance names. The original message is preserved; these notices do not invent a new stat value.
 
 `Due to your diligent training, you have gained additional fatigue!` is also saved directly to **ALL**, with the full notice preserved.
+
+Skill improvements such as `You now feel more skilled in Biting.` are saved directly to **ALL** for any skill, including multi-word names. The original message is preserved, even when COMBAT is excluded from ALL.
 
 ## Scrolling and wrapping
 
