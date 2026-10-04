@@ -15,6 +15,36 @@ local function custom(phrase,extras)
   return rule
 end
 
+test("1000 custom highlights stay active and reuse preparation until rules change",function()
+  local rules={}
+  for index=1,1000 do rules[index]=custom("Phrase "..index) end
+  local f=fake(); local c=Colorizer.new(f,true,{custom_rules=rules}); assert(c:start())
+  eq(#c.custom_rules,1000); eq(#c._custom_candidates,1000)
+  local prepared=c._custom_candidates
+  for _,index in ipairs({1,50,51,500,999,1000}) do
+    assert(c:onLine("Phrase "..index,100+index))
+    local part=f.applied[#f.applied][1]
+    eq(part.kind,"custom"); eq(part.length,#("Phrase "..index))
+    eq(part.rule_index,index); eq(c._custom_candidates,prepared)
+  end
+  -- Caller mutations cannot change the prepared, validated settings.
+  rules[1000].phrase="Caller mutated"
+  assert(c:onLine("Phrase 1000",1200)); eq(c._custom_candidates,prepared)
+  local extra={}
+  for index=1,1001 do extra[index]=custom("Too many "..index) end
+  eq(c:setCustomRules(extra),nil); eq(c._custom_candidates,prepared)
+  assert(c:onLine("Phrase 1000",1201))
+  -- Main's save callback replaces the public array instead of using the setter.
+  c.custom_rules={custom("Fresh phrase",{foreground="#445566"}),custom("Disabled",{enabled=false})}
+  assert(c:onLine("Fresh phrase",1202))
+  assert(c._custom_candidates~=prepared); eq(#c._custom_candidates,1)
+  eq(f.applied[#f.applied][1].color[1],68)
+  local updated=c._custom_candidates
+  eq(c:onLine("Phrase 1000",1203),false); eq(c._custom_candidates,updated)
+  eq(c:onLine("Disabled",1204),false); eq(c._custom_candidates,updated)
+  c:shutdown()
+end)
+
 test("custom highlights use case-insensitive literal whole-word matching",function()
   local f=fake(); local c=Colorizer.new(f,true,{custom_rules={custom("gate")}}); assert(c:start())
   eq(#c.custom_rules,1)

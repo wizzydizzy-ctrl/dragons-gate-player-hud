@@ -3,6 +3,7 @@ local Layout=require("layout")
 local MapCatalog=require("map_catalog")
 local ColorStyles=require("color_styles")
 local ColorPreferences=require("color_preferences")
+local MAX_CUSTOM_RULES=ColorPreferences.MAX_CUSTOM_RULES
 local Sounds=require("chat_sounds")
 local View={}; View.__index=View
 function View.withFont(text,size) return "<span style='font-size:"..tonumber(size).."px'>"..text.."</span>" end
@@ -1287,7 +1288,7 @@ function View:createColorStyleEditor()
   self.custom_highlight_rules={}; self.custom_highlight_rows={}
   self.custom_highlight_list=scroll("CustomList"); self.custom_highlight_content=scroll("CustomEditor")
   self.custom_highlight_status=text("CustomStatus",self.color_settings_panel,"")
-  self.custom_highlight_help=text("CustomHelp",self.custom_highlight_list,"Match literal words or phrases in game text. Up to 50 saved rules.")
+  self.custom_highlight_help=text("CustomHelp",self.custom_highlight_list,"Match literal words or phrases in game text. Up to "..MAX_CUSTOM_RULES.." saved rules.")
   self.custom_highlight_add=text("CustomAdd",self.custom_highlight_list,"+ ADD WORD / PHRASE",function() return self:addCustomHighlight() end)
   self.custom_highlight_count=text("CustomCount",self.custom_highlight_list,"")
   self.custom_highlight_phrase_caption=text("CustomPhraseCaption",self.custom_highlight_content,"Word or phrase (literal match, 1–120 bytes)")
@@ -1473,7 +1474,7 @@ function View:layoutCustomHighlightList(width)
   place(self.custom_highlight_help,0,0,width,40); self.custom_highlight_help:echo(View.withFont(safeText(self.custom_highlight_help.option_text),font))
   place(self.custom_highlight_add,0,44,width,32); self:renderColorStyleButton(self.custom_highlight_add,true)
   place(self.custom_highlight_count,0,84,width,24)
-  self.custom_highlight_count:echo(View.withFont(#self.custom_highlight_rules.." / 50 saved",font))
+  self.custom_highlight_count:echo(View.withFont(#self.custom_highlight_rules.." / "..MAX_CUSTOM_RULES.." saved",font))
   local y=112
   for index,rule in ipairs(self.custom_highlight_rules) do
     local row=self.custom_highlight_rows[index]; place(row,0,y,width,34); y=y+38
@@ -1523,7 +1524,7 @@ function View:customHighlightValues()
   for _,rule in ipairs(self.custom_highlight_rules) do
     if ColorPreferences.foldCase(rule.phrase)==ColorPreferences.foldCase(phrase) and rule.phrase~=self.custom_highlight_selected then return nil,"That phrase is already saved." end
   end
-  if not self.custom_highlight_selected and #self.custom_highlight_rules>=50 then return nil,"The 50-rule limit has been reached." end
+  if not self.custom_highlight_selected and #self.custom_highlight_rules>=MAX_CUSTOM_RULES then return nil,"The "..MAX_CUSTOM_RULES.."-rule limit has been reached." end
   local foreground=ColorStyles.normalizeColor(tostring(draft.foreground):match("^%s*(.-)%s*$"))
   if not foreground then return nil,"Text color: enter # and six color digits, such as #79D98B." end
   local background=false
@@ -1584,8 +1585,8 @@ function View:chooseCustomHighlightSwatch(color)
   return true
 end
 function View:addCustomHighlight()
-  if #self.custom_highlight_rules>=50 then
-    self.custom_highlight_error="The 50-rule limit has been reached."; self:renderCustomHighlightStatus(); return nil,self.custom_highlight_error
+  if #self.custom_highlight_rules>=MAX_CUSTOM_RULES then
+    self.custom_highlight_error="The "..MAX_CUSTOM_RULES.."-rule limit has been reached."; self:renderCustomHighlightStatus(); return nil,self.custom_highlight_error
   end
   self.custom_highlight_selected=nil; self.custom_highlight_draft={phrase="",foreground="#FFFFFF",background=false,background_enabled=false,background_text="#333333",bold=false,underline=false,enabled=true}
   self.custom_highlight_phrase:print(""); self.custom_highlight_fields.foreground.input:print("#FFFFFF"); self.custom_highlight_fields.background.input:print("#333333")
@@ -1680,7 +1681,7 @@ function View:setColorStyles(config)
   self.color_styles_config=config
   local custom,seen={},{}
   for _,item in ipairs(type(config.custom_rules)=="table" and config.custom_rules or {}) do
-    if #custom>=50 then break end
+    if #custom>=MAX_CUSTOM_RULES then break end
     local rule=customRule(item)
     if rule and not seen[ColorPreferences.foldCase(rule.phrase)] then custom[#custom+1]=rule; seen[ColorPreferences.foldCase(rule.phrase)]=true end
   end
@@ -2863,7 +2864,7 @@ function View.validateReusable(candidate,settings)
     local group=candidate.color_style_groups[entry.group]; if type(group)~="table" or not reusableLabel(group.heading) or not reusableLabel(candidate.color_style_group_buttons[entry.group]) then return nil,"preserved HUD color groups are incomplete" end
   end
   if type(candidate.custom_highlight_rules)~="table" or type(candidate.custom_highlight_rows)~="table" or type(candidate.custom_highlight_fields)~="table" or type(candidate.custom_highlight_toggles)~="table" or type(candidate.custom_highlight_palette_targets)~="table" or type(candidate.custom_highlight_swatches)~="table" or type(candidate.custom_highlight_toggle_order)~="table" then return nil,"preserved HUD custom highlights are incomplete" end
-  if #candidate.custom_highlight_rules>50 or #candidate.custom_highlight_rows<#candidate.custom_highlight_rules then return nil,"preserved HUD custom highlights are incomplete" end
+  if #candidate.custom_highlight_rules>MAX_CUSTOM_RULES or #candidate.custom_highlight_rows<#candidate.custom_highlight_rules then return nil,"preserved HUD custom highlights are incomplete" end
   for index=1,#candidate.custom_highlight_rules do if not reusableLabel(candidate.custom_highlight_rows[index]) then return nil,"preserved HUD custom highlight row is incomplete" end end
   -- Geyser's .parent refers to a superclass; .container owns the widget.
   -- Validate actual containment without mistaking inheritance for corruption.

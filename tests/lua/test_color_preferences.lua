@@ -121,6 +121,50 @@ test("color preferences save literal custom phrases in bounded v1 records", func
   eq(assert(Preferences.load(HOME,api)).custom_rules[1].phrase,"Open gate")
 end)
 
+test("color preferences save and reload 1000 maximum-length custom rules with every style", function()
+  local config={enabled=true,highlights_enabled=true,styles={},custom_rules={}}
+  for _,feature in ipairs({
+    "room","exits","currency","races","classes","portal","presence","attack",
+    "damage","danger","recovery","upkeep","spell","discovery","illumination","notice",
+  }) do config[feature.."_enabled"]=true end
+  for _,entry in ipairs(Styles.entries()) do config.styles[entry.id]=Styles.defaults(entry.id) end
+  for index=1,1000 do
+    local phrase=string.format("%04d",index)..string.rep("x",116)
+    config.custom_rules[index]=custom(phrase,{
+      background="#654321",bold=index%2==0,underline=index%3==0,enabled=index%4~=0,
+    })
+  end
+  local encoded=assert(Preferences.encode(config))
+  assert(#encoded>65536 and #encoded<=Preferences.MAX_BYTES)
+  local decoded=assert(Preferences.decode(encoded))
+  eq(#decoded.custom_rules,1000)
+  eq(assert(Preferences.encode(decoded)),encoded)
+  local api=fake()
+  assert(Preferences.save(HOME,config,api))
+  local loaded=assert(Preferences.load(HOME,api))
+  eq(#loaded.custom_rules,1000)
+  eq(loaded.custom_rules[1000].phrase,config.custom_rules[1000].phrase)
+  eq(loaded.custom_rules[1000].enabled,false)
+  eq(assert(Preferences.encode(loaded)),encoded)
+  -- A 1001st record is rejected even though it still fits the byte budget.
+  local extra=assert(Preferences.encode({custom_rules={custom("extra rule")}})):sub(#HEADER+1)
+  reject(Preferences.decode,encoded..extra)
+end)
+
+test("color preferences preserve 50 existing rules and reject over-cap saves without mutations", function()
+  local config={custom_rules={}}
+  for index=1,50 do config.custom_rules[index]=custom("old phrase "..index) end
+  local original=assert(Preferences.encode(config))
+  local api=fake({[PATH]=original})
+  local loaded=assert(Preferences.load(HOME,api))
+  eq(#loaded.custom_rules,50)
+  eq(assert(Preferences.encode(loaded)),original)
+  for index=51,1001 do config.custom_rules[index]=custom("new phrase "..index) end
+  reject(Preferences.save,HOME,config,api)
+  eq(api.mutations,0)
+  eq(api.files[PATH],original)
+end)
+
 test("color preferences preserve old v1 files and reject malformed custom records", function()
   local old=HEADER.."toggle|enabled|0\nstyle|room|#112233|-|0|0|1\n"
   local decoded=assert(Preferences.decode(old))
@@ -143,13 +187,14 @@ test("color preferences preserve old v1 files and reject malformed custom record
 end)
 
 test("color preferences bound custom arrays, phrases, fields and duplicate names", function()
-  local fifty={}
-  for index=1,50 do fifty[index]=custom("phrase "..index) end
-  eq(#assert(Preferences.snapshot({custom_rules=fifty})).custom_rules,50)
+  local rules={}
+  eq(Preferences.MAX_CUSTOM_RULES,1000)
+  for index=1,1000 do rules[index]=custom("phrase "..index) end
+  eq(#assert(Preferences.snapshot({custom_rules=rules})).custom_rules,1000)
   local longest=string.rep("x",120)
   eq(assert(Preferences.decode(assert(Preferences.encode({custom_rules={custom(longest)}})))).custom_rules[1].phrase,longest)
-  fifty[51]=custom("extra")
-  reject(Preferences.snapshot,{custom_rules=fifty})
+  rules[1001]=custom("extra")
+  reject(Preferences.snapshot,{custom_rules=rules})
   for _,rules in ipairs({
     {custom("")}, {custom(" \t ")}, {custom(string.rep("x",121))},
     {custom("one\ntwo")}, {custom("\none")}, {custom("one\n")},
@@ -290,7 +335,7 @@ test("color preferences reject duplicate, unknown, incomplete and executable rec
 end)
 
 test("color preferences reject oversized strings and overlong records", function()
-  reject(Preferences.decode, string.rep("x", 65537))
+  reject(Preferences.decode, string.rep("x", Preferences.MAX_BYTES+1))
   reject(Preferences.decode, HEADER..string.rep("x", 257).."\n")
   reject(Preferences.decode, HEADER..string.rep("toggle|enabled|1\n", 100))
   eq(Preferences.decode(HEADER).enabled, nil)
@@ -442,9 +487,9 @@ test("color preferences do not classify permission or ambiguous errors as absenc
 end)
 
 test("color preferences request bounded reads and reject an oversized file", function()
-  local api = fake({[PATH]=HEADER..string.rep("x", 100000)})
+  local api = fake({[PATH]=HEADER..string.rep("x", Preferences.MAX_BYTES+1)})
   reject(Preferences.load, HOME, api); reject(Preferences.save, HOME, {}, api)
-  for _, read in ipairs(api.reads) do eq(read.limit, 65537) end
+  for _, read in ipairs(api.reads) do eq(read.limit, Preferences.MAX_BYTES+1) end
   eq(api.mutations, 0)
 end)
 
@@ -524,7 +569,7 @@ local function withNative(fault, fn)
     api.opened[path] = true
     return {
       read=function(_, limit)
-        eq(type(limit), "number"); assert(limit <= 65537)
+        eq(type(limit), "number"); assert(limit <= Preferences.MAX_BYTES+1)
         if fault == "read" then error("read failed") end
         return api.files[path]:sub(1, limit)
       end,
@@ -675,7 +720,7 @@ test("color preferences preserve corrupt unknown and oversized leftovers without
   for _, invalid in ipairs({
     "", "unknown backup bytes", "DGHUD-COLORS|2\n", "return {enabled=false}",
     HEADER.."style|unknown|#112233|-|0|0|1\n",
-    HEADER.."toggle|enabled|0\ntoggle|enabled|1\n", string.rep("x", 65537),
+    HEADER.."toggle|enabled|0\ntoggle|enabled|1\n", string.rep("x", Preferences.MAX_BYTES+1),
   }) do
     for _, suffix in ipairs({".bak", ".tmp"}) do
       for _, hasPrimary in ipairs({false, true}) do

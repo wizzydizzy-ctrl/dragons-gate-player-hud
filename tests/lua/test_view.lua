@@ -1,4 +1,5 @@
 local View=require("view")
+local ColorPreferences=require("color_preferences")
 local VIEW_CONTRACT=string.rep("a",64)
 local SETTINGS_CONTRACT=string.rep("b",64)
 test("rich text receives an explicit responsive font size",function()
@@ -494,6 +495,13 @@ local function customEditor(config,width,height)
   assert(view.color_settings_custom_tab.click())
   return view
 end
+local function customRules(count)
+  local rules={}
+  for index=1,count do
+    rules[index]={phrase="Phrase "..index,foreground="#FFFFFF",background=false,bold=false,underline=false,enabled=true}
+  end
+  return rules
+end
 test("custom phrases have a separate saved catalog and escaped labels",function()
   local config={custom_rules={{phrase="a <gate> & sign",foreground="#12AB34",background=false,bold=false,underline=false,enabled=true},{phrase="Hidden door",foreground="#AABBCC",background="#112233",bold=true,underline=true,enabled=false}}}
   local view=customEditor(config,420,360)
@@ -572,10 +580,137 @@ test("custom phrase bounds uniqueness and unsafe colors reject before callbacks"
   view.custom_highlight_toggles.background_enabled.click(); view.custom_highlight_fields.background.input:print("url(evil)")
   eq(view.custom_highlight_save.click(),nil); eq(calls,0)
   view.custom_highlight_toggles.background_enabled.click(); assert(view.custom_highlight_save.click()); eq(calls,1)
-  local full={}; for index=1,50 do full[index]={phrase="Phrase "..index,foreground="#FFFFFF",background=false,bold=false,underline=false,enabled=true} end
-  view:setColorStyles({custom_rules=full}); view.color_settings_custom_tab.click()
-  eq(view.custom_highlight_add.click(),nil); eq(#view.custom_highlight_rules,50)
-  assert(view.custom_highlight_status.message:find("50-rule limit",1,true))
+end)
+test("custom catalog keeps all 1000 rows accessible and reuses widgets across layouts",function()
+  eq(ColorPreferences.MAX_CUSTOM_RULES,1000)
+  local rules=customRules(1000)
+  local view=customEditor({custom_rules=rules},320,260)
+  local rows={}; local widgetCount=#view.color_style_widgets
+  eq(#view.custom_highlight_rules,1000); eq(#view.custom_highlight_rows,1000)
+  assert(view.custom_highlight_help.message:find("Up to 1000 saved rules.",1,true))
+  assert(view.custom_highlight_count.message:find("1000 / 1000 saved",1,true))
+  for index,row in ipairs(view.custom_highlight_rows) do rows[index]=row end
+  for _,size in ipairs({{320,260},{420,280},{560,360},{760,700},{1920,1080}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local panel,list=view.color_settings_panel,view.custom_highlight_list
+    eq(panel.x>=0 and panel.y>=0,true)
+    eq(panel.x+panel.width<=size[1] and panel.y+panel.height<=size[2],true)
+    eq(list.kind,"scrollbox"); eq(list.y+list.height<=panel.height,true)
+    eq(list.content_height,112+1000*38); eq(list.content_height>list.height,true)
+    for index,row in ipairs(view.custom_highlight_rows) do
+      eq(row,rows[index]); eq(row.container,list); eq(row.visible,true)
+      eq(row.y,112+(index-1)*38); eq(row.y+row.height<=list.content_height,true)
+      eq(row.x>=0 and row.x+row.width<=list.width,true)
+      assert(row.message:find(rules[index].phrase.." &nbsp;",1,true))
+    end
+    eq(#view.color_style_widgets,widgetCount)
+  end
+  for index,row in ipairs(rows) do
+    assert(row.click()); eq(view.custom_highlight_selected,rules[index].phrase)
+    eq(view.custom_highlight_phrase.text,rules[index].phrase)
+    assert(view.custom_highlight_cancel.click())
+  end
+  view:setColorStyles({custom_rules=rules})
+  eq(#view.color_style_widgets,widgetCount)
+  for index,row in ipairs(rows) do eq(view.custom_highlight_rows[index],row) end
+end)
+test("custom snapshots retain 1000 valid unique rules and truncate the 1001st",function()
+  local rules=customRules(1001)
+  table.insert(rules,1,{phrase="invalid",foreground="url(evil)",background=false})
+  table.insert(rules,3,{phrase="pHrAsE 1",foreground="#123456",background=false})
+  local view=customEditor({custom_rules=rules})
+  eq(#view.custom_highlight_rules,1000); eq(#view.custom_highlight_rows,1000)
+  eq(view.custom_highlight_rules[1].phrase,"Phrase 1")
+  eq(view.custom_highlight_rules[1].foreground,"#FFFFFF")
+  eq(view.custom_highlight_rules[1000].phrase,"Phrase 1000")
+  assert(view.custom_highlight_rows[1000].click())
+  eq(view.custom_highlight_phrase.text,"Phrase 1000")
+  eq(view:selectCustomHighlight("Phrase 1001"),nil)
+end)
+test("custom add saves the 1000th rule and rejects 1001st adds and stale saves",function()
+  local view=customEditor({custom_rules=customRules(999)}); local calls=0
+  view:setCustomHighlightCallbacks(function(oldPhrase,rule)
+    eq(oldPhrase,nil); eq(rule.phrase,"Phrase 1000"); calls=calls+1; return true
+  end,function() return true end)
+  assert(view.custom_highlight_count.message:find("999 / 1000 saved",1,true))
+  assert(view.custom_highlight_add.click()); view.custom_highlight_phrase:print("Phrase 1000")
+  assert(view.custom_highlight_save.click()); eq(calls,1)
+  eq(#view.custom_highlight_rules,1000); eq(#view.custom_highlight_rows,1000)
+  eq(view.custom_highlight_rules[1000].phrase,"Phrase 1000")
+  view.custom_highlight_cancel.click()
+  assert(view.custom_highlight_count.message:find("1000 / 1000 saved",1,true))
+  local ok,err=view.custom_highlight_add.click()
+  eq(ok,nil); assert(err:find("1000-rule limit",1,true)); eq(calls,1)
+  eq(view.custom_highlight_draft,nil); eq(#view.custom_highlight_rules,1000)
+  -- Another snapshot can fill the last slot while an add draft is open.
+  view:setColorStyles({custom_rules=customRules(999)})
+  assert(view.custom_highlight_add.click()); view.custom_highlight_phrase:print("Phrase 1001")
+  view:setColorStyles({custom_rules=customRules(1000)})
+  ok,err=view.custom_highlight_save.click()
+  eq(ok,nil); assert(err:find("1000-rule limit",1,true)); eq(calls,1)
+  eq(#view.custom_highlight_rules,1000); eq(view.custom_highlight_phrase.text,"Phrase 1001")
+  assert(view.custom_highlight_draft)
+end)
+test("custom edits and confirmed deletes work at 1000 and reuse the freed row",function()
+  local view=customEditor({custom_rules=customRules(1000)}); local saves,deletes=0,0
+  local lastRow=view.custom_highlight_rows[1000]; local widgetCount=#view.color_style_widgets
+  view:setCustomHighlightCallbacks(function(oldPhrase,rule)
+    saves=saves+1
+    if saves==1 then eq(oldPhrase,"Phrase 1000"); eq(rule.phrase,"Renamed last phrase")
+    else eq(oldPhrase,nil); eq(rule.phrase,"Replacement phrase") end
+    return true
+  end,function(phrase)
+    eq(phrase,"Renamed last phrase"); deletes=deletes+1; return true
+  end)
+  assert(lastRow.click()); view.custom_highlight_phrase:print("Renamed last phrase")
+  view.custom_highlight_fields.foreground.input:print("#ABCDEF")
+  assert(view.custom_highlight_save.click()); eq(saves,1); eq(#view.custom_highlight_rules,1000)
+  eq(view.custom_highlight_rules[1000].phrase,"Renamed last phrase")
+  eq(view.custom_highlight_rules[1000].foreground,"#ABCDEF")
+  assert(view.custom_highlight_delete.click()); eq(deletes,0); eq(#view.custom_highlight_rules,1000)
+  assert(view.custom_highlight_delete.click()); eq(deletes,1); eq(#view.custom_highlight_rules,999)
+  eq(lastRow.visible,false); eq(view.custom_highlight_rules[999].phrase,"Phrase 999")
+  assert(view.custom_highlight_count.message:find("999 / 1000 saved",1,true))
+  assert(view.custom_highlight_add.click()); view.custom_highlight_phrase:print("Replacement phrase")
+  assert(view.custom_highlight_save.click()); eq(saves,2); eq(#view.custom_highlight_rules,1000)
+  view.custom_highlight_cancel.click()
+  eq(view.custom_highlight_rows[1000],lastRow); eq(lastRow.visible,true)
+  eq(#view.color_style_widgets,widgetCount)
+  assert(lastRow.click()); eq(view.custom_highlight_phrase.text,"Replacement phrase")
+end)
+test("preserved 1000-rule views validate actual containers and retain rows through reuse",function()
+  local view=customEditor({custom_rules=customRules(1000)},420,280)
+  local superclass={name="WindowClass"}; local rows={}
+  for index,row in ipairs(view.custom_highlight_rows) do
+    rows[index]=row; row.parent=nil; setmetatable(row,{__index={parent=superclass}})
+    row.clickCallback=row.click; row.click=nil
+    eq(row.parent,superclass); eq(row.container,view.custom_highlight_list)
+  end
+  assert(View.validateReusable(view,view.settings))
+  local last=rows[1000]
+  for _,container in ipairs({false,view.root}) do
+    last.container=container or nil
+    local ok,err=View.validateReusable(view,view.settings)
+    eq(ok,nil); assert(err:find("custom highlight row",1,true))
+  end
+  last.container=view.custom_highlight_list
+  view.custom_highlight_rules[1001]=customRules(1001)[1001]
+  local ok,err=View.validateReusable(view,view.settings)
+  eq(ok,nil); assert(err:find("custom highlights are incomplete",1,true))
+  view.custom_highlight_rules[1001]=nil
+  assert(last.clickCallback()); view.custom_highlight_phrase:print("Unsaved rename")
+  view:setCustomHighlightCallbacks(function() error("retired save") end,function() error("retired delete") end)
+  assert(view:prepareForReuse(view.settings))
+  eq(view.custom_highlight_save_callback,nil); eq(view.custom_highlight_delete_callback,nil)
+  eq(view.custom_highlight_draft,nil); eq(#view.custom_highlight_rules,1000)
+  assert(View.validateReusable(view,view.settings))
+  view:showColorSettings(); view.color_settings_custom_tab.click()
+  for index,row in ipairs(rows) do
+    eq(view.custom_highlight_rows[index],row); eq(row.visible,true)
+    eq(row.container,view.custom_highlight_list)
+  end
+  assert(last.clickCallback()); eq(view.custom_highlight_phrase.text,"Phrase 1000")
+  view:delete()
 end)
 test("custom callback failures retain saved state and draft even with an in-flight snapshot",function()
   local view=customEditor(); view.custom_highlight_add.click(); view.custom_highlight_phrase:print("secret <door>")

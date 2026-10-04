@@ -5,9 +5,11 @@
 -- idempotent. write must flush/close before reporting success. All paths are
 -- derived here; saved data cannot select a path. One writer owns each profile.
 local Styles = require("color_styles")
-local Preferences = {MAX_BYTES=65536, HEADER="DGHUD-COLORS|1"}
+-- Keep storage bounded while allowing 1,000 maximum-length, hex-encoded rules
+-- alongside every built-in style. Existing v1 settings remain compatible.
+local Preferences = {MAX_BYTES=524288, MAX_CUSTOM_RULES=1000, HEADER="DGHUD-COLORS|1"}
 local MAX_BYTES, HEADER = Preferences.MAX_BYTES, Preferences.HEADER
-local MAX_CUSTOM_RULES, MAX_PHRASE_BYTES = 50, 120
+local MAX_CUSTOM_RULES, MAX_PHRASE_BYTES = Preferences.MAX_CUSTOM_RULES, 120
 local customFields = {phrase=true, foreground=true, background=true, bold=true, underline=true, enabled=true}
 local toggles, toggleSet = {"enabled", "highlights_enabled"}, {}
 for _, feature in ipairs({
@@ -90,7 +92,7 @@ function Preferences.normalizeCustomRules(input)
   for key in next, input do
     count = count + 1
     if count > MAX_CUSTOM_RULES or type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > MAX_CUSTOM_RULES then
-      return nil, "custom highlights must be an array of at most 50 rules"
+      return nil, "custom highlights must be an array of at most "..MAX_CUSTOM_RULES.." rules"
     end
   end
   local result, seen = {}, {}
@@ -185,13 +187,13 @@ function Preferences.encode(config)
     }, "|")
   end
   local text = table.concat(lines, "\n").."\n"
-  if #text > MAX_BYTES then return nil, "color settings exceed 64 KiB" end
+  if #text > MAX_BYTES then return nil, "color settings exceed 512 KiB" end
   return text
 end
 
 function Preferences.decode(text)
   if type(text) ~= "string" then return nil, "color settings must be text" end
-  if #text > MAX_BYTES then return nil, "color settings exceed 64 KiB" end
+  if #text > MAX_BYTES then return nil, "color settings exceed 512 KiB" end
   if text:sub(1, #HEADER+1) ~= HEADER.."\n" or text:sub(-1) ~= "\n" then
     return nil, "invalid or incomplete color settings header/record"
   end
@@ -358,7 +360,7 @@ local function read(store, path)
     return nil, readErr or "could not read color settings"
   end
   if type(text) ~= "string" then return nil, "invalid storage read" end
-  if #text > MAX_BYTES then return nil, "color settings exceed 64 KiB" end
+  if #text > MAX_BYTES then return nil, "color settings exceed 512 KiB" end
   return text
 end
 

@@ -122,17 +122,26 @@ local function wordByte(byte)
   return byte and (byte>=128 or (byte>=48 and byte<=57) or (byte>=65 and byte<=90) or (byte>=97 and byte<=122) or byte==95)
 end
 
-local function customSegments(line,rules,bridge)
-  local result, claimed, candidates = {}, {}, {}
-  local lower=Preferences.foldCase(line)
+local function prepareCustomRules(rules)
+  local candidates={has_phrase=false}
   for index,rule in ipairs(rules) do
-    if rule.enabled then candidates[#candidates+1]={rule=rule,index=index,needle=Preferences.foldCase(rule.phrase)} end
+    if rule.enabled then
+      candidates[#candidates+1]={rule=rule,index=index,needle=Preferences.foldCase(rule.phrase)}
+      if rule.phrase:find(" ",1,true) then candidates.has_phrase=true end
+    end
   end
   -- Longest phrase wins a custom/custom overlap; otherwise saved order wins.
   table.sort(candidates,function(a,b)
     if #a.needle==#b.needle then return a.index<b.index end
     return #a.needle>#b.needle
   end)
+  return candidates
+end
+
+local function customSegments(line,candidates,bridge)
+  local result, claimed = {}, {}
+  if #candidates==0 then return result end
+  local lower=Preferences.foldCase(line)
   for _,candidate in ipairs(candidates) do
     local needle,rule=candidate.needle,candidate.rule
     local firstWord,lastWord=wordByte(needle:byte(1)),wordByte(needle:byte(-1))
@@ -182,12 +191,10 @@ local function verifiedLine(number,source)
   return ok and type(lines)=="table" and lines[1]==source
 end
 
-local function wrappedCustomSegments(previous,current,rules,adapter)
+local function wrappedCustomSegments(previous,current,candidates,adapter)
   if not previous or type(previous.text)~="string" or type(previous.number)~="number"
     or type(current.number)~="number" or current.number~=previous.number+1 then return {} end
-  local hasPhrase=false
-  for _,rule in ipairs(rules) do if rule.enabled and rule.phrase:find(" ",1,true) then hasPhrase=true; break end end
-  if not hasPhrase then return {} end
+  if not candidates.has_phrase then return {} end
   local old,now=previous.text,current.text
   local oldEnd=old:match(".*()%S")
   local nowStart=now:find("%S")
@@ -201,7 +208,7 @@ local function wrappedCustomSegments(previous,current,rules,adapter)
   if not oldEnd or oldEnd<threshold or not nowStart or not wordByte(old:byte(oldEnd)) or not wordByte(now:byte(nowStart))
     or old:match("^%s*[%[>]" ) or now:match("^%s*[%[>]" ) then return {} end
   local joined=old:sub(1,oldEnd).." "..now:sub(nowStart)
-  local matches=customSegments(joined,rules,oldEnd)
+  local matches=customSegments(joined,candidates,oldEnd)
   if #matches==0 then return {} end
   -- Both absolute console rows must still contain the exact game text. The
   -- adapter verifies again when selecting; missing/stale rows color neither half.
@@ -321,6 +328,7 @@ function Colorizer:setCustomRules(rules)
   self.custom_rules=normalized
   self._custom_rules_source=normalized
   self._custom_rules_validated=Preferences.normalizeCustomRules(normalized)
+  self._custom_candidates=prepareCustomRules(self._custom_rules_validated)
   return true
 end
 function Colorizer:start()
@@ -378,13 +386,16 @@ function Colorizer:onLine(line,number)
   -- array. Revalidate that new table once, not for every incoming game line.
   if self._custom_rules_source~=self.custom_rules then
     self._custom_rules_validated=Preferences.normalizeCustomRules(self.custom_rules) or {}
+    self._custom_candidates=prepareCustomRules(self._custom_rules_validated)
     self._custom_rules_source=self.custom_rules
   end
-  local rules=self._custom_rules_validated or {}
-  local custom=customSegments(line,rules)
+  -- Validate and prepare up to 1,000 rules only when settings change; do not
+  -- case-fold, allocate and sort the whole catalog for every game line.
+  local candidates=self._custom_candidates or {}
+  local custom=customSegments(line,candidates)
   for _,item in ipairs(custom) do item.source_line=line; item.line_number=number end
   local previous=self.line_history[#self.line_history-1]
-  local wrapped=#rules>0 and wrappedCustomSegments(previous,{text=line,number=number},rules,self.adapter) or {}
+  local wrapped=#candidates>0 and wrappedCustomSegments(previous,{text=line,number=number},candidates,self.adapter) or {}
   local filtered={}
   for _,item in ipairs(segments) do
     local feature=item.kind
