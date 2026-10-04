@@ -70,6 +70,24 @@ test("WORLD colors honor master and category toggles without affecting classific
   assert(c:setFeature("highlights",true)); assert(c:onLine(line)); c:shutdown()
 end)
 
+test("WORLD capture and coloring reject embedded controls before display normalization",function()
+  local Parser=require("chat_parser")
+  for _,control in ipairs({"\r","\n","\t","\0"}) do
+    local line="** Mael"..control.."Soultis has left the world unexpectedly."
+    eq(Parser.parse(line),nil); eq(Colorizer.worldNotice(line),nil)
+    for _,part in ipairs(Colorizer.parse(line) or {}) do
+      assert(part.kind~="world_arrival" and part.kind~="world_departure")
+    end
+    local f=fake(); local c=Colorizer.new(f,true,{}); assert(c:start())
+    eq(c:onLine(line,67),false); eq(#f.applied,0); c:shutdown()
+  end
+  local line="\27[31m ** Mael Soultis has left the world unexpectedly.\27[0m\r"
+  eq(Parser.parse(line).category,"WORLD")
+  local f=fake(); local c=Colorizer.new(f,true,{}); assert(c:start())
+  assert(c:onLine(line,68)); eq(f.applied[1][1].kind,"world_departure")
+  c:shutdown()
+end)
+
 test("WORLD arrival and departure text styles are independent editable and persistable",function()
   local Preferences=require("color_preferences")
   local saved=assert(Preferences.decode(assert(Preferences.encode({

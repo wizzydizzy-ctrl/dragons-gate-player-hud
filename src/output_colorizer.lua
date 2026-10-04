@@ -95,8 +95,9 @@ end
 function Colorizer.parse(line,colors)
   colors=colors or defaultColors
   if type(line)~="string" or line=="" then return nil end
-  line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
+  line=line:gsub("\27%[[0-?]*[ -/]*[@-~]","")
   local _,_,worldKind=Colorizer.worldNotice(line)
+  line=line:gsub("\r","")
   -- Keep the entire world notice one color, even if a character is named
   -- Gold, Silver, Dragon, or Fighter.
   if worldKind then return whole(line,worldKind,colors) end
@@ -359,12 +360,13 @@ end
 function Colorizer:onLine(line,number)
   if not self.started or not self.enabled then self.travel=Travel.new(true); self.line_history={}; return false end
   if type(line)~="string" then return false end
-  line=line:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
+  local classificationLine=line:gsub("\27%[[0-?]*[ -/]*[@-~]","")
+  line=classificationLine:gsub("\r","")
   if #line>8192 then self.travel=Travel.new(true); self.line_history={}; return false end
   self.line_history[#self.line_history+1]={text=line,number=number}
   if #self.line_history>4 then table.remove(self.line_history,1) end
   local segments,overlays={},{}
-  for _,item in ipairs(Colorizer.parse(line,self.colors) or {}) do
+  for _,item in ipairs(Colorizer.parse(classificationLine,self.colors) or {}) do
     if item.kind~="portal" and item.kind~="presence" and item.kind~="presence_phrase" then overlays[#overlays+1]=item end
   end
   local oldOverlays={}
