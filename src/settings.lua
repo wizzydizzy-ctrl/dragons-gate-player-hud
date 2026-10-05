@@ -1,4 +1,5 @@
 local SHA=require("sha256")
+local SkillSort=require("skill_sort")
 local Settings={CURRENT_SCHEMA=1}
 local function copy(value,seen)
   if type(value)~="table" then return value end
@@ -38,6 +39,10 @@ end
 function Settings.resolve(defaults,input)
   local migrated,changed=Settings.migrate(input)
   local resolved=Settings.merge(defaults,migrated)
+  resolved.display=type(resolved.display)=="table" and resolved.display or {}
+  for _,key in ipairs({"main_skill_sort","sidebar_skill_sort"}) do
+    resolved.display[key]=SkillSort.normalize(resolved.display[key])
+  end
   -- Release identity and compatibility values belong to the installed package,
   -- never to a persisted user override from an older release.
   for _,key in ipairs({"view_schema","view_contract","edition","package_name","version","github"}) do resolved[key]=copy(defaults and defaults[key]) end

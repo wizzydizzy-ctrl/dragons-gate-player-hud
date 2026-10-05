@@ -14,7 +14,9 @@ def migration_source_version():
     return match.group(1)
 MODULES.append('roundtime')
 MODULES.append('skill_display')
-VIEW_CONTRACT_FILES=('view.lua','navigation.lua')
+MODULES.append('skill_sort')
+MODULES.append('skill_settings_view')
+VIEW_CONTRACT_FILES=('view.lua','navigation.lua','skill_settings_view.lua')
 def view_contract():
     digest=hashlib.sha256()
     for name in VIEW_CONTRACT_FILES:

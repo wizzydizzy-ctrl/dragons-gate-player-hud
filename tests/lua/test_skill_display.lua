@@ -1,6 +1,7 @@
 local Display=require("skill_display")
+local SkillSort=require("skill_sort")
 local Adapter=require("mudlet_adapter")
-local function fakeSkills(enabled)
+local function fakeSkills(enabled,sort,packageName)
   local f={next=0,timers={},cancelled={},events={},lines={},replacements=0,cursor=0,column=3,selected={},clock=0}
   function f:addSkillDisplayTrigger(fn) self.trigger=fn; return "skill-trigger" end
   function f:killTrigger() self.trigger=nil end
@@ -41,7 +42,7 @@ local function fakeSkills(enabled)
   f.api=api
   function f:applyLineColors(segments,provided) return Adapter.new():applyLineColors(segments,provided) end
   function f:replaceSkillOutput(rows) self.lastRows=rows; return Adapter.replaceSkillOutput(self,rows,api) end
-  local display=Display.new(f,enabled); assert(display:start())
+  local display=Display.new(f,enabled,packageName,sort); assert(display:start())
   function f:feed(text,row)
     if row~=nil then self.lines[row]=text:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r",""); self.cursor=row end
     self.trigger(text,row)
@@ -382,4 +383,79 @@ test("main skills row categories and style ids follow sorted skills and the head
   eq(tonumber(f.lastRows[3].display_text:match("^%s*(%d+)%s")),42)
   eq(f.lastRows[4].display_text:match("^%s*(%S+)%s"),"23")
   eq(f.lastRows[5].display_text:match("^%s*(%S+)%s"),"?"); d:shutdown()
+end)
+
+test("main skills optional sort preferences are normalized copied and preserve the package argument",function()
+  local config={primary="number",direction="asc",secondary="none",secondary_direction=false}
+  local f,d=fakeSkills(true,config,"CustomHUD")
+  eq(d.package_name,"CustomHUD"); eq(d.sort.primary,"number"); eq(d.sort.secondary_direction,"asc")
+  assert(d.sort~=config); config.primary="level"; eq(d.sort.primary,"number")
+  f:feed("Skill Remain Level",1); f:feed(" Future Art       0 9",2)
+  f:feed(" Sharp Weapons       400 4",3); f:feed(" Brawling       1 1",4)
+  f:feed(">",5); f:advance(0)
+  eq(f.lastRows[2].display_text:match("^%s*(%S+)%s"),"1")
+  eq(f.lastRows[3].display_text:match("^%s*(%S+)%s"),"2")
+  eq(f.lastRows[4].display_text:match("^%s*(%S+)%s"),"?"); d:shutdown()
+  local _,default=fakeSkills(); eq(default.sort.primary,"level"); eq(default.sort.direction,"desc")
+  eq(default.sort.secondary,"uses"); eq(default.sort.secondary_direction,"asc"); default:shutdown()
+end)
+
+test("main skills setSort validates atomically without cancelling an active capture",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1); f:feed(" Sharp Weapons       400 4",2)
+  local response,timer,generation,sort=d.response,d.timer,d.generation,d.sort
+  for _,invalid in ipairs({false,true,"name",{primary="none"},{direction="up"},{extra=true},{secondary=false}}) do
+    local result,err=d:setSort(invalid); eq(result,nil); eq(type(err),"string")
+    eq(d.response,response); eq(d.timer,timer); eq(d.generation,generation); eq(d.sort,sort)
+  end
+  local result,err=d:setSort(nil); eq(result,nil); eq(type(err),"string")
+  local config={primary="number",direction="desc",secondary="none"}
+  local accepted=assert(d:setSort(config)); eq(accepted,d.sort); assert(d.sort~=config)
+  config.direction="asc"; eq(d.sort.direction,"desc")
+  eq(d.response,response); eq(d.timer,timer); eq(d.generation,generation)
+  f:feed(" Stinging       1 1",3); f:feed(">",4); f:advance(0)
+  eq(f.lastRows[2].display_text:match("^%s*(%S+)%s"),"57")
+  eq(f.lastRows[3].display_text:match("^%s*(%S+)%s"),"2"); d:shutdown()
+end)
+
+test("main skills changing sort preserves a successful pending capture and affects subsequent captures",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1)
+  f:feed(" Sharp Weapons       400 4",2); f:feed(" Stinging       1 1",3); f:feed(">",4)
+  local pending,timer,generation=d.pending,d.timer,d.generation
+  assert(d:setSort({primary="number",direction="desc",secondary="none"}))
+  eq(d.pending,pending); eq(d.timer,timer); eq(d.generation,generation)
+  local result=d:setSort({direction=false}); eq(result,nil); eq(d.pending,pending); eq(d.timer,timer)
+  f:advance(0); eq(f.replacements,3)
+  eq(f.lastRows[2].display_text:match("^%s*(%S+)%s"),"2")
+  eq(f.lastRows[3].display_text:match("^%s*(%S+)%s"),"57")
+  f:feed("Skill Remain Level",5); f:feed(" Sharp Weapons       400 4",6)
+  f:feed(" Stinging       1 1",7); f:feed(">",8); f:advance(0)
+  eq(f.replacements,6); eq(f.lastRows[2].display_text:match("^%s*(%S+)%s"),"57"); d:shutdown()
+end)
+
+test("main skills changing sort during a blank boundary retains the capture and readiness colors",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1)
+  f:feed(" Swimming       0 4",2); f:feed(" First Aid       9 1",3); f:feed(" Brawling       0 2",4)
+  f:feed("",5); local response,timer,generation=d.response,d.timer,d.generation
+  assert(d:setSort({primary="category",direction="asc",secondary="ready",secondary_direction="desc"}))
+  eq(d.response,response); eq(d.timer,timer); eq(d.generation,generation); f:advance(0)
+  eq(f.lastRows[2].display_text:match("^%s*(%S+)%s"),"42"); eq(f.lastRows[2].style_id,"skill_combat")
+  eq(f.lastRows[3].display_text:match("^%s*(%S+)%s"),"1"); eq(f.lastRows[3].style_id,"skill_ready")
+  eq(f.lastRows[4].display_text:match("^%s*(%S+)%s"),"23"); eq(f.lastRows[4].style_id,"skill_ready")
+  eq(f.lines[5],""); d:shutdown()
+end)
+
+test("main skills finish delegates to the shared sorter and retains captured source objects",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1)
+  f:feed(" Sharp Weapons       400 4",2); f:feed(" Brawling       0 1",3)
+  local response=d.response; local first,second=response.rows[1].skill,response.rows[2].skill
+  local original=SkillSort.sorted; local calls=0
+  SkillSort.sorted=function(items,config)
+    calls=calls+1; eq(config,d.sort); eq(items[1],first); eq(items[2],second)
+    return {second,first}
+  end
+  local ok,err=pcall(function() f:feed(">",4); f:advance(0) end)
+  SkillSort.sorted=original; assert(ok,err); eq(calls,1)
+  eq(response.rows[1].skill,first); eq(response.rows[2].skill,second)
+  eq(first.name,"Sharp Weapons"); eq(first.level,4); eq(first.remain,400)
+  eq(f.lastRows[2].display_text:match("^%s*(%S+)%s"),"1"); d:shutdown()
 end)

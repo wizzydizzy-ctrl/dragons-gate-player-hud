@@ -1,4 +1,5 @@
 local View=require("view"); local Storage=require("chat_storage"); local MapAdapter=require("map_adapter")
+local SkillSort=require("skill_sort")
 local SHA256
 local function sha256Hex(payload)
   if not SHA256 then SHA256=require("sha256") end
@@ -938,20 +939,36 @@ function Adapter.displaySettingsSnapshot(config)
   if alignInput==nil then alignInput=false elseif type(alignInput)~="boolean" then return nil,"main input alignment must be a boolean" end
   local mainSkills=config.main_skills
   if mainSkills==nil then mainSkills=true elseif type(mainSkills)~="boolean" then return nil,"main skills display must be a boolean" end
-  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput,main_skills=mainSkills}
+  local sorts={}
+  for _,key in ipairs({"main_skill_sort","sidebar_skill_sort"}) do
+    local selected=config[key]; if selected==nil then selected=SkillSort.normalize() end
+    local value,err=SkillSort.validate(selected)
+    if not value then return nil,err end
+    sorts[key]=value
+  end
+  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput,main_skills=mainSkills,
+    main_skill_sort=sorts.main_skill_sort,sidebar_skill_sort=sorts.sidebar_skill_sort}
 end
 function Adapter:saveDisplaySettings(config)
   local snapshot,snapshotErr=Adapter.displaySettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
   local base=Adapter.dataBase(); lfs.mkdir(base); local destination=displaySettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
-  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local function sortSource(value)
+    -- Only validated enum values are serialized; no user text becomes code.
+    return string.format("{primary=%q,direction=%q,secondary=%q,secondary_direction=%q}",
+      value.primary,value.direction,value.secondary,value.secondary_direction)
+  end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s, main_skill_sort=%s, sidebar_skill_sort=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills),sortSource(snapshot.main_skill_sort),sortSource(snapshot.sidebar_skill_sort))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
 end
 function Adapter.loadDisplaySettings()
   local loader=loadfile(displaySettingsPath()); if not loader then return nil end
-  local ok,value=pcall(loader); if not ok then return nil end
+  local ok,value=pcall(loader); if not ok or type(value)~="table" then return nil end
+  -- Bad/legacy sorting values cannot erase unrelated saved display choices.
+  value.main_skill_sort=SkillSort.normalize(value.main_skill_sort)
+  value.sidebar_skill_sort=SkillSort.normalize(value.sidebar_skill_sort)
   local snapshot=Adapter.displaySettingsSnapshot(value); return snapshot
 end
 local function chatSettingsPath() return Adapter.dataBase().."/chat-settings.lua" end

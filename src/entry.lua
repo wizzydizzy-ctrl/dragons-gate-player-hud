@@ -67,6 +67,7 @@ DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateRe
 local moduleNames={"defaults","keybindings","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","chat_sounds","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
 moduleNames[#moduleNames+1]="color_styles"; moduleNames[#moduleNames+1]="color_preferences"; moduleNames[#moduleNames+1]="travel_highlights"; moduleNames[#moduleNames+1]="roundtime"
 moduleNames[#moduleNames+1]="skill_display"
+moduleNames[#moduleNames+1]="skill_sort"; moduleNames[#moduleNames+1]="skill_settings_view"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")

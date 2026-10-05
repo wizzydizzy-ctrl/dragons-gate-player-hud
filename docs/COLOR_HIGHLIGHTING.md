@@ -50,7 +50,7 @@ For example, save `secret path` with yellow text and a dark background to make t
 
 **Example: change exits to blue.** Open Text Styles, select **Exit directions**, choose blue, then Save. The `Obvious exits:` / `Obvious paths:` label is a separate style, so it can stay red or use another color.
 
-Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, important notices, and the three skill row colors all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear. Skill row colors require **MAIN SKILLS** to be on; switching the colors off leaves its aligned table layout on.
+Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, important notices, and the three skill row colors all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear. Skill row colors require **OPTIONS → Skill Settings → MAIN SKILLS** to be on; switching the colors off leaves its aligned table layout on. Sorting never changes the green priority for rows with 0 uses.
 
 Selections apply to **new output**, not previously printed lines. Use `look` to see a room description again. Saved choices survive HUD reloads, package updates, character changes, and Mudlet restarts within the same profile. They are stored as validated data in `DGHUDData/color-settings.dat`, outside the replaceable package. A failed save shows an error and does not apply partial changes.
 

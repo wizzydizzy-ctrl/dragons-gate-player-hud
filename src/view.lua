@@ -5,6 +5,8 @@ local ColorStyles=require("color_styles")
 local ColorPreferences=require("color_preferences")
 local MAX_CUSTOM_RULES=ColorPreferences.MAX_CUSTOM_RULES
 local Sounds=require("chat_sounds")
+local SkillSort=require("skill_sort")
+local SkillSettingsView=require("skill_settings_view")
 local View={}; View.__index=View
 function View.withFont(text,size) return "<span style='font-size:"..tonumber(size).."px'>"..text.."</span>" end
 function View.raiseCards(cards) for _,card in ipairs(cards or {}) do if card and card.raise then card:raise() end end end
@@ -272,6 +274,7 @@ local function gauge(name,parent,color,theme)
   return g
 end
 local function place(item,x,y,w,h) item:move(x,y); item:resize(w,h); item:show() end
+SkillSettingsView.attach(View,{label=label,copy=viewCopy,safeText=safeText})
 function View:resizeInventoryContent(rows,minimumHeight)
   local layout=self.layout; local height=math.max(1,rows*layout.list_row_height)
   if self.inventory_footer_scrolling then
@@ -434,9 +437,13 @@ function View.new(settings)
   self.option_action_order={"command_help","refresh_data","auto_update","base_ui_toggle","text_size","auto_main_wrap","align_main_input","main_skills","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
   local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",base_ui_toggle="MUDLET UI: UNAVAILABLE",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   actionLabels.main_skills="MAIN SKILLS: ON"
+  actionLabels.skill_settings="SKILL SETTINGS…"
+  for index,key in ipairs(self.option_action_order) do if key=="main_skills" then table.insert(self.option_action_order,index+1,"skill_settings"); break end end
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self:setMainSkillsEnabled(not (self.settings.display and self.settings.display.main_skills==false))
+  self:createSkillSettings()
+  self:setSkillSortPreferences(self.settings.display)
   local skillsButton=self.option_action_buttons.main_skills
   if skillsButton.setToolTip then pcall(skillsButton.setToolTip,skillsButton,"Format possessed skills in the main display with game skill numbers, level and remaining uses. The right-side skills list stays unchanged.") end
   local alignInputButton=self.option_action_buttons.align_main_input
@@ -1191,6 +1198,7 @@ function View:applyLayout(layout)
   self:layoutColorSettings(layout)
   self:layoutChatSettings(layout)
   self:layoutKeybindingSettings(layout)
+  self:layoutSkillSettings(layout)
   self:layoutHelp(layout)
   self:layoutFeedback(layout)
   self:layoutSupport(layout)
@@ -1213,6 +1221,7 @@ function View:layoutLatentPsionAlert(layout)
   View.raiseCards(widgets); return true
 end
 function View:showLatentPsionAlert(message)
+  self:hideSkillSettings()
   if self.color_settings_visible then self:hideColorSettings() end
   self.latent_alert_message=tostring(message or "Automatic rolling has stopped. Choose the profession yourself.")
   self.latent_alert_visible=true
@@ -1727,6 +1736,7 @@ function View:setColorStyles(config)
   return true
 end
 function View:showColorSettingsPage(page)
+  self:hideSkillSettings()
   if page~="groups" and page~="styles" and page~="custom" then return nil,"Unknown color settings page." end
   self.color_style_draft=nil; self.color_style_selected=nil; self.color_style_error=nil; self.color_style_note=nil
   self.custom_highlight_draft=nil; self.custom_highlight_selected=nil; self.custom_highlight_error=nil; self.custom_highlight_message=nil; self.custom_highlight_delete_pending=false; self.custom_highlight_delete.option_text="DELETE"
@@ -2091,6 +2101,7 @@ function View:renderChatSettings(font)
 end
 function View:setChatAllSources(sources) self.chat_all_sources={}; for _,key in ipairs(self.chat_all_source_order or {}) do self.chat_all_sources[key]=not (type(sources)=="table" and sources[key]==false) end; if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:showChatSettings()
+  self:hideSkillSettings()
   if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   self.chat_settings_visible=false
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end
@@ -2119,7 +2130,8 @@ function View:renderKeybindingSettings(populate)
   for _,key in ipairs(self.keybinding_order) do local field=self.keybinding_fields[key]; field.caption:echo(View.withFont(field.label,font)); if populate and field.input.print then field.input:print(tostring((self.keybindings_draft.commands or {})[key] or "")) end end
   self.keybindings_status:echo(View.withFont(self.keybindings_error and ("<span style='color:"..t.hp.."'><b>"..safeText(self.keybindings_error).."</b></span>") or safeText(self.keybindings_status_text or "Changes apply after Save. If any key conflicts, DGHUD leaves the full keypad set inactive."),font)); self.keybindings_cancel:echo(View.withFont("<center><b>CANCEL</b></center>",font)); self.keybindings_save:echo(View.withFont("<center><b>SAVE</b></center>",font)); return true
 end
-function View:showKeybindingSettings(config) self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; config=type(config)=="table" and config or {}; self.keybindings_draft={enabled=config.enabled==true,commands={}}; for _,key in ipairs(self.keybinding_order) do self.keybindings_draft.commands[key]=tostring(type(config.commands)=="table" and config.commands[key] or "") end; self.keybindings_visible=true; self.keybindings_error=nil; self.keybindings_status_text=nil; self:setColorMenuVisible(false); self:renderKeybindingSettings(true); if self.layout then self:layoutKeybindingSettings(self.layout) end; return true end
+function View:showKeybindingSettings(config)
+  self:hideSkillSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; config=type(config)=="table" and config or {}; self.keybindings_draft={enabled=config.enabled==true,commands={}}; for _,key in ipairs(self.keybinding_order) do self.keybindings_draft.commands[key]=tostring(type(config.commands)=="table" and config.commands[key] or "") end; self.keybindings_visible=true; self.keybindings_error=nil; self.keybindings_status_text=nil; self:setColorMenuVisible(false); self:renderKeybindingSettings(true); if self.layout then self:layoutKeybindingSettings(self.layout) end; return true end
 function View:hideKeybindingSettings() self.keybindings_visible=false; self.keybindings_draft=nil; self.keybindings_error=nil; if self.layout then self:layoutKeybindingSettings(self.layout) end; return true end
 function View:keybindingSettingsValues() local result={enabled=self.keybindings_draft.enabled==true,commands={}}; for _,key in ipairs(self.keybinding_order) do local field=self.keybinding_fields[key]; result.commands[key]=field.input.getText and field.input:getText() or "" end; return result end
 function View:saveKeybindingSettings() if not self.keybindings_settings_callback then return nil,"keybinding settings callback is unavailable" end; local ok,err,config,status=self.keybindings_settings_callback(self:keybindingSettingsValues()); if not ok then self.keybindings_error=err or "Could not save keybindings"; self:renderKeybindingSettings(false); return nil,self.keybindings_error end; self.keybindings_error=nil; if status and status.conflicts and #status.conflicts>0 then self.keybindings_status_text="Saved, but inactive because: "..table.concat(status.conflicts,", "); self.keybindings_draft=config; self:renderKeybindingSettings(true); return true,config,status end; self:hideKeybindingSettings(); return true,config,status end
@@ -2356,13 +2368,14 @@ function View:layoutSupport(layout)
   place(self.support_overlay,0,0,"100%","100%"); place(self.support_panel,x,y,pw,ph); place(self.support_bg,0,0,"100%","100%"); place(self.support_title,16,10,pw-32,32); place(self.support_text,16,50,pw-32,70); place(self.support_feedback,16,126,pw-32,40); place(self.support_debug,16,174,pw-32,40); place(self.support_status,16,222,pw-32,math.max(24,ph-278)); place(self.support_close,pw-126,ph-48,110,34); self:renderSupport(font); View.raiseCards(widgets); return true
 end
 function View:renderSupport(font) font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.support_title:echo(View.withFont("<b>SUPPORT</b>",font+3)); self.support_text:echo(View.withFont("Send feedback, request a feature, or anonymously submit the latest privacy-safe debug report. No GitHub account or browser is needed.",font)); self.support_feedback:echo(View.withFont("<center><b>FEEDBACK & REQUESTS…</b></center>",font)); self.support_debug:echo(View.withFont("<center><b>SEND LAST DEBUG REPORT</b></center>",font)); self.support_status:echo(View.withFont(safeText(self.support_status_text or "Debug reports exclude chat, room prose, credentials, character names, and command history."),font)); self.support_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); return true end
-function View:showSupport() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; self.support_visible=true; self.support_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutSupport(self.layout) end; return true end
+function View:showSupport()
+  self:hideSkillSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; self.support_visible=true; self.support_status_text=nil; self:setColorMenuVisible(false); if self.layout then self:layoutSupport(self.layout) end; return true end
 function View:hideSupport() self.support_visible=false; if self.layout then self:layoutSupport(self.layout) end; return true end
 function View:setSupportStatus(message) self.support_status_text=tostring(message or ""); if self.support_visible then self:renderSupport() end; return true end
 function View:setHelpCloseCallback(callback) self.help_close_callback=type(callback)=="function" and callback or nil; return true end
 function View:setHelpVisible(visible,entries)
   self.help_visible=visible==true
-  if self.help_visible then self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end end
+  if self.help_visible then self:hideSkillSettings(); self:setColorMenuVisible(false); self:hideRollerSettings(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end end
   if entries~=nil then self.help_entries=type(entries)=="table" and entries or View.defaultHelpEntries() end
   if self.layout then return self:layoutHelp(self.layout) end
   return true
@@ -2430,6 +2443,7 @@ function View:setMapSettingsActionCallback(callback) self.map_settings_action_ca
 function View:selectOptionsAction(action)
   if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   self:setColorMenuVisible(false)
+  if action=="skill_settings" then return self:showSkillSettings() end
   if action=="command_help" then return self:showHelp() end
   if action=="chat_settings" then return self:showChatSettings() end
   if action=="keybindings_settings" then if self.options_action_callback then local config=self.options_action_callback(action); if type(config)=="table" then return self:showKeybindingSettings(config) end; return config end; return nil,"keybinding settings are unavailable" end
@@ -2440,7 +2454,8 @@ function View:selectOptionsAction(action)
   if self.options_action_callback then return self.options_action_callback(action) end
   return nil,"options action is unavailable"
 end
-function View:showColorSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); self:hideKeybindingSettings(); self:hideLatentPsionAlert(); if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; self.color_settings_visible=true; self.color_settings_error=nil; self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return true end
+function View:showColorSettings()
+  self:hideSkillSettings() self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); self:hideKeybindingSettings(); self:hideLatentPsionAlert(); if self.feedback_visible then self:hideFeedback() end; if self.support_visible then self:hideSupport() end; self.color_settings_visible=true; self.color_settings_error=nil; self:setColorMenuVisible(false); if self.layout then self:layoutColorSettings(self.layout) end; return true end
 function View:hideColorSettings()
   self.color_settings_visible=false; self.color_style_draft=nil; self.color_style_selected=nil; self.color_style_error=nil; self.color_style_note=nil; self.color_settings_error=nil
   if self.color_settings_page=="editor" then self.color_settings_page="styles" end
@@ -2450,6 +2465,7 @@ function View:hideColorSettings()
   return true
 end
 function View:showFeedback()
+  self:hideSkillSettings()
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideRollerSettings(); self:hideChatSettings(); if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self:setColorMenuVisible(false); self.feedback_draft={kind="feedback"}; self.feedback_visible=true; self.feedback_sending=false; self.feedback_error=nil; self.feedback_result=nil
   if self.feedback_summary.print then self.feedback_summary:print("") end; if self.feedback_details.print then self.feedback_details:print("") end
   if self.layout then self:layoutFeedback(self.layout) end; return true
@@ -2470,6 +2486,7 @@ function View:sendFeedback()
   self.feedback_sending=true; self.feedback_error=nil; self:renderFeedback(false); local called,ok,err=pcall(self.feedback_callback,payload,function(result,sendErr) self:finishFeedback(result,sendErr) end); if not called then err=tostring(ok); ok=nil end; if not ok then self.feedback_sending=false; self.feedback_error=err or "Could not start upload"; self:renderFeedback(false); return nil,self.feedback_error end; return true
 end
 function View:showMapLibrary()
+  self:hideSkillSettings()
   self:hideMapSettings(); self.map_library_visible=true; self:setColorMenuVisible(false); self:hideHelp(); self:hideRollerSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; if self.layout then self:layoutMapLibrary(self.layout) end; return true
 end
 function View:hideMapLibrary() self.map_library_visible=false; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
@@ -2548,6 +2565,7 @@ function View:selectedMapLibraryEntry() return self.map_library_selected and sel
 function View:setMapLibraryImportPending(value,combine) self.map_library_import_pending=value==true; self.map_library_combine_pending=self.map_library_import_pending and combine==true; if self.layout then self:layoutMapLibrary(self.layout) end; return true end
 function View:setColorMenuVisible(visible)
   self.color_menu_visible=visible==true
+  if self.color_menu_visible then self:hideSkillSettings() end
   if self.color_menu_visible and self.color_settings_visible then self:hideColorSettings() end
   if self.color_menu_visible and self.roller_settings_visible then self:hideRollerSettings() end
   if self.layout then return self:layoutColorMenu(self.layout) end
@@ -2564,10 +2582,12 @@ function View:renderColorOptions()
   return true
 end
 function View:showRollerSettings(config)
+  self:hideSkillSettings()
   self.roller_session_height=nil
   self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
+  self:hideSkillSettings()
   self:hideHelp(); self:hideRollerSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.map_settings_draft=viewCopy(config or {}); local t=self.map_settings_draft.transition_submaps or {}; for _,key in ipairs({"gate","portal","door","arch","path","other"}) do self.map_settings_draft[key]=t[key]==true end
   self.map_settings_visible=true; self:setColorMenuVisible(false); self.map_settings_error=nil; self:renderMapSettings(true); if self.layout then self:layoutMapSettings(self.layout) end; return true
 end
@@ -2707,7 +2727,12 @@ function View:renderRunes(s)
 end
 function View:renderSkills(s)
   local layout=self.layout; if not layout then return end
-  local nameWidth=self.skill_name_width or 22; local signature={tostring(nameWidth)}; local items=(s.skills or {}).items or {}
+  local config=SkillSort.normalize(self.settings.display and self.settings.display.sidebar_skill_sort)
+  -- Keep the State array and its records owned by the runtime.
+  local source=(s.skills or {}).items or {}; local copy={}
+  for index,skill in ipairs(source) do copy[index]=viewCopy(skill) end
+  local items=SkillSort.sorted(copy,config)
+  local nameWidth=self.skill_name_width or 22; local signature={tostring(nameWidth),config.primary,config.direction,config.secondary,config.secondary_direction}
   for _,skill in ipairs(items) do signature[#signature+1]=tostring(skill.name or "").."\31"..tostring(skill.level or "").."\31"..tostring(skill.remain or "") end
   signature=table.concat(signature,"\30"); if signature==self.skills_signature then return end; self.skills_signature=signature
   local function fixed(value) return (esc(value):gsub(" ","&nbsp;")) end
@@ -2874,6 +2899,8 @@ function View.validateReusable(candidate,settings)
   local expectedSettings=type(settings)=="table" and settings.view_settings_contract or nil
   if type(expected)~="string" or #expected~=64 or candidate.view_contract~=expected then return nil,"preserved HUD view contract does not match" end
   if type(expectedSettings)~="string" or #expectedSettings~=64 or candidate.view_settings_contract~=expectedSettings then return nil,"preserved HUD settings contract does not match" end
+  local skillSettingsValid,skillSettingsError=SkillSettingsView.validate(candidate,reusableWidget,reusableLabel)
+  if not skillSettingsValid then return nil,skillSettingsError end
   for _,name in ipairs(reusableWidgetNames) do
     local valid
     if name=="chat_output" then valid=reusableConsole(candidate[name])
@@ -2947,6 +2974,10 @@ end
 function View:prepareForReuse(settings)
   local valid,why=View.validateReusable(self,settings); if not valid then return nil,why end
   self.settings=settings or self.settings
+  self:hideSkillSettings()
+  self.skill_settings_saving=false; self.skill_settings_pending_snapshot=nil
+  self:bindSkillSettingsCallbacks()
+  self:setSkillSortPreferences(self.settings.display)
   self:ensureVersionLabel(); self:renderVersion()
   self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.color_style_callback=nil; self.color_style_pending_config=nil; self.color_style_saving=false
@@ -2969,6 +3000,7 @@ function View:prepareForReuse(settings)
     if type(key)=="string" and (key:match("^color_menu") or key:match("^color_settings") or key:match("^color_option") or key:match("^option_action") or key:match("^chat_settings") or key:match("^keybinding") or key:match("^help_") or key:match("^roller_") or key:match("^latent_alert") or key:match("^map_settings_") or key:match("^feedback_") or key:match("^support_") or key:match("^map_library_") or key:match("^map_collection_")) and type(value)=="table" and type(value.hide)=="function" then pcall(value.hide,value) end
   end
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
+  self:hideSkillSettings()
   self:setChatVisible(self.settings.chat and self.settings.chat.visible)
   self.chat_sound_status_text=nil
   self:setChatSounds(self.settings.chat and self.settings.chat.sounds)
@@ -2981,6 +3013,9 @@ function View:delete()
   -- Native deletion may deliver callbacks before it returns. Retire this view
   -- first so retained closures cannot save preferences or repaint old labels.
   self.disposed=true; self.chat_settings_visible=false
+  pcall(self.hideSkillSettings,self)
+  self.skill_settings_visible=false; self.skill_settings_draft=nil
+  self.skill_settings_saving=false; self.skill_settings_pending_snapshot=nil
   self.roller_session=nil
   for key,value in pairs(self) do if type(key)=="string" and key:match("_callback$") and type(value)=="function" then self[key]=nil end end
   -- Rejected or partially constructed views may lack editor widgets. Their

@@ -78,7 +78,7 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(manifest['view_schema'],5)
             self.assertRegex(manifest['view_contract'],r'^[0-9a-f]{64}$')
             expected_contract=hashlib.sha256()
-            for filename in ('view.lua','navigation.lua'):
+            for filename in ('view.lua','navigation.lua','skill_settings_view.lua'):
                 payload=(ROOT/'src'/filename).read_bytes()
                 expected_contract.update(filename.encode('utf-8')+b'\0')
                 expected_contract.update(len(payload).to_bytes(8,'big'))

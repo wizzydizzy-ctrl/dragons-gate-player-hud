@@ -107,15 +107,13 @@ This puts the runes closest to needing renewal at the top.
 
 ## Skills
 
-`skill` fills the Skills list. DGHUD retains every skill and sorts them by:
+`skill` fills the Skills list. **OPTIONS → Skill Settings** gives **Main Display** and **Right Sidebar** independent sorting choices. Each has a primary key, ascending or descending order, and an optional secondary key with its own direction. Available keys are **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, and **Category (combat vs utility)**. Both displays default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
-1. highest level first;
-2. lowest remaining uses next; and
-3. skill name for an exact tie.
+Sidebar sorting changes immediately reorder existing rows. Main sorting changes apply to the next complete `skill` output and leave previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and HUD updates. Category and Ready to train sorting keep every captured skill visible.
 
 Long display names are shortened only for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. Columns stay aligned, and scrollbars appear when needed.
 
-**OPTIONS → MAIN SKILLS** controls an additional display change in the main game console. It is on by default and remembers your choice through updates and restarts. When a complete `skill` response arrives, its rows use the same sorting above and become, for example:
+The **MAIN SKILLS** toggle in **Skill Settings** is on by default. It formats complete `skill` responses in the main game console using the **Main Display** order, for example:
 
 ```text
 Number  Skill   LVL  USES
@@ -123,7 +121,7 @@ Number  Skill   LVL  USES
     46  Biting    4   414
 ```
 
-The leading number is the game's fixed training skill ID, not the row's position. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This option does not change the right-hand Skills panel's appearance, send training commands, or replace unrelated game output.
+The leading catalog number is the game's fixed training skill ID, not a display rank. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This toggle does not change the sidebar's layout, send training commands, or replace unrelated game output.
 
 Whole rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. The green ready-to-train color takes priority. Combat includes weapons, Focus Force, Biting, Clawing, First Aid, and other combat abilities; Identify skills, Swimming, Riding, and other utility skills stay yellow unless they have zero uses. Change or disable these styles under **OPTIONS → COLOR SETTINGS → TEXT STYLES → Skills**. These choices are saved with your profile.
 

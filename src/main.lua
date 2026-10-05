@@ -5,6 +5,7 @@ local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
 local SkillDisplay=require("skill_display")
+local SkillSort=require("skill_sort")
 local Roundtime=require("roundtime")
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
@@ -346,13 +347,55 @@ local function displayTextPresetName(scale)
   for name,value in pairs(displayTextPresets) do local distance=math.abs(scale-value); if distance<difference then selected,difference=name,distance end end
   return selected
 end
+function Main:displayPreferences(overrides)
+  local display=type(self.settings.display)=="table" and self.settings.display or {}
+  local result={side_text_scale=tonumber(display.side_text_scale) or 1,
+    auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),
+    main_skills=self:mainSkillsEnabled(),
+    main_skill_sort=SkillSort.normalize(display.main_skill_sort),
+    sidebar_skill_sort=SkillSort.normalize(display.sidebar_skill_sort)}
+  for key,value in pairs(overrides or {}) do result[key]=value end
+  return result
+end
+function Main:skillSettings()
+  local display=self:displayPreferences()
+  return {main_skills=display.main_skills,main_skill_sort=display.main_skill_sort,sidebar_skill_sort=display.sidebar_skill_sort}
+end
+function Main:setSkillSettings(config)
+  if type(config)~="table" or type(config.main_skills)~="boolean" then return nil,"Choose whether main skill formatting is on or off." end
+  local mainSort,mainErr=SkillSort.validate(config.main_skill_sort)
+  if not mainSort then return nil,mainErr end
+  local sidebarSort,sidebarErr=SkillSort.validate(config.sidebar_skill_sort)
+  if not sidebarSort then return nil,sidebarErr end
+  local candidate=self:displayPreferences({main_skills=config.main_skills,main_skill_sort=mainSort,sidebar_skill_sort=sidebarSort})
+  if self.adapter.saveDisplaySettings then
+    local called,saved,err=pcall(self.adapter.saveDisplaySettings,self.adapter,candidate)
+    if not called or not saved then return nil,"Could not save skill settings. Try again: "..tostring(called and err or saved) end
+  end
+  local wasEnabled=self:mainSkillsEnabled()
+  self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}
+  for key,value in pairs(candidate) do self.settings.display[key]=value end
+  local root=rawget(_G,"DGHUD")
+  if root then
+    root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}
+    root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}
+    for key,value in pairs(candidate) do root.user_settings.display[key]=type(value)=="table" and SkillSort.normalize(value) or value end
+  end
+  if self.skill_display then
+    if wasEnabled~=config.main_skills then self.skill_display:setEnabled(config.main_skills) end
+    self.skill_display:setSort(mainSort)
+  end
+  if self.view and self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(config.main_skills) end
+  if self.view and self.view.setSkillSortPreferences then self.view:setSkillSortPreferences(self:skillSettings()) end
+  return self:skillSettings()
+end
 function Main:setDisplayTextSize(action)
   local function failed(message) if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end; return nil,message end
   action=tostring(action or "status"):lower():match("^%s*(.-)%s*$")
   local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
   if action=="status" or action=="" then if self.view and self.view.setDisplayTextSize then self.view:setDisplayTextSize(current) end; if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(current:gsub("^%l",string.upper)) end; return current end
   local scale=displayTextPresets[action]; if not scale then return failed("Usage: dghud text [small|normal|large|status]") end
-  local candidate={side_text_scale=scale,auto_wrap=not (self.settings.display and self.settings.display.auto_wrap==false),align_input=self:mainInputAligned(),main_skills=self:mainSkillsEnabled()}
+  local candidate=self:displayPreferences({side_text_scale=scale})
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return failed("Could not save HUD text size: "..tostring(err)) end end
   self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}; self.settings.display.side_text_scale=scale
   local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.side_text_scale=scale end
@@ -371,8 +414,7 @@ function Main:setMainSkillsEnabled(enabled)
   end
   if type(enabled)~="boolean" then return failed("Main skills display must be on or off.") end
   local display=self.settings.display or {}
-  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,
-    auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),main_skills=enabled}
+  local candidate=self:displayPreferences({main_skills=enabled})
   if self.adapter.saveDisplaySettings then
     local called,saved,err=pcall(self.adapter.saveDisplaySettings,self.adapter,candidate)
     if not called or not saved then return failed("Could not save main skills display: "..tostring(called and err or saved)) end
@@ -392,7 +434,7 @@ function Main:setMainConsoleAutoWrap(enabled)
   local current=self:mainConsoleAutoWrapEnabled()
   if current==enabled then return enabled end
   local display=self.settings.display or {}
-  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=enabled,align_input=self:mainInputAligned(),main_skills=self:mainSkillsEnabled()}
+  local candidate=self:displayPreferences({auto_wrap=enabled})
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return nil,"Could not save automatic main-window wrap: "..tostring(err) end end
   if enabled and self.adapter.getMainConsoleWrap then
     local read,value=pcall(self.adapter.getMainConsoleWrap,self.adapter)
@@ -465,7 +507,7 @@ function Main:setMainInputAligned(enabled)
   local applied,err=self:applyMainInputAlignment(enabled,nil,not enabled)
   if not applied then return failed("Could not align input: "..tostring(err)) end
   local display=self.settings.display or {}
-  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=enabled,main_skills=self:mainSkillsEnabled()}
+  local candidate=self:displayPreferences({align_input=enabled})
   if self.adapter.saveDisplaySettings then
     local saved,saveErr=self.adapter:saveDisplaySettings(candidate)
     if not saved then
@@ -1310,6 +1352,8 @@ function Main:start()
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setFeedbackCallback then self.view:setFeedbackCallback(function(payload,done) return self.adapter:submitFeedback(payload,done) end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action,key,wanted)
+    if action=="skill_settings" then return self:skillSettings() end
+    if action=="skill_settings_save" then return self:setSkillSettings(key) end
     if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
     if action=="map_settings" then local config={}; for key,value in pairs(self.settings.mapper or {}) do config[key]=value end; local current=self.automapper and self.automapper:currentRoom(); local scope=current and self.map:currentTransferScope(current); if scope then config.current_area_name=scope.area_name; config.current_subarea_name=scope.subarea_name end; return config end
     if action=="refresh_data" then return self:refreshCharacterData() end
@@ -1354,6 +1398,7 @@ function Main:start()
   if self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(self:mainConsoleAutoWrapEnabled()) end
   if self.view.setMainInputAligned then self.view:setMainInputAligned(self:mainInputAligned()) end
   if self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(self:mainSkillsEnabled()) end
+  if self.view.setSkillSortPreferences then self.view:setSkillSortPreferences(self:skillSettings()) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
@@ -1440,7 +1485,7 @@ function Main:start()
     if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
     self:refresh()
   end,function(value,metadata) self:onRoundtime(value,metadata) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
-  self.skill_display=SkillDisplay.new(self.adapter,self:mainSkillsEnabled(),self.settings.package_name)
+  self.skill_display=SkillDisplay.new(self.adapter,self:mainSkillsEnabled(),self.settings.package_name,self:skillSettings().main_skill_sort)
   local skillsCalled,skillsOk=pcall(self.skill_display.start,self.skill_display)
   if not skillsCalled or not skillsOk then
     self.skill_display:shutdown(); self.skill_display=nil

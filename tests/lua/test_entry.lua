@@ -146,6 +146,23 @@ test("persisted display settings override stale live preferences",function()
     eq(DGHUD.user_settings.display.side_text_scale,.9); eq(DGHUD.settings.display.side_text_scale,.9); eq(DGHUD.user_settings.display.auto_wrap,false); eq(DGHUD.settings.display.auto_wrap,false)
   end)
 end)
+test("persisted independent skill sorting overrides stale live sorting at entry",function()
+  withEntryStubs(function(context)
+    context.defaults.display={side_text_scale=1}
+    context.install("mudlet_adapter",function() return {loadDisplaySettings=function()
+      return {side_text_scale=1,main_skills=false,
+        main_skill_sort={primary="name",direction="asc",secondary="none",secondary_direction="desc"},
+        sidebar_skill_sort={primary="number",direction="desc",secondary="uses",secondary_direction="asc"}}
+    end,new=function() return context.adapter end} end)
+    DGHUD={user_settings={display={main_skills=true,main_skill_sort={primary="level"},sidebar_skill_sort={primary="level"}}},shutdown=function() return true end}
+    dofile("src/entry.lua")
+    eq(DGHUD.settings.display.main_skills,false)
+    eq(DGHUD.settings.display.main_skill_sort.primary,"name"); eq(DGHUD.settings.display.main_skill_sort.secondary,"none")
+    eq(DGHUD.settings.display.sidebar_skill_sort.primary,"number"); eq(DGHUD.settings.display.sidebar_skill_sort.direction,"desc")
+    eq(DGHUD.user_settings.display.main_skill_sort.primary,"name")
+  end)
+end)
+
 test("persisted mapper submap choices override stale nested live values",function()
   withEntryStubs(function(context)
     context.defaults.mapper={schema=2,enabled=true,transition_submaps={gate=false,portal=false,door=false,arch=false,path=false,other=false}}

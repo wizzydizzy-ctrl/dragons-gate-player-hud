@@ -39,7 +39,11 @@ The HUD runs `info magic` during character startup and whenever that command is 
 
 ## Skills and combat updates
 
-**OPTIONS → MAIN SKILLS** (on by default) formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns, sorted by highest level and then fewest uses remaining. The number is the game's fixed skill ID, not a sorted row number. Every possessed skill is retained. Completed blank-ended tables update on the next UI tick without waiting for a later prompt or sending an extra Enter; the right-hand Skills list updates at the same boundary. This choice persists through updates and restarts.
+**OPTIONS → Skill Settings** keeps the **MAIN SKILLS** formatting toggle (on by default) and separate sorting for **Main Display** and **Right Sidebar**. Each offers **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)** as a primary key, ascending or descending order, and an optional secondary key with its own direction. Both default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
+
+Sidebar ordering changes immediately reorder existing rows. Main ordering changes apply to the next complete `skill` output, leaving previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and updates. See [Skill Settings](docs/OPTIONS_AND_DISPLAY.md#skill-settings).
+
+Formatted output uses aligned **Number / Skill / LVL / USES** columns. The catalog number is the fixed training ID, not a display rank. Category and Ready to train sorting keep every captured skill visible. Completed blank-ended tables update on the next UI tick without waiting for a later prompt or sending an extra Enter.
 
 Skill rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. Zero uses takes priority over the skill category. Customize or disable these colors under **OPTIONS → COLOR SETTINGS → TEXT STYLES → Skills**, or use the **SKILL ROW COLORS** category switch. The right-hand Skills panel keeps its existing appearance.
 

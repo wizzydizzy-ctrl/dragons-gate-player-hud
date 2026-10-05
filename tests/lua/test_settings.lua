@@ -1,6 +1,22 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("display skill ordering defaults and persisted choices resolve independently without changing callers",function()
+  local input={display={main_skills=false,auto_wrap=false,personal="keep",
+    main_skill_sort={primary="uses",direction="asc",secondary="level",secondary_direction="desc"},
+    sidebar_skill_sort={primary="category",direction="desc",secondary="name",secondary_direction="asc"}}}
+  local resolved,migrated=Settings.resolve(defaults,input)
+  eq(resolved.display.main_skills,false); eq(resolved.display.personal,"keep")
+  eq(resolved.display.main_skill_sort.primary,"uses"); eq(resolved.display.sidebar_skill_sort.primary,"category")
+  local restarted=Settings.resolve(defaults,migrated)
+  eq(restarted.display.main_skill_sort.secondary_direction,"desc"); eq(restarted.display.sidebar_skill_sort.direction,"desc")
+  resolved.display.main_skill_sort.primary="number"; eq(input.display.main_skill_sort.primary,"uses")
+  eq(defaults.display.main_skill_sort.primary,"level")
+  local invalid=Settings.resolve(defaults,{display={auto_wrap=false,main_skills=false,main_skill_sort=false,sidebar_skill_sort={primary="invalid"}}})
+  eq(invalid.display.auto_wrap,false); eq(invalid.display.main_skills,false)
+  eq(invalid.display.main_skill_sort.primary,"level"); eq(invalid.display.sidebar_skill_sort.primary,"level")
+end)
+
 
 test("WORLD defaults to its own tab and inclusion in ALL for fresh and older settings",function()
   eq(defaults.chat.all_sources.WORLD,true)

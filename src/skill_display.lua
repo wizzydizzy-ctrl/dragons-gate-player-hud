@@ -1,36 +1,17 @@
 local Parser=require("command_parser")
+local SkillSort=require("skill_sort")
 local Display={}; Display.__index=Display
 Display.MAX_ROWS=128; Display.MAX_LINES=256; Display.MAX_LINE_BYTES=2048; Display.RESPONSE_TIMEOUT=5
 Display.BOUNDARY_DELAY=0
 
--- Authoritative game catalog supplied by the user. Entries are identifiers,
--- never a list of possessed skills and never display-order ordinals.
-local catalog={
-  "Brawling","Sharp Weapons","Blunt Weapons","Pole Weapons","Throw Weapons","Missile Weapons",
-  "Shield Parry","Quickdraw","Dodging","Focus Force","Berserk Attack","Parry Blows","Bargaining",
-  "Identify Gems/Minerals","Climbing","Detect Traps","Remove Traps","Skinning","Disguise","Pick Locks",
-  "Riding","Hiding","Swimming","Alchemy","Backstab","Martial Arts","Picking Pockets","Shoplifting",
-  "Stealth","Poisoning","Identify Magick","Identify Weapon Quality","Play Instruments","Armor Smithing",
-  "Weapon Smithing","Singing","Fletching","Tracking","Disarming","Psionics","Channeling","First Aid",
-  "Body Building","Turn Undead","Draining","Biting","Clawing","Webbing","Breath Weapon",
-  "Identify Armor Quality","Linguistics","Herbalism","Healing","Spellcasting","Conjuration","Delving","Stinging",
-}
 local function plain(value)
   return value:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
 end
 local function name(value)
   return value:match("^%s*(.-)%s*$"):gsub("^[%*%s]+",""):gsub("%s+"," ")
 end
-local ids={}; for id,value in ipairs(catalog) do ids[name(value):lower()]=id end
-local combatIds={
-  [1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true,[9]=true,[10]=true,[11]=true,[12]=true,
-  [25]=true,[26]=true,[30]=true,[39]=true,[40]=true,[41]=true,[42]=true,[43]=true,[44]=true,[45]=true,[46]=true,
-  [47]=true,[48]=true,[49]=true,[53]=true,[54]=true,[55]=true,[57]=true,
-}
-function Display.skillId(value)
-  if type(value)~="string" or #value>Display.MAX_LINE_BYTES then return nil end
-  return ids[name(plain(value)):lower()]
-end
+Display.skillId=SkillSort.skillId
+Display.combatCategory=SkillSort.combatCategory
 function Display.displayName(value)
   local cleaned=name(plain(tostring(value or ""))):gsub("%c"," ")
   local short={["sharp weapons"]="Sharps",["blunt weapons"]="Blunts",["pole weapons"]="Poles",
@@ -39,7 +20,7 @@ function Display.displayName(value)
 end
 function Display.category(skill)
   if skill.remain==0 then return "ready" end
-  return combatIds[Display.skillId(skill.name)] and "combat" or "utility"
+  return Display.combatCategory(skill)
 end
 local function width(value)
   local _,points=tostring(value):gsub("[^\128-\191]","")
@@ -65,9 +46,9 @@ function Display.format(skill,widths)
   return columns({tostring(Display.skillId(skill.name) or "?"),Display.displayName(skill.name),tostring(skill.level),tostring(skill.remain)},
     widths or columnWidths({skill}))
 end
-function Display.new(adapter,enabled,packageName)
+function Display.new(adapter,enabled,packageName,sort)
   return setmetatable({adapter=adapter,enabled=enabled~=false,package_name=packageName or "DragonsGateHUD",
-    started=false,generation=0,events={}},Display)
+    sort=SkillSort.normalize(sort),started=false,generation=0,events={}},Display)
 end
 function Display:disarmTimer()
   self.generation=self.generation+1
@@ -80,6 +61,11 @@ end
 function Display:setEnabled(enabled)
   if type(enabled)~="boolean" then return nil,"main skills display must be a boolean" end
   self:cancel(); self.enabled=enabled; return enabled
+end
+function Display:setSort(config)
+  local normalized,err=SkillSort.validate(config)
+  if not normalized then return nil,err end
+  self.sort=normalized; return normalized
 end
 function Display:armTimer(delay,fn)
   self:disarmTimer()
@@ -96,11 +82,7 @@ function Display:finish()
   self:cancel()
   if not response or #response.rows==0 or not self.enabled then return end
   local items={}; for _,row in ipairs(response.rows) do items[#items+1]=row.skill end
-  table.sort(items,function(a,b)
-    if a.level~=b.level then return a.level>b.level end
-    if a.remain~=b.remain then return a.remain<b.remain end
-    return a.name:lower()<b.name:lower()
-  end)
+  items=SkillSort.sorted(items,self.sort)
   local widths=columnWidths(items)
   local rows={{line_number=response.header.line_number,source_line=response.header.source_line,
     display_text=columns({"Number","Skill","LVL","USES"},widths),category="neutral"}}

@@ -91,6 +91,47 @@ test("main input OFF without ownership performs no mutations or native calls",fu
   eq(#h.calls,0); eq(h.writes,0); eq(h.renames,0); eq(h.removes,0); eq(h.reads,1)
 end)
 
+test("skill sorting snapshots validate independent directions and do not share mutable choices",function()
+  local config={side_text_scale=1,main_skills=false,
+    main_skill_sort={primary="uses",direction="asc",secondary="level",secondary_direction="desc"},
+    sidebar_skill_sort={primary="number",direction="desc",secondary="none",secondary_direction="asc"}}
+  local snapshot=assert(Adapter.displaySettingsSnapshot(config))
+  eq(snapshot.main_skills,false); eq(snapshot.main_skill_sort.primary,"uses"); eq(snapshot.main_skill_sort.secondary_direction,"desc")
+  eq(snapshot.sidebar_skill_sort.primary,"number"); eq(snapshot.sidebar_skill_sort.direction,"desc")
+  snapshot.main_skill_sort.primary="name"; eq(config.main_skill_sort.primary,"uses")
+  local legacy=assert(Adapter.displaySettingsSnapshot({side_text_scale=1}))
+  eq(legacy.main_skill_sort.primary,"level"); eq(legacy.main_skill_sort.direction,"desc")
+  eq(legacy.sidebar_skill_sort.secondary,"uses"); eq(legacy.sidebar_skill_sort.secondary_direction,"asc")
+  for _,value in ipairs({false,"name",{primary="os.execute('bad')"},{direction="up"},{secondary="broken"}}) do
+    eq(Adapter.displaySettingsSnapshot({side_text_scale=1,main_skill_sort=value}),nil)
+  end
+end)
+
+test("skill sort settings round trip through disk and invalid sorts retain unrelated display preferences",function()
+  local h=fakeInput(); local saved={io=io,os=os,lfs=lfs,getMudletHomeDir=getMudletHomeDir,loadfile=loadfile}
+  local ok,err=xpcall(function()
+    io=h.api.io; os=h.api.os; lfs=h.api.lfs; getMudletHomeDir=h.api.getMudletHomeDir
+    loadfile=function(path) if not h.files[path] then return nil,"missing" end; return (loadstring or load)(h.files[path]) end
+    local path="/profile/DGHUDData/display-settings.lua"
+    local config={side_text_scale=.9,auto_wrap=false,align_input=true,main_skills=false,
+      main_skill_sort={primary="ready",direction="asc",secondary="level",secondary_direction="desc"},
+      sidebar_skill_sort={primary="category",direction="desc",secondary="number",secondary_direction="asc"}}
+    assert(Adapter.new():saveDisplaySettings(config))
+    local loaded=assert(Adapter.loadDisplaySettings())
+    eq(loaded.main_skills,false); eq(loaded.auto_wrap,false); eq(loaded.align_input,true); eq(loaded.side_text_scale,.9)
+    eq(loaded.main_skill_sort.primary,"ready"); eq(loaded.main_skill_sort.secondary_direction,"desc")
+    eq(loaded.sidebar_skill_sort.primary,"category"); eq(loaded.sidebar_skill_sort.direction,"desc")
+    local before=h.files[path]; config.sidebar_skill_sort.direction="invalid"
+    eq(Adapter.new():saveDisplaySettings(config),nil); eq(h.files[path],before)
+    h.files[path]="return {side_text_scale=.9,auto_wrap=false,align_input=true,main_skills=false,main_skill_sort=false,sidebar_skill_sort={primary='broken'}}"
+    loaded=assert(Adapter.loadDisplaySettings())
+    eq(loaded.main_skills,false); eq(loaded.auto_wrap,false); eq(loaded.align_input,true)
+    eq(loaded.main_skill_sort.primary,"level"); eq(loaded.sidebar_skill_sort.primary,"level")
+  end,debug.traceback)
+  io=saved.io; os=saved.os; lfs=saved.lfs; getMudletHomeDir=saved.getMudletHomeDir; loadfile=saved.loadfile
+  if not ok then error(err,0) end
+end)
+
 test("main input ON persists original before mutation and resizes without accumulating CSS",function()
   local h=fakeInput(true); local original=h.style; local adapter=Adapter.new()
   h.onSet=function() local backup=assert(Adapter.parseInputLayoutBaseline(h.files[h.path])); eq(backup.style,original); eq(backup.compact_input,true) end

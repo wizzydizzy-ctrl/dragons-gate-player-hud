@@ -92,13 +92,19 @@ The setting is saved and survives updates.
 
 Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap manually. Once it is off, DGHUD stops changing that value during resizing, reloads, and updates. Set your preferred wrap normally in Mudlet's profile preferences; the OFF choice is saved outside the package and survives updates.
 
-## Main skills output
+## Skill Settings
 
-**MAIN SKILLS** is on by default. It reformats complete `skill` responses in the main game display into aligned **Number / Skill / LVL / USES** columns, sorted by highest level and then fewest remaining uses. The leading number is the fixed game skill ID, not a sorted row number. Tables ending in blank lines update on the next UI tick without waiting for a later prompt. The right-hand Skills panel keeps its existing layout and receives the same completed list.
+Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
+
+**Main Display** and **Right Sidebar** have independent sorting choices. For each, choose a primary key: **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)**. Choose ascending or descending order, and optionally add a secondary key with its own direction. Both displays default to **Level descending**, then **Uses ascending**. For “level then uses,” choose **Level** as the primary key and **Uses** as the secondary key.
+
+Changing **Right Sidebar** ordering immediately reorders its existing skill rows. **Main Display** ordering applies to the next complete `skill` output; previously printed tables stay as they are. Formatting and sorting choices are saved for the whole Mudlet profile and survive character changes, reloads, restarts, and HUD updates.
+
+**Number** is the game's fixed catalog ID used for training, not a display rank. All captured skills remain visible; Category and Ready to train sorting only change their order.
 
 Rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. Zero uses overrides the normal category color. Use **COLOR SETTINGS → TEXT STYLES → Skills** to change the three styles, or the **SKILL ROW COLORS** category to switch their coloring off without disabling the aligned layout.
 
-Turn it **OFF** to keep future `skill` responses in their original game layout. Your choice survives restarts, updates, and changes to text size or word wrap. Only the skill table is changed; other output and prompts remain. See [Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills).
+Tables ending in blank lines update on the next UI tick without waiting for a later prompt. The sidebar keeps its existing layout. See [Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills).
 
 ## Align command input
 

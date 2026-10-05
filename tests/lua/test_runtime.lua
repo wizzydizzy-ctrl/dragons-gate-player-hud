@@ -58,6 +58,7 @@ local function fake()
     setBaseUIVisible=function(self,visible) f.viewBaseUIVisible=visible end,
     setMainInputAligned=function(self,enabled) f.viewInputAligned=enabled end,
     setMainSkillsEnabled=function(self,enabled) f.viewMainSkills=enabled end,
+    setSkillSortPreferences=function(self,config) f.viewSkillSettings=Settings.merge({},config); f.skillSortUpdates=(f.skillSortUpdates or 0)+1 end,
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
@@ -159,7 +160,7 @@ local function fake()
   function f:sendCommand(command) self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command; return true end
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
-  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings={side_text_scale=config.side_text_scale,auto_wrap=config.auto_wrap,align_input=config.align_input,main_skills=config.main_skills}; return true end
+  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings=Settings.merge({},config); return true end
   function f:saveChatSettings(config)
     self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1
     if self.onChatSettingsSave then self.onChatSettingsSave(config) end
@@ -2190,6 +2191,61 @@ test("walker stops on disconnect WrongDir unexpected room manual movement and sh
   walkto("2"); f.gmcp.Room.Info={num=99,name="Elsewhere",area=1,exits={}}; f.callbacks["gmcp.Room.Info"](); eq(hud.walker:active(),false)
   f.gmcp.Room.Info={num=1,name="A",area=1,exits={"north"}}; hud.automapper.current_id=1; walkto("2"); f.callbacks["sysDisconnectionEvent"](); eq(hud.walker:active(),false)
   walkto("2"); hud:shutdown(); eq(f:count(f.timers),0)
+end)
+
+test("skills settings save both lists independently and preserve all display preferences across reload",function()
+  local previous=_G.DGHUD
+  local f=fake(); local hud=Main.new(f,Settings.merge(require("defaults"),{display={side_text_scale=.9,auto_wrap=false,align_input=true,personal="keep"}}))
+  assert(hud:start()); DGHUD={controller=hud,user_settings={display={personal="keep"}}}
+  local initial=f.optionsActionCallback("skill_settings")
+  eq(initial.main_skill_sort.primary,"level"); eq(initial.sidebar_skill_sort.direction,"desc")
+  initial.main_skill_sort.primary="name"; eq(hud:skillSettings().main_skill_sort.primary,"level")
+  local chosen={main_skills=false,main_skill_sort={primary="name",direction="desc",secondary="none",secondary_direction="asc"},
+    sidebar_skill_sort={primary="ready",direction="asc",secondary="number",secondary_direction="desc"}}
+  local saved=assert(f.optionsActionCallback("skill_settings_save",chosen))
+  eq(saved.main_skills,false); eq(hud.skill_display.sort.primary,"name"); eq(hud.skill_display.enabled,false)
+  eq(f.viewSkillSettings.sidebar_skill_sort.primary,"ready"); eq(f.viewSkillSettings.sidebar_skill_sort.secondary_direction,"desc")
+  eq(hud.settings.display.personal,"keep"); eq(DGHUD.user_settings.display.personal,"keep")
+  eq(f.savedDisplaySettings.side_text_scale,.9); eq(f.savedDisplaySettings.align_input,true); eq(f.savedDisplaySettings.auto_wrap,false)
+  saved.main_skill_sort.primary="level"; chosen.sidebar_skill_sort.primary="level"
+  eq(hud:skillSettings().main_skill_sort.primary,"name"); eq(hud:skillSettings().sidebar_skill_sort.primary,"ready")
+  assert(hud:setDisplayTextSize("large")); eq(f.savedDisplaySettings.main_skill_sort.primary,"name")
+  eq(hud:setMainConsoleAutoWrap(true),true); eq(f.savedDisplaySettings.sidebar_skill_sort.primary,"ready")
+  eq(hud:setMainInputAligned(false),false); eq(f.savedDisplaySettings.sidebar_skill_sort.secondary_direction,"desc")
+  eq(hud:setMainSkillsEnabled(true),true); eq(f.savedDisplaySettings.main_skill_sort.direction,"desc")
+  assert(hud:reload()); eq(hud.skill_display.sort.primary,"name"); eq(f.viewSkillSettings.sidebar_skill_sort.primary,"ready")
+  local cold=Main.new(fake(),Settings.merge(require("defaults"),{display=f.savedDisplaySettings}))
+  assert(cold:start()); eq(cold.skill_display.sort.primary,"name"); eq(cold:skillSettings().sidebar_skill_sort.secondary_direction,"desc")
+  cold:shutdown(); hud:shutdown(); DGHUD=previous
+end)
+
+test("skill settings reject invalid values and failed writes without changing active or stored sorting",function()
+  local previous=_G.DGHUD; local f=fake(); local hud=Main.new(f,{layout={}})
+  assert(hud:start()); DGHUD={user_settings={display={personal="keep"}}}
+  local chosen=hud:skillSettings(); chosen.main_skill_sort.primary="name"; chosen.sidebar_skill_sort.primary="number"
+  for _,bad in ipairs({false,"invalid",{main_skills="true"},{main_skills=true,main_skill_sort=false},{main_skills=true,main_skill_sort={primary="invalid"}}}) do
+    eq(f.optionsActionCallback("skill_settings_save",bad),nil)
+  end
+  eq(f.savedDisplaySettings,nil); eq(hud.skill_display.sort.primary,"level")
+  local before=f.skillSortUpdates; f.failDisplaySettingsSave="disk full"
+  local result,err=f.optionsActionCallback("skill_settings_save",chosen)
+  eq(result,nil); assert(err:find("disk full",1,true)); eq(f.skillSortUpdates,before)
+  eq(hud:skillSettings().main_skill_sort.primary,"level"); eq(hud:skillSettings().sidebar_skill_sort.primary,"level")
+  eq(DGHUD.user_settings.display.main_skill_sort,nil); eq(DGHUD.user_settings.display.personal,"keep")
+  hud:shutdown(); DGHUD=previous
+end)
+
+test("changing only skill order preserves an in flight table and does not resend game commands",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local display=hud.skill_display
+  display:onLine("Skill                     Remain Level",1)
+  display:onLine(" Sharp Weapons             400    4",2)
+  local response=assert(display.response); local sent=#(f.sentCommands or {})
+  local chosen=hud:skillSettings(); chosen.main_skill_sort.primary="number"; chosen.main_skill_sort.direction="asc"
+  chosen.sidebar_skill_sort.primary="uses"
+  assert(hud:setSkillSettings(chosen)); eq(display.response,response); eq(display.sort.primary,"number")
+  eq(#(f.sentCommands or {}),sent); eq(f.viewSkillSettings.sidebar_skill_sort.primary,"uses")
+  hud:shutdown()
 end)
 
 test("main skills option defaults on persists off through other display settings reload and cold start",function()
