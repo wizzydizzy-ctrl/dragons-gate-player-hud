@@ -41,7 +41,7 @@ The HUD runs `info magic` during character startup and whenever that command is 
 
 **OPTIONS → MAIN SKILLS** (on by default) formats complete `skill` responses in the main console as `2. Sharps - Level 4 - Remain: 400`, sorted by highest level and then fewest uses remaining. The number is the game's fixed skill ID, not a sorted row number. Every possessed skill is retained, and the right-hand Skills list stays unchanged. This choice persists through updates and restarts.
 
-Printed roundtime penalties accumulate instead of replacing one another, including double attacks and fumbles. Recent GMCP snapshots are reconciled without adding the same delay twice, stale unchanged values do not restart the countdown, and character exits/disconnects clear it. STAT combat fields and confirmed attack-strategy messages update immediately, including **Frenzied**, even if another command interrupts STAT.
+Printed roundtime penalties accumulate instead of replacing one another, including double attacks and fumbles. Text and GMCP are reconciled within a 0.5-second window to reduce duplicate counting; without game-provided delay event IDs, perfectly identifying each delay is not possible. Stale unchanged snapshots do not restart the countdown, and character exits/disconnects clear it. STAT combat fields and confirmed attack-strategy messages update immediately, including **Frenzied**, even if another command interrupts STAT.
 
 ## Autoroller session highs
 
@@ -190,7 +190,7 @@ mapcenter
 dghud mapstatus
 ```
 
-Walking sends exactly one command at a time and waits for the expected GMCP room number. Standard directions are normalized; a non-direction route step is sent only when its exact origin, destination, and command match a confirmed HUD-owned special exit. This allows `walkto` and owned native-map clicks to cross safe mixed directional/special routes without trusting an unobserved portal, door, gate, arch, or other command. After arrival, nonzero GMCP roundtime pauses the route until a later Vitals update reports zero. The per-step movement timeout is canceled while paused because no command is in flight; a fresh timeout starts only when the next command is sent. Wrong directions, unexpected rooms, manual movement, disconnection, timeout, and shutdown stop the route.
+Walking sends exactly one command at a time and waits for the expected GMCP room number. Standard directions are normalized; a non-direction route step is sent only when its exact origin, destination, and command match a confirmed HUD-owned special exit. This allows `walkto` and owned native-map clicks to cross safe mixed directional/special routes without trusting an unobserved portal, door, gate, arch, or other command. After arrival, nonzero tracked roundtime pauses the route. It can resume when the local countdown expires, without waiting for a fresh zero Vitals packet; changed GMCP snapshots also correct the countdown. The per-step movement timeout is canceled while paused because no command is in flight; a fresh timeout starts only when the next command is sent. Wrong directions, unexpected rooms, manual movement, disconnection, timeout, and shutdown stop the route.
 
 The HUD's optional **OPTIONS → Keybindings** panel can create temporary, HUD-owned number-pad controls. It starts off, never replaces personal Mudlet keys, and removes only the temporary keys it created. On macOS, use the numeric keypad normally; on Windows, keep Num Lock on.
 
