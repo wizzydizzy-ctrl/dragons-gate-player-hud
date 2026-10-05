@@ -3,6 +3,22 @@ local userSettings=previous and previous.user_settings
 local updateReinstallPending=previous and previous._update_reinstall_pending
 local viewHandoff=previous and previous._view_handoff
 local mainWrapBaseline=previous and (previous._main_wrap_baseline or (type(previous.controller)=="table" and previous.controller.original_main_console_wrap))
+local roundtimeHandoff
+do
+  local controller=previous and type(previous.controller)=="table" and previous.controller
+  local tracker=controller and controller.roundtime
+  if controller and type(controller.roundtimeHandoff)=="function" then
+    local called,snapshot=pcall(controller.roundtimeHandoff,controller)
+    if called and type(snapshot)=="table" then roundtimeHandoff=snapshot end
+  elseif type(tracker)=="table" and type(tracker.handoff)=="function" then
+    local called,snapshot=pcall(tracker.handoff,tracker)
+    if called and type(snapshot)=="table" then roundtimeHandoff=snapshot end
+  end
+  if roundtimeHandoff and controller then
+    local character=controller.last_state and controller.last_state.character
+    roundtimeHandoff.character=controller.character_entry_name or roundtimeHandoff.character or (character and character.name)
+  end
+end
 local function copyChatEntries(entries,partial)
   -- Capture before replacing loaded modules. A full controller snapshot carries
   -- eleven bounded source histories; a view-only fallback carries one visible tab.
@@ -49,7 +65,8 @@ chat.setFilter=function() return nil,"chatbox is not running" end
 chat.status=function() return nil,"HUD is not running" end
 DGHUD = {user_settings=userSettings,chat=chat,_update_reinstall_pending=updateReinstallPending,_view_handoff=viewHandoff,_chat_handoff=chatHandoff,_main_wrap_baseline=mainWrapBaseline}
 local moduleNames={"defaults","keybindings","command_parser","command_collector","chat_parser","chat_history","chat_storage","chat_controller","chat_sounds","output_colorizer","posture_tracker","needs_tracker","autoroller","game_clock","navigation","mapper_model","map_adapter","map_transfer","map_catalog","map_collections","map_cleanup","map_diagnostics","failure_report","automapper","special_transition","map_walker","state","settings","sha256","release","events","layout","view","mudlet_adapter","main","updater"}
-moduleNames[#moduleNames+1]="color_styles"; moduleNames[#moduleNames+1]="color_preferences"; moduleNames[#moduleNames+1]="travel_highlights"
+moduleNames[#moduleNames+1]="color_styles"; moduleNames[#moduleNames+1]="color_preferences"; moduleNames[#moduleNames+1]="travel_highlights"; moduleNames[#moduleNames+1]="roundtime"
+moduleNames[#moduleNames+1]="skill_display"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")
@@ -86,7 +103,12 @@ if type(persistedMapper)=="table" then
   end
 end
 local persistedDisplay=Adapter.loadDisplaySettings and Adapter.loadDisplaySettings()
-if type(persistedDisplay)=="table" then userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}; for key,value in pairs(persistedDisplay) do userSettings.display[key]=value end end
+if type(persistedDisplay)=="table" then
+  userSettings.display=type(userSettings.display)=="table" and userSettings.display or {}
+  for key,value in pairs(persistedDisplay) do
+    if key~="main_skills" or type(value)=="boolean" then userSettings.display[key]=value end
+  end
+end
 local persistedChat=Adapter.loadChatSettings and Adapter.loadChatSettings()
 if type(persistedChat)=="table" then userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}; userSettings.chat.tab_order=persistedChat.tab_order; if type(persistedChat.visible)=="boolean" then userSettings.chat.visible=persistedChat.visible end; if type(persistedChat.all_sources)=="table" then userSettings.chat.all_sources=persistedChat.all_sources end end
 if type(persistedChat)=="table" and type(persistedChat.sounds)=="table" then userSettings.chat.sounds=persistedChat.sounds end
@@ -107,7 +129,7 @@ if not applied then error(applyErr) end
 DGHUD.chatStorageApi=Storage.mudletApi(getMudletHomeDir(),"DGHUDData")
 local adapter=Adapter.new()
 if type(keybindingRetiredIds)=="table" then adapter._dghudRetiredKeyIds=keybindingRetiredIds end
-DGHUD.controller=Main.new(adapter,DGHUD.settings,viewHandoff,chatHandoff)
+DGHUD.controller=Main.new(adapter,DGHUD.settings,viewHandoff,chatHandoff,roundtimeHandoff)
 if tonumber(mainWrapBaseline) and tonumber(mainWrapBaseline)>=1 then DGHUD.controller.original_main_console_wrap=math.floor(tonumber(mainWrapBaseline)) end
 DGHUD.updater=Updater.new(DGHUD.controller.adapter,DGHUD.settings)
 DGHUD.controller.updater=DGHUD.updater

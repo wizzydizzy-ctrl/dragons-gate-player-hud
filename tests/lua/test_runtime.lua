@@ -57,6 +57,7 @@ local function fake()
     setBaseUIStatusCallback=function(self,callback) f.baseUIStatusCallback=callback end,
     setBaseUIVisible=function(self,visible) f.viewBaseUIVisible=visible end,
     setMainInputAligned=function(self,enabled) f.viewInputAligned=enabled end,
+    setMainSkillsEnabled=function(self,enabled) f.viewMainSkills=enabled end,
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
@@ -75,9 +76,21 @@ local function fake()
     delete=function() f.deleted=f.deleted+1 end,
   }; view.map_library_actions={browse={clickCallback=function() return view.map_library_action_callback("browse") end}}; return view end
   function f:adoptView(view,settings) self.viewAdoptions=(self.viewAdoptions or 0)+1; view.adoptedSettings=settings; return view end
-  function f:addEvent(name,fn) self.next=self.next+1; self.callbacks[name]=fn; local id="event-"..self.next; self.events[id]=name; return id end
+  function f:addEvent(name,fn)
+    self.next=self.next+1; local id="event-"..self.next
+    self.events[id]=name; self.eventFns=self.eventFns or {}; self.eventFns[id]=fn
+    self.eventOrder=self.eventOrder or {}; self.eventOrder[#self.eventOrder+1]=id
+    self.callbacks[name]=function(...)
+      local handlers={}; for _,owned in ipairs(self.eventOrder) do if self.events[owned]==name then handlers[#handlers+1]=self.eventFns[owned] end end
+      for _,callback in ipairs(handlers) do callback(...) end
+    end
+    return id
+  end
+  function f:emit(name,...)
+    if self.callbacks[name] then self.callbacks[name](...) end
+  end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end
-  function f:killEvent(id) self.killed[id]=true; self.events[id]=nil end
+  function f:killEvent(id) self.killed[id]=true; self.events[id]=nil; self.eventFns[id]=nil end
   function f:killAlias(id) self.killed[id]=true; self.aliases[id]=nil end
   function f:getGMCP() return self.gmcp or {Char={Vitals={hp=1,hp_max=1}}} end
   function f:isCharacterActive() return self.character_active==true end
@@ -91,6 +104,11 @@ local function fake()
     self.next=self.next+1; local id="trigger-"..self.next; self.triggers[id]=fn; self.colorizerTrigger=id; return id
   end
   function f:applyLineColors(segments) self.coloredSegments=segments; return true end
+  function f:addSkillDisplayTrigger(fn)
+    self.next=self.next+1; local id="skill-trigger-"..self.next
+    self.triggers[id]=fn; return id
+  end
+  function f:replaceSkillOutput(rows) self.replacedSkills=rows; return true end
   function f:reportColorizerStatus(enabled) self.reportedColorizer=enabled; return true end
   function f:saveColorSettings(config)
     if self.failColorSave then return nil,"disk full" end
@@ -141,7 +159,7 @@ local function fake()
   function f:sendCommand(command) self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command; return true end
   function f:saveRollerSettings(config) self.savedRollerSettings=config; return true end
   function f:saveMapperSettings(config) self.savedMapperSettings={enabled=config.enabled}; return true end
-  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings={side_text_scale=config.side_text_scale,auto_wrap=config.auto_wrap,align_input=config.align_input}; return true end
+  function f:saveDisplaySettings(config) if self.failDisplaySettingsSave then return nil,self.failDisplaySettingsSave end; self.savedDisplaySettings={side_text_scale=config.side_text_scale,auto_wrap=config.auto_wrap,align_input=config.align_input,main_skills=config.main_skills}; return true end
   function f:saveChatSettings(config)
     self.chatSettingsSaves=(self.chatSettingsSaves or 0)+1
     if self.onChatSettingsSave then self.onChatSettingsSave(config) end
@@ -1236,7 +1254,7 @@ test("resize preserves chat controller history and trigger ownership",function()
   eq(f.layouts[#f.layouts].chat_height>160,true); eq(f.set_borders[2],f.layouts[#f.layouts].console_top)
 end)
 test("controller merges collector snapshots and removes owned trigger runtime",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),5); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
+  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),6); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
 test("registered raw and collector callbacks apply a no-condition INFO exactly once in either order",function()
   for _,collectorFirst in ipairs({false,true}) do
@@ -1438,7 +1456,7 @@ test("a different character welcome performs another opted-in update without dis
   eq(checks,2); eq(#completions,2)
 end)
 test("reload leaves one command collector",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:reload(); eq(f:count(f.triggers),5); local outgoing=0; for _,name in pairs(f.events) do if name=="sysDataSendRequest" then outgoing=outgoing+1 end end; eq(outgoing,2)
+  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:reload(); eq(f:count(f.triggers),6); local outgoing=0; for _,name in pairs(f.events) do if name=="sysDataSendRequest" then outgoing=outgoing+1 end end; eq(outgoing,2)
 end)
 
 test("runtime wires one automapper handler per event and cleans it exactly",function()
@@ -1446,7 +1464,7 @@ test("runtime wires one automapper handler per event and cleans it exactly",func
   local personal=f:addEvent("gmcp.Room.Info",function() end); local hud=Main.new(f,{layout={}}); assert(hud:start())
   eq(f.createdMaps,1); eq(hud.automapper:currentRoom(),100)
   local function count(name) local n=0; for _,value in pairs(f.events) do if value==name then n=n+1 end end; return n end
-  eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),2); eq(count("sysDataSendRequest"),2)
+  eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),3); eq(count("sysDataSendRequest"),2)
   hud:reload(); eq(f.createdMaps,2); eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDataSendRequest"),2)
   hud:shutdown(); eq(f.events[personal],"gmcp.Room.Info"); eq(count("gmcp.Room.Info"),1); eq(count("gmcp.Room.WrongDir"),0); eq(count("sysDataSendRequest"),0)
 end)
@@ -1638,9 +1656,100 @@ test("runtime cancels candidates on movement and mapper lifecycle boundaries",fu
   f.callbacks["sysDataSendRequest"](nil,"enter tunnel"); local second=hud.special_transition; hud:shutdown(); eq(second:pending(),nil)
   eq(f.timers[personalTimer]~=nil,true); eq(f:count(f.timers),1)
 end)
+test("Frenzied and combat fields refresh the visible HUD before STAT ends",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud.collector:onOutgoing("stat")
+  hud.collector:onLine("OR: 13 DR: 74 Move Rate: 9/9 UDs Dam Bonus: Good/None Stance: Frenzied")
+  eq(hud.last_state.combat.stance,"Frenzied"); eq(hud.last_state.combat.or_rating,13); eq(hud.last_state.combat.dr,74)
+  hud.collector:onOutgoing("info"); eq(hud.last_state.combat.stance,"Frenzied")
+  hud.collector:onLine("Attack strategy set to: Defensive -- Guard carefully.")
+  eq(hud.last_state.combat.stance,"Defensive"); eq(hud.last_state.combat.dr,74); hud:shutdown()
+end)
 test("roundtime counts down once per second and becomes ready",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:onRoundtime(2); eq(hud.last_state.vitals.roundtime,2)
   f:fireTimer(); eq(hud.last_state.vitals.roundtime,1); f:fireTimer(); eq(hud.last_state.vitals.roundtime,0); eq(f:count(f.timers),0)
+end)
+test("disconnect clears roundtime without resuming the walker",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud:onRoundtime(7,"text"); local timer=hud.roundtime_timer; assert(timer)
+  hud.walker.route={rooms={1,2},commands={"north"}}; hud.walker.waiting_roundtime=true
+  local sent=#(f.sentCommands or {})
+  f.callbacks["sysDisconnectionEvent"]()
+  eq(hud.roundtime_display,0); eq(hud.last_state.vitals.roundtime,0)
+  eq(hud.roundtime_timer,nil); eq(f.timers[timer],nil); eq(hud.walker.roundtime,0)
+  eq(hud.walker:active(),false); eq(#(f.sentCommands or {}),sent); hud:shutdown()
+end)
+test("a different character cannot inherit the previous character's delay credits",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud.character_entry_started=true; hud.character_entry_name="First"
+  hud:onRoundtime(7,"gmcp"); local timer=hud.roundtime_timer
+  assert(hud:onCharacterEntry("Second")); eq(hud.roundtime_display,0)
+  eq(hud.roundtime_timer,nil); eq(f.timers[timer],nil)
+  hud:onRoundtime(7,"text"); eq(hud.roundtime_display,7); hud:shutdown()
+end)
+test("printed delay chains survive unchanged and unrelated GMCP updates",function()
+  local f=fake(); f.gmcp={Char={Vitals={hp=1,hp_max=1,roundtime=0}}}
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud.collector:onLine("[7 sec. delay]"); hud.collector:onLine("[2 sec. delay]")
+  eq(hud.last_state.vitals.roundtime,9); eq(hud.walker.roundtime,9)
+  f.gmcp.Char.Vitals.roundtime=9; f.callbacks["gmcp.Char.Vitals"](); eq(hud.last_state.vitals.roundtime,9)
+  f:fireTimer(); eq(hud.last_state.vitals.roundtime,8)
+  f.callbacks["gmcp.Char.Vitals"](); eq(hud.last_state.vitals.roundtime,8)
+  f.gmcp.Char.Vitals.roundtime=nil; f.callbacks["gmcp.Char.Vitals"](); eq(hud.last_state.vitals.roundtime,8)
+  hud:shutdown()
+end)
+test("room packets cannot restore cached roundtime after a character switch",function()
+  local f=fake(); f.gmcp=gmcpRoom(175); f.gmcp.Char.Vitals.roundtime=7
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud.character_entry_started=true; hud.character_entry_name="First"
+  assert(hud:onCharacterEntry("Second")); eq(hud.roundtime_display,0)
+  hud.walker.route={rooms={175,176},commands={"north"}}; hud.walker.waiting_roundtime=true
+  f.callbacks["gmcp.Room.Info"](); eq(hud.roundtime_display,0); hud:shutdown()
+end)
+test("controller reload cannot restart expired cached GMCP roundtime",function()
+  local f=fake(); f.gmcp=gmcpRoom(175); f.gmcp.Char.Vitals.roundtime=7
+  local hud=Main.new(f,{layout={}}); assert(hud:start()); f.epochValue=108
+  hud:onRoundtime(7,"gmcp"); eq(hud.roundtime_display,0); assert(hud:reload())
+  eq(hud.roundtime_display,0); eq(hud.walker.roundtime,0); hud:shutdown()
+end)
+test("new controller accepts a bounded update roundtime handoff instead of reseeding stale GMCP",function()
+  local f=fake(); f.gmcp=gmcpRoom(175); f.gmcp.Char.Vitals.roundtime=7
+  local old=Main.new(f,{layout={}}); assert(old:start()); f.epochValue=108
+  local snapshot=old.roundtime:handoff(); old:shutdown()
+  local hud=Main.new(f,{layout={}},nil,nil,snapshot); assert(hud:start())
+  eq(hud.roundtime_display,0); eq(hud.walker.roundtime,0); hud:shutdown()
+end)
+test("replacement controller clears handed off roundtime when a different character enters",function()
+  local f=fake(); f.gmcp=gmcpRoom(175); f.gmcp.Char.Vitals.roundtime=7
+  local old=Main.new(f,{layout={}}); assert(old:start()); old.character_entry_name="Alice"
+  local snapshot=old:roundtimeHandoff(); eq(snapshot.character,"Alice"); old:shutdown(); f.epochValue=101
+  local hud=Main.new(f,{layout={}},nil,nil,snapshot); assert(hud:start()); eq(hud.roundtime_display,6)
+  assert(hud:onCharacterEntry("Bob")); eq(hud.roundtime_display,0); eq(hud.roundtime_timer,nil)
+  eq(hud:roundtimeHandoff().character,"Bob"); hud:shutdown()
+end)
+test("same character entry retains handed off roundtime without skipping data refresh",function()
+  local f=fake(); f.gmcp=gmcpRoom(175); f.gmcp.Char.Vitals.roundtime=7
+  local old=Main.new(f,{layout={}}); assert(old:start()); old.character_entry_name="Alice"
+  local snapshot=old:roundtimeHandoff(); old:shutdown(); f.epochValue=101
+  local hud=Main.new(f,{layout={}},nil,nil,snapshot); assert(hud:start())
+  assert(hud:onCharacterEntry("Alice")); eq(hud.roundtime_display,6); eq(f.sent,"inventory")
+  hud:shutdown()
+end)
+test("multiple printed delays on one line add once and shutdown removes their timer",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud.collector:onLine("[4 sec. delay] [4 sec. delay]")
+  eq(hud.last_state.vitals.roundtime,8); eq(hud.walker.roundtime,8)
+  eq(f:count(f.timers),1); hud:shutdown(); eq(f:count(f.timers),0)
+end)
+test("roundtime deadline expiry resumes a waiting walker without a fresh GMCP packet",function()
+  local f=fake(); f.gmcp={Char={Vitals={hp=1,hp_max=1,roundtime=0}},Room={Info={num=175,name="A",area=1,exits={"north"}}}}
+  f.route={rooms={175,176,180},commands={"north","east"}}
+  local hud=Main.new(f,{layout={},mapper={walk_timeout=12}}); assert(hud:start())
+  assert(aliasCallback(f,"^walkto\\s+(\\d+)$")("180"))
+  hud:onRoundtime(2,"text"); f.gmcp.Room.Info={num=176,name="B",area=1,exits={"east"}}
+  f.callbacks["gmcp.Room.Info"](); eq(hud.walker.waiting_roundtime,true); eq(#f.sentCommands,1)
+  f.epochValue=103; f:fireTimer()
+  eq(hud.walker.roundtime,0); eq(#f.sentCommands,2); eq(f.sentCommands[2],"e"); hud:shutdown()
 end)
 test("refresh preserves the posture tracker's confirmed state",function()
   local f=fake(); function f:getPostureVariables() return {standing=true,sitting=false} end
@@ -1659,7 +1768,8 @@ test("GMCP roundtime pauses controlled walking until a ready vitals update",func
   f.route={rooms={175,176,180},commands={"north","east"}}
   local hud=Main.new(f,{layout={},mapper={walk_timeout=12}}); assert(hud:start())
   assert(aliasCallback(f,"^walkto\\s+(\\d+)$")("180")); eq(#f.sentCommands,1)
-  f.gmcp.Char.Vitals.roundtime=4; f.gmcp.Room.Info={num=176,name="B",area=1,exits={"east"}}; f.callbacks["gmcp.Room.Info"]()
+  f.gmcp.Char.Vitals.roundtime=4; f.callbacks["gmcp.Char.Vitals"]()
+  f.gmcp.Room.Info={num=176,name="B",area=1,exits={"east"}}; f.callbacks["gmcp.Room.Info"]()
   eq(#f.sentCommands,1); eq(hud.walker.waiting_roundtime,true)
   f.gmcp.Char.Vitals.roundtime=2; f.callbacks["gmcp.Char.Vitals"](); eq(#f.sentCommands,1)
   f.gmcp.Char.Vitals.roundtime=0; f.callbacks["gmcp.Char.Vitals"](); eq(#f.sentCommands,2); eq(f.sentCommands[2],"e")
@@ -1851,10 +1961,10 @@ test("chat trigger registration failure rolls back partial HUD runtime",function
 end)
 test("chat runtime has one owned trigger and cached personal API survives reload safely",function()
   local f=fake(); local unrelated=f:addLineTrigger(function() end); local hud=Main.new(f,{layout={}}); hud:start()
-  eq(hud.chat.started,true); eq(f:count(f.triggers),6)
+  eq(hud.chat.started,true); eq(f:count(f.triggers),7)
   DGHUD={controller=hud}; Main.installChatApi(DGHUD); local capture=DGHUD.chat.capture
   assert(capture("QUEST","before reload")); hud:reload(); DGHUD={controller=hud}; Main.installChatApi(DGHUD)
-  eq(f:count(f.triggers),6); eq(f.loadRecentCalls,2); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"before reload")
+  eq(f:count(f.triggers),7); eq(f.loadRecentCalls,2); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"before reload")
   assert(capture("QUEST","after reload")); eq(#hud.chat:entries(),2); eq(hud.chat:entries()[2].message,"after reload")
   hud:shutdown(); eq(f:count(f.triggers),1); eq(f.triggers[unrelated]~=nil,true)
   local result,err=capture("QUEST","during shutdown"); eq(result,nil); eq(err,"chatbox is not running"); DGHUD=nil
@@ -1964,7 +2074,7 @@ test("walkto crosses a confirmed special exit one command at a time around round
   local walkto=assert(aliasCallback(f,"^walkto\\s+(\\d+)$")); assert(walkto("3"))
   eq(f.sentCommands[1],"Go Gate"); eq(f.sentCommands[2],nil); eq(hud.generated_command,"Go Gate")
   f.callbacks["sysDataSendRequest"](nil,"Go Gate"); eq(hud.generated_command,nil); eq(hud.walker:active(),true)
-  f.gmcp=gmcpRoom(2); f.gmcp.Char.Vitals.roundtime=4; f.callbacks["gmcp.Room.Info"]()
+  f.gmcp=gmcpRoom(2); f.gmcp.Char.Vitals.roundtime=4; f.callbacks["gmcp.Char.Vitals"](); f.callbacks["gmcp.Room.Info"]()
   eq(#f.sentCommands,1); eq(hud.walker.waiting_roundtime,true)
   f.gmcp.Char.Vitals.roundtime=0; f.callbacks["gmcp.Char.Vitals"]()
   eq(f.sentCommands[2],"n"); eq(f.sentCommands[3],nil)
@@ -2080,4 +2190,66 @@ test("walker stops on disconnect WrongDir unexpected room manual movement and sh
   walkto("2"); f.gmcp.Room.Info={num=99,name="Elsewhere",area=1,exits={}}; f.callbacks["gmcp.Room.Info"](); eq(hud.walker:active(),false)
   f.gmcp.Room.Info={num=1,name="A",area=1,exits={"north"}}; hud.automapper.current_id=1; walkto("2"); f.callbacks["sysDisconnectionEvent"](); eq(hud.walker:active(),false)
   walkto("2"); hud:shutdown(); eq(f:count(f.timers),0)
+end)
+
+test("main skills option defaults on persists off through other display settings reload and cold start",function()
+  local previous=_G.DGHUD
+  local f=fake(); local hud=Main.new(f,Settings.merge(require("defaults"),{layout={}})); assert(hud:start())
+  DGHUD={controller=hud,user_settings={}}; eq(hud:mainSkillsEnabled(),true); eq(f.viewMainSkills,true)
+  eq(f.optionsActionCallback("main_skills"),false); eq(f.savedDisplaySettings.main_skills,false)
+  eq(DGHUD.user_settings.display.main_skills,false); eq(hud.skill_display.enabled,false)
+  assert(hud:setDisplayTextSize("small")); eq(f.savedDisplaySettings.main_skills,false)
+  eq(hud:setMainConsoleAutoWrap(false),false); eq(f.savedDisplaySettings.main_skills,false)
+  eq(hud:setMainInputAligned(true),true); eq(f.savedDisplaySettings.main_skills,false)
+  assert(hud:reload()); eq(hud:mainSkillsEnabled(),false); eq(hud.skill_display.enabled,false); eq(f.viewMainSkills,false)
+  local coldFake=fake(); local cold=Main.new(coldFake,Settings.merge(require("defaults"),{display=f.savedDisplaySettings}))
+  assert(cold:start()); eq(cold:mainSkillsEnabled(),false); eq(coldFake.viewMainSkills,false)
+  cold:shutdown(); hud:shutdown(); DGHUD=previous
+end)
+
+test("main skills failed persistence keeps the current option formatter and saved preference",function()
+  local previous=_G.DGHUD
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); DGHUD={user_settings={display={main_skills=true}}}
+  f.failDisplaySettingsSave="disk full"
+  local value,err=f.optionsActionCallback("main_skills"); eq(value,nil); assert(err:find("disk full",1,true))
+  assert(f.commandErrors[1]:find("Could not save main skills display",1,true))
+  eq(hud:mainSkillsEnabled(),true); eq(hud.skill_display.enabled,true); eq(f.viewMainSkills,true)
+  eq(DGHUD.user_settings.display.main_skills,true); eq(f.savedDisplaySettings,nil)
+  hud:shutdown(); DGHUD=previous
+end)
+
+test("main skills formatter and collector independently retain right sidebar skills and defer main rows",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud.collector:onOutgoing("skill")
+  local formatter=assert(f.triggers[hud.skill_display.trigger])
+  local lines={"Skill Remain Level"," Sharp Weapons       400 4","An enemy attacks."," Dodging       50 5",">"}
+  for row,line in ipairs(lines) do hud.collector:onLine(line); formatter(line,row) end
+  eq(hud.last_state.skills.items[1].name,"Dodging"); eq(hud.last_state.skills.items[2].name,"Sharp Weapons")
+  eq(hud.last_state.skills.items[2].remain,400); eq(f.replacedSkills,nil)
+  local timer=hud.skill_display.timer; local callback=f.timers[timer]; f.timers[timer]=nil; callback()
+  eq(#f.replacedSkills,3); eq(f.replacedSkills[1].line_number,1)
+  eq(f.replacedSkills[2].line_number,2); eq(f.replacedSkills[2].display_text,"9. Dodging - Level 5 - Remain: 50")
+  eq(f.replacedSkills[3].line_number,4); eq(f.replacedSkills[3].display_text,"2. Sharps - Level 4 - Remain: 400")
+  eq(hud.last_state.skills.items[2].name,"Sharp Weapons"); hud:shutdown()
+end)
+
+test("main skills disconnect dispatch cancels every owned handler and shutdown removes the formatter",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local display=hud.skill_display
+  local trigger=f.triggers[display.trigger]; trigger("Skill Remain Level",1); trigger(" Sharp Weapons       400 4",2); trigger(">",3)
+  local timer=display.timer; local late=f.timers[timer]
+  f.callbacks.sysDisconnectionEvent(); eq(display.timer,nil); eq(f.timers[timer],nil); late(); eq(f.replacedSkills,nil)
+  local owned=display.trigger; hud:shutdown(); eq(f.triggers[owned],nil); eq(f:count(f.events),0); eq(f:count(f.triggers),0)
+end)
+
+test("optional main skills missing or failed registration keeps the rest of the HUD running",function()
+  for _,mode in ipairs({"missing","failed","throws","event"}) do
+    local f=fake()
+    if mode=="missing" then f.addSkillDisplayTrigger=nil
+    elseif mode=="failed" then function f:addSkillDisplayTrigger() return nil end
+    elseif mode=="throws" then function f:addSkillDisplayTrigger() error("unavailable") end
+    else local add=f.addEvent; function f:addEvent(name,fn) if name=="sysInstallPackage" then return nil end; return add(self,name,fn) end end
+    local hud=Main.new(f,{layout={}}); assert(hud:start()); eq(hud.started,true); eq(hud.skill_display,nil); eq(hud.chat.started,true)
+    assert(f.commandErrors[1]:find("Main skills display is unavailable",1,true))
+    eq(hud:mainSkillsEnabled(),true); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.events),0)
+  end
 end)

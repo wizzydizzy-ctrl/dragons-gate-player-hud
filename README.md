@@ -37,6 +37,12 @@ Choose **OPTIONS → Refresh Character Data** or run `dghud refresh` whenever in
 
 The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a five-row scrollable Runes card above Skills. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
 
+## Skills and combat updates
+
+**OPTIONS → MAIN SKILLS** (on by default) formats complete `skill` responses in the main console as `2. Sharps - Level 4 - Remain: 400`, sorted by highest level and then fewest uses remaining. The number is the game's fixed skill ID, not a sorted row number. Every possessed skill is retained, and the right-hand Skills list stays unchanged. This choice persists through updates and restarts.
+
+Printed roundtime penalties accumulate instead of replacing one another, including double attacks and fumbles. Recent GMCP snapshots are reconciled without adding the same delay twice, stale unchanged values do not restart the countdown, and character exits/disconnects clear it. STAT combat fields and confirmed attack-strategy messages update immediately, including **Frenzied**, even if another command interrupts STAT.
+
 ## Autoroller session highs
 
 **Autoroller session breakdown:** Options → Autoroller shows a live **SESSION BEST** table comparing each characteristic's target with its highest observed rank. Unreached minimums are highlighted, with a reminder every 100 named-stat rolls. These are observations, not proven race/class caps; minimums never change automatically. Use the SESSION BEST button or `rr stats` for a console copy. Arranged pools are tracked separately and never attributed to named stats.

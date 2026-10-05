@@ -83,9 +83,9 @@ The Combat section can show:
 - tactical area position; and
 - standing, sitting, or unconscious state when known.
 
-OR, DR, armor, stance, and tactical position come from `stat`. Roundtime comes from GMCP and confirmed delay output. Posture begins unknown and changes only after recognized game messages.
+OR, DR, armor, stance, and tactical position come from `stat`. Recognized combat fields are retained as they arrive, even if another command interrupts the response. Confirmed attack-strategy messages also update stance immediately. Posture begins unknown and changes only after recognized game messages.
 
-The separate roundtime bar below the mapper controls remains empty at READY. When a delay begins, it fills and counts down locally while later GMCP updates correct it.
+The separate roundtime bar below the mapper controls remains empty at READY. Separate printed delay messages accumulate, including double attacks and fumble penalties. GMCP roundtime is a snapshot, not another delay to add: matching snapshots are reconciled with recent output, and unchanged cached values do not restart the countdown. Fresh changed snapshots can correct the remaining time. The local countdown accounts for elapsed time if Mudlet is busy. Because the game does not supply a delay/event ID, near-simultaneous text and GMCP are correlated within a short window rather than claiming perfectly identifiable events.
 
 ## Inventory, money, and carrying capacity
 
@@ -114,6 +114,15 @@ This puts the runes closest to needing renewal at the top.
 3. skill name for an exact tie.
 
 Long display names are shortened only for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. Columns stay aligned, and scrollbars appear when needed.
+
+**OPTIONS → MAIN SKILLS** controls an additional display change in the main game console. It is on by default and remembers your choice through updates and restarts. When a complete `skill` response arrives, its rows use the same sorting above and become, for example:
+
+```text
+2. Sharps - Level 4 - Remain: 400
+46. Biting - Level 4 - Remain: 414
+```
+
+The leading number is the game's fixed training skill ID, not the row's position. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This option does not change the right-hand Skills list, send training commands, or replace unrelated game output.
 
 ## Resource bars
 
@@ -147,7 +156,7 @@ skill
 time
 ```
 
-DGHUD waits for a complete response and its prompt before replacing the previous valid data. This avoids displaying half of a list when the game or network is delayed.
+DGHUD waits for a complete response and its prompt before replacing a captured list. Combat fields update as soon as recognized. This avoids displaying half of a list when the game or network is delayed.
 
 ## Data that updates immediately through GMCP
 

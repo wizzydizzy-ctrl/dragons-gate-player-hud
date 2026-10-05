@@ -12,6 +12,8 @@ def migration_source_version():
     match=re.search(r'\bBridge\s*=\s*\{version\s*=\s*["\']([^"\']+)["\']',(ROOT/'src/migration_bridge.lua').read_text())
     if not match: raise ValueError('could not determine migration bridge version')
     return match.group(1)
+MODULES.append('roundtime')
+MODULES.append('skill_display')
 VIEW_CONTRACT_FILES=('view.lua','navigation.lua')
 def view_contract():
     digest=hashlib.sha256()

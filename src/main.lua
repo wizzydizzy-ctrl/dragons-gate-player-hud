@@ -4,6 +4,8 @@ local Main={}; Main.__index=Main
 local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
+local SkillDisplay=require("skill_display")
+local Roundtime=require("roundtime")
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
@@ -11,11 +13,15 @@ local function colorOptions(status)
   for _,name in ipairs(colorFeatures) do result[name]=status[name] end
   return result
 end
-function Main.new(adapter,settings,viewHandoff,chatHandoff)
+function Main.new(adapter,settings,viewHandoff,chatHandoff,roundtimeHandoff)
   adapter.settings=settings
   local colorSettings=settings and settings.colorization
   local self=setmetatable({adapter=adapter,settings=settings,view_handoff=viewHandoff,chat_handoff=chatHandoff,runtime={events={},aliases={},triggers={}},started=false,roundtime_display=nil,managed_rooms={},colorizer_enabled=not (type(colorSettings)=="table" and colorSettings.enabled==false)},Main)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
+  self.roundtime=Roundtime.new(function() return adapter.chatSoundTime and adapter:chatSoundTime() or adapter:epoch() end)
+  self.roundtime_initialized=self.roundtime:restore(roundtimeHandoff)
+  if self.roundtime_initialized and type(roundtimeHandoff.character)=="string" and #roundtimeHandoff.character<=256
+      and not roundtimeHandoff.character:find("%c") then self.roundtime_character=roundtimeHandoff.character end
   self.map_diagnostics=MapDiagnostics.new(settings and settings.version,settings and settings.edition,function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end)
   self.failure_reports=FailureReport.new({version=settings and settings.version,edition=settings and settings.edition,clock=function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end,save=function(report) if adapter.saveFailureReport then return adapter:saveFailureReport(report) end end,submit=function(report,done) if not adapter.submitFailureReport then return nil,"anonymous failure reporting is unavailable" end; return adapter:submitFailureReport(report,done) end})
   return self
@@ -346,7 +352,7 @@ function Main:setDisplayTextSize(action)
   local current=displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)
   if action=="status" or action=="" then if self.view and self.view.setDisplayTextSize then self.view:setDisplayTextSize(current) end; if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(current:gsub("^%l",string.upper)) end; return current end
   local scale=displayTextPresets[action]; if not scale then return failed("Usage: dghud text [small|normal|large|status]") end
-  local candidate={side_text_scale=scale,auto_wrap=not (self.settings.display and self.settings.display.auto_wrap==false),align_input=self:mainInputAligned()}
+  local candidate={side_text_scale=scale,auto_wrap=not (self.settings.display and self.settings.display.auto_wrap==false),align_input=self:mainInputAligned(),main_skills=self:mainSkillsEnabled()}
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return failed("Could not save HUD text size: "..tostring(err)) end end
   self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}; self.settings.display.side_text_scale=scale
   local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.side_text_scale=scale end
@@ -354,6 +360,29 @@ function Main:setDisplayTextSize(action)
   self:applyResponsiveLayout(self.last_state); self:refresh()
   if self.adapter.reportDisplayTextScale then self.adapter:reportDisplayTextScale(action:gsub("^%l",string.upper)) end
   return action
+end
+function Main:mainSkillsEnabled()
+  return not (self.settings.display and self.settings.display.main_skills==false)
+end
+function Main:setMainSkillsEnabled(enabled)
+  local function failed(message)
+    if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end
+    return nil,message
+  end
+  if type(enabled)~="boolean" then return failed("Main skills display must be on or off.") end
+  local display=self.settings.display or {}
+  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,
+    auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),main_skills=enabled}
+  if self.adapter.saveDisplaySettings then
+    local called,saved,err=pcall(self.adapter.saveDisplaySettings,self.adapter,candidate)
+    if not called or not saved then return failed("Could not save main skills display: "..tostring(called and err or saved)) end
+  end
+  self.settings.display=display; display.main_skills=enabled
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.main_skills=enabled end
+  if self.skill_display then self.skill_display:setEnabled(enabled) end
+  if self.view and self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(enabled) end
+  return enabled
 end
 function Main:mainConsoleAutoWrapEnabled()
   return not (self.settings.display and self.settings.display.auto_wrap==false)
@@ -363,7 +392,7 @@ function Main:setMainConsoleAutoWrap(enabled)
   local current=self:mainConsoleAutoWrapEnabled()
   if current==enabled then return enabled end
   local display=self.settings.display or {}
-  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=enabled,align_input=self:mainInputAligned()}
+  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=enabled,align_input=self:mainInputAligned(),main_skills=self:mainSkillsEnabled()}
   if self.adapter.saveDisplaySettings then local saved,err=self.adapter:saveDisplaySettings(candidate); if not saved then return nil,"Could not save automatic main-window wrap: "..tostring(err) end end
   if enabled and self.adapter.getMainConsoleWrap then
     local read,value=pcall(self.adapter.getMainConsoleWrap,self.adapter)
@@ -436,7 +465,7 @@ function Main:setMainInputAligned(enabled)
   local applied,err=self:applyMainInputAlignment(enabled,nil,not enabled)
   if not applied then return failed("Could not align input: "..tostring(err)) end
   local display=self.settings.display or {}
-  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=enabled}
+  local candidate={side_text_scale=tonumber(display.side_text_scale) or 1,auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=enabled,main_skills=self:mainSkillsEnabled()}
   if self.adapter.saveDisplaySettings then
     local saved,saveErr=self.adapter:saveDisplaySettings(candidate)
     if not saved then
@@ -517,10 +546,19 @@ function Main:characterName()
   if self.character_entry_name and self.character_entry_name~="" then return self.character_entry_name end
   return self.last_state and self.last_state.character and self.last_state.character.full_name or nil
 end
+function Main:roundtimeHandoff()
+  local snapshot=self.roundtime:handoff()
+  local status=self.last_state and self.last_state.character
+  snapshot.character=self.character_entry_name or self.roundtime_character or (status and status.name)
+  return snapshot
+end
 function Main:onCharacterEntry(name)
   name=tostring(name or ""):match("^%s*(.-)%s*$")
   if self.character_entry_started and (name=="" or name==self.character_entry_name) then return false end
+  local previousName=self.character_entry_name or self.roundtime_character
+  if name~="" and previousName and name~=previousName then self:onCharacterExit() end
   self.character_entry_started=true; self.character_entry_name=name~="" and name or self.character_entry_name
+  self.roundtime_character=self.character_entry_name or self.roundtime_character
   if self.chat then self.chat:syncCharacter() end
   local function refreshCommands()
     local collector=self.collector
@@ -533,8 +571,12 @@ function Main:onCharacterEntry(name)
   if not ok then refreshCommands() end
   return ok,err
 end
-function Main:onCharacterExit()
-  self.character_entry_started=false; self.character_entry_name=nil
+function Main:onCharacterExit(reason)
+  self.character_entry_started=false; self.character_entry_name=nil; self.roundtime_character=nil
+  if self.walker then self.walker:stop(reason or "character exit"); self.walker:onRoundtime(0) end
+  if self.roundtime then self.roundtime:reset() end
+  if self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
+  self.roundtime_display=0
   return true
 end
 function Main:startChat()
@@ -681,11 +723,18 @@ function Main:previewChatSound(tab,soundId)
 end
 function Main:scheduleRoundtimeTick()
   if self.roundtime_timer or self.roundtime_display<=0 then return end
-  self.roundtime_timer=self.adapter:schedule(1,function() self.roundtime_timer=nil; self.roundtime_display=math.max(0,self.roundtime_display-1); self:refresh(); self:scheduleRoundtimeTick() end)
+  self.roundtime_timer=self.adapter:schedule(1,function()
+    self.roundtime_timer=nil; self.roundtime_display=self.roundtime:tick()
+    if self.walker then self.walker:onRoundtime(self.roundtime_display) end
+    self:refresh(); self:scheduleRoundtimeTick()
+  end)
 end
-function Main:onRoundtime(value)
-  value=math.max(0,math.floor(tonumber(value) or 0)); if self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
-  self.roundtime_display=value; if self.walker then self.walker:onRoundtime(value) end; self:refresh(); self:scheduleRoundtimeTick(); return true
+function Main:onRoundtime(value,metadata)
+  local source=type(metadata)=="table" and metadata.source or metadata
+  self.roundtime_display=source=="text" and self.roundtime:text(value) or self.roundtime:gmcp(value)
+  if self.roundtime_display==0 and self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
+  if self.walker then self.walker:onRoundtime(self.roundtime_display) end
+  self:refresh(); self:scheduleRoundtimeTick(); return true
 end
 function Main:applyResponsiveLayout(state)
   local vitals=(state or self.last_state or {}).vitals
@@ -1180,7 +1229,10 @@ function Main:start()
   function walkerAdapter:clearGenerated() self.owner.generated_command=nil end
   self.walker=MapWalker.new(walkerAdapter,function(kind,message,isError) self:mapperStatus(kind,message,isError) end,(self.settings.mapper and self.settings.mapper.walk_timeout) or 12)
   local initialVitals=self.adapter:getGMCP(); initialVitals=initialVitals and initialVitals.Char and initialVitals.Char.Vitals
-  self.roundtime_display=math.max(0,math.floor(tonumber(initialVitals and initialVitals.roundtime) or 0)); self.walker:onRoundtime(self.roundtime_display)
+  if not self.roundtime_initialized then
+    self.roundtime:reset(); self.roundtime_display=self.roundtime:gmcp(initialVitals and initialVitals.roundtime); self.roundtime_initialized=true
+  else self.roundtime_display=self.roundtime:display() end
+  self.walker:onRoundtime(self.roundtime_display)
   local cleanupRuntime={owner=self}
   function cleanupRuntime:safetySnapshot(roomIDs) return self.owner:safetySnapshot(roomIDs) end
   function cleanupRuntime:beforeDelete(plan) return self.owner:beforeCleanupDelete(plan) end
@@ -1284,6 +1336,7 @@ function Main:start()
     end
     if action=="auto_main_wrap" then return self:setMainConsoleAutoWrap(not self:mainConsoleAutoWrapEnabled()) end
     if action=="align_main_input" then return self:setMainInputAligned(not self:mainInputAligned()) end
+    if action=="main_skills" then return self:setMainSkillsEnabled(not self:mainSkillsEnabled()) end
     local command=({roller_start="start",roller_stop="stop",roller_status="status",roller_show="show",roller_stats="stats",roller_last="last",roller_reset="reset",roller_help="help"})[action]
     if not command then return nil,"unknown autoroller action" end; return self.roller:command(command)
   end) end
@@ -1300,6 +1353,7 @@ function Main:start()
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
   if self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(self:mainConsoleAutoWrapEnabled()) end
   if self.view.setMainInputAligned then self.view:setMainInputAligned(self:mainInputAligned()) end
+  if self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(self:mainSkillsEnabled()) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
     if action=="download_new" then return self:downloadLibraryCollection(suppliedEntry or self.view:selectedMapLibraryEntry(),false) end
@@ -1385,11 +1439,17 @@ function Main:start()
     if key=="time" then self:onClockSync(snapshot.time); return end
     if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
     self:refresh()
-  end,function(value) self:onRoundtime(value) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
+  end,function(value,metadata) self:onRoundtime(value,metadata) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
+  self.skill_display=SkillDisplay.new(self.adapter,self:mainSkillsEnabled(),self.settings.package_name)
+  local skillsCalled,skillsOk=pcall(self.skill_display.start,self.skill_display)
+  if not skillsCalled or not skillsOk then
+    self.skill_display:shutdown(); self.skill_display=nil
+    if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,"Main skills display is unavailable; keeping the original skill output.") end
+  end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end
   if self.adapter.isCharacterActive and self.adapter:isCharacterActive() then self:onCharacterEntry() end
   for _,name in ipairs(Events.gmcp) do local eventName=name; self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(eventName,function()
-    if eventName=="gmcp.Char.Vitals" then local data=self.adapter:getGMCP(); local vitals=data and data.Char and data.Char.Vitals; self:onRoundtime(vitals and vitals.roundtime or 0); return end
+    if eventName=="gmcp.Char.Vitals" then local data=self.adapter:getGMCP(); local vitals=data and data.Char and data.Char.Vitals; self:onRoundtime(vitals and vitals.roundtime,"gmcp"); return end
     self:refresh()
   end) end
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysLoadEvent",function() self:syncBaseUI() end)
@@ -1404,7 +1464,6 @@ function Main:start()
       ok,err=self:callAutomapper("onRoom",info); if ok and info and tonumber(info.num) then self.managed_rooms[tonumber(info.num)]=true end
     else self:callSpecialTransition("cancel","disabled"); ok=true end
     if self.walker and self.walker:active() then
-      local vitals=data and data.Char and data.Char.Vitals; self.walker:onRoundtime(vitals and vitals.roundtime or 0)
       if not ok then self.walker:stop(err or "room mapping failed",true) else self.walker:onRoom(info and info.num) end
     end; self:refresh()
   end)
@@ -1419,7 +1478,11 @@ function Main:start()
       if canonical then self:callSpecialTransition("cancel","direction") else self:callSpecialTransition("onOutgoing",command,self.automapper:currentRoom()) end
     else self:callSpecialTransition("cancel","disabled") end
   end)
-  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.disconnect,function() self.character_entry_started=false; self.character_entry_name=nil; if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end; self:callSpecialTransition("cancel","disconnect"); self.automapper:onDisconnect(); self.walker:stop("disconnected") end)
+  self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.disconnect,function()
+    self:onCharacterExit("disconnected")
+    if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end
+    self:callSpecialTransition("cancel","disconnect"); self.automapper:onDisconnect(); self:refresh()
+  end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysWindowResizeEvent",function() self:applyResponsiveLayout() end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysUninstallPackage",function(_,packageName)
     if packageName~=(self.settings.package_name or "DragonsGateHUD") then return end
@@ -1517,6 +1580,7 @@ function Main:restoreMainInputAlignment()
   return restored,err
 end
 function Main:shutdown()
+  local skillDisplay=self.skill_display; self.skill_display=nil; if skillDisplay then skillDisplay:shutdown() end
   -- Restore the existing native input, including its stylesheet and utility
   -- controls, even during replacement. Never replace its history or draft.
   self:restoreMainInputAlignment()

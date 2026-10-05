@@ -92,6 +92,12 @@ The setting is saved and survives updates.
 
 Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap manually. Once it is off, DGHUD stops changing that value during resizing, reloads, and updates. Set your preferred wrap normally in Mudlet's profile preferences; the OFF choice is saved outside the package and survives updates.
 
+## Main skills output
+
+**MAIN SKILLS** is on by default. It reformats complete `skill` responses in the main game display as `2. Sharps - Level 4 - Remain: 400`, sorted by highest level and then fewest remaining uses. The leading number is the fixed game skill ID, not a sorted row number. The right-hand Skills panel is unaffected.
+
+Turn it **OFF** to keep future `skill` responses in their original game layout. Your choice survives restarts, updates, and changes to text size or word wrap. Only the skill table is changed; other output and prompts remain. See [Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills).
+
 ## Align command input
 
 Turn **OPTIONS → ALIGN INPUT: ON** to line up the command input's **left edge** with the main game display. It follows the window as you resize it. The input ends before Mudlet's native Search and status controls, which stay visible together on the right. Search remains on the right; this does not align the input to the full width of the main display. The default is **OFF**, and your choice survives updates and restarts independently of automatic word wrap.

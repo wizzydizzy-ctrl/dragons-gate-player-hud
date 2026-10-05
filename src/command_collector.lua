@@ -61,6 +61,17 @@ function Collector:restartRefresh()
   self.refreshed=false
   return self:refresh()
 end
+function Collector:mergeStat(parsed)
+  local stat=self.snapshot.stat or {}; self.snapshot.stat=stat; local delta={}
+  for key,value in pairs(parsed) do
+    local previous=stat[key]; local changed=previous~=value
+    if key=="move" and type(value)=="table" and type(previous)=="table" then
+      changed=tonumber(previous.current)~=tonumber(value.current) or tonumber(previous.maximum)~=tonumber(value.maximum)
+    end
+    if changed then stat[key]=value; delta[key]=value end
+  end
+  return stat,delta
+end
 function Collector:finish(lines)
   local active=self.active; if not active then return end
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
@@ -71,7 +82,8 @@ function Collector:finish(lines)
     local ok,result=pcall(fn,lines)
     if ok and result then
       local parsed=result
-      if spec.snapshot=="info" and type(self.snapshot.info)=="table" then
+      if spec.snapshot=="stat" then result=self:mergeStat(result)
+      elseif spec.snapshot=="info" and type(self.snapshot.info)=="table" then
         local previous=self.snapshot.info
         for key,value in pairs(result) do
           if key=="attributes" and type(value)=="table" and next(value)~=nil then
@@ -102,7 +114,11 @@ function Collector:onLine(value)
     if self.onCharacterExit then self.onCharacterExit() end
     return
   end
-  local delay=tonumber(value:match("%[(%d+)%s+sec%.%s+delay%]")); if delay and self.onRoundtime then self.onRoundtime(delay) end
+  if self.onRoundtime then
+    for marker in plain:gmatch("%[(%d+%.?%d*)%s+sec%.%s+delay%]") do
+      local delay=tonumber(marker); if delay then self.onRoundtime(delay,{source="text"}) end
+    end
+  end
   local character=value:match("^Welcome to Dragon's Gate, (.+)!%s*$")
   if character then
     if self.active_character==character then return end
@@ -110,11 +126,25 @@ function Collector:onLine(value)
     if self.onCharacterEntry then self.onCharacterEntry(character) else self:refresh() end
     return
   end
+  local stance=self.parser.parseStance and self.parser.parseStance(value)
+  if stance then
+    local _,delta=self:mergeStat({stance=stance})
+    if next(delta) then self.onChange(self.snapshot,"stat",delta) end
+  end
   if not self.active then return end
   -- Lines remain owned by the timed-out command throughout recovery/drain. A
   -- complete delayed response can still succeed before the bounded drain ends.
   if #self.active.lines==1 and self.parser.isPrompt(self.active.lines[1]) and not self.parser.isPrompt(value) then self.active.lines={} end
   self.active.lines[#self.active.lines+1]=value
+  if self.active.command=="stat" and self.parser.parseStatCombat then
+    local ok,parsed=pcall(self.parser.parseStatCombat,self.active.lines)
+    -- Publish only changed, recognized combat fields before a prompt or interruption.
+    -- Completion callbacks still fire normally; equipment stays inside completed STAT.
+    if ok and parsed then
+      local _,delta=self:mergeStat(parsed)
+      if next(delta) then self.onChange(self.snapshot,"stat",delta) end
+    end
+  end
   if self.parser.isComplete(self.active.command,self.active.lines) then self:finish(self.active.lines)
   elseif self.active.command=="time" and #self.active.lines>1 and self.parser.isPrompt(value) then
     -- A natural terminal prompt ends TIME even if a future server format cannot

@@ -16,8 +16,8 @@ local function withEntryStubs(fn)
   local defaults={schema=1,chat={enabled=true,height_percent=.21,target_height=240,min_height=160,max_height=320,visible_limit=1000,dedupe_seconds=3,timestamps=true}}
   local adapter={}
   local Main={}
-  function Main.new(_,settings,viewHandoff,chatHandoff)
-    local controller={adapter=adapter,settings=settings,view_handoff=viewHandoff,chat_handoff=chatHandoff,reloads=0,starts=0,shutdowns=0}
+  function Main.new(_,settings,viewHandoff,chatHandoff,roundtimeHandoff)
+    local controller={adapter=adapter,settings=settings,view_handoff=viewHandoff,chat_handoff=chatHandoff,roundtime_handoff=roundtimeHandoff,reloads=0,starts=0,shutdowns=0}
     function controller:start() self.starts=self.starts+1; if adapter.failStart then return nil,adapter.failStart end; return true end
     function controller:shutdown() self.shutdowns=self.shutdowns+1; return true end
     function controller:reload() self.reloads=self.reloads+1; return true end
@@ -47,6 +47,15 @@ local function withEntryStubs(fn)
   return result
 end
 
+test("entry captures roundtime handoff before retiring the previous controller",function()
+  withEntryStubs(function(context)
+    local order={}; local snapshot={schema=1,deadline=107,last_gmcp=7}
+    DGHUD={user_settings={},controller={roundtime={handoff=function() order[#order+1]="capture"; return snapshot end}},
+      shutdown=function() order[#order+1]="shutdown"; return true end}
+    dofile("src/entry.lua")
+    eq(table.concat(order,","),"capture,shutdown"); eq(DGHUD.controller.roundtime_handoff,snapshot)
+  end)
+end)
 test("public reload re-resolves current nested user settings without replacing unknown keys",function()
   withEntryStubs(function(context)
     DGHUD={user_settings={chat={height_percent=.25,personal_option="keep"},personal="untouched"},shutdown=function() return true end}

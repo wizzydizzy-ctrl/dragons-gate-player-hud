@@ -20,6 +20,51 @@ test("rejects incomplete inventory",function() eq(Parser.parseInventory({"Items 
 test("parses stat combat protection and readied equipment",function()
   local r=assert(Parser.parseStat(stat)); eq(r.body_armor,4); eq(r.or_rating,18); eq(r.dr,70); eq(r.move.current,6); eq(r.move.maximum,6); eq(r.damage_bonus,"Good/None"); eq(r.stance,"Aggressive"); eq(r.area_position,"center"); eq(r.novice_protected,true); eq(r.equipment[2],"A wooden shield")
 end)
+test("STAT combat fields parse before a prompt without equipment or posture deltas",function()
+  local r=assert(Parser.parseStatCombat({stat[1],stat[2]}))
+  eq(r.body_armor,4); eq(r.or_rating,18); eq(r.dr,70); eq(r.move.current,6); eq(r.move.maximum,6)
+  eq(r.damage_bonus,"Good/None"); eq(r.stance,"Aggressive"); eq(r.equipment,nil); eq(r.standing,nil)
+  eq(Parser.parseStat({stat[1],stat[2]}),nil); eq(Parser.isComplete("stat",{stat[1],stat[2]}),false)
+end)
+test("STAT parses ANSI prompt prefixes and wrapped combat fields and values",function()
+  local lines={"\27[38;5;32m[199] 301/301 hp, 173/173 ftg > Body Armor: 9%.\27[0m",
+    "> OR: 25 DR: 115", "Move Rate: 3/", "6 UDs Dam Bonus: Good/", "None Stance:", "Frenzied"}
+  local r=assert(Parser.parseStatCombat(lines)); eq(r.body_armor,9); eq(r.or_rating,25); eq(r.dr,115)
+  eq(r.move.current,3); eq(r.move.maximum,6); eq(r.damage_bonus,"Good/None"); eq(r.stance,"Frenzied")
+  lines[#lines+1]=">"; eq(Parser.isComplete("stat",lines),true); eq(assert(Parser.parseStat(lines)).equipment,nil)
+end)
+test("STAT combat parser accepts partial fields and rejects malformed values",function()
+  local r=assert(Parser.parseStatCombat({"DR: 81", "Stance: Defensive"})); eq(r.dr,81); eq(r.stance,"Defensive"); eq(r.or_rating,nil)
+  eq(Parser.parseStatCombat({"OR: 1..2 DR: nope", "Move Rate: 6/x UDs", "Stance: Frenzied<script>"}),nil)
+end)
+test("STAT reconstructs split labels and units while retaining damage bonus token formats",function()
+  local r=assert(Parser.parseStatCombat({"Body Armor:","9%.","OR: 25 DR: 115 Move", "Rate: 3/6", "UDs Dam", "Bonus: 10/+2 Stance:","Normal"}))
+  eq(r.body_armor,9); eq(r.or_rating,25); eq(r.dr,115); eq(r.move.current,3); eq(r.move.maximum,6)
+  eq(r.damage_bonus,"10/+2"); eq(r.stance,"Normal")
+end)
+test("standalone strategy confirmations accept alphabetic stances and prompt prefixes",function()
+  for _,stance in ipairs({"Frenzied","Aggressive","Normal","Defensive","Cautious"}) do
+    for _,prefix in ipairs({"","> ","[199] 301/301 hp, 173/173 ftg > "}) do
+      eq(Parser.parseStance("\27[36m"..prefix.."Attack strategy set to: "..stance.." -- Throw caution to the wind.\27[0m"),stance)
+    end
+  end
+  eq(Parser.parseStance("Attack strategy set to: Normal"),"Normal")
+  for _,line in ipairs({"A goblin says: Attack strategy set to: Frenzied -- Attack!",
+    "Attack strategy set to: Frenzied<script> -- Attack!", "Attack strategy set to: Frenzied2 -- Attack!",
+    "Attack strategy set to: Frenzied nonsense", "A goblin stands up.", "  A goblin draws a spear."}) do
+    eq(Parser.parseStance(line),nil); eq(Parser.parseStatCombat({line}),nil)
+  end
+end)
+test("complete partial STAT omits absent equipment and unrelated NPC protection",function()
+  local r=assert(Parser.parseStat({"Body Armor: 8%.","A goblin has novice protection.",">"}))
+  eq(r.body_armor,8); eq(r.equipment,nil); eq(r.novice_protected,nil); eq(r.standing,nil)
+  eq(#assert(Parser.parseStat({"Body Armor: 8%.","::: Equipment Readied :::",">"})).equipment,0)
+end)
+test("STAT equipment section ignores NPC prose after the response boundary",function()
+  local r=assert(Parser.parseStat({stat[1],"::: Equipment Readied :::","  A spear.","","  A shield.",
+    "A goblin stands up.","  A goblin draws a sword.",">"}))
+  eq(#r.equipment,2); eq(r.equipment[2],"A shield"); eq(r.standing,nil)
+end)
 test("parses info physical data and all attributes",function()
   local r=assert(Parser.parseInfo(info)); eq(r.physical.age,28); eq(r.physical.sex,"Male"); eq(r.physical.height,"6'10\""); eq(r.physical.weight,309); eq(r.attributes.STR,"Good"); eq(r.attributes.APP,"Fair")
 end)

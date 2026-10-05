@@ -6,7 +6,7 @@ local ATTR_ORDERS={
 local RANKS={awful="Awful",poor="Poor",low="Low",aver="Aver",fair="Fair",good="Good",great="Great",excel="Excel",super="Super",superb="Superb",godly="Godly"}
 local GAME_MONTHS={tanei=1,odeth=2,daleth=3,majus=4,mateth=5,rina=6}
 local function clean(value)
-  return tostring(value or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("%s+$","")
+  return tostring(value or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("%s+$","")
 end
 local function trim(value) return clean(value):match("^%s*(.-)%s*$") end
 local function infoLine(value)
@@ -50,20 +50,82 @@ function Parser.parseInventory(lines)
   return nil,"incomplete inventory response"
 end
 
+local COMBAT_FIELDS={
+  {label="Body Armor",key="body_armor",pattern="^(%d+)%%%.$"},
+  {label="OR",key="or_rating",pattern="^(%d+)$"},
+  {label="DR",key="dr",pattern="^(%d+)$"},
+  {label="Move Rate",key="move",pattern="^(%d+)%s*/%s*(%d+)%s+UDs$"},
+  {label="Dam Bonus",key="damage_bonus",pattern="^(%S+)$"},
+  {label="Stance",key="stance",pattern="^([A-Za-z]+)$"},
+}
+local function combatStart(line)
+  for _,field in ipairs(COMBAT_FIELDS) do
+    if line:sub(1,#field.label+1)==field.label..":" then return true end
+  end
+  return false
+end
+local function combatRow(row,result)
+  local fields={}
+  for _,field in ipairs(COMBAT_FIELDS) do
+    local cursor=1
+    while true do
+      local first,last=row:find(field.label..":",cursor,true); if not first then break end
+      if first==1 or row:sub(first-1,first-1):match("%s") then fields[#fields+1]={first=first,last=last,field=field} end
+      cursor=last+1
+    end
+  end
+  table.sort(fields,function(a,b) return a.first<b.first end)
+  for index,entry in ipairs(fields) do
+    local value=trim(row:sub(entry.last+1,fields[index+1] and fields[index+1].first-1 or #row))
+    if entry.field.key=="damage_bonus" then value=value:gsub("%s*/%s*","/") end
+    local first,second=value:match(entry.field.pattern)
+    if first then
+      local key=entry.field.key
+      if key=="move" then result.move={current=tonumber(first),maximum=tonumber(second)}
+      elseif key=="damage_bonus" or key=="stance" then result[key]=first
+      else result[key]=tonumber(first) end
+    end
+  end
+end
+function Parser.parseStance(value)
+  local stance,tail=infoLine(value):match("^Attack strategy set to:%s*([A-Za-z]+)(.*)$")
+  -- Validate the entire stance token; explanatory prose is only allowed after --.
+  if stance and (tail=="" or tail:match("^%s+%-%-%s+")) then return stance end
+  return nil
+end
+function Parser.parseStatCombat(lines)
+  local result={}; local row=""; local parts=0
+  for _,raw in ipairs(lines or {}) do
+    local line=infoLine(raw); local stance=Parser.parseStance(raw)
+    local pending=row:match(":%s*$") or row:match("/%s*$") or row:match("Move Rate:%s*%d+%s*/%s*%d+%s*$")
+    local token,rest=line:match("^([A-Za-z%d/%%%.%+%-]+)%s*(.*)$")
+    local continuation=pending and token and (rest=="" or combatStart(rest) or rest:match("^UDs%f[%A]") or (token=="UDs" and rest=="Dam"))
+    continuation=continuation or (row:match("%f[%a]Move%s*$") and line:match("^Rate:")) or (row:match("%f[%a]Dam%s*$") and line:match("^Bonus:"))
+    if stance then result.stance=stance; row=""; parts=0
+    elseif combatStart(line) or (row~="" and continuation) then
+      -- Bound reconstruction and only join labeled rows or unfinished field values.
+      -- NPC prose never starts a combat row or an equipment/posture update.
+      if parts>=16 then row=""; parts=0 end
+      row=row~="" and row.." "..line or line; parts=parts+1; combatRow(row,result)
+    else row=""; parts=0 end
+    local position=line:match("^You are in the (.-) of the area!$"); if position then result.area_position=position end
+    if line:match("^You are .-novice protection%.$") then result.novice_protected=true end
+  end
+  if next(result)==nil then return nil,"unrecognized stat combat response" end
+  return result
+end
 function Parser.parseStat(lines)
   if not hasPrompt(lines) then return nil,"incomplete stat response" end
-  local result={equipment={}}; local reading=false
+  local result=Parser.parseStatCombat(lines); if not result then return nil,"unrecognized stat response" end
+  local reading=false
   for _,raw in ipairs(lines or {}) do
     local line=clean(raw)
-    result.body_armor=result.body_armor or tonumber(line:match("^Body Armor:%s*(%d+)%%%."))
-    local orv,dr,move,max,damage,stance=line:match("^OR:%s*(%d+)%s+DR:%s*(%d+)%s+Move Rate:%s*(%d+)/(%d+)%s+UDs%s+Dam Bonus:%s*(%S+)%s+Stance:%s*(%S+)")
-    if orv then result.or_rating=tonumber(orv); result.dr=tonumber(dr); result.move={current=tonumber(move),maximum=tonumber(max)}; result.damage_bonus=damage; result.stance=stance end
-    local position=line:match("^You are in the (.-) of the area!$"); if position then result.area_position=position end
-    if line:find("novice protection",1,true) then result.novice_protected=true end
-    if line:find("Equipment Readied",1,true) then reading=true
-    elseif reading and line:match("^%s+%S") then local item=line:match("^%s+(.+)%.$"); if item then result.equipment[#result.equipment+1]=item end end
+    if infoLine(raw)=="::: Equipment Readied :::" then result.equipment={}; reading=true
+    elseif reading then
+      local item=line:match("^%s+(.+)%.$")
+      if item then result.equipment[#result.equipment+1]=item elseif trim(line)~="" then reading=false end
+    end
   end
-  if not result.body_armor and not result.or_rating then return nil,"unrecognized stat response" end
   return result
 end
 

@@ -1069,7 +1069,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,notice=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,13); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,14); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -1086,7 +1086,7 @@ test("main input alignment defaults off immediately after automatic main wrap",f
   local view=chatView(); local button=view.option_action_buttons.align_main_input
   eq(view.main_input_aligned,false); eq(button.option_text,"ALIGN INPUT: OFF")
   eq(button.tooltip,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
-  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,auto_main_wrap,align_main_input,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
+  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,auto_main_wrap,align_main_input,main_skills,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(button.visible,true); assert(button.message:find("ALIGN INPUT: OFF",1,true))
   local wrap=view.option_action_buttons.auto_main_wrap
@@ -3202,4 +3202,14 @@ test("latent psion warning remains visible and bounded through responsive layout
   eq(view.latent_alert_panel.visible,true); eq(view.latent_alert_panel.x>=0,true); eq(view.latent_alert_panel.y>=0,true)
   eq(view.latent_alert_panel.x+view.latent_alert_panel.width<=640,true); eq(view.latent_alert_panel.y+view.latent_alert_panel.height<=480,true)
   view.latent_alert_close.click(); eq(view.latent_alert_visible,false); eq(view.latent_alert_panel.visible,false); eq(view.latent_alert_overlay.visible,false)
+end)
+
+test("main skills display option starts on toggles independently and preserves sidebar formatting",function()
+  local view=chatView(); local button=view.option_action_buttons.main_skills
+  eq(view.main_skills_enabled,true); eq(button.option_text,"MAIN SKILLS: ON")
+  eq(button.parent,view.options_scroll); eq(view:setMainSkillsEnabled(false),false); eq(button.option_text,"MAIN SKILLS: OFF")
+  local action; view:setOptionsActionCallback(function(value) action=value; return false end)
+  button.click(); eq(action,"main_skills")
+  eq(View.skillDisplayName("Sharp Weapons"),"Sharp Weapons")
+  eq(view:setMainSkillsEnabled(true),true); eq(button.option_text,"MAIN SKILLS: ON")
 end)

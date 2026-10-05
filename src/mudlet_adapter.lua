@@ -486,6 +486,39 @@ function Adapter:addColorizerTrigger(fn)
     fn(line or (type(getCurrentLine)=="function" and getCurrentLine() or ""),type(getLineNumber)=="function" and getLineNumber() or nil)
   end)
 end
+function Adapter:addSkillDisplayTrigger(fn) return self:addColorizerTrigger(fn) end
+function Adapter:replaceSkillOutput(rows,api)
+  api=api or _G
+  for _,key in ipairs({"getLines","getLineNumber","getColumnNumber","moveCursor","selectSection","replace","setFgColor","deselect"}) do
+    if type(api[key])~="function" then return nil,"Mudlet skill replacement API is unavailable" end
+  end
+  if type(rows)~="table" or #rows<1 or #rows>129 then return nil,"invalid skill output rows" end
+  local segments,seen={},{}
+  -- Preflight the entire batch. A shifted/deleted/replaced row leaves the raw
+  -- response alone rather than painting sorted skills over unrelated output.
+  local ok,err=pcall(function()
+    local cursor=api.getLineNumber()
+    assert(type(cursor)=="number" and cursor>=0 and cursor%1==0,"current console coordinate is unavailable")
+    for _,row in ipairs(rows) do
+      assert(type(row)=="table" and type(row.line_number)=="number" and row.line_number>=0
+        and row.line_number%1==0 and not seen[row.line_number],"invalid skill output coordinate")
+      assert(type(row.source_line)=="string" and #row.source_line>0 and #row.source_line<=2048
+        and not row.source_line:find("[\r\n]"),"invalid skill source line")
+      assert(type(row.display_text)=="string" and #row.display_text<=512
+        and not row.display_text:find("%c"),"invalid formatted skill line")
+      seen[row.line_number]=true
+      local current=api.getLines(row.line_number,row.line_number+1)
+      assert(type(current)=="table" and current[1]==row.source_line,"skill source row changed")
+      segments[#segments+1]={start=1,length=#row.source_line,color={220,224,220},
+        line_number=row.line_number,source_line=row.source_line,display_text=row.display_text}
+    end
+  end)
+  if not ok then return nil,tostring(err) end
+  -- Map sorted skills into their original slots before this ordering step.
+  -- Longer text may insert wrapped buffer rows: lower slots must be done first.
+  table.sort(segments,function(a,b) return a.line_number>b.line_number end)
+  return self:applyLineColors(segments,api)
+end
 function Adapter:applyLineColors(segments,api)
   api=api or _G
   if type(segments)~="table" or type(api.selectSection)~="function" or type(api.setFgColor)~="function" then return nil,"Mudlet line-color API is unavailable" end
@@ -886,13 +919,15 @@ function Adapter.displaySettingsSnapshot(config)
   if autoWrap==nil then autoWrap=true elseif type(autoWrap)~="boolean" then return nil,"automatic main-window wrap must be a boolean" end
   local alignInput=config.align_input
   if alignInput==nil then alignInput=false elseif type(alignInput)~="boolean" then return nil,"main input alignment must be a boolean" end
-  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput}
+  local mainSkills=config.main_skills
+  if mainSkills==nil then mainSkills=true elseif type(mainSkills)~="boolean" then return nil,"main skills display must be a boolean" end
+  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput,main_skills=mainSkills}
 end
 function Adapter:saveDisplaySettings(config)
   local snapshot,snapshotErr=Adapter.displaySettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
   local base=Adapter.dataBase(); lfs.mkdir(base); local destination=displaySettingsPath(); local temp=destination..".tmp"
   local file,err=io.open(temp,"wb"); if not file then return nil,err end
-  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
