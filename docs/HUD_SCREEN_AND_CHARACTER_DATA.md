@@ -2,6 +2,8 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
+Applies to DGHUD v0.3.89.
+
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
 ## Header
@@ -26,6 +28,8 @@ In **OPTIONS**, **ALIGN INPUT: OFF** appears immediately after **AUTO MAIN WRAP*
 Your normal native command input remains available with the same draft, command history, and alias behavior. Turning alignment **OFF** restores the previous input stylesheet and compact-input preference, so the Search and status controls return to their previous visibility. Your alignment choice survives updates and restarts.
 
 Input alignment is independent of **AUTO MAIN WRAP**, which controls line wrapping in the main display.
+
+On shorter windows, Inventory, Runes, and Skills share a tabbed area on the right. Click **INVENTORY**, **RUNES**, or **SKILLS** to see the corresponding list; narrower layouts shorten these labels to **INV**, **RUN**, and **SKL**. If there is too little height even for the tabs, enlarge the window. See [Options and Display](OPTIONS_AND_DISPLAY.md) for text-size presets and responsive layout controls.
 
 ## Identity
 
@@ -99,7 +103,7 @@ Below the list, DGHUD shows:
 - silver as `sp` in silver coloring; and
 - carry current / maximum / percentage.
 
-Items and total carried weight come from `inventory`. Money and carrying capacity prefer GMCP Vitals values.
+Items and total carried weight come from `inventory`. Money comes from GMCP Vitals; the Carry figures use GMCP Vitals when available, with INFO values as a fallback. In a short tabbed Inventory panel, money and Carry may appear inside the scrollable list; scroll below the items to find them.
 
 ## Runes
 
@@ -113,7 +117,7 @@ This puts the runes closest to needing renewal at the top.
 
 Sidebar sorting changes immediately reorder existing rows. Main sorting changes apply to the next complete `skill` output and leave previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and HUD updates. Category and Ready to train sorting keep every captured skill visible.
 
-Long display names are shortened only for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. Columns stay aligned, and scrollbars appear when needed.
+The sidebar shortens names for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. The formatted main table shortens weapon names to `Sharps`, `Blunts`, `Poles`, `Throws`, and `Missiles`. Columns stay aligned, and scrollbars appear when needed.
 
 The **MAIN SKILLS** toggle in **Skill Settings** is on by default. It formats complete `skill` responses in the main game console using the **Main Display** order, for example:
 
@@ -125,6 +129,12 @@ Number  Skill   LVL  USES
 
 The leading catalog number is the game's fixed training skill ID, not a display rank. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This toggle does not change the sidebar's layout, send training commands, or replace unrelated game output.
 
+To narrow one response in the main display, enter `skill <prefix>`, for example `skill claw`, `skill bite`, `skill c`, `skill id`, or `skill ste`. Matching ignores case and checks the start of the name, including supported shortened names; the text is not a wildcard or pattern. Enter `skill` or `skill all` to show the full list again. Each request fetches the full table, so the Skills sidebar retains all your skills even when the main response is filtered.
+
+`skill weapons` shows only your possessed Sharp, Blunt, Pole, Throw, and Missile Weapons and natural attacks: Biting, Clawing, Webbing, Breath Weapon, and Stinging. The group uses catalog IDs 2–6, 46–49, and 57. It does not include Identify Weapon Quality, Weapon Smithing, or every combat skill. A filter with no matches prints `No skills match: <prefix>`.
+
+Filters also work with **MAIN SKILLS** off, keeping the game's row format and order. If another refresh or skill request is loading, wait for it to finish and try again. Filtering finishes when the complete table ends, without needing Enter. DGHUD redraws removed rows locally so they do not leave a blank gap at the bottom, and preserves your position when reading scrollback. A filter applies to one response only; canceled or expired requests do not carry their filter into the next request.
+
 Whole rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. The green ready-to-train color takes priority. Combat includes weapons, Focus Force, Biting, Clawing, First Aid, and other combat abilities; Identify skills, Swimming, Riding, and other utility skills stay yellow unless they have zero uses. Change or disable these styles under **OPTIONS → COLOR SETTINGS → TEXT STYLES → Skills**. These choices are saved with your profile.
 
 ## Resource bars
@@ -133,11 +143,11 @@ The bars immediately above Mudlet's command line show:
 
 - Health;
 - Fatigue;
-- PSI when PSI is applicable and has a maximum;
-- Web when Web is applicable and has a maximum; and
+- PSI when a positive maximum is known, or your profession is Psion or Psycian;
+- Web when a positive maximum is known, or your race is Arachnian; and
 - both PSI and Web when both apply.
 
-The bars divide the main-display width evenly according to how many are visible. Carry is shown under Inventory instead of taking a resource bar.
+The bars divide the main-display width according to how many are visible and may use two rows in compact layouts. Profession- or race-based bars can appear before their values arrive. Health, Fatigue, PSI, and Web prefer GMCP Vitals, with INFO values as a fallback. Carry is shown under Inventory instead of taking a resource bar.
 
 ## Refreshing information
 

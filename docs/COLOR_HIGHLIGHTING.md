@@ -1,8 +1,10 @@
 # DGHUD Color Highlighting Guide
 
+Applies to DGHUD **v0.3.89**.
+
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-DGHUD can highlight selected game output while leaving ordinary room prose unchanged. Travel highlighting changes only the object phrase, not the surrounding description or nearby loot. Important version notices also receive an “IMPORTANT - PLEASE READ” heading.
+DGHUD can highlight selected game output while leaving ordinary room prose unchanged. Travel objects, other listed room objects, and the words `is here` / `are here` have separate styles. Important version notices also receive an “IMPORTANT - PLEASE READ” heading.
 
 All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTINGS** to switch them individually.
 
@@ -17,6 +19,7 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 | Races | Known race names wherever the race matcher applies. | Race palette |
 | Classes | Known profession names wherever the class matcher applies. | Profession palette |
 | Travel Objects | Doors, gates, arches, portals, stairs, ladders, trapdoors, bridges, tunnels, passages, entrances, exits, paths, holes, stores, shops, pawnshops, and taverns in confirmed object listings. | Cyan |
+| Other Objects / Here | Non-travel objects in a confirmed room listing, plus separate `is here` / `are here` wording. | Muted green for objects; bright yellow for the presence wording |
 | Attacks on You | Recognized attacks aimed at you. | Red |
 | Damage to You | `Your ... takes ... points of ... damage!` | Bright red |
 | Danger / Blocks | Blocked movement and recognized hard warnings. | Amber |
@@ -46,11 +49,11 @@ Open **OPTIONS → COLOR SETTINGS → CUSTOM WORDS/PHRASES** to add your own hig
 
 Matches are literal text, not regular expressions, and ignore case for English and common accented Latin letters. Other scripts may need exact capitalization. A saved word is matched as a word rather than inside a longer word. Custom entries apply to new output in the main display and can override an overlapping built-in color without changing the original game text. Important version notices keep their prominent warning even when a custom phrase overlaps them. The master All Highlights switch still controls whether any coloring appears. Custom entries remain private to the Mudlet profile; they are saved with the other color settings and survive HUD updates, character changes, and restarts.
 
-For example, save `secret path` with yellow text and a dark background to make that phrase stand out whenever the game prints it. Entries are limited in length and number so a large collection cannot slow down the display.
+For example, save `secret path` with yellow text and a dark background to make that phrase stand out whenever the game prints it. You can save up to **1,000** custom entries; each phrase is limited to **120 bytes** (some accented characters use more than one byte). Oversized or invalid entries are rejected rather than partly saved.
 
 **Example: change exits to blue.** Open Text Styles, select **Exit directions**, choose blue, then Save. The `Obvious exits:` / `Obvious paths:` label is a separate style, so it can stay red or use another color.
 
-Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, important notices, and the three skill row colors all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear. Skill row colors require **OPTIONS → Skill Settings → MAIN SKILLS** to be on; switching the colors off leaves its aligned table layout on. Sorting never changes the green priority for rows with 0 uses.
+Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, other room objects, `is here` / `are here`, combat highlights, illumination/darkness, important notices, and the three skill row colors all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear. Skill row colors require **OPTIONS → Skill Settings → MAIN SKILLS** to be on; switching the colors off leaves its aligned table layout on. Sorting never changes the green priority for rows with 0 uses. World notice colors also apply to their corresponding chat notices; the main-display skill styles do not recolor sidebar rows.
 
 Selections apply to **new output**, not previously printed lines. Use `look` to see a room description again. Saved choices survive HUD reloads, package updates, character changes, and Mudlet restarts within the same profile. They are stored as validated data in `DGHUDData/color-settings.dat`, outside the replaceable package. A failed save shows an error and does not apply partial changes.
 
@@ -79,10 +82,10 @@ dghud colors illumination status
 Valid feature names are:
 
 ```text
-room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice world skills
+room exits currency races classes highlights portal presence attack damage danger recovery upkeep spell discovery illumination notice world skills
 ```
 
-The `highlights` feature groups travel objects, attacks, damage, danger, recovery, costs, spells, discovery, illumination, version notices, world notices, and skill row colors. Race, profession, room-title, exit, and currency switches remain independently controllable.
+The `highlights` feature groups travel objects, other room objects/presence wording, attacks, damage, danger, recovery, costs, spells, discovery, illumination, version notices, world notices, and skill row colors. Race, profession, room-title, exit, and currency switches remain independently controllable.
 
 ## What to expect
 
@@ -109,8 +112,8 @@ DGHUD matches the game text itself, including ANSI-colored input. If a new wordi
 The matchers are deliberately restrained:
 
 - A random NPC sentence containing `says` is not treated as a combat alert.
-- Every sentence ending with `is here` is not treated as a travel object.
-- In mixed lists, the shop, hole, door, or other recognized travel phrase is colored; ordinary torches, fountains, and loot remain unchanged.
+- Ending in `is here` alone does not make an object a travel exit. Confirmed object listings are distinguished from quoted speech and unrelated narration.
+- In mixed lists, a shop, hole, door, or other recognized travel phrase uses its travel style. Torches, fountains, and other listed objects can use the separate **OTHER OBJECTS / HERE** styles. Disable that category if you only want travel objects colored.
 - A confirmed travel-object listing may span up to four server lines. Quoted speech, command echoes, and unrelated prose are not travel listings.
 - Attacks on another character are not highlighted as attacks on you.
 - Ordinary uses of words such as `full`, `rested`, or `satisfied` do not become recovery notices.

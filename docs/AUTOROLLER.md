@@ -2,6 +2,8 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
+Applies to DGHUD v0.3.89.
+
 The DGHUD autoroller watches the current Dragons Gate Character Creator, scores each complete set of 11 characteristics, and sends one `reroll` when the set does not meet your saved rules.
 
 The autoroller never sends `done`. When it finds a result to keep, the creator prompt remains waiting for you.
@@ -106,6 +108,8 @@ A target is not the only rule. Enabled minimums and arranged-pool counts may sti
 
 Default: `53`.
 
+By default, characteristic minimums are enabled and required, with Fair (`5`) in all 11 positions. That makes the lowest normally qualifying Roll-in-place total 55, even though the saved target is 53. The hard stop can bypass those minimums.
+
 ### Hard stop
 
 An emergency score threshold. A roll at or above this total qualifies immediately before normal minimum and pool-count filters are considered.
@@ -160,6 +164,8 @@ These apply directly to Roll-in-place results. For Roll-and-arrange, they are us
 ### Auto-start when roll screen appears
 
 When on, DGHUD begins only after it recognizes a complete supported roll and its exact decision prompt. When off, use `rr start`.
+
+Default: **ON**. The default arranged-pool mode is **LET ME PLACE**; both pool-count requirements are **off**.
 
 ### Enable stat minimums
 

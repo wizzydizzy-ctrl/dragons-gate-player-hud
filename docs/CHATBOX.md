@@ -2,6 +2,8 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
+Applies to DGHUD v0.3.89.
+
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
 To hide it completely, open **OPTIONS → CHAT SETTINGS** and set **SHOW CHATBOX: OFF**. The main game display expands into the freed space. Chat capture and saved history continue while hidden; this does not turn off logging. Return to the same setting and switch it **ON** to see your messages again. Your choice is saved for the profile and survives character changes, restarts, and HUD updates. It does not change your tab order or SHOW IN ALL choices.
@@ -29,6 +31,7 @@ A message can appear in more than one filter, but plays only one sound: its spec
 - **PRIVATE** — Whispers, ESP, Dragon links, Secian links, and contact-style thoughts together.
 - **ESP** — ESP messages only.
 - **DRAGON** — Mental and Dragon link messages.
+- **SECIAN** — Secian link messages; this filter becomes available after a Secian message is captured. These messages also appear in PRIVATE.
 - **CONTACT** — Thoughts echoing through the area.
 - **STAFF** — Recognized Guide, GM, Elder, sends, and voice formats.
 - **COMBAT** — Your attacks, incoming weapon attacks, hit/miss results, damage, movement blocks, spell threats, upkeep, and recovery. This tab keeps capturing and saving messages even when **SHOW IN ALL → COMBAT** is OFF.
@@ -36,7 +39,7 @@ A message can appear in more than one filter, but plays only one sound: its spec
 
 Drag any chat tab left or right to arrange the filters in the order you prefer. The order is saved for the whole Mudlet profile and survives character changes, reconnects, and HUD updates. A short click still selects the tab normally.
 
-If all tabs do not fit, the final overflow control cycles through hidden categories. Custom categories added by personal triggers become available as filters too, and can be reordered after they appear. Combat capture recognizes specific game messages independently of color settings; turning off a highlight does not stop chat capture. Ordinary room prose is not copied into COMBAT.
+If all tabs do not fit, click the final overflow control to cycle through hidden categories. A filter missing from the visible row may be there. Custom categories added by personal triggers become available as filters too, and can be reordered after they appear. Combat capture recognizes specific game messages independently of color settings; turning off a highlight does not stop chat capture. Ordinary room prose is not copied into COMBAT.
 
 ## Examples DGHUD recognizes
 

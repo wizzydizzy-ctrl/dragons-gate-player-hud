@@ -2,17 +2,63 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
+Documentation checked for **DGHUD v0.3.89**.
+
+## Quick start
+
+1. Open the Dragons Gate profile you want to use in Mudlet 5.0 or newer.
+2. For a fresh installation, paste this into Mudlet's command line:
+
+```lua
+lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/latest/download/DragonsGateHUD.mpackage")
+```
+
+3. Log into a character. If the HUD does not appear, close and reopen that profile once.
+4. Use **OPTIONS** for settings, or enter `dghud help`.
+
+For an existing installation:
+
+```text
+dghud check
+dghud update
+```
+
+`dghud check` reports your installed version without installing. `dghud update` installs only when a newer release exists; an already-current result is normal. Use `dghud refresh` for stale character information, not an update. Automatic updates start **OFF** and your saved choice survives updates. For versions 0.3.15 or older, or a safe-upgrade warning, read [Updates and Recovery](docs/UPDATES_AND_RECOVERY.md) before replacing the package.
+
 ## Guides
 
-- [Complete DGHUD Guide — start here](docs/DGHUD_GUIDE.md)
-- [Autoroller Guide](docs/AUTOROLLER.md)
-- [Automapper and Map Library Guide](docs/AUTOMAPPER_AND_MAP_LIBRARY.md)
+[**Complete DGHUD Guide — start here**](docs/DGHUD_GUIDE.md)
+
+| Guide | Find help with |
+| --- | --- |
+| [Installation](docs/INSTALLATION_AND_FIRST_START.md) | First setup and character login. |
+| [Screen and character data](docs/HUD_SCREEN_AND_CHARACTER_DATA.md) | Combat, vitals, needs, inventory, runes, skills, and time. |
+| [Options and display](docs/OPTIONS_AND_DISPLAY.md) | Text size, wrap, input alignment, keybindings, and responsive layouts. |
+| [Chatbox](docs/CHATBOX.md) | Tabs, Show in ALL, hiding chat, sounds, and saved history. |
+| [Color highlighting](docs/COLOR_HIGHLIGHTING.md) | Built-in styles and up to 1,000 custom words or phrases. |
+| [Automapper and map library](docs/AUTOMAPPER_AND_MAP_LIBRARY.md) | Explore, name areas, back up, share, download, combine, and clean maps. |
+| [Autoroller](docs/AUTOROLLER.md) | Both rolling methods, adjustable minimums, session highs, and safety alerts. |
+| [Updates and recovery](docs/UPDATES_AND_RECOVERY.md) | Manual/automatic updates, safe upgrade, and emergency repair. |
+| [Command reference](docs/COMMAND_REFERENCE.md) | Searchable commands with an explanation beside each one. |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
+| [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
+
+## Latest changes — v0.3.89
+
+- Added `skill weapons` for your five weapon skills plus possessed natural attacks.
+- Fixed the blank gap below filtered skill results without extra Enter prompts or scrollback jumps.
+- Fixed cancelled capture timers interfering with newer skill requests.
+- Kept full sidebar skills, your chosen sorting, aligned columns, and skill colors.
+
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.89).
+
+## Feature overview
 
 The header shows the player's local computer time and a synchronized Dragons Gate clock. Game time advances at the configurable 2× default, labels 6:00 AM–5:59 PM as `Daytime` and 6:00 PM–5:59 AM as `Night`, and resynchronizes from startup or manually entered `time` output.
 
 The compact `OPTIONS ▾` control includes Automatic Updates, a **MUDLET UI** toggle, persistent `HUD TEXT`, and **AUTO MAIN WRAP** toggles, plus Help & Commands, Color Settings, Map Settings, Autoroller, and Support. Automatic updates are off by default. Mudlet's optional starter dock (its extra map/chat/vitals panel) is hidden by default when the HUD first encounters it; turn **MUDLET UI** on if you want that dock, and Mudlet remembers your choice across sessions and HUD updates. This does not hide game text or the command line. Automatic main-window wrapping is on by default; turn it off to keep full manual control of Mudlet's profile wrap preference. `HUD TEXT` cycles through Small, Normal, and Large for the side cards without changing the main game-console font. Each section opens its own responsive settings box, so the top menu stays short and every related change can be made in one place. Every highlight is on by default and can be toggled independently in Color Settings: room titles, exits/directions, currency, travel objects, attacks aimed at you, damage received, danger/movement blocks, recovery, ongoing costs, spell threats, and discoveries/loot. Normal room prose and chat remain unchanged. Preferences survive HUD reloads and updates without changing personal Mudlet triggers or colors.
 
-**OPTIONS → Keybindings** enables customizable HUD-owned number-pad controls. The standard layout uses 7/8/9/4/6/1/2/3 for compass movement, 5 for `look`, `+` for `up`, and `-` for `down`; 0, decimal, multiply, divide, and keypad Enter are available but unassigned. Keep Num Lock on. The feature starts off, leaves the full set inactive if a requested key conflicts with an existing Mudlet key, never deletes personal keys, and preserves choices through updates.
+**OPTIONS → Keybindings** enables customizable HUD-owned number-pad controls. The standard layout uses 7/8/9/4/6/1/2/3 for compass movement, 5 for `look`, `+` for `up`, and `-` for `down`; 0, decimal, multiply, divide, and keypad Enter are available but unassigned. On Windows, keep Num Lock on; on macOS, use the actual numeric keypad normally. The feature starts off, leaves the full set inactive if a requested key conflicts with an existing Mudlet key, never deletes personal keys, and preserves choices through updates.
 
 The HUD tracks posture from confirmed game output using the mutually exclusive global variables `standing` and `sitting`. Both begin unknown. Standing messages set `standing=true`; seated, lying, fallen, fainted, and passed-out messages set `sitting=true`. Merely being off balance, knocked back, seeing `You fall...`, or being told to stand does not change posture. The separate `unconscious` variable follows confirmed loss and recovery of consciousness. Matching is substring-safe so command echo and optional social wording do not prevent updates.
 
@@ -35,7 +81,7 @@ Run `dghud help` to open the scrollable, color-coded command guide. Everyday com
 
 Choose **OPTIONS → Refresh Character Data** or run `dghud refresh` whenever inventory, combat values, character details, religion, runes, skills, or time look stale. This reruns only the normal character-data commands; it does not download or reinstall the HUD. `dghud text small`, `dghud text normal`, and `dghud text large` provide the same persistent side-panel sizing as the OPTIONS control, while `dghud text status` reports the current choice.
 
-The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a five-row scrollable Runes card above Skills. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
+The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a scrollable Runes card above Skills. The list height adapts to available space; shorter layouts share Inventory, Runes, and Skills through tabs. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
 
 ## Skills and combat updates
 
@@ -85,11 +131,11 @@ For a fresh installation with no existing HUD, install the current release direc
 lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/latest/download/DragonsGateHUD.mpackage")
 ```
 
-This executes code from that release inside the current Mudlet profile. Use only your own repository URL.
+This executes code from that release inside the current Mudlet profile. Use the official download URL above, and install packages only from sources you trust.
 
 ## Publishing
 
-Create an empty GitHub repository, set your owner in `src/defaults.lua`, commit this project, and push a semantic version tag such as `v0.1.0`. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
+Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.89` for runtime `0.3.89`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
 
 The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, and files under the profile's `DGHUDData` directory. It does not alter unrelated profile triggers, aliases, scripts, timers, keys, packages, modules, maps, or settings.
 
@@ -119,7 +165,7 @@ chat = {
 }
 ```
 
-User overrides merge into these defaults, including nested `chat` overrides, without discarding unknown personal settings. For example, from the Mudlet command line, set an override and reload:
+User overrides merge into these defaults, including nested `chat` overrides, without discarding unknown personal settings. Prefer **OPTIONS → CHAT SETTINGS** for everyday changes. Advanced users can set an override in a Mudlet Lua script, then reload:
 
 ```lua
 DGHUD.user_settings.chat = DGHUD.user_settings.chat or {}
@@ -222,7 +268,7 @@ dghud map clear current
 dghud map clear all
 ```
 
-Map Settings provides the same `clear all` operation. Its first click previews every DGHUD-owned area and room and changes the action to `CONFIRM CLEAR`; click it again within 30 seconds to delete that exact revalidated set. The current room is then recreated immediately from live GMCP so mapping starts fresh. Unowned and personal Mudlet map content is never included.
+Map Settings provides the same `clear all` operation. Its first click previews every DGHUD-owned area and room and changes the action to `CLICK AGAIN TO CLEAR ALL`; click it again within 30 seconds to delete that exact revalidated set. The current room is then recreated immediately from live GMCP so mapping starts fresh. Unowned and personal Mudlet map content is never included.
 
 Inspect the resolved area and every exact room ID in the preview. If anything is unexpected, run `dghud map cancel`. Otherwise, confirm with the printed one-use command within 30 seconds:
 

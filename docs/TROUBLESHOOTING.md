@@ -1,5 +1,7 @@
 # DGHUD Troubleshooting
 
+Applies to DGHUD **v0.3.89**.
+
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
 Start with the smallest action that matches the problem. A data refresh is safer and faster than a package update, and a reload is safer than removing a package.
@@ -56,6 +58,17 @@ Wait for all seven source commands to complete. If only one section is blank, ru
 
 DGHUD keeps the previous valid value when a response is incomplete. A panel may therefore remain unchanged until the game prints a complete response and prompt.
 
+Skills are an exception: a complete skill table ending in blank lines is saved on the next UI tick, without waiting for another prompt. Commands still depend on the game sending the response; DGHUD cannot show fresh results before they arrive.
+
+## Filtered skills leave a blank gap or seem stuck
+
+1. Run `dghud check` and update if your installed version is older than **0.3.89**.
+2. Wait for the current startup/refresh sequence or skill request to finish, then enter `skill bite`, `skill weapons`, or another filter once.
+3. Use `skill` or `skill all` for the complete list again. The sidebar always keeps every captured skill.
+4. If a gap remains on v0.3.89, send a report with the command, formatting toggle, whether you were reading scrollback, and a screenshot of the window.
+
+The fix refreshes hidden-row edits locally. You should not need to send Enter or another game command just to make the blank area disappear.
+
 ## Skills, inventory, or runes do not scroll
 
 - Put the mouse over the list itself, not its title or surrounding card.
@@ -94,18 +107,21 @@ The panel data is not deleted.
 
 The commands run sequentially. DGHUD waits for a complete prompt so one response does not contaminate the next. Skills and inventory can take longer because their output may contain many lines.
 
-If the game prompt does not arrive, DGHUD sends one blank prompt nudge and uses bounded recovery timeouts before continuing. Do not repeatedly send the same refresh commands while the startup sequence is active.
+For inventory, stat, info, religion, and magic responses, DGHUD may request a blank prompt nudge and uses bounded recovery timeouts before continuing. It does **not** send those extra Enters for `skill` or `time`. A delayed or cancelled request is kept separate from the next one. Do not repeatedly send the same refresh commands while the startup sequence is active.
 
 ## Roundtime is stuck
 
-DGHUD takes the newest confirmed value from GMCP or a delay line and counts down once per second. A later Vitals event can correct it.
+DGHUD counts down locally once per second. Printed action delays can accumulate, including double attacks and fumbles; GMCP snapshots are reconciled to reduce duplicate counting. A repeated unchanged GMCP value does not restart the bar.
 
-If it remains stuck:
+After a printed-delay burst, DGHUD can make a throttled `delay` check and use the game's remaining total. Only a proven HUD-requested, isolated response is hidden. Your manually entered `delay` result stays visible; ambiguous overlapping replies stay visible too. Automatic checks pause during startup collection, updates, and autorolling, and suspend after a failed or timed-out check rather than repeatedly polling.
 
-1. perform an action that creates a new delay;
-2. wait for a new game prompt;
-3. run `dghud refresh`; and
-4. send a report if the number still does not change.
+If the bar looks wrong, enter:
+
+```text
+delay
+```
+
+Compare `You have ... second(s) remaining!` with the bar. The manual response also corrects its countdown. If they still differ, send that exact reply and the preceding action/delay lines through Support. A GMCP dump can contain an older snapshot even while the HUD's local timer counts down normally.
 
 ## Standing or sitting is missing
 
@@ -129,7 +145,7 @@ Enter:
 time
 ```
 
-DGHUD resynchronizes from the line beginning `It is now ...`. Real Time comes from the computer's local clock and timezone.
+DGHUD recognizes the current month-name format, for example `Today is the 59th day of Majus in the year 362. The time is 4:29.`, and the older `It is now ...` format. Real Time comes from the computer's local clock and timezone, not the server's timezone line. Daytime/Night uses the configured game-time boundaries (6 AM and 6 PM by default), not a measured sunrise/sunset event.
 
 ## Colors do not appear
 
@@ -205,6 +221,10 @@ The updater should retain or restore the prior working HUD when the newly regist
 3. Run `dghud recover`.
 4. Send the last debug report after recovery.
 
+## Update stopped safely and mentions differing personal-data copies
+
+Stop the autoroller and enter `dghud safe update`. If Mudlet reports an unknown command, install the migration bridge from the [safe-upgrade instructions](UPDATES_AND_RECOVERY.md#update-stopped-safely-run-the-safe-upgrade-bridge). Do not delete the differing files or manually uninstall to get past the check. The bridge preserves conflict copies before retrying the verified update.
+
 ## The autoroller does not continue
 
 Use:
@@ -220,7 +240,7 @@ The **Waiting** line from `rr status` explains the immediate pause, and `rr show
 
 ## A normal command behaves differently with DGHUD
 
-DGHUD creates aliases only for documented `dghud ...`, `rr ...`, `walkto`, `walkstop`, and `mapcenter` commands. It does not intentionally create broad aliases for unrelated game commands.
+DGHUD handles the documented `dghud ...`, `rr ...`, walking, and local `skill` filtering commands. Skill filters request the normal game table rather than sending the filter as a game command. It does not intentionally create broad aliases for unrelated game commands.
 
 If a command such as `lay hands` works only with different capitalization, inspect personal Mudlet aliases and triggers first. Disable them one at a time in an isolated profile before attributing the behavior to DGHUD.
 

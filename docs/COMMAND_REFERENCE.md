@@ -2,7 +2,9 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Commands are not case-sensitive in normal use, but the examples below use their documented lowercase form.
+Applies to DGHUD v0.3.89.
+
+Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
 Most features are also available through **OPTIONS**. Destructive map commands create a preview; they do not delete immediately.
 
@@ -14,6 +16,7 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 | `dghud check` | Check the newest verified release and report the installed version without installing. |
 | `dghud update` | Install a newer verified release when one exists, then refresh character data. |
 | `dghud recover` | Emergency clean reinstall through the independent recovery companion. |
+| `dghud safe update` | Run the installed migration bridge after a differing-personal-data warning; stop the autoroller first. See [safe-upgrade steps](UPDATES_AND_RECOVERY.md#update-stopped-safely-run-the-safe-upgrade-bridge) if the command is unknown. |
 | `dghud reload` | Rebuild the currently installed HUD using saved settings. |
 | `dghud refresh` | Run inventory, stat, info, religion, runes, skills, and time refreshes without reinstalling. |
 | `dghud config` | Print the profile's persistent DGHUD data location. |
@@ -25,6 +28,23 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 | `dghud layout` | Print privacy-safe responsive-layout measurements for troubleshooting clipping or low-resolution behavior. |
 
 `dghud purge` may appear in older built-in command text. Do not use it for routine repair or map cleanup; use `dghud recover` or the specific map commands below.
+
+For setup and repair steps, see [Installation and First Start](INSTALLATION_AND_FIRST_START.md) and [Updates and Recovery](UPDATES_AND_RECOVERY.md). For text sizing and display controls, see [Options and Display](OPTIONS_AND_DISPLAY.md).
+
+## Skills commands
+
+| Command | What it does |
+| --- | --- |
+| `skill` | Request every possessed skill and refresh the full Skills sidebar. |
+| `skill all` | Show every possessed skill, clearing any previous filter. |
+| `skill weapons` | Show possessed Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Webbing, Breath Weapon, and Stinging. |
+| `skill <prefix>` | Show skills whose names begin with the supplied text; for example, `skill claw`, `skill bite`, `skill c`, `skill id`, or `skill ste`. |
+
+DGHUD handles the forms with an argument by requesting the full game `skill` response, then filtering only that response in the main display. The sidebar keeps every captured skill. Prefixes are literal text, ignore case, and also match supported shortened display names. `weapons` is an exact group name, not a search for every name containing “weapon”; it uses skill IDs 2–6, 46–49, and 57 and never adds skills you do not possess.
+
+With **MAIN SKILLS** on, results use your main-display sorting, catalog numbers, and skill colors. With it off, filters still work but keep the game's row format and order. If a refresh or skill request is still loading, wait for it to finish, then repeat the command. If filtering is unavailable, run `dghud reload`, then try again.
+
+See [Screen and Character Data → Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills) for sorting, colors, and display controls.
 
 ## Color commands
 
@@ -42,7 +62,7 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 Feature names:
 
 ```text
-room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice world skills
+room exits currency races classes highlights portal presence attack damage danger recovery upkeep spell discovery illumination notice world skills
 ```
 
 Example:
@@ -50,6 +70,12 @@ Example:
 ```text
 dghud colors illumination toggle
 ```
+
+See [Color Highlighting](COLOR_HIGHLIGHTING.md) for what each feature highlights and how to change its styles.
+
+## Roundtime check
+
+`delay` is a normal game command. Its remaining-time response stays visible when you run it manually and also corrects the HUD countdown. DGHUD may request its own throttled check after printed delay bursts; only an isolated reply proven to belong to that automatic check is hidden. See [Roundtime troubleshooting](TROUBLESHOOTING.md#roundtime-is-stuck).
 
 ## Mapper and walking commands
 
@@ -67,6 +93,8 @@ dghud colors illumination toggle
 | `dghud map folder` | Open the local map export/import directory. |
 
 `dghud map on|off|toggle|status` is accepted as an alternate form of `dghud mapper ...`.
+
+See [Automapper and Map Library](AUTOMAPPER_AND_MAP_LIBRARY.md) for mapping, walking, imports, and cleanup steps.
 
 ## Private map backup and advanced import commands
 
@@ -165,7 +193,7 @@ skill
 time
 ```
 
-DGHUD observes their complete responses and refreshes the matching panel.
+DGHUD observes their complete responses and refreshes the matching panel. `info mag` is also recognized as a shortened form of `info magic`. The skills forms with an argument are DGHUD aliases described [above](#skills-commands).
 
 ## Chat history commands
 
@@ -176,5 +204,7 @@ DGHUD observes their complete responses and refreshes the matching panel.
 | `dghud chat clear saved confirm` | Permanently delete saved DGHUD profile chat history and clear the chatbox. |
 
 The same actions are available under **OPTIONS → CHAT SETTINGS**. Saved history is retained by default and remains shared across characters in the profile.
+
+See the [Chatbox Guide](CHATBOX.md) for tabs, sound alerts, hidden-chat behavior, and local-history privacy.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)

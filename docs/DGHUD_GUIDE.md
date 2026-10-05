@@ -1,5 +1,7 @@
 # Complete DGHUD Guide
 
+Applies to DGHUD **v0.3.89**. These guides describe the current controls; older screenshots and messages may use different labels.
+
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
 This page is the main guide. Use the links below to open a detailed guide for each part of the HUD.
@@ -20,6 +22,17 @@ dghud check
 - `dghud refresh` refreshes character information without reinstalling anything.
 - `dghud check` checks whether a newer release exists without installing it.
 
+To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
+
+## What's new in v0.3.89
+
+- `skill weapons` shows your five weapon skills and any natural attacks you possess.
+- Filtered skill results refresh without the blank gap that sometimes remained until the next command.
+- Cancelled capture timers cannot interfere with newer skill requests.
+- Your chosen sorting, skill colors, and complete saved sidebar list are retained.
+
+See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.89).
+
 ## Complete guide index
 
 | Guide | What it explains |
@@ -27,7 +40,7 @@ dghud check
 | [Installation and First Start](INSTALLATION_AND_FIRST_START.md) | Requirements, installation, first login, and what DGHUD does automatically. |
 | [HUD Screen and Character Data](HUD_SCREEN_AND_CHARACTER_DATA.md) | Every visible section, where its information comes from, and how to refresh it. |
 | [Options and Display Settings](OPTIONS_AND_DISPLAY.md) | Every button under **OPTIONS**, text size, resizing, and saved preferences. |
-| [Chatbox](CHATBOX.md) | Chat categories, filters, permanent local history, and custom capture triggers. |
+| [Chatbox](CHATBOX.md) | Tabs, Show in ALL, hiding chat, sound alerts, profile-wide history, and custom capture triggers. |
 | [Color Highlighting](COLOR_HIGHLIGHTING.md) | Built-in highlights, color choices, and how to add your own words or phrases. |
 | [Automapper and Map Library](AUTOMAPPER_AND_MAP_LIBRARY.md) | Automatic mapping, special submaps, walking, cleanup, named map collections, sharing, downloading, and combining maps. |
 | [Autoroller](AUTOROLLER.md) | Both character-creation rolling methods, every setting, recommended setups, commands, and troubleshooting. |
@@ -72,6 +85,8 @@ The game may not provide all of this through GMCP, so DGHUD combines structured 
 - Read map cleanup and replacement previews before confirming them.
 - Do not include passwords, private account information, or private conversations in feedback forms.
 - DGHUD owns its own package resources and data. It is designed not to edit personal triggers, aliases, scripts, keys, packages, or unrelated maps.
+
+Saved choices belong to the Mudlet profile, not the individual character. A different profile has its own preferences, chat history, and map collections.
 
 ## Getting help quickly
 

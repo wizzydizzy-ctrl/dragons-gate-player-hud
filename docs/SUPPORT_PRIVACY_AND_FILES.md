@@ -2,6 +2,8 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
+Applies to DGHUD v0.3.89.
+
 ## Feedback and feature requests
 
 Open **OPTIONS → SUPPORT → FEEDBACK & REQUESTS**.
@@ -12,6 +14,8 @@ Open **OPTIONS → SUPPORT → FEEDBACK & REQUESTS**.
 4. Submit it.
 
 The form sends through the DGHUD service without opening a browser or requiring a GitHub account. A successful submission returns a reference.
+
+Feedback is submitted anonymously to the DGHUD GitHub project. The summary and description you enter are sent as written; they do not receive the same automatic redaction as a failure report. Review both fields before submitting.
 
 Please include exact game or DGHUD wording when the request concerns a parser, chat line, color matcher, or error. Do not include passwords, private account information, private chat, access tokens, or API keys.
 
@@ -36,6 +40,8 @@ To keep a local mapper diagnostic and open its folder:
 ```text
 dghud map debug folder
 ```
+
+`dghud map debug` uploads a mapper diagnostic immediately. `dghud map debug folder` saves it locally and opens the folder without uploading it. **SEND LAST DEBUG REPORT** and **REPORT A PROBLEM** send the latest general failure report when clicked; no GitHub account is needed.
 
 ## What privacy-safe reports remove
 
@@ -114,7 +120,9 @@ Updating or recovering DGHUD does not intentionally delete the persistent data d
 
 ## Backups
 
-For maps, use **Map Settings → Map Library → MY MAPS → BACKUP** before a major edit, combine, or replacement.
+For maps, use **Map Settings → Map Library → MY MAPS → BACKUP** before a major edit, combine, or replacement. This creates a dated local collection, not an off-computer backup. Backing up an inactive collection switches to it first.
+
+For a local JSON export of HUD-owned rooms in the active map, enter `dghud map export my_backup local-export`, then `dghud map folder` to open the transfer folder. Exporting does not upload the map. Copy backups outside the profile for protection against profile loss.
 
 For full profile protection, periodically back up the Mudlet profile while Mudlet is closed. Include `DGHUDData` if you want to retain chat, collections, settings, logs, and diagnostics.
 
@@ -124,14 +132,14 @@ Use specific in-HUD cleanup controls whenever possible:
 
 - map commands remove only previewed DGHUD-owned map data;
 - deleting a map collection affects only that selected collection;
-- chat history is removed only by deleting its dated local files yourself; and
+- `dghud chat clear` clears the visible chatbox while keeping saved logs; `dghud chat clear saved confirm` permanently deletes saved DGHUD chat logs, so back them up first; and
 - package recovery should use `dghud recover`, not deletion of the entire data directory.
 
 Before deleting files manually, close Mudlet and make a backup. The operation may not be recoverable after backups are removed.
 
 ## Community map submissions
 
-Maps can be uploaded through the built-in library without a GitHub account. A submission contains the map data and the creator/publisher information entered for that map. It is validated and placed into a review queue before public publication.
+Maps can be uploaded through the built-in library without a GitHub account. Sharing starts the upload directly, using map data and creator/publisher credit derived from the character displayed by the HUD, with a fallback if unavailable. Anonymous submission means no GitHub login is needed; it does not mean the map has no creator credit. A successful submission enters owner review before public publication. Local **BACKUP** and export commands do not share maps.
 
 Downloaded maps become separate local collections or new combined copies. Editing and reuploading a downloaded map does not silently overwrite the original creator's publication.
 

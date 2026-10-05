@@ -1,5 +1,7 @@
 # DGHUD Updates and Emergency Recovery
 
+Applies to DGHUD **v0.3.89**.
+
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
 DGHUD supports manual update checks, manual updates, an optional login-time update setting, and an independent emergency recovery command.
@@ -36,6 +38,8 @@ When a newer release exists, the updater:
 8. refreshes character data after a successful replacement.
 
 Normal update messages show elapsed time for the major stages. Large Mudlet profiles and native profile saving can make package replacement take longer than the download itself.
+
+An update may reuse compatible visible panels rather than visibly reload the whole interface. Check the version beside **OPTIONS** and the completion message; a full-screen redraw is not required for an update to succeed.
 
 Do not enter `dghud update` repeatedly while one update is still running.
 
@@ -92,7 +96,7 @@ Recovery:
 
 1. downloads a clean current package;
 2. verifies that personal data is safely outside the replaceable package;
-3. preserves the current visible HUD when possible;
+3. prepares replacement of the existing HUD (visible panels may be rebuilt);
 4. removes only the broken `DragonsGateHUD` package;
 5. installs the clean package; and
 6. waits for a healthy running HUD before reporting success.
@@ -124,6 +128,19 @@ lua installPackage("https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/r
 ```
 
 This protects personal files that older versions may have placed inside the package directory.
+
+## Update stopped safely: run the safe-upgrade bridge
+
+If DGHUD says that personal-data copies differ, **do not delete either copy or uninstall the HUD to bypass the check**. Stop the autoroller, then run:
+
+```text
+rr stop
+dghud safe update
+```
+
+If `dghud safe update` is unknown, install the migration bridge using the official `DGHUDMigration.mpackage` command above. Its first installation can start the safe upgrade automatically; if nothing starts, run `dghud safe update` once more.
+
+The bridge preserves differing files as separate conflict copies and verifies the data before replacing the HUD. Wait for its final result, check the version beside OPTIONS, and review your Autoroller settings. If it still refuses, use **OPTIONS → SUPPORT** to send the report instead of removing saved files.
 
 ## Reload is not an update
 

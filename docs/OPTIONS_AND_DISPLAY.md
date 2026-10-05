@@ -1,12 +1,14 @@
 # DGHUD Options and Display Settings
 
+Applies to DGHUD **v0.3.89**.
+
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
 The **OPTIONS** button is at the far left of the header. The current DGHUD version is shown beside it. Click **OPTIONS** to open a short menu of sections.
 
 ## Mudlet UI
 
-**MUDLET UI: OFF** means Mudlet's separate starter dock (extra map, chat, and vitals) is hidden. DGHUD turns that dock off by default when it first appears, without touching the game-text window, command line, toolbar, or HUD mapper. Click the option to show the starter dock if you want it; click again to hide it. Mudlet remembers your choice across restarts and HUD updates. The extra dock may overlap the HUD when shown, but you can drag it by its title bar.
+The option is labeled **MUDLET UI** (or **MUDLET STARTER UI** in some builds). **OFF** means Mudlet's separate starter dock (extra map, chat, and vitals) is hidden; **ON** means it is shown. DGHUD defaults it off when no explicit show/hide choice has been saved, without touching the game-text window, command line, toolbar, or HUD mapper. Click the option to switch it. Mudlet remembers your choice across restarts and HUD updates. The extra dock may overlap the HUD when shown, but you can drag it by its title bar.
 
 If that starter package is not installed in the profile, the option reports that it is unavailable and changes nothing. Mudlet's own `baseui show` and `baseui hide` commands still work; reopening OPTIONS refreshes the toggle's status.
 
@@ -20,7 +22,7 @@ The same window controls which sources appear in ALL, provides separate history-
 
 Open **OPTIONS → KEYBINDINGS** to enable or customize the number pad. Standard movement follows the keypad compass: 8 north, 9 northeast, 6 east, 3 southeast, 2 south, 1 southwest, 4 west, and 7 northwest. Numpad 5 sends `look`, `+` sends `up`, and `-` sends `down`. The remaining keypad keys are editable and begin blank.
 
-Keep Num Lock on. DGHUD creates temporary bindings that it owns and removes only those exact bindings when it reloads. If a requested key is already assigned in Mudlet, DGHUD leaves its whole keypad set inactive and reports the collision instead of replacing a personal key. Saved choices are stored outside the package and survive updates.
+On Windows, keep Num Lock on. On macOS, use the actual numeric keypad; the number row above the letters is not the keypad. DGHUD creates temporary bindings that it owns and removes only those exact bindings when it reloads. If a requested key is already assigned in Mudlet, DGHUD leaves its whole keypad set inactive and reports the collision instead of replacing a personal key. Saved choices are stored outside the package and survive updates.
 
 ## Help & Commands
 
@@ -120,6 +122,8 @@ Rows with **0 uses remaining are green**, combat skills are **blue**, and utilit
 
 Tables ending in blank lines update on the next UI tick without waiting for a later prompt. The sidebar keeps its existing layout. See [Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills).
 
+Each filtered request still asks the game for fresh skill data, so wait for that response; filtering cannot display a result before the server sends it. v0.3.89 fixes the leftover blank gap after rows are hidden and refreshes the visible tail locally without sending extra Enter prompts or pulling you out of scrollback.
+
 ## Align command input
 
 Turn **OPTIONS → ALIGN INPUT: ON** to line up the command input's **left edge** with the main game display. It follows the window as you resize it. The input ends before Mudlet's native Search and status controls, which stay visible together on the right. Search remains on the right; this does not align the input to the full width of the main display. The default is **OFF**, and your choice survives updates and restarts independently of automatic word wrap.
@@ -131,6 +135,8 @@ This keeps Mudlet's native input, command history, current draft, and aliases. T
 **COLOR SETTINGS** opens individual toggles for room titles, exits, currency, races, professions, travel objects, combat warnings, recovery, spell threats, discoveries, and illumination.
 
 The **CUSTOM WORDS/PHRASES** section lets you add, edit, or delete your own literal text matches. Each one can have its own text color, background highlight, bold, underline, and on/off choice. Saved entries stay with your Mudlet profile across character changes and HUD updates.
+
+You can save up to **1,000** custom entries. **TEXT STYLES** also separates travel objects, other room objects, and the `is here` / `are here` wording, so each can use a different color.
 
 All highlights are enabled by default. Turning a highlight off changes only DGHUD's coloring; it does not suppress game text.
 

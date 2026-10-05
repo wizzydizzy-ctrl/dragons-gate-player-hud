@@ -2,11 +2,13 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Make sure you are using DGHUD v0.3.62 or newer:
+Applies to DGHUD v0.3.89. To check for an update without installing it, enter:
 
 ```text
-dghud update
+dghud check
 ```
+
+If a newer release exists, run `dghud update`. For an existing map problem, use the specific steps below rather than reinstalling the HUD.
 
 ## Using the automapper
 
@@ -137,11 +139,13 @@ Select a map and choose:
 - **USE** — Switch to that map collection.
 - **RENAME** — Give it a clearer name.
 - **DUPLICATE & EDIT** — Create an editable copy without changing the original.
-- **BACKUP** — Save a private local backup.
+- **BACKUP** — Create a dated backup collection in **MY MAPS**. Selecting an inactive map for backup switches to that map first.
 - **SHARE SELECTED MAP** — Submit it to the community library.
 - **DELETE** — Delete that saved collection. You must switch away from an active map first.
 
 Use the name field near the top before choosing **RENAME** or **DUPLICATE & EDIT**.
+
+For a portable local JSON export of HUD-owned rooms in the active map, enter `dghud map export my_backup local-export`, then `dghud map folder` to open its folder. Exporting does not submit anything for review. Copy important backups outside the profile for protection against losing the profile itself.
 
 ### Finding community maps
 
@@ -153,7 +157,7 @@ Select a result before choosing a download action.
 
 ### Download as New — recommended
 
-**DOWNLOAD AS NEW** creates a separate editable map collection. Your current map remains unchanged, and you can switch between them under **MY MAPS**.
+**DOWNLOAD AS NEW** creates and activates a separate editable map collection. Your previous collection is saved, and you can switch back under **MY MAPS**.
 
 ### Add to Current Map
 
@@ -176,15 +180,26 @@ Room numbers are permanent game identifiers, so review collision choices careful
 
 **UPDATE MY COPY** downloads the newest library version of a map you previously downloaded. Select the same shared map entry first. Be careful if you have made personal changes to your copy.
 
+DGHUD finds a matching downloaded collection, switches to it if needed, creates a dated backup, and replaces that copy with a fresh download. Personal additions are preserved in the backup, not merged into the refreshed copy.
+
+### Importing a local backup
+
+Enter `dghud map folder` to open the transfer folder. Place a DGHUD JSON export there using a simple filename such as `my_backup.json`, then enter:
+
+```text
+dghud map import my_backup
+```
+
+Read the preview. For overlaps, choose **KEEP MY MAP**, **USE SHARED MAP**, or **SKIP THIS AREA**, then **FINISH INSTALLING**. These labels are also used for local-file imports. **USE SHARED MAP** can replace overlapping HUD-owned rooms; unrelated personal rooms are protected. This import updates the active map rather than creating a separate collection, so back it up first. Enter `dghud map import cancel` to cancel the preview.
+
 ## Editing downloaded maps
 
 Downloaded maps are editable. To protect your work:
 
 1. Select the map under **MY MAPS**.
 2. Choose **DUPLICATE & EDIT**.
-3. Give your copy a new name.
-4. Select **USE**.
-5. Continue exploring and making additions.
+3. The copy becomes active automatically. Use **RENAME** if you did not enter a name before duplicating.
+4. Continue exploring and making additions.
 
 Your changes never alter the original creator's uploaded map.
 
@@ -194,10 +209,9 @@ Under **MY MAPS**:
 
 1. Select the map you want to share.
 2. Click **SHARE SELECTED MAP**.
-3. Complete the requested name and creator information.
-4. Submit it.
+3. Wait for the upload result and keep its submission reference.
 
-No GitHub account is required. Shared maps are submitted for safety review before they appear publicly, so they may not appear in the library immediately.
+No GitHub account is required. Clicking **SHARE SELECTED MAP** starts the upload directly; there is no separate name-and-creator form. DGHUD uses the current character name supplied by the game as creator credit, or `Unknown` if unavailable. Map data and that credit are submitted for owner review before public publication. Review the selected collection and your current character before clicking Share.
 
 If you downloaded someone else's map, improved it, and want to share your version:
 
@@ -242,7 +256,7 @@ If mapping, downloading, uploading, or cleanup fails:
 
 1. Open **MAP SETTINGS → MAP LIBRARY**.
 2. Click **REPORT A PROBLEM**.
-3. Submit the privacy-safe diagnostic.
+3. Wait for the report result and keep its reference. Clicking the button sends the newest sanitized failure report directly.
 
 No GitHub account is required, and chat logs or passwords are not included.
 
@@ -253,5 +267,7 @@ dghud map debug
 ```
 
 This sends a sanitized mapper report and gives you a reference number.
+
+For a local mapper report without uploading it, enter `dghud map debug folder`. DGHUD saves the diagnostic and opens its folder.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
