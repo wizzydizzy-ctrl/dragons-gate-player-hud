@@ -2062,6 +2062,17 @@ test("weapons skill group appears in the visible and copyable help guide",functi
   end
 end)
 
+test("color grouped skill commands appear in visible and copyable help",function()
+  local view=chatView(); local copied
+  view:setCopyTextCallback(function(value) copied=value; return true end)
+  view:applyLayout(require("layout").compute(1000,700)); view:showHelp()
+  assert(view.help_copy.click()); assert(type(copied)=="string")
+  for _,command in ipairs({"skill combat","skill utility","skill train"}) do
+    assert(view.help_content.message:find(command,1,true),"missing visible help: "..command)
+    assert(copied:find(command,1,true),"missing copyable help: "..command)
+  end
+end)
+
 test("help overlay remains bounded and readable at every layout mode",function()
   local view=chatView(); view:showHelp()
   for _,size in ipairs({{420,500},{760,700},{800,650},{1200,800},{1920,1080}}) do
@@ -3421,6 +3432,19 @@ test("opening other settings hides Skills Settings and opening it hides other po
     end
   end
 end)
+test("Skills Settings explains all grouped filters without covering tabs at small sizes",function()
+  local view=skillSettingsView(); view:showSkillSettings(skillSettingsFixture())
+  for _,size in ipairs({{1200,900},{420,500},{320,260},{160,100}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local hint=view.skill_settings_text
+    for _,command in ipairs({"skill combat","skill utility","skill train"}) do
+      assert(hint.message:find(command,1,true),"missing settings hint: "..command)
+    end
+    assert(view.skill_settings_tabs.main.y>=hint.y+hint.height,"skill hint overlaps tabs")
+    assert(view.skill_settings_content.content_height>=view.skill_settings_save.y+view.skill_settings_save.height)
+  end
+end)
+
 test("Skills Settings reuse validates new controls hides drafts and drops retired callbacks",function()
   local view=skillSettingsView()
   eq(View.validateReusable(view,view.settings),true)

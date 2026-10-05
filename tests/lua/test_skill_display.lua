@@ -1235,3 +1235,373 @@ test("skill weapons honors independent chosen number name and uses orders withou
     eq(d.sort.primary,case.sort.primary); eq(d.sort.direction,case.sort.direction); d:shutdown()
   end
 end)
+
+-- Semantic groups follow category/readiness even when their colors are changed.
+-- This independent catalog pins every identifier and its non-ready category.
+local semanticSkillCatalog={
+  {"Brawling","combat"},{"Sharp Weapons","combat"},{"Blunt Weapons","combat"},
+  {"Pole Weapons","combat"},{"Throw Weapons","combat"},{"Missile Weapons","combat"},
+  {"Shield Parry","combat"},{"Quickdraw","combat"},{"Dodging","combat"},
+  {"Focus Force","combat"},{"Berserk Attack","combat"},{"Parry Blows","combat"},
+  {"Bargaining","utility"},{"Identify Gems/Minerals","utility"},{"Climbing","utility"},
+  {"Detect Traps","utility"},{"Remove Traps","utility"},{"Skinning","utility"},
+  {"Disguise","utility"},{"Pick Locks","utility"},{"Riding","utility"},
+  {"Hiding","utility"},{"Swimming","utility"},{"Alchemy","utility"},
+  {"Backstab","combat"},{"Martial Arts","combat"},{"Picking Pockets","utility"},
+  {"Shoplifting","utility"},{"Stealth","utility"},{"Poisoning","combat"},
+  {"Identify Magick","utility"},{"Identify Weapon Quality","utility"},{"Play Instruments","utility"},
+  {"Armor Smithing","utility"},{"Weapon Smithing","utility"},{"Singing","utility"},
+  {"Fletching","utility"},{"Tracking","utility"},{"Disarming","combat"},
+  {"Psionics","combat"},{"Channeling","combat"},{"First Aid","combat"},
+  {"Body Building","combat"},{"Turn Undead","combat"},{"Draining","combat"},
+  {"Biting","combat"},{"Clawing","combat"},{"Webbing","combat"},
+  {"Breath Weapon","combat"},{"Identify Armor Quality","utility"},{"Linguistics","utility"},
+  {"Herbalism","utility"},{"Healing","combat"},{"Spellcasting","combat"},
+  {"Conjuration","combat"},{"Delving","utility"},{"Stinging","combat"},
+}
+local semanticSkillRows={
+  {name="Sharp Weapons",id=2,remain=400,level=4},
+  {name="Weapon Smithing",id=35,remain=0,level=9999},
+  {name="Swimming",id=23,remain=5,level=7},
+  {name="Brawling",id=1,remain=0,level=9},
+  {name="First Aid",id=42,remain=1000000000000,level=123},
+  {name="Identify Weapon Quality",id=32,remain=42,level=2},
+  {name="Channeling",id=41,remain=0,level=1},
+  {name="Future Art",remain=10,level=3},
+  {name="Riding",id=21,remain=0,level=12},
+}
+local semanticQueries={"combat","utility","train"}
+local semanticNumberOrder={combat={1,5},utility={3,6,8},train={4,9,2,7}}
+local semanticServerOrder={combat={1,5},utility={3,6,8},train={2,4,7,9}}
+local function semanticFeed(f,first,skills,boundary,heading)
+  f:feed(heading or "Skill Remain Level",first)
+  for index,skill in ipairs(skills) do f:feed(groupedWeaponRaw(skill),first+index) end
+  f:feed(boundary or ">",first+#skills+1)
+end
+local function assertSemanticOutput(f,first,order,enabled)
+  if enabled then assert(f.lines[first]:match("^Number%s+Skill%s+LVL%s+USES$"))
+  else eq(f.lines[first],"Skill Remain Level") end
+  for index,fixtureIndex in ipairs(order) do
+    local skill=semanticSkillRows[fixtureIndex]; local text=assert(f.lines[first+index])
+    if enabled then
+      eq(text:match("^%s*(%S+)%s"),tostring(skill.id or "?"))
+      assert(text:find(Display.displayName(skill.name),1,true))
+      eq(tonumber(text:match("(%d+)$")),skill.remain)
+    else eq(text,groupedWeaponRaw(skill)) end
+  end
+end
+
+test("skill semantic groups cover all 57 names and give readiness priority over combat and utility",function()
+  eq(#semanticSkillCatalog,57); local counts={combat=0,utility=0}; local seen={}
+  for id,entry in ipairs(semanticSkillCatalog) do
+    local skillName,category=entry[1],entry[2]
+    eq(Display.skillId(skillName),id); assert(not seen[skillName]); seen[skillName]=true
+    counts[category]=counts[category]+1
+    for _,remain in ipairs({0,1,17,1000000000000}) do
+      eq(Display.category({name=skillName,remain=remain}),remain==0 and "ready" or category)
+      for _,query in ipairs(semanticQueries) do
+        local expected=query=="train" and remain==0 or (query==category and remain>0)
+        eq(Display.matchesFilter(skillName,query,remain),expected)
+        local messy="\27[35m ** "..skillName:upper():gsub(" "," \t ").."  \27[0m"
+        eq(Display.matchesFilter(messy,"  "..query:upper().."  ",remain),expected)
+      end
+    end
+  end
+  eq(counts.combat,30); eq(counts.utility,27)
+end)
+
+test("skill semantic groups normalize exact keywords and retain literal near keyword prefixes",function()
+  for _,case in ipairs({{query="combat",name="Sharp Weapons"},{query="utility",name="Swimming"},
+    {query="train",name="Brawling"}}) do
+    local remain=case.query=="train" and 0 or 1
+    for _,query in ipairs({case.query,case.query:upper(),"  "..case.query:upper().."   "}) do
+      eq(Display.normalizeFilter(query),case.query)
+      eq(Display.matchesFilter(case.name,query,remain),true)
+    end
+    for _,suffix in ipairs({" skills","x",".*",";quit"}) do
+      local query=case.query..suffix
+      eq(Display.normalizeFilter(query),query)
+      eq(Display.matchesFilter(case.name,query,remain),false)
+      eq(Display.matchesFilter(query.." Lore",query,17),true)
+    end
+    local prefix=case.query:sub(1,3)
+    eq(Display.matchesFilter(case.name,prefix,remain),false)
+    eq(Display.matchesFilter(case.query.." Lore",prefix,0),true)
+    eq(Display.matchesFilter(case.name,"\t"..case.query,remain),false)
+  end
+  eq(Display.matchesFilter("Training Lore","tra",17),true)
+  eq(Display.matchesFilter("Training Lore","train",17),false)
+  eq(Display.matchesFilter("Training Lore","train",0),true)
+end)
+
+test("skill semantic groups handle canonical labels support skills and unknown skills without inventing ids",function()
+  for _,skillName in ipairs({"Sharps","Blunts","Poles","Throws","Missiles","First Aid","Shield Parry"}) do
+    eq(Display.matchesFilter(skillName,"combat",1),true)
+    eq(Display.matchesFilter(skillName,"utility",1),false)
+    eq(Display.matchesFilter(skillName,"combat",0),false)
+    eq(Display.matchesFilter(skillName,"train",0),true)
+  end
+  for _,skillName in ipairs({"ID Weapon","ID Armor Quality","Weapon Smithing","Future Art",
+    "Future Sharp Weapons","Quantum Élan 🐉"}) do
+    eq(Display.matchesFilter(skillName,"utility",1),true)
+    eq(Display.matchesFilter(skillName,"combat",1),false)
+    eq(Display.matchesFilter(skillName,"utility",0),false)
+    eq(Display.matchesFilter(skillName,"train",0),true)
+    eq(Display.matchesFilter(skillName,"train",1),false)
+  end
+  eq(Display.skillId("Future Art"),nil)
+  eq(Display.matchesFilter("Future Art","train"),false)
+end)
+
+test("skill semantic remain argument leaves weapons ordinary prefixes and all behavior unchanged",function()
+  for _,entry in ipairs(semanticSkillCatalog) do
+    for _,query in ipairs({"weapons","weapon","c","ste","id","bite",""," ALL "}) do
+      local expected=Display.matchesFilter(entry[1],query)
+      eq(Display.matchesFilter(entry[1],query,0),expected)
+      eq(Display.matchesFilter(entry[1],query,17),expected)
+    end
+  end
+  eq(Display.matchesFilter("Clawing","weapons",0),true)
+  eq(Display.matchesFilter("Weapon Smithing","weapons",0),false)
+  eq(Display.matchesFilter("Channeling","c",0),true)
+end)
+
+test("skill semantic filtered output captures all rows before sorting and aligns only the matching rows",function()
+  for _,case in ipairs({
+    {query="combat",order={5,1},widths={6,9,3,13},category="combat"},
+    {query="utility",order={3,8,6},widths={6,23,3,4},category="utility"},
+    {query="train",order={2,9,4,7},widths={6,15,4,4},category="ready"},
+  }) do
+    local f,d=fakeSkills(); assert(d:requestFilter("  "..case.query:upper().."  "))
+    f:feed(">skill "..case.query,0); f:feed("Skill Remain Level",1)
+    for index,skill in ipairs(semanticSkillRows) do f:feed(groupedWeaponRaw(skill),index+1) end
+    eq(#d.response.rows,#semanticSkillRows); eq(d.pending,nil)
+    for index,skill in ipairs(semanticSkillRows) do
+      eq(f.lines[index+1],groupedWeaponRaw(skill)); eq(d.response.rows[index].skill.remain,skill.remain)
+    end
+    eq(f.replacements,0); eq(f.deletions,0); f:feed(">",11)
+    local rows=d.pending; eq(#rows,10)
+    local widths=case.widths
+    local format="%"..widths[1].."s  %-"..widths[2].."s  %"..widths[3].."s  %"..widths[4].."s"
+    local heading=string.format(format,"Number","Skill","LVL","USES")
+    eq(rows[1].display_text,heading); eq(rows[1].category,"neutral"); eq(rows[1].style_id,nil)
+    for index,fixtureIndex in ipairs(case.order) do
+      local skill=semanticSkillRows[fixtureIndex]; local row=rows[index+1]
+      eq(row.display_text,string.format(format,tostring(skill.id or "?"),Display.displayName(skill.name),
+        tostring(skill.level),tostring(skill.remain)))
+      eq(#row.display_text,#heading); eq(row.category,case.category)
+      eq(row.style_id,"skill_"..case.category); eq(row.remove,nil)
+    end
+    for index=2,#rows do
+      eq(rows[index].line_number,index); eq(rows[index].source_line,groupedWeaponRaw(semanticSkillRows[index-1]))
+      if index>#case.order+1 then eq(rows[index].remove,true); eq(rows[index].display_text,nil) end
+    end
+    eq(f.replacements,0); eq(f.deletions,0); f:advance(0)
+    eq(f.lastRows,rows); eq(f.deletions,9-#case.order); eq(f.replacements,#case.order+1)
+    eq(f.lines[0],">skill "..case.query); eq(f.lines[#case.order+2],">")
+    eq(f.lines[#case.order+3],nil); eq(f.cursor,#case.order+2); eq(f.column,3)
+    eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("skill semantic filters honor chosen number name and uses sorting without changing membership",function()
+  for _,case in ipairs({
+    {query="combat",sort={primary="number",direction="asc",secondary="none"},ids="2,42"},
+    {query="utility",sort={primary="number",direction="desc",secondary="none"},ids="32,23,?"},
+    {query="train",sort={primary="name",direction="asc",secondary="none"},ids="1,41,21,35"},
+    {query="utility",sort={primary="uses",direction="asc",secondary="none"},ids="23,?,32"},
+  }) do
+    local f,d=fakeSkills(true,case.sort); assert(d:requestFilter(case.query))
+    semanticFeed(f,1,semanticSkillRows); eq(groupedWeaponIds(d.pending),case.ids)
+    for index=2,#d.pending do
+      if not d.pending[index].remove then
+        eq(d.pending[index].category,case.query=="train" and "ready" or case.query)
+      end
+    end
+    f:advance(0); eq(d.sort.primary,case.sort.primary); eq(d.sort.direction,case.sort.direction)
+    eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("skill semantic formatting off preserves raw matched rows server order and the disabled toggle",function()
+  for _,query in ipairs(semanticQueries) do
+    local f,d=fakeSkills(false,{primary="number",direction="desc",secondary="none"})
+    local heading="  Skill                     Remain Level  "
+    assert(d:requestFilter(query)); semanticFeed(f,1,semanticSkillRows,">",heading)
+    local rows=d.pending; local order=semanticServerOrder[query]
+    eq(#rows,10); eq(rows[1].display_text,heading)
+    for index,fixtureIndex in ipairs(order) do
+      local row=rows[index+1]; eq(row.display_text,groupedWeaponRaw(semanticSkillRows[fixtureIndex]))
+      eq(row.category,"neutral"); eq(row.style_id,nil); eq(row.remove,nil)
+    end
+    for index=#order+2,#rows do eq(rows[index].remove,true) end
+    f:advance(0); eq(f.lines[1],heading)
+    for index,fixtureIndex in ipairs(order) do eq(f.lines[index+1],groupedWeaponRaw(semanticSkillRows[fixtureIndex])) end
+    eq(f.deletions,9-#order); eq(f.replacements,#order+1); eq(f.lines[#order+2],">")
+    eq(f.lines[#order+3],nil); eq(d.enabled,false); eq(d:filterPending(),false)
+    local previous=f.lastRows; semanticFeed(f,f.cursor+1,semanticSkillRows)
+    eq(f.lastRows,previous); eq(d.pending,nil); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("skill semantic groups keep membership when all style colors coincide or highlighting is disabled",function()
+  for _,query in ipairs(semanticQueries) do
+    for _,mode in ipairs({"custom","master-off","skills-off","style-off"}) do
+      local f,d=fakeSkills(true,{primary="number",direction="asc",secondary="none"})
+      local styles={}
+      for _,id in ipairs({"skill_combat","skill_utility","skill_ready"}) do
+        styles[id]={foreground="#AA11CC",enabled=mode~="style-off"}
+      end
+      f.settings={colorization={styles=styles,enabled=mode~="master-off",skills_enabled=mode~="skills-off"}}
+      local colors={}; f.api.setFgColor=function(r,g,b) colors[#colors+1]=table.concat({r,g,b},",") end
+      assert(d:requestFilter(query)); semanticFeed(f,1,semanticSkillRows)
+      local rows=d.pending; local order=semanticNumberOrder[query]
+      for index=2,#order+1 do eq(rows[index].style_id,"skill_"..(query=="train" and "ready" or query)) end
+      f:advance(0); assertSemanticOutput(f,1,order,true)
+      local custom=0; for _,color in ipairs(colors) do if color=="170,17,204" then custom=custom+1 end end
+      eq(custom,mode=="custom" and #order or 0)
+      eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+    end
+  end
+end)
+
+test("skill semantic no matches and empty responses preserve combat prompts and a single normalized notice",function()
+  local excluded={combat={semanticSkillRows[4],semanticSkillRows[3]},
+    utility={semanticSkillRows[2],semanticSkillRows[1]},train={semanticSkillRows[1],semanticSkillRows[3]}}
+  for _,query in ipairs(semanticQueries) do
+    for _,enabled in ipairs({true,false}) do
+      for _,empty in ipairs({true,false}) do
+        local f,d=fakeSkills(enabled); assert(d:requestFilter("  "..query:upper().."  "))
+        f:feed("Skill Remain Level",1)
+        if empty then f:feed(">",2)
+        else
+          f:feed(groupedWeaponRaw(excluded[query][1]),2); f:feed("Combat continues.",3)
+          f:feed(groupedWeaponRaw(excluded[query][2]),4); f:feed(">",5)
+        end
+        eq(d.pending[1].display_text,"No skills match: "..query); eq(#d.pending,empty and 1 or 3)
+        for index=2,#d.pending do eq(d.pending[index].remove,true); eq(d.pending[index].display_text,nil) end
+        f:advance(0); eq(f.lines[1],"No skills match: "..query)
+        eq(f.replacements,1); eq(f.deletions,empty and 0 or 2)
+        if empty then eq(f.lines[2],">"); eq(f.lines[3],nil)
+        else eq(f.lines[2],"Combat continues."); eq(f.lines[3],">"); eq(f.lines[4],nil) end
+        eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+      end
+    end
+  end
+end)
+
+test("skill semantic successive groups weapons prefixes all and bare requests retain independent tables",function()
+  for _,enabled in ipairs({true,false}) do
+    for _,boundary in ipairs({">",""}) do
+      local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+      local full=enabled and {4,1,9,3,6,2,7,5,8} or {1,2,3,4,5,6,7,8,9}
+      for _,case in ipairs({
+        {query="combat"},{query="utility"},{query="train"},{query="combat"},
+        {query="weapons",order={1}},{query="c",order={7}},{query="all",order=full},{order=full},
+      }) do
+        local prior={}; for row,value in pairs(f.lines) do prior[row]=value end
+        if case.query then assert(d:requestFilter(case.query)) else d:cancel() end
+        local order=case.order or (enabled and semanticNumberOrder[case.query] or semanticServerOrder[case.query])
+        local first=f.cursor+1; local deletions,replacements=f.deletions,f.replacements
+        semanticFeed(f,first,semanticSkillRows,boundary); f:advance(0)
+        assertSemanticOutput(f,first,order,enabled)
+        eq(f.deletions-deletions,9-#order)
+        eq(f.replacements-replacements,(enabled or case.query~=nil) and (#order+1) or 0)
+        eq(f.lines[first+#order+1],boundary); eq(f.lines[first+#order+2],nil)
+        for row,value in pairs(prior) do eq(f.lines[row],value) end
+        eq(d.enabled,enabled); eq(d:filterPending(),false); eq(d.response,nil); eq(d.pending,nil)
+        eq(next(f.timers),nil)
+      end
+      d:shutdown()
+    end
+  end
+end)
+
+test("skill semantic cancelled phase callbacks cannot change a later different group",function()
+  for queryIndex,query in ipairs(semanticQueries) do
+    local nextQuery=semanticQueries[queryIndex%#semanticQueries+1]
+    for _,phase in ipairs({"intent","collecting","blank","deferred"}) do
+      for _,action in ipairs({"cancel","disconnect","install","uninstall","menu","off"}) do
+        local f,d=fakeSkills(); assert(d:requestFilter(query))
+        if phase~="intent" then f:feed("Skill Remain Level",1); f:feed(groupedWeaponRaw(semanticSkillRows[1]),2) end
+        if phase=="blank" then f:feed("",3) elseif phase=="deferred" then f:feed(">",3) end
+        local oldTimer=d.timer; local late=f.timers[oldTimer].fn
+        if action=="cancel" then d:cancel()
+        elseif action=="disconnect" then f:emit("sysDisconnectionEvent")
+        elseif action=="install" then f:emit("sysInstallPackage",nil,"DragonsGateHUD")
+        elseif action=="uninstall" then f:emit("sysUninstallPackage",nil,"DragonsGateHUD")
+        elseif action=="menu" then f:feed("Dragon's Gate Menu",4)
+        else d:setEnabled(false) end
+        eq(f.timers[oldTimer],nil); eq(d:filterPending(),false); eq(d.pending,nil); eq(d.response,nil)
+        if not d.enabled then d:setEnabled(true) end
+        assert(d:requestFilter(nextQuery)); semanticFeed(f,10,semanticSkillRows)
+        local pending,timer,generation=d.pending,d.timer,d.generation
+        late(); late(); eq(d.pending,pending); eq(d.timer,timer); eq(d.generation,generation)
+        eq(f.replacements,0); eq(f.deletions,0); f:advance(0)
+        local changed=f.replacements; late(); eq(f.replacements,changed)
+        eq(changed,#semanticNumberOrder[nextQuery]+1); eq(f.deletions,9-#semanticNumberOrder[nextQuery])
+        eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+      end
+    end
+  end
+end)
+
+test("skill semantic expired requests and incomplete captures cannot narrow a later all response",function()
+  for _,query in ipairs(semanticQueries) do
+    for _,enabled in ipairs({true,false}) do
+      for _,phase in ipairs({"intent","collecting"}) do
+        local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+        assert(d:requestFilter(query)); local intent=f.timers[d.timer].fn
+        if phase=="collecting" then
+          f:advance(Display.RESPONSE_TIMEOUT-.25); f:feed("Skill Remain Level",1)
+          f:feed(groupedWeaponRaw(semanticSkillRows[1]),2)
+          local timer=d.timer; intent(); eq(d.timer,timer); eq(d.response.filter_query,query)
+        end
+        local late=f.timers[d.timer].fn; f:advance(Display.RESPONSE_TIMEOUT)
+        eq(d:filterPending(),false); eq(d.response,nil); eq(f.replacements,0); eq(f.deletions,0)
+        assert(d:requestFilter("all")); semanticFeed(f,10,semanticSkillRows)
+        local pending,timer=d.pending,d.timer; late(); eq(d.pending,pending); eq(d.timer,timer)
+        f:advance(0); eq(#f.lastRows,10); eq(f.deletions,0)
+        for _,row in ipairs(f.lastRows) do eq(row.remove,nil) end
+        eq(f.lines[20],">"); eq(d.enabled,enabled); eq(next(f.timers),nil); d:shutdown()
+      end
+    end
+  end
+end)
+
+test("skill semantic requests send only skill and keep the full sidebar collector snapshot in either observer order",function()
+  local Main=require("main"); local Collector=require("command_collector"); local Parser=require("command_parser")
+  for _,query in ipairs(semanticQueries) do
+    for _,enabled in ipairs({true,false}) do
+      for _,displayFirst in ipairs({true,false}) do
+        for _,boundary in ipairs({">",""}) do
+          local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+          local updates=0; local collector=Collector.new(f,Parser,function(_,key) if key=="skills" then updates=updates+1 end end)
+          local hud={started=true,adapter=f,skill_display=d,collector=collector}
+          local sent={}
+          function f:sendCommand(command) sent[#sent+1]=command; collector:onOutgoing(command); return true end
+          local feed=f.feed
+          function f:feed(text,row)
+            if not displayFirst then collector:onLine(text) end
+            feed(self,text,row)
+            if displayFirst then collector:onLine(text) end
+          end
+          assert(Main.requestSkills(hud," "..query:upper().." "))
+          eq(#sent,1); eq(sent[1],"skill"); eq(hud.skills_filter_sending,nil)
+          semanticFeed(f,1,semanticSkillRows,boundary); f:advance(0)
+          local snapshot=assert(collector.snapshot.skills); eq(#snapshot.items,9); eq(updates,1)
+          local byName={}; for _,skill in ipairs(snapshot.items) do byName[skill.name]=skill end
+          for _,skill in ipairs(semanticSkillRows) do
+            local retained=assert(byName[skill.name]); eq(retained.remain,skill.remain); eq(retained.level,skill.level)
+          end
+          local order=enabled and semanticNumberOrder[query] or semanticServerOrder[query]
+          assertSemanticOutput(f,1,order,enabled); eq(f.deletions,9-#order)
+          eq(collector.snapshot.skills,snapshot); eq(collector.active,nil)
+          f:advance(Display.RESPONSE_TIMEOUT+1); eq(#sent,1); eq(sent[1],"skill")
+          eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil)
+          collector:shutdown(); d:shutdown()
+        end
+      end
+    end
+  end
+end)

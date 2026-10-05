@@ -46,13 +46,19 @@ function Display.normalizeFilter(query)
   local normalized=query:lower():gsub(" +"," "):match("^ *(.-) *$")
   return normalized=="all" and "" or normalized
 end
-function Display.matchesFilter(skillName,query)
+function Display.matchesFilter(skillName,query,remain)
   local prefix=Display.normalizeFilter(query)
   if prefix==nil or type(skillName)~="string" or #skillName>Display.MAX_LINE_BYTES then return false end
   if prefix=="" then return true end
   local cleaned=name(plain(skillName)):lower()
   local canonical=canonicalNames[cleaned] or cleaned
   if prefix=="weapons" then return weaponSkillIds[Display.skillId(canonical)]==true end
+  -- Match the same semantic groups as the row styles, not configured RGB values.
+  -- Ready (green) rows belong to train only, even for combat/utility skills.
+  if prefix=="train" then return remain==0 end
+  if prefix=="combat" or prefix=="utility" then
+    return Display.category({name=canonical,remain=remain})==prefix
+  end
   -- The query is data: literal leading bytes only, never a Lua pattern or code.
   local function starts(value) return value:sub(1,#prefix)==prefix end
   if starts(canonical) or starts(Display.displayName(canonical):lower()) then return true end
@@ -143,7 +149,7 @@ function Display:finish()
   local items,sources={},{}
   for _,row in ipairs(response.rows) do
     sources[row.skill]=row.source_line
-    if query==nil or Display.matchesFilter(row.skill.name,query) then items[#items+1]=row.skill end
+    if query==nil or Display.matchesFilter(row.skill.name,query,row.skill.remain) then items[#items+1]=row.skill end
   end
   if self.enabled then items=SkillSort.sorted(items,self.sort) end
   local widths=self.enabled and columnWidths(items) or nil

@@ -289,8 +289,11 @@ function View:resizeInventoryContent(rows,minimumHeight)
 end
 local help_entries={
   {command="dghud help",description="Open this command guide."},
-  {command="skill | skill all",description="Show every possessed skill and refresh the saved Skills list."},
+  {command="skill | skill all",description="Show every possessed skill. All filters refresh the full Skills sidebar and also work with MAIN SKILLS formatting off."},
   {command="skill weapons",description="Show your Sharp, Blunt, Pole, Throw, and Missile Weapons plus Biting, Clawing, Breath Weapon, Webbing, and Stinging."},
+  {command="skill combat",description="Show blue combat skills with uses left. Green 0-use skills appear under skill train instead."},
+  {command="skill utility",description="Show yellow utility skills with uses left. Green 0-use skills appear under skill train instead."},
+  {command="skill train",description="Show green skills with 0 uses left, ready for training. Only displays the list; never sends a game train command."},
   {command="skill <prefix>",description="Show only matching skills: skill claw, skill bite, skill c, skill id, or skill ste. Matching ignores case and supports shortened display names."},
   {command="dghud colors [on|off|toggle|status]",description="Control all optional DGHUD output colors."},
   {command="dghud colors <feature> on|off|toggle|status",description="Toggle room, exits, currency, races, classes, travel, combat, spell, discovery, or illumination highlights."},

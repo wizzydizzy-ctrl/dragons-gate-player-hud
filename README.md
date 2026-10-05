@@ -89,6 +89,14 @@ Use `skill` or `skill all` to show every possessed skill. Add a case-insensitive
 
 Use `skill weapons` for a grouped list of your Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging. It shows only skills your character actually has, using your usual sorting and colors. The sidebar still receives the complete skill list.
 
+Three new group filters are ready for the next release (not yet available in v0.3.89):
+
+- `skill combat` — non-ready combat rows (blue by default), excluding all zero-use rows.
+- `skill utility` — non-ready utility rows (yellow by default), excluding all zero-use rows.
+- `skill train` — all zero-use rows (green by default), from either category. Display only; sends no game training command.
+
+These groups ignore case and use skill category and remaining uses, even with customized or disabled colors. Other arguments remain literal name prefixes, and `skill weapons` still includes matching zero-use skills. Every filter affects only one main-display response and keeps the full sidebar list. With **MAIN SKILLS** formatting off, all filters still narrow the raw game output while preserving its row format and order.
+
 **OPTIONS → Skill Settings** keeps the **MAIN SKILLS** formatting toggle (on by default) and separate sorting for **Main Display** and **Right Sidebar**. Each offers **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)** as a primary key, ascending or descending order, and an optional secondary key with its own direction. Both default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
 Sidebar ordering changes immediately reorder existing rows. Main ordering changes apply to the next complete `skill` output, leaving previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and updates. See [Skill Settings](docs/OPTIONS_AND_DISPLAY.md#skill-settings).

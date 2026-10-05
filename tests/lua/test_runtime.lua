@@ -3155,3 +3155,181 @@ test("skill weapons runtime native send forwards one raw skill and never expands
     assert(ok,err)
   end)
 end)
+
+-- Group expectations are independent of matchesFilter/category: include ready
+-- combat, ready utility, unknown skills, and names resembling group keywords.
+local groupedSkillItems={}
+for index,item in ipairs(weaponSkillItems) do groupedSkillItems[index]=item end
+groupedSkillItems[21]={"Future Art",0,6}
+groupedSkillItems[22]={"Combat Theory",11,6}
+groupedSkillItems[23]={"Utility Research",13,6}
+groupedSkillItems[24]={"Train Lore",7,6}
+local groupedSkillCases={
+  {query="combat",raw={1,3,5,6,7,9,11,12,16,19,20},sorted={6,19,20,12,5,3,9,7,16,11,1},category="combat"},
+  {query="utility",raw={4,13,17,18,22,23,24},sorted={18,17,4,13,24,22,23},category="utility"},
+  {query="train",raw={2,8,10,14,15,21},sorted={10,8,2,21,15,14},category="ready"},
+}
+local function assertGroupedSkillRows(f,case,enabled)
+  local expected=enabled and case.sorted or case.raw
+  local rows=weaponOutputRows(f); eq(#rows,#expected)
+  local short={ ["Sharp Weapons"]="Sharps",["Blunt Weapons"]="Blunts",["Pole Weapons"]="Poles",
+    ["Throw Weapons"]="Throws",["Missile Weapons"]="Missiles" }
+  for index,itemIndex in ipairs(expected) do
+    local item=groupedSkillItems[itemIndex]; local row=rows[index]
+    if enabled then
+      local label=row.display_text:match("^%s*[%d?]+%s%s+(.-)%s%s+%d+%s+%d+%s*$")
+      eq(label,short[item[1]] or item[1])
+      local level,remain=row.display_text:match("(%d+)%s+(%d+)%s*$")
+      eq(tonumber(level),item[3]); eq(tonumber(remain),item[2])
+      eq(row.category,case.category); eq(row.style_id,"skill_"..case.category)
+    else
+      eq(row.display_text,weaponRawRow(item)); eq(row.category,"neutral"); eq(row.style_id,nil)
+    end
+  end
+end
+
+test("skill groups normalize runtime aliases and filter styles after complete sidebar capture",function()
+  for _,case in ipairs(groupedSkillCases) do
+    for _,query in ipairs({case.query,case.query:upper(),"  "..case.query:upper().."  "}) do
+      for _,enabled in ipairs({true,false}) do
+        for _,displayFirst in ipairs({false,true}) do
+          for _,boundary in ipairs({">",""}) do
+            withSkillPrefix(enabled,function(f,hud)
+              assert(aliasCallback(f,skillPrefixPattern)({"sKiLl "..query,query}))
+              eq(#f.sentCommands,1); eq(f.sentCommands[1],"skill"); eq(f.skillSendOwnership[1],true)
+              eq(hud.skill_display.filter_query,case.query)
+              local raw=assert(hud.collector.active).lines
+              local response=weaponSkillResponse(f,hud,groupedSkillItems,displayFirst,1,boundary)
+              eq(#f.skillBatches,0); eq(#raw,#response.lines)
+              for index,line in ipairs(response.lines) do eq(raw[index],line) end
+              flushSkillPrefix(f,hud)
+              eq(#f.skillBatches,1); assertGroupedSkillRows(f,case,enabled)
+              assertWeaponSnapshot(hud,groupedSkillItems); assertWeaponQueryComplete(f,hud,response)
+              eq(hud:mainSkillsEnabled(),enabled); eq(f.savedDisplaySettings,nil)
+            end)
+          end
+        end
+      end
+    end
+  end
+end)
+
+test("skill group membership remains semantic when colors are disabled or customized",function()
+  for _,config in ipairs({{enabled=false,skills_enabled=false},
+      {styles={skill_combat={foreground="#ffff00"},skill_utility={foreground="#00ff00"},skill_ready={foreground="#0000ff"}}}}) do
+    for _,case in ipairs(groupedSkillCases) do
+      withSkillPrefix(true,function(f,hud)
+        hud.settings.colorization=config
+        assert(hud:requestSkills(case.query))
+        local response=weaponSkillResponse(f,hud,groupedSkillItems)
+        flushSkillPrefix(f,hud); assertGroupedSkillRows(f,case,true)
+        assertWeaponSnapshot(hud,groupedSkillItems); assertWeaponQueryComplete(f,hud,response)
+      end)
+    end
+  end
+end)
+
+test("skill groups never train clear history or retain filtering in bare and all followups",function()
+  for _,case in ipairs(groupedSkillCases) do
+    for _,enabled in ipairs({true,false}) do
+      for _,action in ipairs({"bare","all"}) do
+        withSkillPrefix(enabled,function(f,hud)
+          f.skillConsole[0]="Retained earlier game output"
+          local entry={category="ROOM",message="Retained chat history",line="Retained chat history",source="builtin"}
+          assert(hud.chat:accept(entry)); local history=hud.chat.history.items; local saved=f.chatEntries
+          local historyCount,savedCount=#history,#saved
+          hud.clearVisibleChat=function() error("skill filtering must not clear visible chat") end
+          hud.clearSavedChat=function() error("skill filtering must not delete saved chat") end
+          f.requestPurge=function() error("skill filtering must not purge history") end
+          assert(aliasCallback(f,skillPrefixPattern)(case.query))
+          local response=weaponSkillResponse(f,hud,groupedSkillItems)
+          flushSkillPrefix(f,hud); assertGroupedSkillRows(f,case,enabled)
+          assertWeaponQueryComplete(f,hud,response)
+          local prior={}; for row,text in pairs(f.skillConsole) do prior[row]=text end
+          local batches=#f.skillBatches
+          if action=="bare" then f:sendCommand("skill")
+          else assert(aliasCallback(f,skillPrefixPattern)({"SKILL ALL","ALL"})) end
+          eq(#f.sentCommands,2)
+          local full=weaponSkillResponse(f,hud,groupedSkillItems,true,100)
+          flushSkillPrefix(f,hud)
+          eq(#f.skillBatches,batches+((enabled or action=="all") and 1 or 0))
+          if enabled or action=="all" then eq(#weaponOutputRows(f),#groupedSkillItems)
+          else
+            for index,item in ipairs(groupedSkillItems) do eq(f.skillConsole[full.row_numbers[index]],weaponRawRow(item)) end
+          end
+          for row,text in pairs(prior) do eq(f.skillConsole[row],text) end
+          eq(hud.chat.history.items,history); eq(#history,historyCount); eq(history[historyCount],entry)
+          eq(f.chatEntries,saved); eq(#saved,savedCount); eq(saved[savedCount],entry)
+          assertWeaponSnapshot(hud,groupedSkillItems); assertWeaponQueryComplete(f,hud,full,2)
+        end)
+      end
+    end
+  end
+end)
+
+test("manual raw skill cancels every pending group phase without duplicate commands or stale callbacks",function()
+  for _,case in ipairs(groupedSkillCases) do
+    for _,phase in ipairs({"requested","collecting","pending"}) do
+      for _,enabled in ipairs({true,false}) do
+        withSkillPrefix(enabled,function(f,hud)
+          assert(hud:requestSkills(case.query))
+          if phase=="collecting" then
+            skillPrefixLine(f,hud,"Skill Remain Level",1); skillPrefixLine(f,hud,weaponRawRow(groupedSkillItems[1]),2)
+          elseif phase=="pending" then weaponSkillResponse(f,hud,groupedSkillItems) end
+          local timer=hud.skill_display.timer; local late=assert(f.timers[timer])
+          f:sendCommand("skill"); eq(#f.sentCommands,2)
+          eq(hud.skill_display:filterPending(),false); eq(f.timers[timer],nil)
+          late(); eq(#f.skillBatches,0)
+          local response=weaponSkillResponse(f,hud,groupedSkillItems,true,100)
+          flushSkillPrefix(f,hud)
+          if enabled then eq(#weaponOutputRows(f),#groupedSkillItems)
+          else
+            eq(#f.skillBatches,0)
+            for index,item in ipairs(groupedSkillItems) do eq(f.skillConsole[response.row_numbers[index]],weaponRawRow(item)) end
+          end
+          assertWeaponSnapshot(hud,groupedSkillItems); assertWeaponQueryComplete(f,hud,response,2)
+        end)
+      end
+    end
+  end
+end)
+
+test("skill group invalid queries cannot send commands mutate history or replace an active filter",function()
+  for _,enabled in ipairs({true,false}) do
+    withSkillPrefix(enabled,function(f,hud)
+      local callback=assert(aliasCallback(f,skillPrefixPattern))
+      local prepared=0; local request=hud.skill_display.requestFilter
+      hud.skill_display.requestFilter=function(self,query) prepared=prepared+1; return request(self,query) end
+      for _,query in ipairs({false,42,{},"train\nquit","combat\0","utility\127",string.rep("t",129)}) do
+        local ok,err=callback({"skill invalid",query}); eq(ok,nil); assert(type(err)=="string")
+        eq(f.sentCommands,nil); eq(prepared,0); eq(hud.skill_display:filterPending(),false)
+      end
+      assert(callback("train")); eq(prepared,1)
+      local timer=hud.skill_display.timer; local active=hud.collector.active
+      local ok,err=callback({"skill train\rquit","train\rquit"}); eq(ok,nil); assert(type(err)=="string")
+      eq(prepared,1); eq(#f.sentCommands,1); eq(hud.skill_display.timer,timer)
+      eq(hud.collector.active,active); eq(hud.skill_display.filter_query,"train")
+      local response=weaponSkillResponse(f,hud,groupedSkillItems)
+      flushSkillPrefix(f,hud); assertGroupedSkillRows(f,groupedSkillCases[3],enabled)
+      assertWeaponSnapshot(hud,groupedSkillItems); assertWeaponQueryComplete(f,hud,response)
+    end)
+  end
+end)
+
+test("skill group near keywords and command shaped text remain literal prefix data",function()
+  local cases={{query="com",index=22},{query="util",index=23},{query="tra",index=24},
+    {query="train;quit"},{query="combat.*"},{query="utility extra"}}
+  for _,case in ipairs(cases) do
+    for _,enabled in ipairs({true,false}) do
+      withSkillPrefix(enabled,function(f,hud)
+        assert(aliasCallback(f,skillPrefixPattern)({"skill "..case.query,case.query}))
+        local response=weaponSkillResponse(f,hud,groupedSkillItems)
+        flushSkillPrefix(f,hud)
+        if case.index then
+          assertGroupedSkillRows(f,{raw={case.index},sorted={case.index},category="utility"},enabled)
+        else eq(#weaponOutputRows(f),0); eq(f.skillConsole[1],"No skills match: "..case.query) end
+        assertWeaponSnapshot(hud,groupedSkillItems); assertWeaponQueryComplete(f,hud,response)
+      end)
+    end
+  end
+end)

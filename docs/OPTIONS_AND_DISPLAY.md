@@ -98,17 +98,22 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 ### Show just the skills you want
 
-Enter `skill` or `skill all` for the full list. To narrow the main console output, add the beginning of a skill name:
+Enter `skill` or `skill all` for the full list. To narrow one main-console response, use an exact group name or the beginning of a skill name:
 
 - `skill claw` or `skill clawing` — Clawing.
 - `skill bite` — Biting.
 - `skill weapons` — Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging; only skills you have are shown.
+- `skill combat` — non-ready combat rows (blue by default), excluding all zero-use rows.
+- `skill utility` — non-ready utility rows (yellow by default), excluding all zero-use rows.
+- `skill train` — all zero-use rows (green by default), from either category. Display only; sends no game training command.
 - `skill c` — all your skills beginning with C.
 - `skill id` — all your Identify skills; `skill id weapon` narrows to Identify Weapon Quality.
 - `skill s` — all your skills beginning with S.
 - `skill ste` — Stealth, plus any future skill beginning with Ste.
 
-Matching ignores case and accepts full names or shortened display names. Apart from the special `weapons` group, this is a literal prefix search, not a regular expression. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; filtering also works with formatting off. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
+Matching ignores case and accepts full names or shortened display names. `weapons`, `combat`, `utility`, and `train` are exact group names; other arguments are literal name prefixes, not regular expressions. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; with formatting off, all filters still narrow the raw game output while preserving its row format and order. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
+
+The three new group filters are ready for the next release, not yet available in v0.3.89. They use skill category and remaining uses even if you customize or disable the colors. Zero-use combat and utility rows appear in `skill train`; `skill weapons` and name-prefix filters still include their matching zero-use skills.
 
 Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
 

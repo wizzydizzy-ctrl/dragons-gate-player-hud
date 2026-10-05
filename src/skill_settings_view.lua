@@ -6,6 +6,7 @@ function SkillSettingsView.attach(View,helpers)
 local skillSortKeys={"level","uses","name","number","ready","category"}
 local skillSortLabels={level="Level",uses="Remaining uses",name="Name",number="Skill number",ready="Training readiness<br>(0 uses)",category="Category<br>Combat / Utility",none="None"}
 local skillSortDirections={asc="Ascending",desc="Descending"}
+local skillFilterExamples="Main order changes on your next skill command; sidebar order changes when you save.<br>skill combat: blue skills with uses left.<br>skill utility: yellow skills with uses left.<br>skill train: green skills with 0 uses. Displays only; does not train.<br>The sidebar keeps all skills. Filters still work with custom colors and formatting OFF.<br>skill weapons and name prefixes also work."
 local skillSortHelp="Training readiness: ascending puts 0 uses first; descending puts other skills first.<br>Category: ascending puts Combat first; descending puts Utility first.<br>Save applies both tabs; Cancel discards this draft."
 local function skillSettingsSnapshot(display)
   display=type(display)=="table" and display or {}
@@ -173,7 +174,7 @@ function View:renderSkillSettings()
   end
   self.skill_settings_title:setStyleSheet("background:transparent;color:"..t.accent..";font-weight:700;")
   self.skill_settings_title:echo(View.withFont("<b>SKILL SETTINGS</b>",font+3))
-  text(self.skill_settings_text,"Main display order applies on your next skill command.<br>Sidebar order applies when you save. All skills remain visible.")
+  text(self.skill_settings_text,skillFilterExamples)
   for _,key in ipairs({"main","sidebar"}) do button(self.skill_settings_tabs[key],key=="main" and "MAIN DISPLAY" or "SIDEBAR",self.skill_settings_target==key) end
   button(self.skill_settings_format,"MAIN SKILLS FORMAT: "..(self.skill_settings_draft.main_skills and "ON" or "OFF"),self.skill_settings_draft.main_skills)
   button(self.skill_settings_preset,"LEVEL THEN USES<br>Highest level, fewest uses",false)
@@ -214,7 +215,13 @@ function View:layoutSkillSettings(layout)
   self.skill_settings_font=math.max(13,math.min(15,tonumber(layout.body_font) or 13))
   local font=self.skill_settings_font; local row=font*2+12; local y=0; local gap=6
   local function full(widget,h) place(widget,0,y,inner,h); y=y+h+gap end
-  full(self.skill_settings_text,math.ceil(132/math.max(1,math.floor(inner/(font*.58))))*(font+6))
+  local hintRows=0
+  local hintColumns=math.max(1,math.floor(inner/(font*.65)))
+  for line in (skillFilterExamples.."<br>"):gmatch("(.-)<br>") do
+    local plainLine=line:gsub("<[^>]+>","")
+    hintRows=hintRows+math.max(1,math.ceil(#plainLine/hintColumns))+1
+  end
+  full(self.skill_settings_text,hintRows*(font+6))
   local tabw=(inner-gap)/2
   place(self.skill_settings_tabs.main,0,y,tabw,row); place(self.skill_settings_tabs.sidebar,tabw+gap,y,tabw,row); y=y+row+gap
   full(self.skill_settings_format,row); full(self.skill_settings_preset,row+font)
