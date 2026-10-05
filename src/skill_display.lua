@@ -15,6 +15,12 @@ Display.skillId=SkillSort.skillId
 Display.combatCategory=SkillSort.combatCategory
 local shortNames={["sharp weapons"]="Sharps",["blunt weapons"]="Blunts",["pole weapons"]="Poles",
   ["throw weapons"]="Throws",["missile weapons"]="Missiles"}
+-- Only catalogued weapon/natural attacks belong to this named group. Do not
+-- treat Identify Weapon Quality, smithing, or every combat skill as a weapon.
+local weaponSkillIds={
+  [2]=true,[3]=true,[4]=true,[5]=true,[6]=true, -- Sharp, Blunt, Pole, Throw, Missile
+  [46]=true,[47]=true,[48]=true,[49]=true,[57]=true, -- Bite, Claw, Web, Breath, Sting
+}
 local filterAliases={
   ["identify gems/minerals"]={"id gems/minerals","id gems"},
   ["identify magick"]={"id magick"},
@@ -46,6 +52,7 @@ function Display.matchesFilter(skillName,query)
   if prefix=="" then return true end
   local cleaned=name(plain(skillName)):lower()
   local canonical=canonicalNames[cleaned] or cleaned
+  if prefix=="weapons" then return weaponSkillIds[Display.skillId(canonical)]==true end
   -- The query is data: literal leading bytes only, never a Lua pattern or code.
   local function starts(value) return value:sub(1,#prefix)==prefix end
   if starts(canonical) or starts(Display.displayName(canonical):lower()) then return true end

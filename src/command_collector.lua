@@ -38,10 +38,13 @@ function Collector:schedulePromptNudge(command)
   end)
 end
 function Collector:scheduleTimeout(active,delay,fn)
-  self.timeout=self.adapter:schedule(delay,function()
+  local timer
+  timer=self.adapter:schedule(delay,function()
+    if self.timeout~=timer or self.active~=active then return end
     self.timeout=nil
-    if self.active==active then fn() end
+    fn()
   end)
+  self.timeout=timer
 end
 function Collector:startRecovery(active)
   active.timeout_stage="recovery"

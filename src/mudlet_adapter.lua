@@ -546,10 +546,16 @@ function Adapter:replaceSkillOutput(rows,api)
   end)
   if not ok then return nil,tostring(err) end
   -- Map sorted skills into their original slots before this ordering step.
-  -- Longer text may insert wrapped buffer rows: lower slots must be done first.
+  -- Apply lower slots first so deletion cannot shift unprocessed coordinates.
   table.sort(segments,function(a,b) return a.line_number>b.line_number end)
   if hasRemovals then
-    local removedBeforeCursor=0
+    local removedBeforeCursor,removedRows=0,0
+    local refreshTail=false
+    if type(api.getScroll)=="function" and type(api.getLastLineNumber)=="function" and type(api.echo)=="function" then
+      local measured,scroll,last=pcall(function() return api.getScroll("main"),api.getLastLineNumber("main") end)
+      refreshTail=measured and type(scroll)=="number" and scroll>=0 and scroll%1==0
+        and type(last)=="number" and last>=0 and last%1==0 and scroll==last
+    end
     local applied,failure=pcall(function()
       for _,segment in ipairs(segments) do
         local current=api.getLines(segment.line_number,segment.line_number+1)
@@ -558,8 +564,12 @@ function Adapter:replaceSkillOutput(rows,api)
           assert(api.moveCursor(0,segment.line_number)==true,"Mudlet could not select a filtered skill row")
           local deleted,deleteErr=api.deleteLine()
           assert(deleted~=false and not (deleted==nil and deleteErr~=nil),"Mudlet could not hide a filtered skill row")
+          removedRows=removedRows+1
           if segment.line_number<originalLine then removedBeforeCursor=removedBeforeCursor+1 end
         else
+          -- Color-only highlighting can safely skip an unavailable row. A skill
+          -- replacement cannot: that would leave a different retained skill.
+          assert(api.moveCursor(0,segment.line_number)==true,"Mudlet could not select a retained skill row")
           local rendered,renderErr=self:applyLineColors({segment},api)
           assert(rendered,renderErr)
         end
@@ -569,6 +579,11 @@ function Adapter:replaceSkillOutput(rows,api)
     -- the player's cursor on the same prompt/output, accounting for hidden rows.
     pcall(api.deselect)
     pcall(api.moveCursor,originalColumn,math.max(0,originalLine-removedBeforeCursor))
+    -- Native deleteLine shrinks the buffer but not its painted tail viewport.
+    -- This batch runs after the trigger pass: an empty echo invokes Mudlet's
+    -- local console refresh without inserting output or sending a game command.
+    -- Also settle a partially changed buffer if a later native edit fails.
+    if removedRows>0 and refreshTail then pcall(api.echo,"main","") end
     if not applied then return nil,tostring(failure) end
     return true
   end
@@ -616,7 +631,8 @@ function Adapter:applyLineColors(segments,api)
       local selected=api.selectSection(start,length)
       if selected==false then error("Mudlet could not select the requested line segment") end
       if item.display_text and type(api.replace)=="function" then
-        api.replace(item.display_text)
+        local replaced,replaceErr=api.replace(item.display_text)
+        if replaced==false or (replaced==nil and replaceErr~=nil) then error("Mudlet could not replace the requested line segment") end
         selected=api.selectSection(start,utf16Units(item.display_text))
         if selected==false then error("Mudlet could not select the formatted notice") end
       end

@@ -498,7 +498,7 @@ test("skill filters use only leading full names shortened labels and the exact b
   end
   eq(Display.matchesFilter(" ** sTeAlTh  ","sTEal"),true)
   eq(Display.matchesFilter("Biting","BITE"),true); eq(Display.matchesFilter("Biting","bit"),true)
-  for _,query in ipairs({"bites","bite weapon","ting","weapons","gems","quality","steal.*"}) do
+  for _,query in ipairs({"bites","bite weapon","ting","weapon","gems","quality","steal.*"}) do
     eq(Display.matchesFilter("Biting",query),false)
     eq(Display.matchesFilter("Identify Weapon Quality",query),false)
     eq(Display.matchesFilter("Sharp Weapons",query),false)
@@ -770,5 +770,468 @@ test("filtered rewrites and removals keep every original coordinate and source g
     f.lines[changedRow]="Unrelated output."; f:advance(0)
     eq(f.replacements,0); eq(f.deletions,0); eq(f.lines[changedRow],"Unrelated output.")
     eq(f.lines[3],"Combat continues."); eq(f.lines[5],">"); d:shutdown()
+  end
+end)
+
+
+-- Multi-command regression coverage uses synthetic console rows and virtual time.
+local regressionSkillRows={
+  " Sharp Weapons       400 4"," Climbing       17 1",
+  " Channeling       0 9"," Stealth       3 2",
+}
+local function assertRegressionSkills(f,first,names,enabled)
+  if enabled then assert(f.lines[first]:match("^Number%s+Skill%s+LVL%s+USES$"))
+  else eq(f.lines[first],"Skill Remain Level") end
+  for index,expected in ipairs(names) do
+    local value=assert(f.lines[first+index])
+    if enabled then
+      assert(value:find(expected,1,true),"missing skill "..expected.." in "..value)
+    else
+      local raw
+      for _,source in ipairs(regressionSkillRows) do if source:find(expected,1,true) then raw=source end end
+      eq(value,assert(raw))
+    end
+  end
+end
+
+test("skill filter repeated prefixes then bare and all retain complete independent console tables",function()
+  for _,enabled in ipairs({true,false}) do
+    for _,boundary in ipairs({">",""}) do
+      local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+      f:feed("A notice before skills.",0)
+      local full=enabled and {"Sharps","Climbing","Stealth","Channeling"} or {"Sharp Weapons","Climbing","Channeling","Stealth"}
+      local commands={
+        {query="c",names={"Climbing","Channeling"}},{query="ste",names={"Stealth"}},
+        {query="c",names={"Climbing","Channeling"}},{names=full},{query="all",names=full},
+      }
+      for _,command in ipairs(commands) do
+        local history={}; for row,value in pairs(f.lines) do history[row]=value end
+        eq(d:filterPending(),false)
+        if command.query then assert(d:requestFilter(command.query))
+        else d:cancel() end -- The runtime cancels filter intent for manual bare skill.
+        local echo=f.cursor+1
+        f:feed(">skill"..(command.query and (" "..command.query) or ""),echo)
+        local first=echo+1; local previousRows=f.lastRows; local deleted=f.deletions
+        f:feed("Skill Remain Level",first)
+        for index,raw in ipairs(regressionSkillRows) do f:feed(raw,first+index) end
+        f:feed(boundary,first+5)
+        for index,raw in ipairs(regressionSkillRows) do eq(f.lines[first+index],raw) end
+        f:advance(0)
+        assertRegressionSkills(f,first,command.names,enabled)
+        eq(f.deletions-deleted,4-#command.names)
+        eq(f.lines[first+#command.names+1],boundary); eq(f.cursor,first+#command.names+1)
+        eq(f.lines[f.cursor+1],nil); eq(f.column,3)
+        for row,value in pairs(history) do eq(f.lines[row],value) end
+        if not enabled and not command.query then eq(f.lastRows,previousRows) end
+        eq(d.enabled,enabled); eq(d:filterPending(),false); eq(d.response,nil); eq(d.pending,nil)
+        eq(next(f.timers),nil)
+      end
+      d:shutdown()
+    end
+  end
+end)
+
+test("skill filters survive delayed headers rows and final prompts within their response deadlines",function()
+  for _,enabled in ipairs({true,false}) do
+    for _,boundary in ipairs({">",""}) do
+      local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+      assert(d:requestFilter("c")); local intentCallback=f.timers[d.timer].fn
+      f:feed(">skill c",0); f:advance(Display.RESPONSE_TIMEOUT-.25)
+      eq(d:filterPending(),true); eq(f.deletions,0)
+      f:feed("Skill Remain Level",1); local responseTimer=d.timer
+      intentCallback(); eq(d.timer,responseTimer); eq(d.response.filter_query,"c")
+      f:advance(2); f:feed(regressionSkillRows[1],2)
+      f:advance(2); f:feed(regressionSkillRows[2],3)
+      f:advance(.5); f:feed(regressionSkillRows[3],4)
+      eq(f.replacements,0); eq(f.deletions,0); eq(#d.response.rows,3)
+      local watchdog=f.timers[d.timer].fn
+      f:feed(boundary,5); watchdog(); eq(f.replacements,0)
+      f:advance(0); assertRegressionSkills(f,1,{"Climbing","Channeling"},enabled)
+      eq(f.deletions,1); eq(f.lines[4],boundary); eq(f.cursor,4)
+      eq(d:filterPending(),false); eq(next(f.timers),nil)
+      local replacements,deletions=f.replacements,f.deletions
+      f:advance(Display.RESPONSE_TIMEOUT+1)
+      f:feed("[0] 10/10 hp, 8/8 ftg >",5)
+      eq(f.lines[5],"[0] 10/10 hp, 8/8 ftg >")
+      eq(f.replacements,replacements); eq(f.deletions,deletions); eq(d.pending,nil)
+      eq(f.lines[6],nil); d:shutdown()
+    end
+  end
+end)
+
+test("skill filters cancel an internal blank boundary and let the final prompt supersede its callback",function()
+  for _,enabled in ipairs({true,false}) do
+    local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+    assert(d:requestFilter("c")); f:feed("Skill Remain Level",1)
+    f:feed(regressionSkillRows[1],2); f:feed("",3)
+    local internalTimer=d.timer; local internalCallback=f.timers[internalTimer].fn
+    f:feed("An enemy strikes you for 12 damage.",4); f:feed(regressionSkillRows[2],5)
+    f:feed(regressionSkillRows[3],6); f:feed(regressionSkillRows[4],7)
+    local collectingTimer=d.timer
+    internalCallback(); eq(d.timer,collectingTimer); eq(#d.response.rows,4)
+    f:advance(.25); eq(f.replacements,0); eq(f.deletions,0)
+    f:feed("",8); local finalTimer=d.timer; local finalCallback=f.timers[finalTimer].fn
+    f:feed("[0] 10/10 hp, 8/8 ftg >",9); local replacementTimer=d.timer
+    internalCallback(); finalCallback(); eq(d.timer,replacementTimer)
+    eq(f.timers[internalTimer],nil); eq(f.timers[finalTimer],nil)
+    local rows=d.pending; eq(#rows,5)
+    eq(rows[2].line_number,2); eq(rows[3].line_number,5)
+    eq(rows[4].remove,true); eq(rows[5].remove,true)
+    f:advance(0)
+    assert(f.lines[2]:find("Climbing",1,true)); assert(f.lines[5]:find("Channeling",1,true))
+    eq(f.lines[3],""); eq(f.lines[4],"An enemy strikes you for 12 damage.")
+    eq(f.lines[6],""); eq(f.lines[7],"[0] 10/10 hp, 8/8 ftg >")
+    eq(f.lines[8],nil); eq(f.cursor,7); eq(f.deletions,2); eq(f.replacements,3)
+    eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil)
+    d:shutdown()
+  end
+end)
+
+test("cancelled filter callbacks cannot change a subsequent bare or all skill response",function()
+  for _,enabled in ipairs({true,false}) do
+    for _,phase in ipairs({"intent","collecting","blank","deferred"}) do
+      for _,nextCommand in ipairs({"bare","all"}) do
+        local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+        f:feed(">skill ste",0); assert(d:requestFilter("ste"))
+        if phase~="intent" then
+          f:feed("Skill Remain Level",1); f:feed(regressionSkillRows[1],2); f:feed(regressionSkillRows[4],3)
+        end
+        if phase=="blank" then f:feed("",4) elseif phase=="deferred" then f:feed(">",4) end
+        local oldTimer=d.timer; local late=f.timers[oldTimer].fn
+        d:cancel(); eq(f.timers[oldTimer],nil)
+        f:feed(">skill"..(nextCommand=="all" and " all" or ""),f.cursor+1)
+        if nextCommand=="all" then assert(d:requestFilter("all")) end
+        local first=f.cursor+1; f:feed("Skill Remain Level",first)
+        for index,raw in ipairs(regressionSkillRows) do f:feed(raw,first+index) end
+        f:feed(">",first+5)
+        local timer,response,pending,generation=d.timer,d.response,d.pending,d.generation
+        late(); late()
+        eq(d.timer,timer); eq(d.response,response); eq(d.pending,pending); eq(d.generation,generation)
+        eq(f.replacements,0); eq(f.deletions,0)
+        f:advance(0)
+        local full=enabled and {"Sharps","Climbing","Stealth","Channeling"} or {"Sharp Weapons","Climbing","Channeling","Stealth"}
+        assertRegressionSkills(f,first,full,enabled)
+        eq(f.deletions,0); eq(f.lines[first+5],">"); eq(f.cursor,first+5)
+        if phase~="intent" then
+          eq(f.lines[1],"Skill Remain Level"); eq(f.lines[2],regressionSkillRows[1]); eq(f.lines[3],regressionSkillRows[4])
+        end
+        local replacements=f.replacements; late(); eq(f.replacements,replacements); eq(f.deletions,0)
+        eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+      end
+    end
+  end
+end)
+
+test("a deferred filtered response preserves later look output and interleaved combat",function()
+  for _,enabled in ipairs({true,false}) do
+    local f,d=fakeSkills(enabled); assert(d:requestFilter("ste"))
+    f:feed(">skill ste",0); f:feed("Skill Remain Level",1); f:feed(regressionSkillRows[1],2)
+    f:feed("An enemy strikes you for 12 damage.",3)
+    f:feed(regressionSkillRows[2],4); f:feed(regressionSkillRows[3],5); f:feed(regressionSkillRows[4],6)
+    f:feed(">",7); local replacement=d.timer
+    f:feed(">look",8); f:feed("A room description.",9); f:feed("[0] 10/10 hp, 8/8 ftg >",10)
+    eq(d.timer,replacement); eq(f.replacements,0); eq(f.deletions,0)
+    f:advance(0); assertRegressionSkills(f,1,{"Stealth"},enabled)
+    eq(f.lines[0],">skill ste"); eq(f.lines[3],"An enemy strikes you for 12 damage.")
+    eq(f.lines[4],">"); eq(f.lines[5],">look"); eq(f.lines[6],"A room description.")
+    eq(f.lines[7],"[0] 10/10 hp, 8/8 ftg >"); eq(f.lines[8],nil)
+    eq(f.cursor,7); eq(f.column,3); eq(f.replacements,2); eq(f.deletions,3)
+    f:advance(Display.RESPONSE_TIMEOUT+1); eq(f.replacements,2); eq(f.deletions,3)
+    eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("blank terminated no match filters preserve combat blanks and a delayed prompt exactly once",function()
+  for _,enabled in ipairs({true,false}) do
+    local f,d=fakeSkills(enabled); assert(d:requestFilter("nosuch"))
+    f:feed(">skill nosuch",0); f:feed("Skill Remain Level",1)
+    f:feed(regressionSkillRows[1],2); f:feed("Combat continues.",3); f:feed(regressionSkillRows[4],4)
+    f:feed("",5); local boundary=d.timer; local late=f.timers[boundary].fn
+    f:feed("An enemy retreats.",6); f:advance(0)
+    eq(f.lines[0],">skill nosuch"); eq(f.lines[1],"No skills match: nosuch")
+    eq(f.lines[2],"Combat continues."); eq(f.lines[3],""); eq(f.lines[4],"An enemy retreats.")
+    eq(f.lines[5],nil); eq(f.cursor,4); eq(f.deletions,2); eq(f.replacements,1)
+    eq(d:filterPending(),false); eq(d.pending,nil); eq(next(f.timers),nil)
+    late(); f:advance(Display.RESPONSE_TIMEOUT+1); f:feed(">",5)
+    eq(f.lines[3],""); eq(f.lines[4],"An enemy retreats."); eq(f.lines[5],">")
+    eq(f.replacements,1); eq(f.deletions,2); eq(d.enabled,enabled); eq(next(f.timers),nil)
+    assert(d:requestFilter("ste")); f:feed(">skill ste",6); f:feed("Skill Remain Level",7)
+    f:feed(regressionSkillRows[1],8); f:feed(regressionSkillRows[4],9); f:feed(">",10)
+    f:advance(0); assertRegressionSkills(f,7,{"Stealth"},enabled)
+    eq(f.lines[1],"No skills match: nosuch"); eq(f.lines[5],">"); eq(f.lines[9],">")
+    eq(f.lines[10],nil); eq(f.cursor,9); eq(f.deletions,3); eq(f.replacements,3)
+    eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+
+-- The named weapons group is an exact catalog allowlist, not a substring search.
+-- Keep fixtures independent of the production allowlist so accidental widening fails.
+local groupedWeaponCases={
+  {name="Sharp Weapons",id=2,remain=400,level=4},
+  {name="Blunt Weapons",id=3,remain=395,level=4},
+  {name="Pole Weapons",id=4,remain=400,level=4},
+  {name="Throw Weapons",id=5,remain=269,level=3},
+  {name="Missile Weapons",id=6,remain=550,level=5},
+  {name="Biting",id=46,remain=414,level=4},
+  {name="Clawing",id=47,remain=0,level=3},
+  {name="Breath Weapon",id=49,remain=200,level=2},
+  {name="Webbing",id=48,remain=25,level=3},
+  {name="Stinging",id=57,remain=0,level=2},
+}
+local groupedWeaponExcluded={
+  {name="Shield Parry",id=7,remain=0,level=99},
+  {name="First Aid",id=42,remain=0,level=98},
+  {name="Focus Force",id=10,remain=0,level=97},
+  {name="Weapon Smithing",id=35,remain=0,level=96},
+  {name="Identify Weapon Quality",id=32,remain=0,level=95},
+  {name="Future Weapons",remain=0,level=94},
+  {name="Weapons Training",remain=0,level=93},
+  {name="Swimming",id=23,remain=0,level=92},
+}
+local function groupedWeaponRaw(skill)
+  return " "..skill.name.."       "..skill.remain.." "..skill.level
+end
+local function groupedWeaponFixture()
+  local result={}
+  for _,skill in ipairs(groupedWeaponCases) do result[#result+1]=skill end
+  for _,skill in ipairs(groupedWeaponExcluded) do result[#result+1]=skill end
+  return result
+end
+local function groupedWeaponFeed(f,first,skills,boundary)
+  f:feed("Skill Remain Level",first)
+  for index,skill in ipairs(skills) do f:feed(groupedWeaponRaw(skill),first+index) end
+  f:feed(boundary or ">",first+#skills+1)
+end
+local function groupedWeaponIds(rows)
+  local ids={}
+  for index=2,#rows do
+    local row=rows[index]
+    if not row.remove then ids[#ids+1]=assert(row.display_text:match("^%s*(%S+)%s")) end
+  end
+  return table.concat(ids,",")
+end
+
+test("skill weapons exact normalized keyword includes only five weapons and five natural attacks",function()
+  eq(#groupedWeaponCases,10)
+  for _,query in ipairs({"weapons","WEAPONS","  WeApOnS   "}) do
+    eq(Display.normalizeFilter(query),"weapons")
+    local seen={}
+    for _,skill in ipairs(groupedWeaponCases) do
+      eq(Display.matchesFilter(skill.name,query),true)
+      local messy="\27[32m  ** "..skill.name:upper():gsub(" "," \t ").."  \27[0m"
+      eq(Display.matchesFilter(messy,query),true)
+      eq(Display.skillId(skill.name),skill.id); assert(not seen[skill.id]); seen[skill.id]=true
+    end
+  end
+end)
+
+test("skill weapons recognizes existing canonical shortened weapon names without broad aliases",function()
+  for alias,id in pairs({Sharps=2,Blunts=3,Poles=4,Throws=5,Missiles=6}) do
+    eq(Display.matchesFilter(alias,"weapons"),true)
+    eq(Display.matchesFilter(" ** "..alias:upper(),"  WEAPONS  "),true)
+    eq(Display.skillId(alias),id)
+  end
+  for _,uncatalogued in ipairs({"Claw","Bite","Breath","Web","Sting","Sharp","Blunt","Pole","Throw","Missile"}) do
+    eq(Display.matchesFilter(uncatalogued,"weapons"),false)
+  end
+end)
+
+test("skill weapons excludes support smithing identify and future arbitrary weapons prose",function()
+  local excluded={"Brawling","Shield Parry","First Aid","Focus Force","Quickdraw","Dodging","Disarming",
+    "Armor Smithing","Weapon Smithing","Identify Weapon Quality","ID Weapon","ID Weapon Quality",
+    "Weapons","Weapons Training","Future Weapons","Future Sharp Weapons","Sharp Weapons Training",
+    "Breath Weapons","Future Biting","Webbing Training","Quantum Weapons"}
+  for _,skill in ipairs(excluded) do
+    eq(Display.matchesFilter(skill,"weapons"),false)
+    eq(Display.matchesFilter(" ** "..skill:upper(),"  WEAPONS  "),false)
+    eq(Display.matchesFilter(skill,"all"),true)
+  end
+  for _,skill in ipairs(groupedWeaponExcluded) do eq(Display.matchesFilter(skill.name,"weapons"),false) end
+end)
+
+test("skill weapons reserves only the exact keyword and keeps singular and ordinary literal prefixes",function()
+  for _,query in ipairs({"weapon","weapo","weap","WEA"}) do
+    eq(Display.matchesFilter("Weapon Smithing",query),true)
+    eq(Display.matchesFilter("Weapons Training",query),true)
+    eq(Display.matchesFilter("Sharp Weapons",query),false)
+    eq(Display.matchesFilter("Biting",query),false)
+  end
+  eq(Display.matchesFilter("Clawing","c"),true)
+  eq(Display.matchesFilter("Climbing","c"),true)
+  eq(Display.matchesFilter("Stealth","ste"),true)
+  eq(Display.matchesFilter("Stinging","ste"),false)
+  eq(Display.matchesFilter("Identify Weapon Quality","id"),true)
+  eq(Display.matchesFilter("Biting","bite"),true)
+  eq(Display.matchesFilter("Webbing","w"),true)
+  for _,case in ipairs({
+    {query="weapons training",name="Weapons Training"},
+    {query="weaponsx",name="Weaponsx"},
+    {query="weapons.*",name="Weapons.* Training"},
+    {query="weapons;quit",name="Weapons;quit"},
+  }) do
+    eq(Display.matchesFilter(case.name,case.query),true)
+    for _,skill in ipairs(groupedWeaponCases) do eq(Display.matchesFilter(skill.name,case.query),false) end
+  end
+end)
+
+test("skill weapons enabled integration captures the full response then preserves ids sorting colors and aligned columns",function()
+  local f,d=fakeSkills(); local fixture=groupedWeaponFixture()
+  assert(d:requestFilter("  WEAPONS  ")); f:feed(">skill weapons",0)
+  f:feed("Skill Remain Level",1)
+  for index,skill in ipairs(fixture) do f:feed(groupedWeaponRaw(skill),1+index) end
+  eq(#d.response.rows,#fixture); eq(f.replacements,0); eq(f.deletions,0)
+  for index,skill in ipairs(fixture) do
+    eq(f.lines[1+index],groupedWeaponRaw(skill)); eq(d.response.rows[index].skill.name,skill.name)
+  end
+  f:feed(">",#fixture+2)
+  local rows=d.pending; eq(#rows,#fixture+1)
+  eq(groupedWeaponIds(rows),"6,3,4,2,46,47,48,5,57,49")
+  eq(rows[1].category,"neutral"); eq(rows[1].style_id,nil)
+  local byId={}; for _,skill in ipairs(groupedWeaponCases) do byId[skill.id]=skill end
+  local heading=string.format("%6s  %-13s  %3s  %4s","Number","Skill","LVL","USES")
+  eq(rows[1].display_text,heading)
+  for index=2,11 do
+    local row=rows[index]; local id=tonumber(row.display_text:match("^%s*(%d+)%s"))
+    local skill=assert(byId[id]); local category=skill.remain==0 and "ready" or "combat"
+    eq(row.category,category); eq(row.style_id,"skill_"..category); eq(row.remove,nil)
+    eq(row.display_text,string.format("%6d  %-13s  %3d  %4d",id,Display.displayName(skill.name),skill.level,skill.remain))
+    eq(#row.display_text,#heading)
+  end
+  for index=12,#rows do eq(rows[index].remove,true); eq(rows[index].display_text,nil) end
+  eq(f.replacements,0); eq(f.deletions,0); f:advance(0)
+  eq(f.lastRows,rows); eq(f.deletions,#fixture-10); eq(f.replacements,11)
+  eq(f.lines[0],">skill weapons"); eq(f.lines[12],">"); eq(f.lines[13],nil)
+  eq(f.cursor,12); eq(f.column,3); eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+end)
+
+test("skill weapons formatting off filters only possessed rows and leaves server order styling and toggle unchanged",function()
+  local f,d=fakeSkills(false); local fixture=groupedWeaponFixture()
+  assert(d:requestFilter("weapons")); groupedWeaponFeed(f,1,fixture)
+  local rows=d.pending; eq(#rows,#fixture+1); eq(rows[1].display_text,"Skill Remain Level")
+  for index,skill in ipairs(groupedWeaponCases) do
+    local row=rows[index+1]; eq(row.display_text,groupedWeaponRaw(skill))
+    eq(row.category,"neutral"); eq(row.style_id,nil); eq(row.remove,nil)
+  end
+  for index=12,#rows do eq(rows[index].remove,true) end
+  f:advance(0); eq(f.lines[1],"Skill Remain Level")
+  for index,skill in ipairs(groupedWeaponCases) do eq(f.lines[index+1],groupedWeaponRaw(skill)) end
+  eq(f.lines[12],">"); eq(f.lines[13],nil); eq(f.deletions,#fixture-10); eq(f.replacements,11)
+  eq(d.enabled,false); eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+end)
+
+test("skill weapons never invents missing weapons or natural attacks for a partial character skill list",function()
+  for _,enabled in ipairs({true,false}) do
+    local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+    local possessed={groupedWeaponCases[1],groupedWeaponCases[6],groupedWeaponExcluded[1]}
+    assert(d:requestFilter("weapons")); groupedWeaponFeed(f,1,possessed)
+    local rows=d.pending; eq(#rows,4); eq(rows[4].remove,true)
+    if enabled then eq(groupedWeaponIds(rows),"2,46")
+    else
+      eq(rows[2].display_text,groupedWeaponRaw(possessed[1]))
+      eq(rows[3].display_text,groupedWeaponRaw(possessed[2]))
+    end
+    f:advance(0); eq(f.deletions,1); eq(f.replacements,3); eq(f.lines[4],">"); eq(f.lines[5],nil)
+    eq(d.enabled,enabled); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("skill weapons no matches and empty responses show one notice without creating skills or deleting combat",function()
+  for _,enabled in ipairs({true,false}) do
+    for _,empty in ipairs({true,false}) do
+      local f,d=fakeSkills(enabled); assert(d:requestFilter(" WEAPONS "))
+      f:feed(">skill weapons",0); f:feed("Skill Remain Level",1)
+      if empty then f:feed(">",2)
+      else
+        f:feed(groupedWeaponRaw(groupedWeaponExcluded[1]),2)
+        f:feed("An enemy attacks you!",3)
+        f:feed(groupedWeaponRaw(groupedWeaponExcluded[4]),4); f:feed(">",5)
+      end
+      eq(d.pending[1].display_text,"No skills match: weapons")
+      eq(#d.pending,empty and 1 or 3); f:advance(0)
+      eq(f.lines[0],">skill weapons"); eq(f.lines[1],"No skills match: weapons")
+      eq(f.replacements,1); eq(f.deletions,empty and 0 or 2)
+      if empty then eq(f.lines[2],">"); eq(f.lines[3],nil)
+      else eq(f.lines[2],"An enemy attacks you!"); eq(f.lines[3],">"); eq(f.lines[4],nil) end
+      eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+    end
+  end
+end)
+
+test("skill weapons deferred integration keeps interleaved combat and subsequent full game output intact",function()
+  for _,enabled in ipairs({true,false}) do
+    local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+    assert(d:requestFilter("weapons")); f:feed(">skill weapons",0); f:feed("Skill Remain Level",1)
+    f:feed(groupedWeaponRaw(groupedWeaponExcluded[1]),2); f:feed("The acolyte hits you!",3)
+    f:feed(groupedWeaponRaw(groupedWeaponCases[6]),4); f:feed(groupedWeaponRaw(groupedWeaponCases[1]),5)
+    f:feed("Combat continues.",6); f:feed(groupedWeaponRaw(groupedWeaponExcluded[8]),7)
+    eq(#d.response.rows,4); f:feed(">",8); local pending=d.pending
+    f:feed(">look",9); f:feed("A room description.",10); f:feed("[0] 10/10 hp, 8/8 ftg >",11)
+    eq(f.replacements,0); eq(f.deletions,0)
+    eq(f.lines[2],groupedWeaponRaw(groupedWeaponExcluded[1]))
+    if enabled then eq(groupedWeaponIds(pending),"2,46")
+    else
+      eq(pending[2].display_text,groupedWeaponRaw(groupedWeaponCases[6]))
+      eq(pending[3].display_text,groupedWeaponRaw(groupedWeaponCases[1]))
+    end
+    eq(pending[4].remove,true); eq(pending[5].remove,true); f:advance(0)
+    eq(f.lines[0],">skill weapons"); eq(f.lines[3],"The acolyte hits you!")
+    eq(f.lines[5],"Combat continues."); eq(f.lines[6],">"); eq(f.lines[7],">look")
+    eq(f.lines[8],"A room description."); eq(f.lines[9],"[0] 10/10 hp, 8/8 ftg >")
+    eq(f.lines[10],nil); eq(f.cursor,9); eq(f.column,3); eq(f.replacements,3); eq(f.deletions,2)
+    eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("skill weapons successive grouped singular prefix all and bare queries never retain a previous filter",function()
+  for _,enabled in ipairs({true,false}) do
+    local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+    local fixture=groupedWeaponFixture()
+    local fullOrder=enabled and {1,2,3,4,5,11,13,18,15,14,12,6,7,9,8,10,16,17} or
+      {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18}
+    local groupedOrder=enabled and {1,2,3,4,5,6,7,9,8,10} or {1,2,3,4,5,6,7,8,9,10}
+    for _,case in ipairs({
+      {query="weapons",order=groupedOrder},{query="weapon",order={14,17}},
+      {query="c",order={7}},{query="all",order=fullOrder},{order=fullOrder},
+    }) do
+      local prior={}; for row,value in pairs(f.lines) do prior[row]=value end
+      if case.query then assert(d:requestFilter(case.query)) else d:cancel() end
+      local first=f.cursor+1; local deletions,replacements=f.deletions,f.replacements
+      groupedWeaponFeed(f,first,fixture); f:advance(0)
+      if enabled then assert(f.lines[first]:match("^Number%s+Skill%s+LVL%s+USES$"))
+      else eq(f.lines[first],"Skill Remain Level") end
+      for index,fixtureIndex in ipairs(case.order) do
+        local skill=fixture[fixtureIndex]; local text=assert(f.lines[first+index])
+        if enabled then
+          eq(text:match("^%s*(%S+)%s"),tostring(skill.id or "?"))
+          assert(text:find(Display.displayName(skill.name),1,true))
+        else eq(text,groupedWeaponRaw(skill)) end
+      end
+      eq(f.deletions-deletions,#fixture-#case.order)
+      eq(f.replacements-replacements,(enabled or case.query~=nil) and (#case.order+1) or 0)
+      eq(f.lines[first+#case.order+1],">"); eq(f.lines[first+#case.order+2],nil)
+      for row,value in pairs(prior) do eq(f.lines[row],value) end
+      eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil)
+    end
+    d:shutdown()
+  end
+end)
+
+test("skill weapons honors independent chosen number name and uses orders without changing categories",function()
+  for _,case in ipairs({
+    {sort={primary="number",direction="asc",secondary="none"},ids="2,3,4,5,6,46,47,48,49,57"},
+    {sort={primary="number",direction="desc",secondary="none"},ids="57,49,48,47,46,6,5,4,3,2"},
+    {sort={primary="name",direction="asc",secondary="none"},ids="46,3,49,47,6,4,2,57,5,48"},
+    {sort={primary="uses",direction="asc",secondary="none"},ids="47,57,48,49,5,3,4,2,46,6"},
+  }) do
+    local f,d=fakeSkills(true,case.sort); assert(d:requestFilter("weapons"))
+    groupedWeaponFeed(f,1,groupedWeaponCases); eq(groupedWeaponIds(d.pending),case.ids)
+    for index=2,#d.pending do
+      local row=d.pending[index]; local id=tonumber(row.display_text:match("^%s*(%d+)%s"))
+      local ready=id==47 or id==57; eq(row.category,ready and "ready" or "combat")
+      eq(row.style_id,ready and "skill_ready" or "skill_combat"); eq(row.remove,nil)
+    end
+    f:advance(0); eq(f.deletions,0); eq(f.replacements,11); eq(f.lines[12],">")
+    eq(d.sort.primary,case.sort.primary); eq(d.sort.direction,case.sort.direction); d:shutdown()
   end
 end)

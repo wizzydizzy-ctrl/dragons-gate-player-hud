@@ -2050,6 +2050,18 @@ test("help overlay distinguishes commands descriptions and warnings",function()
   eq(view.help_content.message:find(view.settings.theme.hp,1,true)~=nil,true)
 end)
 
+test("weapons skill group appears in the visible and copyable help guide",function()
+  local view=chatView(); local copied
+  view:setCopyTextCallback(function(value) copied=value; return true end)
+  view:applyLayout(require("layout").compute(1000,700)); view:showHelp()
+  assert(view.help_copy.click()); assert(type(copied)=="string")
+  for _,fragment in ipairs({"skill weapons","Sharp, Blunt, Pole, Throw, and Missile Weapons",
+      "Biting, Clawing, Breath Weapon, Webbing, and Stinging"}) do
+    assert(view.help_content.message:find(fragment,1,true),"missing visible weapons help: "..fragment)
+    assert(copied:find(fragment,1,true),"missing copyable weapons help: "..fragment)
+  end
+end)
+
 test("help overlay remains bounded and readable at every layout mode",function()
   local view=chatView(); view:showHelp()
   for _,size in ipairs({{420,500},{760,700},{800,650},{1200,800},{1920,1080}}) do

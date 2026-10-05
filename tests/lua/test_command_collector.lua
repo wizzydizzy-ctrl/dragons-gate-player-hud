@@ -313,6 +313,51 @@ test("command-specific timeout keeps slower skill collection bounded",function()
   eq(f:hasDelay(3),true); eq(f:fireDelay(3),true); eq(c.active.command,"skill"); eq(c.active.timeout_stage,"recovery")
   eq(f:fireDelay(3),true); eq(c.active.timeout_stage,"drain"); eq(f:fireDelay(.5),true); eq(c.active,nil)
 end)
+test("collector stale timeout ownership survives cancellation and later captures in every timeout stage",function()
+  for _,stage in ipairs({"initial","recovery","drain"}) do
+    for _,action in ipairs({"command","disconnect","restart","shutdown"}) do
+      local f=fake(); local changes=0
+      local c=Collector.new(f,Parser,function() changes=changes+1 end); assert(c:start()); f:outgoing("skill")
+      if stage~="initial" then assert(f:fireDelay(3)) end
+      if stage=="drain" then assert(f:fireDelay(3)) end
+      eq(c.active.timeout_stage,stage)
+      local retiredActive,retiredTimer=c.active,c.timeout; local late=assert(f.timers[retiredTimer])
+      if action=="command" then f:outgoing("skill")
+      elseif action=="disconnect" then f:disconnect(); f:outgoing("skill")
+      elseif action=="restart" then assert(c:restartRefresh())
+      else assert(c:shutdown()); assert(c:start()); f:outgoing("skill") end
+      local active,timer,nudge=c.active,c.timeout,c.prompt_nudge
+      local callback=assert(f.timers[timer]); local sent,nextID=#f.sent,f.next
+      assert(active~=retiredActive); assert(timer~=retiredTimer); eq(f.timers[retiredTimer],nil)
+      late()
+      eq(c.active,active); eq(c.timeout,timer); eq(c.prompt_nudge,nudge)
+      eq(active.timeout_stage,"initial"); eq(f.timers[timer],callback)
+      eq(#f.sent,sent); eq(f.next,nextID); eq(changes,0); eq(next(c.snapshot),nil)
+      c:cancelActive(); eq(f.timers[timer],nil)
+      if nudge then eq(f.timers[nudge],nil) end
+      assert(c:shutdown()); eq(f:owned(),0)
+    end
+  end
+end)
+test("collector stale timeout ownership cannot replay earlier stages of the same active capture",function()
+  local f=fake(); local changes=0
+  local c=Collector.new(f,Parser,function() changes=changes+1 end); assert(c:start()); f:outgoing("skill")
+  local active=c.active; local initial=assert(f.timers[c.timeout])
+  assert(f:fireDelay(3)); eq(c.active,active); eq(active.timeout_stage,"recovery")
+  local recoveryTimer=c.timeout; local recovery=assert(f.timers[recoveryTimer]); local nextID=f.next
+  initial()
+  eq(c.active,active); eq(c.timeout,recoveryTimer); eq(active.timeout_stage,"recovery")
+  eq(f.timers[recoveryTimer],recovery); eq(f.next,nextID); eq(#f.sent,0); eq(changes,0)
+  assert(f:fireDelay(3)); eq(c.active,active); eq(active.timeout_stage,"drain")
+  local drainTimer=c.timeout; local drain=assert(f.timers[drainTimer]); nextID=f.next
+  initial(); recovery()
+  eq(c.active,active); eq(c.timeout,drainTimer); eq(active.timeout_stage,"drain")
+  eq(f.timers[drainTimer],drain); eq(f.next,nextID); eq(#f.sent,0); eq(changes,0)
+  assert(f:fireDelay(.5)); eq(c.active,nil); eq(c.timeout,nil)
+  initial(); recovery(); drain()
+  eq(c.active,nil); eq(c.timeout,nil); eq(#f.sent,0); eq(changes,0)
+  assert(c:shutdown()); eq(f:owned(),0)
+end)
 test("delayed output during recovery remains owned by and completes original command",function()
   local f=fake(); local c=Collector.new(f,Parser,function() end); c:start(); f:line("Welcome to Dragon's Gate, Test!")
   eq(f:fireDelay(2.5),true); eq(c.active.command,"inventory"); f:lines(inventory)

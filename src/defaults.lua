@@ -6,7 +6,7 @@ return {
   view_contract = "__DGHUD_VIEW_CONTRACT__",
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.3.88",
+  version = "0.3.89",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   display = { side_text_scale = 1.0, auto_wrap = true, align_input = false, main_skills = true,
     main_skill_sort = {primary="level",direction="desc",secondary="uses",secondary_direction="asc"},

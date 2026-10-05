@@ -26,6 +26,137 @@ local function console(lines,settings)
   local adapter=Adapter.new(); adapter.settings={colorization=settings or {}}
   return f,api,adapter
 end
+
+-- Mudlet deletes buffer rows without changing the painted viewport. Its empty
+-- main-console echo refreshes tail mode but does not add a line or send a command.
+local function viewportConsole(lines,scroll)
+  local f,api,a=console(lines)
+  local function lastLine()
+    local last=0
+    for row in pairs(f.lines) do if type(row)=="number" then last=math.max(last,row) end end
+    return last
+  end
+  f.cursor=lastLine(); f.visibleLast=scroll or f.cursor; f.tail=scroll==nil; f.refreshes=0
+  api.getLastLineNumber=function(window) eq(window,"main"); return lastLine() end
+  api.getScroll=function(window) eq(window,"main"); return math.min(f.visibleLast,lastLine()) end
+  api.echo=function(window,text)
+    eq(window,"main"); eq(text,"")
+    f.refreshes=f.refreshes+1
+    if f.tail then f.visibleLast=lastLine() end
+    return true
+  end
+  return f,api,a,lastLine
+end
+local function filteredViewportRows(lines)
+  return {
+    {line_number=1,source_line=lines[1],display_text="Number  Skill    LVL  USES"},
+    {line_number=2,source_line=lines[2],display_text="    47  Clawing    3   201",style_id="skill_combat"},
+    {line_number=4,source_line=lines[4],remove=true},
+    {line_number=5,source_line=lines[5],remove=true},
+  }
+end
+local function viewportLines()
+  return {[1]="Skill Remain Level",[2]=" Biting       400 4",[3]="An enemy attacks!",
+    [4]=" Clawing       201 3",[5]=" Swimming       100 1",[6]=">"}
+end
+
+test("filtered skills refresh the tail viewport immediately without new output",function()
+  local lines=viewportLines(); local f,api,a,lastLine=viewportConsole(lines)
+  assert(a:replaceSkillOutput(filteredViewportRows(lines),api))
+  eq(f.visibleLast,lastLine()); eq(f.refreshes,1)
+  eq(f.lines[3],"An enemy attacks!"); eq(f.lines[4],">"); eq(f.lines[5],nil)
+  eq(f.cursor,4); eq(f.column,2); eq(f.deleted,2)
+end)
+test("no-match filtering refreshes once and leaves only its message and existing prompt",function()
+  local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]=" Clawing       201 3",[4]=">"}
+  local f,api,a,lastLine=viewportConsole(lines)
+  assert(a:replaceSkillOutput({{line_number=1,source_line=lines[1],display_text="No skills match: xyz"},
+    {line_number=2,source_line=lines[2],remove=true},{line_number=3,source_line=lines[3],remove=true}},api))
+  eq(f.visibleLast,lastLine()); eq(f.refreshes,1); eq(f.lines[1],"No skills match: xyz")
+  eq(f.lines[2],">"); eq(f.lines[3],nil); eq(f.cursor,2)
+end)
+test("filtered skills do not pull a reader out of scrollback",function()
+  local lines=viewportLines(); local f,api,a=viewportConsole(lines,2)
+  assert(a:replaceSkillOutput(filteredViewportRows(lines),api))
+  eq(f.visibleLast,2); eq(f.tail,false); eq(f.refreshes,0)
+  eq(f.cursor,4); eq(f.lines[4],">")
+end)
+test("optional viewport APIs cannot block skill filtering or add output",function()
+  for _,mode in ipairs({"missing-scroll","missing-last","missing-echo","scroll-error","last-error",
+      "negative","fractional","nan","infinite","string","echo-error"}) do
+    local lines=viewportLines(); local f,api,a=viewportConsole(lines)
+    if mode=="missing-scroll" then api.getScroll=nil
+    elseif mode=="missing-last" then api.getLastLineNumber=nil
+    elseif mode=="missing-echo" then api.echo=nil
+    elseif mode=="scroll-error" then api.getScroll=function() error("unavailable") end
+    elseif mode=="last-error" then api.getLastLineNumber=function() error("unavailable") end
+    elseif mode=="echo-error" then api.echo=function() error("unavailable") end
+    else
+      api.getScroll=function()
+        if mode=="negative" then return -1 elseif mode=="fractional" then return 1.5
+        elseif mode=="nan" then return 0/0 elseif mode=="infinite" then return math.huge end
+        return "6"
+      end
+    end
+    assert(a:replaceSkillOutput(filteredViewportRows(lines),api))
+    eq(f.refreshes,0); eq(f.deleted,2); eq(f.lines[4],">"); eq(f.lines[5],nil)
+  end
+end)
+test("failed preflight and first native deletion never refresh or mutate the viewport",function()
+  for _,mode in ipairs({"changed-row","delete-error"}) do
+    local lines=viewportLines(); local f,api,a=viewportConsole(lines); local rows=filteredViewportRows(lines)
+    if mode=="changed-row" then rows[3].source_line=" Clawing       200 3"
+    else api.deleteLine=function() return false,"unavailable" end end
+    eq(a:replaceSkillOutput(rows,api),nil)
+    eq(f.refreshes,0); eq(f.visibleLast,6); eq(f.deleted,nil); eq(f.replaced,0)
+    eq(f.cursor,6); eq(f.column,2); eq(f.lines[6],">")
+  end
+end)
+test("partial deletion failure refreshes changed rows while preserving its error and prompt cursor",function()
+  local lines=viewportLines(); local f,api,a,lastLine=viewportConsole(lines)
+  local delete=api.deleteLine; local attempts=0
+  api.deleteLine=function()
+    attempts=attempts+1
+    if attempts==2 then return false,"unavailable" end
+    return delete()
+  end
+  local ok,err=a:replaceSkillOutput(filteredViewportRows(lines),api)
+  eq(ok,nil); assert(err:find("could not hide",1,true))
+  eq(f.deleted,1); eq(f.visibleLast,lastLine()); eq(f.refreshes,1)
+  eq(f.lines[1],"Skill Remain Level"); eq(f.lines[3],"An enemy attacks!")
+  eq(f.lines[4]," Clawing       201 3"); eq(f.lines[5],">"); eq(f.cursor,5); eq(f.column,2)
+end)
+test("retained skill cursor failures after deletion are reported rather than silently showing a wrong skill",function()
+  local lines=viewportLines(); local f,api,a,lastLine=viewportConsole(lines)
+  local move=api.moveCursor
+  api.moveCursor=function(column,row)
+    if column==0 and row==2 then return false end
+    return move(column,row)
+  end
+  local ok,err=a:replaceSkillOutput(filteredViewportRows(lines),api)
+  eq(ok,nil); assert(type(err)=="string"); eq(f.deleted,2); eq(f.refreshes,1)
+  eq(f.visibleLast,lastLine()); eq(f.lines[4],">"); eq(f.cursor,4); eq(f.column,2)
+end)
+test("explicit native replacement failure after deletion is reported and the viewport still settles",function()
+  for _,mode in ipairs({"false","nil-error"}) do
+    local lines=viewportLines(); local f,api,a,lastLine=viewportConsole(lines)
+    local rows=filteredViewportRows(lines); rows[1].display_text="Skills"; rows[2].display_text="Clawing"
+    api.replace=function()
+      if mode=="false" then return false,"unavailable" end
+      return nil,"unavailable"
+    end
+    local ok,err=a:replaceSkillOutput(rows,api)
+    eq(ok,nil); assert(type(err)=="string"); eq(f.refreshes,1); eq(f.deleted,2)
+    eq(f.visibleLast,lastLine()); eq(f.lines[4],">"); eq(f.cursor,4); eq(f.column,2)
+  end
+end)
+test("full skill formatting without removed rows does not request a compaction repaint",function()
+  local lines={[1]="Skill Remain Level",[2]=" Clawing       201 3",[3]=">"}
+  local f,api,a=viewportConsole(lines)
+  assert(a:replaceSkillOutput({{line_number=1,source_line=lines[1],display_text="Number  Skill    LVL  USES"},
+    {line_number=2,source_line=lines[2],display_text="    47  Clawing    3   201"}},api))
+  eq(f.refreshes,0); eq(f.deleted,nil); eq(f.lines[3],">"); eq(f.cursor,3); eq(f.column,2)
+end)
 test("skill filtering compacts only skill rows and preserves interleaved combat and prompt",function()
   local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]="An enemy attacks!",
     [4]=" Clawing       201 3",[5]=" Swimming       100 1",[6]=">"}

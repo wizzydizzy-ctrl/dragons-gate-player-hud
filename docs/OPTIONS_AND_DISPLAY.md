@@ -100,12 +100,13 @@ Enter `skill` or `skill all` for the full list. To narrow the main console outpu
 
 - `skill claw` or `skill clawing` — Clawing.
 - `skill bite` — Biting.
+- `skill weapons` — Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging; only skills you have are shown.
 - `skill c` — all your skills beginning with C.
 - `skill id` — all your Identify skills; `skill id weapon` narrows to Identify Weapon Quality.
 - `skill s` — all your skills beginning with S.
 - `skill ste` — Stealth, plus any future skill beginning with Ste.
 
-Matching ignores case and accepts full names or shortened display names. This is a literal prefix search, not a regular expression. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; filtering also works with formatting off. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
+Matching ignores case and accepts full names or shortened display names. Apart from the special `weapons` group, this is a literal prefix search, not a regular expression. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; filtering also works with formatting off. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
 
 Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
 
