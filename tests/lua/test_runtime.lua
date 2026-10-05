@@ -1856,8 +1856,8 @@ test("optional output colors toggle through one owned alias and public API",func
 end)
 test("legacy disabled game highlights persist into every individual option across reload",function()
   local f=fake(); local hud=Main.new(f,{layout={},colorization={highlights_enabled=false}}); assert(hud:start())
-  eq(hud.colorizer:status().highlights,false); eq(f.viewColorOptions.damage,false); eq(f.viewColorOptions.portal,false)
-  hud:reload(); eq(hud.colorizer:status().highlights,false); eq(f.viewColorOptions.damage,false); eq(f.viewColorOptions.portal,false); hud:shutdown()
+  eq(hud.colorizer:status().highlights,false); eq(f.viewColorOptions.damage,false); eq(f.viewColorOptions.portal,false); eq(f.viewColorOptions.skills,false)
+  hud:reload(); eq(hud.colorizer:status().highlights,false); eq(f.viewColorOptions.damage,false); eq(f.viewColorOptions.portal,false); eq(f.viewColorOptions.skills,false); hud:shutdown()
 end)
 test("help alias opens the owned responsive guide",function()
   local f=fake(); local shown=0; local view=f:createView(); function view:showHelp() shown=shown+1; return true end; function f:createView() return view end
@@ -2228,8 +2228,9 @@ test("main skills formatter and collector independently retain right sidebar ski
   eq(hud.last_state.skills.items[2].remain,400); eq(f.replacedSkills,nil)
   local timer=hud.skill_display.timer; local callback=f.timers[timer]; f.timers[timer]=nil; callback()
   eq(#f.replacedSkills,3); eq(f.replacedSkills[1].line_number,1)
-  eq(f.replacedSkills[2].line_number,2); eq(f.replacedSkills[2].display_text,"9. Dodging - Level 5 - Remain: 50")
-  eq(f.replacedSkills[3].line_number,4); eq(f.replacedSkills[3].display_text,"2. Sharps - Level 4 - Remain: 400")
+  eq(f.replacedSkills[2].line_number,2); eq(f.replacedSkills[2].display_text,"     9  Dodging    5    50")
+  eq(f.replacedSkills[3].line_number,4); eq(f.replacedSkills[3].display_text,"     2  Sharps     4   400")
+  eq(f.replacedSkills[2].style_id,"skill_combat"); eq(f.replacedSkills[3].style_id,"skill_combat")
   eq(hud.last_state.skills.items[2].name,"Sharp Weapons"); hud:shutdown()
 end)
 

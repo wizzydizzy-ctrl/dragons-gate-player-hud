@@ -1,6 +1,7 @@
 local Parser=require("command_parser")
 local Display={}; Display.__index=Display
 Display.MAX_ROWS=128; Display.MAX_LINES=256; Display.MAX_LINE_BYTES=2048; Display.RESPONSE_TIMEOUT=5
+Display.BOUNDARY_DELAY=0
 
 -- Authoritative game catalog supplied by the user. Entries are identifiers,
 -- never a list of possessed skills and never display-order ordinals.
@@ -21,6 +22,11 @@ local function name(value)
   return value:match("^%s*(.-)%s*$"):gsub("^[%*%s]+",""):gsub("%s+"," ")
 end
 local ids={}; for id,value in ipairs(catalog) do ids[name(value):lower()]=id end
+local combatIds={
+  [1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true,[9]=true,[10]=true,[11]=true,[12]=true,
+  [25]=true,[26]=true,[30]=true,[39]=true,[40]=true,[41]=true,[42]=true,[43]=true,[44]=true,[45]=true,[46]=true,
+  [47]=true,[48]=true,[49]=true,[53]=true,[54]=true,[55]=true,[57]=true,
+}
 function Display.skillId(value)
   if type(value)~="string" or #value>Display.MAX_LINE_BYTES then return nil end
   return ids[name(plain(value)):lower()]
@@ -31,24 +37,52 @@ function Display.displayName(value)
     ["throw weapons"]="Throws",["missile weapons"]="Missiles"}
   return short[cleaned:lower()] or cleaned
 end
-function Display.format(skill)
-  return tostring(Display.skillId(skill.name) or "?")..". "..Display.displayName(skill.name)
-    .." - Level "..tostring(skill.level).." - Remain: "..tostring(skill.remain)
+function Display.category(skill)
+  if skill.remain==0 then return "ready" end
+  return combatIds[Display.skillId(skill.name)] and "combat" or "utility"
+end
+local function width(value)
+  local _,points=tostring(value):gsub("[^\128-\191]","")
+  return points
+end
+local function columnWidths(items)
+  local widths={6,5,3,4}
+  for _,skill in ipairs(items) do
+    local values={tostring(Display.skillId(skill.name) or "?"),Display.displayName(skill.name),tostring(skill.level),tostring(skill.remain)}
+    for index,value in ipairs(values) do widths[index]=math.max(widths[index],width(value)) end
+  end
+  return widths
+end
+local function columns(values,widths)
+  local cells={}
+  for index,value in ipairs(values) do
+    local padding=string.rep(" ",math.max(0,widths[index]-width(value)))
+    cells[index]=index==2 and value..padding or padding..value
+  end
+  return table.concat(cells,"  ")
+end
+function Display.format(skill,widths)
+  return columns({tostring(Display.skillId(skill.name) or "?"),Display.displayName(skill.name),tostring(skill.level),tostring(skill.remain)},
+    widths or columnWidths({skill}))
 end
 function Display.new(adapter,enabled,packageName)
   return setmetatable({adapter=adapter,enabled=enabled~=false,package_name=packageName or "DragonsGateHUD",
     started=false,generation=0,events={}},Display)
 end
-function Display:cancel()
+function Display:disarmTimer()
   self.generation=self.generation+1
-  local timer=self.timer; self.timer=nil; self.response=nil; self.pending=nil
+  local timer=self.timer; self.timer=nil
   if timer then pcall(self.adapter.cancelTimer,self.adapter,timer) end
+end
+function Display:cancel()
+  self:disarmTimer(); self.response=nil; self.pending=nil
 end
 function Display:setEnabled(enabled)
   if type(enabled)~="boolean" then return nil,"main skills display must be a boolean" end
   self:cancel(); self.enabled=enabled; return enabled
 end
 function Display:armTimer(delay,fn)
+  self:disarmTimer()
   local generation=self.generation
   local ok,id=pcall(self.adapter.schedule,self.adapter,delay,function()
     if self.generation~=generation then return end
@@ -67,10 +101,13 @@ function Display:finish()
     if a.remain~=b.remain then return a.remain<b.remain end
     return a.name:lower()<b.name:lower()
   end)
+  local widths=columnWidths(items)
   local rows={{line_number=response.header.line_number,source_line=response.header.source_line,
-    display_text="Skills - highest level first, fewest remaining uses next"}}
+    display_text=columns({"Number","Skill","LVL","USES"},widths),category="neutral"}}
   for index,row in ipairs(response.rows) do
-    rows[#rows+1]={line_number=row.line_number,source_line=row.source_line,display_text=Display.format(items[index])}
+    local category=Display.category(items[index])
+    rows[#rows+1]={line_number=row.line_number,source_line=row.source_line,display_text=Display.format(items[index],widths),
+      category=category,style_id="skill_"..category}
   end
   self.pending=rows
   -- Defer until the complete raw response has reached every Mudlet trigger.
@@ -96,6 +133,15 @@ function Display:onLine(value,number)
   response.lines=response.lines+1
   if response.lines>Display.MAX_LINES then self:cancel(); return false end
   if Parser.isPrompt(source) then self:finish(); return true end
+  if text=="" then
+    -- The game can end a complete table with blanks and omit the prompt.
+    -- Wait for this burst to finish; a later row before the tick keeps collecting.
+    if #response.rows>0 and not response.ending then
+      response.ending=true
+      self:armTimer(Display.BOUNDARY_DELAY,function() self:finish() end)
+    end
+    return false
+  end
   -- Fixed-width table cells require separation; prose/combat is not consumed.
   local skillName,remain,level=source:match("^%s*(.-)%s%s+(%d+)%s+(%d+)%s*$")
   if not skillName then return false end
@@ -107,6 +153,10 @@ function Display:onLine(value,number)
   response.numbers[number]=true
   response.rows[#response.rows+1]={line_number=number,source_line=source,
     skill={name=skillName,remain=remain,level=level}}
+  if response.ending then
+    response.ending=nil
+    return self:armTimer(Display.RESPONSE_TIMEOUT,function() self:cancel() end)==true
+  end
   return true
 end
 function Display:start()

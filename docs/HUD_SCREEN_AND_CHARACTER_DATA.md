@@ -118,11 +118,14 @@ Long display names are shortened only for readability, such as `Identify` becomi
 **OPTIONS → MAIN SKILLS** controls an additional display change in the main game console. It is on by default and remembers your choice through updates and restarts. When a complete `skill` response arrives, its rows use the same sorting above and become, for example:
 
 ```text
-2. Sharps - Level 4 - Remain: 400
-46. Biting - Level 4 - Remain: 414
+Number  Skill   LVL  USES
+     2  Sharps    4   400
+    46  Biting    4   414
 ```
 
-The leading number is the game's fixed training skill ID, not the row's position. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This option does not change the right-hand Skills list, send training commands, or replace unrelated game output.
+The leading number is the game's fixed training skill ID, not the row's position. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This option does not change the right-hand Skills panel's appearance, send training commands, or replace unrelated game output.
+
+Whole rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. The green ready-to-train color takes priority. Combat includes weapons, Focus Force, Biting, Clawing, First Aid, and other combat abilities; Identify skills, Swimming, Riding, and other utility skills stay yellow unless they have zero uses. Change or disable these styles under **OPTIONS → COLOR SETTINGS → TEXT STYLES → Skills**. These choices are saved with your profile.
 
 ## Resource bars
 
@@ -156,7 +159,7 @@ skill
 time
 ```
 
-DGHUD waits for a complete response and its prompt before replacing a captured list. Combat fields update as soon as recognized. This avoids displaying half of a list when the game or network is delayed.
+DGHUD normally waits for a complete response and its prompt before replacing a captured list. Skills also recognize the game's table-ending blank lines, so a completed list updates on the next UI tick without waiting for another command or injecting an Enter. A header or a pause between rows does not finish the table. Combat fields update as soon as recognized.
 
 ## Data that updates immediately through GMCP
 

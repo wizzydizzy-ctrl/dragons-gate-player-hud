@@ -2,16 +2,33 @@ local Collector={}; Collector.__index=Collector
 local SPECS={inventory={parser="parseInventory",snapshot="inventory"},stat={parser="parseStat",snapshot="stat"},info={parser="parseInfo",snapshot="info"},["info religion"]={parser="parseReligion",snapshot="religion"},["info magic"]={parser="parseRunes",snapshot="runes"},skill={parser="parseSkills",snapshot="skills"},time={parser="parseTime",snapshot="time"}}
 -- TIME now returns a complete prompt on its own. Nudging it injects visible,
 -- duplicate prompts on Dragon's Gate 4.0.9.4 and later.
-local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info magic"]=true,skill=true}
+local PROMPT_NUDGE={inventory=true,stat=true,info=true,["info religion"]=true,["info magic"]=true}
 local RESPONSE_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info magic"]=2.5,skill=3,time=2}
 local RECOVERY_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info magic"]=2.5,skill=3,time=2}
 function Collector.new(adapter,parser,onChange,onRoundtime,onCharacterEntry,onCharacterExit)
   return setmetatable({adapter=adapter,parser=parser,onChange=onChange,onRoundtime=onRoundtime,onCharacterEntry=onCharacterEntry,onCharacterExit=onCharacterExit,snapshot={},sequence={"inventory","stat","info","info religion","info magic","skill","time"},runtime={triggers={},events={}},started=false,refreshed=false,prompt_nudge_delay=.15,drain_delay=.5},Collector)
 end
 function Collector:cancelActive()
+  self:cancelSkillBoundary()
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
   if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
   self.active=nil; self.sequence_index=nil; self.retry_startup=false
+end
+function Collector:cancelSkillBoundary()
+  if self.skill_boundary then self.adapter:cancelTimer(self.skill_boundary); self.skill_boundary=nil end
+end
+function Collector:queueSkillBoundary(active)
+  if self.skill_boundary then return end
+  local ok,result=pcall(self.parser.parseSkills,active.lines,true)
+  if not ok or not result then return end
+  -- The server terminates SKILL with blank lines even without a prompt. Wait
+  -- only for this output burst to finish, not for another command/Enter.
+  local timer
+  timer=self.adapter:schedule(0,function()
+    if self.skill_boundary~=timer or self.active~=active then return end
+    self.skill_boundary=nil; self:finish(active.lines,true)
+  end)
+  self.skill_boundary=timer
 end
 function Collector:schedulePromptNudge(command)
   if not PROMPT_NUDGE[command] then return end
@@ -72,14 +89,15 @@ function Collector:mergeStat(parsed)
   end
   return stat,delta
 end
-function Collector:finish(lines)
+function Collector:finish(lines,tableBoundary)
   local active=self.active; if not active then return end
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
   if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
+  self:cancelSkillBoundary()
   self.active=nil
   if lines then
     local spec=SPECS[active.command]; local fn=spec and self.parser[spec.parser]
-    local ok,result=pcall(fn,lines)
+    local ok,result=pcall(fn,lines,active.command=="skill" and tableBoundary==true)
     if ok and result then
       local parsed=result
       if spec.snapshot=="stat" then result=self:mergeStat(result)
@@ -136,6 +154,14 @@ function Collector:onLine(value)
   -- complete delayed response can still succeed before the bounded drain ends.
   if #self.active.lines==1 and self.parser.isPrompt(self.active.lines[1]) and not self.parser.isPrompt(value) then self.active.lines={} end
   self.active.lines[#self.active.lines+1]=value
+  if self.active.command=="skill" then
+    if plain=="" then self:queueSkillBoundary(self.active)
+    elseif plain:match("^%s*(.-)%s+(%d+)%s+(%d+)%s*$")
+        or plain:match("^Skill%s+Remain%s+Level$") then
+      -- A later row in the same burst makes an earlier blank non-terminal.
+      self:cancelSkillBoundary()
+    end
+  end
   if self.active.command=="stat" and self.parser.parseStatCombat then
     local ok,parsed=pcall(self.parser.parseStatCombat,self.active.lines)
     -- Publish only changed, recognized combat fields before a prompt or interruption.
@@ -158,9 +184,17 @@ function Collector:onOutgoing(command)
   if command=="info mag" then command="info magic" end
   if not SPECS[command] or self.sending_startup_command==command then return end
   if self.active then
+    if self.active.command=="skill" and self.skill_boundary then
+      -- Another tracked command can start before the zero-delay boundary fires.
+      -- Retain its already-complete table before transferring capture ownership;
+      -- do not send or advance startup commands from this interruption path.
+      local ok,result=pcall(self.parser.parseSkills,self.active.lines,true)
+      if ok and result then self.snapshot.skills=result; self.onChange(self.snapshot,"skills",result) end
+    end
     if self.active.startup then self.retry_startup=true end
     if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
     if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
+    self:cancelSkillBoundary()
     self.active=nil
   end
   self:begin(command,false)

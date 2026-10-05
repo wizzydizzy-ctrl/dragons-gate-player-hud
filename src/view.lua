@@ -425,6 +425,7 @@ function View.new(settings)
   self.color_option_buttons={}
   self.color_option_order={"mapper","enabled","notice","room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","world"}
   local optionLabels={mapper="MAPPER",enabled="ALL HIGHLIGHTS",notice="IMPORTANT GAME NOTICES",room="ROOM TITLES",exits="EXITS / DIRECTIONS",currency="CURRENCY",races="RACES",classes="CLASSES",portal="TRAVEL OBJECTS",presence="OTHER OBJECTS / HERE",attack="ATTACKS ON YOU",damage="DAMAGE TO YOU",danger="DANGER / BLOCKS",recovery="RECOVERY",upkeep="ONGOING COSTS",spell="SPELL THREATS",discovery="DISCOVERY / LOOT",illumination="ILLUMINATED AREAS",world="WORLD ARRIVALS / DEPARTURES"}
+  self.color_option_order[#self.color_option_order+1]="skills"; optionLabels.skills="SKILL ROW COLORS"
   for _,key in ipairs(self.color_option_order) do
     local option={key,optionLabels[key]}
     local key,text=option[1],option[2]; local button=label("DGHUD.ColorSettings."..key,self.color_settings_content)

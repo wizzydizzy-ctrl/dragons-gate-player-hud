@@ -87,7 +87,7 @@ end
 test("color preferences keep absent toggles sparse and preserve every false toggle", function()
   local empty = assert(Preferences.snapshot({}))
   eq(next(empty.styles), nil); eq(empty.enabled, nil); eq(#empty.custom_rules, 0)
-  local config = {enabled=false, highlights_enabled=false}
+  local config = {enabled=false, highlights_enabled=false,skills_enabled=false}
   for _, feature in ipairs({"room","exits","currency","races","classes","portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","world"}) do
     config[feature.."_enabled"] = false
   end

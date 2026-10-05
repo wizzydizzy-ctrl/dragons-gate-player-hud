@@ -42,7 +42,7 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 Feature names:
 
 ```text
-room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination
+room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice world skills
 ```
 
 Example:

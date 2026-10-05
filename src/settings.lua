@@ -29,7 +29,7 @@ function Settings.migrate(input)
   end
   local colors=type(result.colorization)=="table" and result.colorization or nil
   if colors and colors.highlights_enabled~=nil then
-    for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do
+    for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}) do
       local key=name.."_enabled"; if colors[key]==nil then colors[key]=colors.highlights_enabled~=false; changed=true end
     end
   end

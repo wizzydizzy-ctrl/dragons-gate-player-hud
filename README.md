@@ -39,7 +39,9 @@ The HUD runs `info magic` during character startup and whenever that command is 
 
 ## Skills and combat updates
 
-**OPTIONS → MAIN SKILLS** (on by default) formats complete `skill` responses in the main console as `2. Sharps - Level 4 - Remain: 400`, sorted by highest level and then fewest uses remaining. The number is the game's fixed skill ID, not a sorted row number. Every possessed skill is retained, and the right-hand Skills list stays unchanged. This choice persists through updates and restarts.
+**OPTIONS → MAIN SKILLS** (on by default) formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns, sorted by highest level and then fewest uses remaining. The number is the game's fixed skill ID, not a sorted row number. Every possessed skill is retained. Completed blank-ended tables update on the next UI tick without waiting for a later prompt or sending an extra Enter; the right-hand Skills list updates at the same boundary. This choice persists through updates and restarts.
+
+Skill rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. Zero uses takes priority over the skill category. Customize or disable these colors under **OPTIONS → COLOR SETTINGS → TEXT STYLES → Skills**, or use the **SKILL ROW COLORS** category switch. The right-hand Skills panel keeps its existing appearance.
 
 Printed roundtime penalties accumulate instead of replacing one another, including double attacks and fumbles. Text and GMCP are reconciled within a 0.5-second window to reduce duplicate counting; without game-provided delay event IDs, perfectly identifying each delay is not possible. Stale unchanged snapshots do not restart the countdown, and character exits/disconnects clear it. STAT combat fields and confirmed attack-strategy messages update immediately, including **Frenzied**, even if another command interrupts STAT.
 

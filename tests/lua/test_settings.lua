@@ -149,8 +149,15 @@ end)
 test("legacy highlight preference migrates to every individual category",function()
   local resolved,migrated,changed=Settings.resolve(defaults,{colorization={highlights_enabled=false}})
   eq(changed,true)
-  for _,name in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice"}) do
+  for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}) do
     eq(migrated.colorization[name.."_enabled"],false); eq(resolved.colorization[name.."_enabled"],false)
+  end
+end)
+test("explicit skill color preference survives legacy-group migration and resolution",function()
+  for _,enabled in ipairs({true,false}) do
+    local resolved,migrated=Settings.resolve(defaults,{colorization={highlights_enabled=not enabled,skills_enabled=enabled}})
+    eq(resolved.colorization.skills_enabled,enabled); eq(migrated.colorization.skills_enabled,enabled)
+    local restarted=Settings.resolve(defaults,migrated); eq(restarted.colorization.skills_enabled,enabled)
   end
 end)
 

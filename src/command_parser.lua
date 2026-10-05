@@ -229,8 +229,10 @@ function Parser.parseRunes(lines)
   return result
 end
 
-function Parser.parseSkills(lines)
-  local result={items={}}; local header=false; local complete=false
+function Parser.parseSkills(lines,tableBoundary)
+  -- Only the owned collector supplies this flag after a table-ending blank
+  -- survives one event-loop turn. A header or a partial row is never enough.
+  local result={items={}}; local header=false; local complete=tableBoundary==true
   for _,raw in ipairs(lines or {}) do
     local line=clean(raw)
     if line:match("^%s*Skill%s+Remain%s+Level%s*$") then header=true

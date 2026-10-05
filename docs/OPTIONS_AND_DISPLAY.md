@@ -94,7 +94,9 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 ## Main skills output
 
-**MAIN SKILLS** is on by default. It reformats complete `skill` responses in the main game display as `2. Sharps - Level 4 - Remain: 400`, sorted by highest level and then fewest remaining uses. The leading number is the fixed game skill ID, not a sorted row number. The right-hand Skills panel is unaffected.
+**MAIN SKILLS** is on by default. It reformats complete `skill` responses in the main game display into aligned **Number / Skill / LVL / USES** columns, sorted by highest level and then fewest remaining uses. The leading number is the fixed game skill ID, not a sorted row number. Tables ending in blank lines update on the next UI tick without waiting for a later prompt. The right-hand Skills panel keeps its existing layout and receives the same completed list.
+
+Rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. Zero uses overrides the normal category color. Use **COLOR SETTINGS → TEXT STYLES → Skills** to change the three styles, or the **SKILL ROW COLORS** category to switch their coloring off without disabling the aligned layout.
 
 Turn it **OFF** to keep future `skill` responses in their original game layout. Your choice survives restarts, updates, and changes to text size or word wrap. Only the skill table is changed; other output and prompts remain. See [Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills).
 

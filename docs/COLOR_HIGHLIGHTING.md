@@ -27,6 +27,7 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 | Illuminated Areas | Both illuminated and not-illuminated room status. | Yellow for illuminated; blue-gray for dark |
 | Important Game Notices | New version-notes announcements. | Gold text, dark red highlight, bold and underline |
 | World Arrivals / Departures | Standalone character arrival/departure notices in the main display and WORLD chat. Includes unexpected departures. | Green for arrival; red for departure |
+| Skill Row Colors | Full rows in the formatted main-window skill table. | Green for zero uses; otherwise blue for combat or yellow for utility |
 
 ## Using the settings box
 
@@ -49,7 +50,7 @@ For example, save `secret path` with yellow text and a dark background to make t
 
 **Example: change exits to blue.** Open Text Styles, select **Exit directions**, choose blue, then Save. The `Obvious exits:` / `Obvious paths:` label is a separate style, so it can stay red or use another color.
 
-Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, and important notices all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear.
+Room titles, exit labels, directions, gold, silver, each known race and profession, travel objects, combat highlights, illumination/darkness, important notices, and the three skill row colors all have separate editable styles. The relevant category and master switches must also be on for a built-in style to appear. Skill row colors require **MAIN SKILLS** to be on; switching the colors off leaves its aligned table layout on.
 
 Selections apply to **new output**, not previously printed lines. Use `look` to see a room description again. Saved choices survive HUD reloads, package updates, character changes, and Mudlet restarts within the same profile. They are stored as validated data in `DGHUDData/color-settings.dat`, outside the replaceable package. A failed save shows an error and does not apply partial changes.
 
@@ -78,10 +79,10 @@ dghud colors illumination status
 Valid feature names are:
 
 ```text
-room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice world
+room exits currency races classes highlights portal attack damage danger recovery upkeep spell discovery illumination notice world skills
 ```
 
-The `highlights` feature groups travel objects, attacks, damage, danger, recovery, costs, spells, discovery, illumination, version notices, and world notices. Race, profession, room-title, exit, and currency switches remain independently controllable.
+The `highlights` feature groups travel objects, attacks, damage, danger, recovery, costs, spells, discovery, illumination, version notices, world notices, and skill row colors. Race, profession, room-title, exit, and currency switches remain independently controllable.
 
 ## What to expect
 

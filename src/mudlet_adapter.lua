@@ -508,9 +508,26 @@ function Adapter:replaceSkillOutput(rows,api)
         and not row.display_text:find("%c"),"invalid formatted skill line")
       seen[row.line_number]=true
       local current=api.getLines(row.line_number,row.line_number+1)
-      assert(type(current)=="table" and current[1]==row.source_line,"skill source row changed")
-      segments[#segments+1]={start=1,length=#row.source_line,color={220,224,220},
-        line_number=row.line_number,source_line=row.source_line,display_text=row.display_text}
+      local bufferLine=type(current)=="table" and current[1]
+      -- Fixed-width game rows carry trailing padding that some console paths
+      -- omit. Only that padding may differ: never ignore leading/interior text,
+      -- shifted rows or wrapping. Select exactly what is actually in the buffer.
+      assert(type(bufferLine)=="string" and bufferLine:gsub(" +$","")==row.source_line:gsub(" +$",""),"skill source row changed")
+      local segment={start=1,length=#bufferLine,color={220,224,220},bold=false,underline=false,
+        line_number=row.line_number,source_line=bufferLine,display_text=row.display_text}
+      if row.style_id~=nil then
+        assert(row.style_id=="skill_ready" or row.style_id=="skill_combat" or row.style_id=="skill_utility","invalid skill row style")
+        local config=self.settings and self.settings.colorization or {}
+        local styles=require("color_styles"); local style=styles.resolve(config,row.style_id)
+        local skillsEnabled=config.skills_enabled
+        if skillsEnabled==nil then skillsEnabled=config.highlights_enabled~=false end
+        if config.enabled~=false and skillsEnabled~=false and style.enabled then
+          segment.color=styles.toRGB(style.foreground)
+          segment.background=style.background and styles.toRGB(style.background) or nil
+          segment.bold=style.bold; segment.underline=style.underline
+        end
+      end
+      segments[#segments+1]=segment
     end
   end)
   if not ok then return nil,tostring(err) end

@@ -6,7 +6,7 @@ local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
 local SkillDisplay=require("skill_display")
 local Roundtime=require("roundtime")
-local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}
+local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
   local result={enabled=status.enabled}
@@ -263,7 +263,7 @@ function Main:setColorFeature(name,enabled)
   if type(enabled)~="boolean" then return nil,"color toggle must be a boolean" end
   if name~="highlights" and self.colorizer.features[name]==nil then return nil,"unknown color feature" end
   local candidate=Settings.merge({},self.settings.colorization or {}); candidate[name.."_enabled"]=enabled
-  if name=="highlights" then for _,feature in ipairs({"portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do candidate[feature.."_enabled"]=enabled end end
+  if name=="highlights" then for _,feature in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}) do candidate[feature.."_enabled"]=enabled end end
   local saved,err=self:commitColorSettings(candidate); if not saved then return nil,err end
   return enabled
 end
@@ -1304,7 +1304,7 @@ function Main:start()
   if self.view.setColorOptions then
     local initial={mapper=self:mapperEnabled(),enabled=self.colorizer_enabled,room=colorSettings.room_enabled~=false,exits=colorSettings.exits_enabled~=false,currency=colorSettings.currency_enabled~=false,races=colorSettings.races_enabled~=false,classes=colorSettings.classes_enabled~=false}
     local legacy=colorSettings.highlights_enabled~=false
-    for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world"}) do local value=colorSettings[name.."_enabled"]; if value==nil then initial[name]=legacy else initial[name]=value~=false end end
+    for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}) do local value=colorSettings[name.."_enabled"]; if value==nil then initial[name]=legacy else initial[name]=value~=false end end
     self.view:setColorOptions(initial)
   elseif self.view.setColorEnabled then self.view:setColorEnabled(self.colorizer_enabled) end
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
@@ -1544,7 +1544,7 @@ function Main:start()
     elseif action=="off" then enabled,err=self:setColorizerEnabled(false)
     elseif action=="toggle" or action=="" then enabled,err=self:setColorizerEnabled(not self.colorizer_enabled)
     elseif action=="status" then enabled=self.colorizer:status().enabled
-    else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|races|classes|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination|notice|world]" end
+    else return nil,"usage: dghud colors [on|off|toggle|status|room|exits|currency|races|classes|highlights|portal|attack|damage|danger|recovery|upkeep|spell|discovery|illumination|notice|world|skills]" end
     if enabled==nil then if self.adapter.reportCommandError then self.adapter:reportCommandError(err) end; return nil,err end
     if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled
   end)

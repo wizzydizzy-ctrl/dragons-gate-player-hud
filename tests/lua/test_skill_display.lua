@@ -1,7 +1,7 @@
 local Display=require("skill_display")
 local Adapter=require("mudlet_adapter")
 local function fakeSkills(enabled)
-  local f={next=0,timers={},cancelled={},events={},lines={},replacements=0,cursor=0,column=3,selected={}}
+  local f={next=0,timers={},cancelled={},events={},lines={},replacements=0,cursor=0,column=3,selected={},clock=0}
   function f:addSkillDisplayTrigger(fn) self.trigger=fn; return "skill-trigger" end
   function f:killTrigger() self.trigger=nil end
   function f:addEvent(event,fn) self.next=self.next+1; self.events[self.next]={event=event,fn=fn}; return self.next end
@@ -12,10 +12,24 @@ local function fakeSkills(enabled)
   end
   function f:schedule(delay,fn)
     if self.failSchedule then return nil end
-    self.next=self.next+1; self.timers[self.next]={delay=delay,fn=fn}; return self.next
+    self.next=self.next+1; self.timers[self.next]={delay=delay,at=self.clock+delay,fn=fn}; return self.next
   end
   function f:cancelTimer(id) self.cancelled[id]=self.timers[id]; self.timers[id]=nil end
-  function f:runTimer(id) local item=self.timers[id]; assert(item); self.timers[id]=nil; item.fn() end
+  function f:runTimer(id)
+    local item=self.timers[id]; assert(item); self.timers[id]=nil; self.clock=math.max(self.clock,item.at); item.fn()
+  end
+  function f:advance(seconds)
+    local target=self.clock+seconds
+    for _=1,512 do
+      local nextId,nextAt
+      for id,item in pairs(self.timers) do
+        if item.at<=target and (not nextAt or item.at<nextAt or (item.at==nextAt and id<nextId)) then nextId,nextAt=id,item.at end
+      end
+      if not nextId then self.clock=target; return end
+      self:runTimer(nextId)
+    end
+    error("diagnostic timer limit exceeded")
+  end
   local api={
     getLineNumber=function() return f.cursor end,getColumnNumber=function() return f.column end,
     getLines=function(first) return {f.lines[first]} end,
@@ -53,7 +67,7 @@ test("main skills authoritative 57 identifiers are unique and normalize case whi
     eq(Display.skillId(messy),id); assert(not seen[Display.skillId(value)]); seen[id]=true
   end
   eq(Display.skillId("Future Art"),nil)
-  eq(Display.format({name="* Sharp Weapons",level=4,remain=400}),"2. Sharps - Level 4 - Remain: 400")
+  eq(Display.format({name="* Sharp Weapons",level=4,remain=400}),"     2  Sharps    4   400")
 end)
 
 test("main skills only formats possessed rows after completion and keeps raw observers unchanged",function()
@@ -62,8 +76,8 @@ test("main skills only formats possessed rows after completion and keeps raw obs
   eq(f.lines[11],raw); eq(f.replacements,0); eq(d.pending,nil)
   f:feed(">",12); eq(f.replacements,0); eq(#d.pending,2)
   eq(f.timers[d.timer].delay,0); f:runTimer(d.timer)
-  eq(f.lines[11],"2. Sharps - Level 4 - Remain: 400"); eq(f.lines[12],">")
-  eq(f.replacements,2); eq(f.lines[10],"Skills - highest level first, fewest remaining uses next")
+  eq(f.lines[11],"     2  Sharps    4   400"); eq(f.lines[12],">")
+  eq(f.replacements,2); eq(f.lines[10],"Number  Skill   LVL  USES")
   eq(f.cursor,12); eq(f.column,3); eq(next(f.timers),nil); d:shutdown()
 end)
 
@@ -77,11 +91,11 @@ test("main skills sorting matches parser and leaves header blank rows combat and
   f:feed(" First Aid       50 4",25)
   f:feed(" Brawling       0 5",26)
   f:feed("[0] 10/10 hp, 8/8 ftg >",27); f:runTimer(d.timer)
-  eq(f.lines[21],"1. Brawling - Level 5 - Remain: 0")
-  eq(f.lines[23],"9. Dodging - Level 4 - Remain: 50")
-  eq(f.lines[25],"42. First Aid - Level 4 - Remain: 50")
-  eq(f.lines[26],"2. Sharps - Level 4 - Remain: 400")
-  eq(f.lines[20],"Skills - highest level first, fewest remaining uses next"); eq(f.lines[22],"An enemy strikes you for 12 damage.")
+  eq(f.lines[21],"     1  Brawling     5     0")
+  eq(f.lines[23],"     9  Dodging      4    50")
+  eq(f.lines[25],"    42  First Aid    4    50")
+  eq(f.lines[26],"     2  Sharps       4   400")
+  eq(f.lines[20],"Number  Skill      LVL  USES"); eq(f.lines[22],"An enemy strikes you for 12 damage.")
   eq(f.lines[24],""); eq(f.lines[27],"[0] 10/10 hp, 8/8 ftg >"); d:shutdown()
 end)
 
@@ -92,9 +106,9 @@ test("main skills generic class specific and future Unicode skills remain visibl
   f:feed(" *Stinging       20 2",3)
   f:feed(" *Conjuration       0 1",4)
   f:feed(">",5); f:runTimer(d.timer)
-  eq(f.lines[2],"?. Quantum Élan 🐉 - Level 3 - Remain: 10")
-  eq(f.lines[3],"57. Stinging - Level 2 - Remain: 20")
-  eq(f.lines[4],"55. Conjuration - Level 1 - Remain: 0")
+  eq(f.lines[2],"     ?  Quantum Élan 🐉    3    10")
+  eq(f.lines[3],"    57  Stinging          2    20")
+  eq(f.lines[4],"    55  Conjuration       1     0")
   local raw=" Quantum Élan 🐉       10 3"
   local _,points=raw:gsub("[^\128-\191]",""); local _,extra=raw:gsub("[\240-\244]","")
   local selected; for _,item in ipairs(f.selected) do if item.row==2 and not selected then selected=item end end
@@ -106,7 +120,7 @@ test("main skills ANSI header rows and prompt use original plain console coordin
   f:feed("\27[33mSkill Remain Level\27[0m",1)
   f:feed("\27[32m *  sHaRp   Weapons       400 4 \27[0m",2)
   f:feed("\27[0m>\r",3); f:runTimer(d.timer)
-  eq(f.lines[2],"2. Sharps - Level 4 - Remain: 400"); eq(f.lines[3],">"); d:shutdown()
+  eq(f.lines[2],"     2  Sharps    4   400"); eq(f.lines[3],">"); d:shutdown()
 end)
 
 test("main skills stale deleted or shifted source rows abort the whole batch without changing combat",function()
@@ -138,9 +152,9 @@ end)
 
 test("main skills cancellation invalidates late timer callbacks on off disconnect update and shutdown",function()
   for _,action in ipairs({"off","disconnect","install","uninstall","shutdown","menu"}) do
-    for _,complete in ipairs({false,true}) do
+    for _,phase in ipairs({"collecting","blank","complete"}) do
       local f,d=fakeSkills(); f:feed("Skill Remain Level",1); local raw=" Sharp Weapons       400 4"; f:feed(raw,2)
-      if complete then f:feed(">",3) end
+      if phase=="complete" then f:feed(">",3) elseif phase=="blank" then f:feed("",3) end
       local timer=d.timer; local late=f.timers[timer].fn
       if action=="off" then d:setEnabled(false)
       elseif action=="disconnect" then f:emit("sysDisconnectionEvent")
@@ -160,7 +174,7 @@ test("main skills disabled mode and reenable do not reuse a partial response",fu
   eq(d.timer,nil); eq(f.replacements,0)
   d:setEnabled(true); f:feed(" Sharp Weapons       400 4",4); f:feed(">",5); eq(d.timer,nil)
   f:feed("Skill Remain Level",6); f:feed(" Sharp Weapons       400 4",7); f:feed(">",8); f:runTimer(d.timer)
-  eq(f.lines[7],"2. Sharps - Level 4 - Remain: 400"); d:shutdown()
+  eq(f.lines[7],"     2  Sharps    4   400"); d:shutdown()
 end)
 
 test("main skills incomplete oversized or flooded responses release their single bounded timer",function()
@@ -229,9 +243,9 @@ test("main skills bottom to top replacement survives wrapped row insertion witho
     f.lines[row]=text; f.lines[row+1]="[wrapped continuation]"; f.replacements=f.replacements+1
   end
   f:runTimer(d.timer); eq(table.concat(order,","),"4,2,1")
-  eq(f.lines[1],"Skills - highest level first, fewest remaining uses next")
-  eq(f.lines[3],"9. Dodging - Level 5 - Remain: 50")
-  eq(f.lines[5],"Interleaved combat."); eq(f.lines[6],"2. Sharps - Level 4 - Remain: 400")
+  eq(f.lines[1],"Number  Skill    LVL  USES")
+  eq(f.lines[3],"     9  Dodging    5    50")
+  eq(f.lines[5],"Interleaved combat."); eq(f.lines[6],"     2  Sharps     4   400")
   eq(f.lines[8],">"); eq(f.lines[0],">skill"); d:shutdown()
 end)
 
@@ -242,4 +256,130 @@ test("main skills unavailable current console APIs preserve the raw heading rows
     f:runTimer(d.timer); eq(f.replacements,0); eq(f.lines[1],"Skill Remain Level")
     eq(f.lines[2]," Sharp Weapons       400 4"); eq(f.lines[3],">"); d:shutdown()
   end
+end)
+
+test("main skills nonempty blank terminated tables finish next tick without a prompt or extra enter",function()
+  local f,d=fakeSkills()
+  local possessed={"Brawling","Sharp Weapons","Blunt Weapons","Pole Weapons","Throw Weapons","Missile Weapons",
+    "Shield Parry","Quickdraw","Dodging","Focus Force","Berserk Attack","Parry Blows","Bargaining",
+    "Identify Gems/Minerals","Climbing","Detect Traps","Remove Traps","Skinning","Disguise","Pick Locks",
+    "Riding","Hiding","Swimming","Alchemy","Backstab"}
+  f:feed("Skill Remain Level",0)
+  local watchdog=f.timers[d.timer].fn
+  for index,skill in ipairs(possessed) do f:feed(" "..skill.."       "..(26-index).." "..index,index) end
+  eq(#d.response.rows,25); f:feed("",26)
+  local boundary=d.timer; eq(f.timers[boundary].delay,0)
+  f:feed("   ",27); eq(d.timer,boundary)
+  f:feed("An enemy strikes you for 12 damage.",28)
+  watchdog(); eq(d.timer,boundary); eq(f.replacements,0)
+  eq(f.replacements,0); f:runTimer(boundary)
+  eq(f.replacements,0); eq(#d.pending,26); eq(f.timers[d.timer].delay,0)
+  f:advance(0); eq(f.replacements,26); eq(#f.lastRows,26)
+  eq(f.lines[26],""); eq(f.lines[27],"   "); eq(f.lines[28],"An enemy strikes you for 12 damage.")
+  for row=1,25 do eq(tonumber(f.lines[row]:match("^%s*(%d+)%s")),26-row) end
+  eq(d.response,nil); eq(d.pending,nil); eq(next(f.timers),nil)
+  f:advance(4); f:feed(">l",29); f:feed("A room description.",30); f:feed(">",31)
+  eq(f.replacements,26); eq(f.lines[29],">l"); eq(f.lines[30],"A room description."); d:shutdown()
+end)
+
+test("main skills a row after an internal blank cancels the boundary and retains the entire batch",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1); f:feed(" Sharp Weapons       400 4",2)
+  f:feed("",3); local boundary=d.timer; local late=f.timers[boundary].fn
+  f:feed("Interleaved combat.",4); f:feed(" Dodging       50 5",5)
+  eq(f.timers[boundary],nil); eq(#d.response.rows,2); eq(d.response.ending,nil)
+  local watchdog=d.timer; late(); eq(d.timer,watchdog); eq(f.replacements,0)
+  f:advance(0.1); eq(f.replacements,0); eq(#d.response.rows,2)
+  f:feed("",6); f:advance(0)
+  eq(f.replacements,3); eq(f.lines[2],"     9  Dodging    5    50")
+  eq(f.lines[5],"     2  Sharps     4   400"); eq(f.lines[3],""); eq(f.lines[4],"Interleaved combat.")
+  eq(next(f.timers),nil); d:shutdown()
+end)
+
+test("main skills blanks before rows and pauses between rows do not finish a partial table",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1); local watchdog=d.timer
+  f:feed("",2); eq(d.timer,watchdog); f:advance(0.1); eq(f.replacements,0)
+  f:feed(" Sharp Weapons       400 4",3); f:advance(0.1)
+  eq(f.replacements,0); eq(#d.response.rows,1)
+  f:feed(" Dodging       50 5",4); f:feed("",5); f:advance(0)
+  eq(f.replacements,3); eq(#f.lastRows,3); eq(f.lines[2],""); d:shutdown()
+end)
+
+test("main skills a prompt supersedes a pending blank boundary without duplicate replacement",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1); f:feed(" Sharp Weapons       400 4",2); f:feed("",3)
+  local boundary=d.timer; local late=f.timers[boundary].fn
+  f:feed(">",4); local replacement=d.timer
+  eq(f.timers[boundary],nil); eq(f.timers[replacement].delay,0)
+  late(); eq(d.timer,replacement); eq(#d.pending,2)
+  f:advance(0); eq(f.replacements,2); f:advance(0.1); eq(f.replacements,2); d:shutdown()
+end)
+
+test("main skills stale blank terminated batches and failed boundary scheduling preserve raw output",function()
+  for _,mode in ipairs({"changed","schedule"}) do
+    local f,d=fakeSkills(); local raw=" Sharp Weapons       400 4"
+    f:feed("Skill Remain Level",1); f:feed(raw,2)
+    if mode=="schedule" then f.failSchedule=true end
+    f:feed("",3)
+    if mode=="changed" then f.lines[1]="An unrelated notice." end
+    f:advance(0); eq(f.replacements,0); eq(f.lines[2],raw); eq(f.lines[3],"")
+    eq(d.response,nil); eq(d.pending,nil); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
+test("main skills aligned columns share widths from every possessed row including long names and uses",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1)
+  f:feed(" Sharp Weapons       400 4",2); f:feed(" Brawling       0 5",3)
+  f:feed(" Identify Weapon Quality       1000000000000 9999",4); f:feed("",5); f:advance(0)
+  eq(f.lines[1],"Number  Skill                     LVL           USES")
+  eq(f.lines[2],"    32  Identify Weapon Quality  9999  1000000000000")
+  eq(f.lines[3],"     1  Brawling                    5              0")
+  eq(f.lines[4],"     2  Sharps                      4            400")
+  for row=2,4 do eq(#f.lines[row],#f.lines[1]) end
+  eq(#f.lastRows,4); d:shutdown()
+end)
+
+test("main skills zero remaining uses override combat utility and unknown categories",function()
+  for _,skill in ipairs({"Sharp Weapons","Focus Force","Clawing","First Aid","Swimming","Riding","Identify Weapon Quality","Future Art"}) do
+    eq(Display.category({name=skill,remain=0}),"ready")
+  end
+end)
+
+test("main skills keeps compact labels separate from consistently aligned numeric rows",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1)
+  f:feed(" Sharp Weapons       400 4",2); f:feed(" Identify Gems/Minerals       20 12",3)
+  f:feed(" First Aid       0 5",4); f:feed("",5); f:advance(0)
+  assert(f.lines[1]:match("^Number%s+Skill%s+LVL%s+USES$"))
+  local levelEnd=f.lines[1]:find("LVL",1,true)+2; local usesEnd=f.lines[1]:find("USES",1,true)+3
+  for row=2,4 do
+    local text=f.lines[row]; eq(#text,#f.lines[1]); assert(not text:find("Level",1,true)); assert(not text:find("Remain",1,true))
+    local _,levelLast=text:find("%d+%s+%d+$")
+    eq(levelLast,usesEnd)
+    local beforeUses=text:sub(1,levelEnd); assert(beforeUses:match("%d+$"))
+    assert(text:sub(levelEnd+1):match("^  +%d+$")); assert(text:match("^%s*%d+  %S"))
+  end
+  d:shutdown()
+end)
+
+test("main skills explicit combat identifiers avoid identify and smithing substring matches",function()
+  for _,skill in ipairs({"Brawling","Sharp Weapons","Blunt Weapons","Pole Weapons","Throw Weapons","Missile Weapons",
+    "Shield Parry","Quickdraw","Dodging","Focus Force","Berserk Attack","Parry Blows","Clawing","First Aid"}) do
+    eq(Display.category({name=" ** "..skill:upper(),remain=1}),"combat")
+  end
+  for _,skill in ipairs({"Swimming","Riding","Identify Gems/Minerals","Identify Magick","Identify Weapon Quality",
+    "Identify Armor Quality","Weapon Smithing","Armor Smithing","Future Art","Future Sharp Weapons"}) do
+    eq(Display.category({name=skill,remain=1}),"utility")
+  end
+end)
+
+test("main skills row categories and style ids follow sorted skills and the heading stays neutral",function()
+  local f,d=fakeSkills(); f:feed("Skill Remain Level",1)
+  f:feed(" Swimming       1 1",2); f:feed(" Focus Force       20 3",3)
+  f:feed(" First Aid       0 2",4); f:feed(" Future Art       4 1",5); f:feed("",6); f:advance(0)
+  eq(f.lastRows[1].category,"neutral"); eq(f.lastRows[2].category,"combat")
+  eq(f.lastRows[3].category,"ready"); eq(f.lastRows[4].category,"utility"); eq(f.lastRows[5].category,"utility")
+  eq(f.lastRows[1].style_id,nil); eq(f.lastRows[2].style_id,"skill_combat")
+  eq(f.lastRows[3].style_id,"skill_ready"); eq(f.lastRows[4].style_id,"skill_utility"); eq(f.lastRows[5].style_id,"skill_utility")
+  eq(tonumber(f.lastRows[2].display_text:match("^%s*(%d+)%s")),10)
+  eq(tonumber(f.lastRows[3].display_text:match("^%s*(%d+)%s")),42)
+  eq(f.lastRows[4].display_text:match("^%s*(%S+)%s"),"23")
+  eq(f.lastRows[5].display_text:match("^%s*(%S+)%s"),"?"); d:shutdown()
 end)

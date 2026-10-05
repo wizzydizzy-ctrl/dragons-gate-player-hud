@@ -78,6 +78,9 @@ local function addPalette(palette, prefix, kind, group)
 end
 addPalette(raceColors, "race", "races", "Races")
 addPalette(classColors, "class", "classes", "Classes")
+add("skill_ready", "Skills: zero uses / ready to train", "Skills", "skill_ready", nil, "skills", "#50D278")
+add("skill_combat", "Skills: combat", "Skills", "skill_combat", nil, "skills", "#64AAFF")
+add("skill_utility", "Skills: utility", "Skills", "skill_utility", nil, "skills", "#E6C850")
 
 local function entryFor(id)
   if type(id) ~= "string" or not byId[id] then return nil, "unknown style id" end

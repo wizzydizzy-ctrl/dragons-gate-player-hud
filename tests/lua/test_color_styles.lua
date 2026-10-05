@@ -59,9 +59,9 @@ local function styleEquals(actual, expected)
   for key in pairs(styleFields) do eq(actual[key], expected[key]) end
 end
 
-test("style registry includes all 69 base and named palette entries with stable metadata", function()
+test("style registry includes all 72 base named palette and skill entries with stable metadata", function()
   local entries, again, seen = Styles.entries(), Styles.entries(), {}
-  eq(#entries, 69)
+  eq(#entries, 72)
   for index, entry in ipairs(entries) do
     eq(seen[entry.id], nil); seen[entry.id] = entry
     eq(again[index].id, entry.id)
@@ -71,10 +71,12 @@ test("style registry includes all 69 base and named palette entries with stable 
     completeStyle(entry.default)
     eq(entry.default.enabled, true)
     styleEquals(Styles.defaults(entry.id), entry.default)
-    if not entry.name then
+    if not entry.name and index<=#baseOrder then
       eq(entry.id, baseOrder[index]); eq(entry.kind, entry.id)
       eq(entry.feature, features[entry.id] or entry.id)
       rgbEquals(Styles.toRGB(entry.default.foreground), assert(baseColors[entry.id]))
+    elseif entry.group=="Skills" then
+      eq(entry.kind,entry.id); eq(entry.feature,"skills")
     end
   end
   for id in pairs(baseColors) do assert(seen[id]) end
@@ -90,9 +92,17 @@ test("style registry includes all 69 base and named palette entries with stable 
     table.sort(names)
     for _, name in ipairs(names) do count = count+1; eq(entries[count].id, palette[2]..":"..name) end
   end
-  eq(count, #entries)
+  eq(count+3, #entries)
+  for offset,id in ipairs({"skill_ready","skill_combat","skill_utility"}) do eq(entries[count+offset].id,id) end
   eq(seen.portal.label, "Travel objects / shops")
   eq(seen.portal.default.bold, false)
+end)
+test("main skill row styles have readable green blue yellow defaults and editable overrides",function()
+  eq(Styles.defaults("skill_ready").foreground,"#50D278")
+  eq(Styles.defaults("skill_combat").foreground,"#64AAFF")
+  eq(Styles.defaults("skill_utility").foreground,"#E6C850")
+  local style=Styles.resolve({styles={skill_ready={foreground="#123456",bold=true}}},"skill_ready")
+  eq(style.foreground,"#123456"); eq(style.bold,true)
 end)
 
 test("registry defaults match every existing parser segment kind and named palette color", function()
@@ -286,7 +296,7 @@ test("registry and returned styles cannot be changed through caller-owned copies
   entries[1].id = "changed"; entries[1].default.foreground = "#000000"
   entries[21].name = "changed"; entries[21].default.enabled = false; entries[2] = nil
   eq(Styles.entries()[1].id, "room"); eq(Styles.entries()[21].name, "anthian")
-  eq(Styles.entries()[21].default.enabled, true); eq(#Styles.entries(), 69)
+  eq(Styles.entries()[21].default.enabled, true); eq(#Styles.entries(), 72)
   local defaults = Styles.defaults("room"); defaults.foreground = "#000000"
   eq(Styles.defaults("room").foreground, "#E0B84F")
   local config = {room_color={1,2,3},styles={room={background={4,5,6}}}}
