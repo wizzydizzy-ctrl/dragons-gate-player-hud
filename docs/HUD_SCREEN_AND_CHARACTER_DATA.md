@@ -87,6 +87,8 @@ OR, DR, armor, stance, and tactical position come from `stat`. Recognized combat
 
 The separate roundtime bar below the mapper controls remains empty at READY. Separate printed delay messages accumulate, including double attacks and fumble penalties. GMCP roundtime is a snapshot, not another delay to add: matching snapshots are reconciled with recent output, and unchanged cached values do not restart the countdown. Fresh changed snapshots can correct the remaining time. The local countdown accounts for elapsed time if Mudlet is busy. Because the game does not supply a delay/event ID, near-simultaneous text and GMCP are correlated within a short window rather than claiming perfectly identifiable events.
 
+After printed delays, DGHUD requests a quiet `delay` check once the output burst settles, no more than once every three seconds. `You have 12 second(s) remaining!` replaces the countdown with 12; it does not add 12 more seconds. Only a reply confirmed to belong to DGHUD's own check is hidden. Your manually entered `delay` results remain visible and also synchronize the bar. If manual and automatic checks overlap, or reply ownership is uncertain, the text stays visible. Requests pause after a timeout or failure and are not sent during character-data refreshes, autorolling, or updates. This is an occasional correction, not continuous polling.
+
 ## Inventory, money, and carrying capacity
 
 Inventory shows every captured item in a scrollable list. Long names and large inventories use horizontal and vertical scrollbars rather than shrinking the text indefinitely.

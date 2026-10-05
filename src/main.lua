@@ -7,6 +7,7 @@ local ChatSounds=require("chat_sounds")
 local SkillDisplay=require("skill_display")
 local SkillSort=require("skill_sort")
 local Roundtime=require("roundtime")
+local RoundtimeCheck=require("roundtime_check")
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
@@ -21,6 +22,7 @@ function Main.new(adapter,settings,viewHandoff,chatHandoff,roundtimeHandoff)
   self.clock=Clock.new(settings and settings.time,function() return adapter:epoch() end)
   self.roundtime=Roundtime.new(function() return adapter.chatSoundTime and adapter:chatSoundTime() or adapter:epoch() end)
   self.roundtime_initialized=self.roundtime:restore(roundtimeHandoff)
+  self.roundtime_check_suspended=type(roundtimeHandoff)=="table" and roundtimeHandoff.delay_check_suspended==true
   if self.roundtime_initialized and type(roundtimeHandoff.character)=="string" and #roundtimeHandoff.character<=256
       and not roundtimeHandoff.character:find("%c") then self.roundtime_character=roundtimeHandoff.character end
   self.map_diagnostics=MapDiagnostics.new(settings and settings.version,settings and settings.edition,function() return adapter.cleanupClock and adapter:cleanupClock() or os.time() end)
@@ -407,6 +409,25 @@ end
 function Main:mainSkillsEnabled()
   return not (self.settings.display and self.settings.display.main_skills==false)
 end
+function Main:requestSkills(query)
+  local filter,err=SkillDisplay.normalizeFilter(query)
+  if filter==nil then return nil,err end
+  local display=self.skill_display
+  if not self.started or not display or not display.started then return nil,"Skill filtering is unavailable. Run dghud reload and try again." end
+  if self.collector and self.collector.active then return nil,"Character data is still refreshing. Try your skill command again when it finishes." end
+  if self.skills_filter_sending or display:filterPending() then return nil,"A skill list is already loading. Wait for it, then try again." end
+  local prepared,prepareErr=display:requestFilter(filter)
+  if not prepared then return nil,prepareErr end
+  -- Always request the full table: the collector keeps every skill, while the
+  -- main console applies this one-request filter after all raw rows are captured.
+  self.skills_filter_sending=true
+  local called,sent,sendErr=pcall(self.adapter.sendCommand,self.adapter,"skill")
+  self.skills_filter_sending=nil
+  if not called or sent==false or (sent==nil and sendErr~=nil) then
+    display:cancel(); return nil,"Could not request skills. Try again."
+  end
+  return true
+end
 function Main:setMainSkillsEnabled(enabled)
   local function failed(message)
     if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end
@@ -590,6 +611,9 @@ function Main:characterName()
 end
 function Main:roundtimeHandoff()
   local snapshot=self.roundtime:handoff()
+  local check=self.roundtime_check
+  snapshot.delay_check_suspended=self.roundtime_check_suspended==true or (check~=nil and
+    (check.suspended==true or check.paused==true or check.sending~=nil or #check.pending>0))
   local status=self.last_state and self.last_state.character
   snapshot.character=self.character_entry_name or self.roundtime_character or (status and status.name)
   return snapshot
@@ -615,6 +639,7 @@ function Main:onCharacterEntry(name)
 end
 function Main:onCharacterExit(reason)
   self.character_entry_started=false; self.character_entry_name=nil; self.roundtime_character=nil
+  if self.roundtime_check then self.roundtime_check:reset() end
   if self.walker then self.walker:stop(reason or "character exit"); self.walker:onRoundtime(0) end
   if self.roundtime then self.roundtime:reset() end
   if self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
@@ -773,7 +798,10 @@ function Main:scheduleRoundtimeTick()
 end
 function Main:onRoundtime(value,metadata)
   local source=type(metadata)=="table" and metadata.source or metadata
-  self.roundtime_display=source=="text" and self.roundtime:text(value) or self.roundtime:gmcp(value)
+  if source=="delay" then self.roundtime_display=self.roundtime:sync(value)
+  elseif source=="text" then self.roundtime_display=self.roundtime:text(value)
+  else self.roundtime_display=self.roundtime:gmcp(value) end
+  if source=="text" and self.roundtime_check then self.roundtime_check:onDelay(value) end
   if self.roundtime_display==0 and self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
   if self.walker then self.walker:onRoundtime(self.roundtime_display) end
   self:refresh(); self:scheduleRoundtimeTick(); return true
@@ -1275,6 +1303,15 @@ function Main:start()
     self.roundtime:reset(); self.roundtime_display=self.roundtime:gmcp(initialVitals and initialVitals.roundtime); self.roundtime_initialized=true
   else self.roundtime_display=self.roundtime:display() end
   self.walker:onRoundtime(self.roundtime_display)
+  self.roundtime_check=RoundtimeCheck.new(self.adapter,function(value) return self:onRoundtime(value,"delay") end,function()
+    return self.started==true and not self.update_handoff
+      and not (self.updater and self.updater.lock)
+      and not (self.collector and self.collector.active)
+      and not (self.roller and self.roller.state and self.roller.state.active)
+  end)
+  -- Replies have no request IDs. A replacement cannot safely inherit an old
+  -- in-flight request, so retain its fail-open suspension for this profile session.
+  if self.roundtime_check_suspended then self.roundtime_check.paused=true; self.roundtime_check.suspended=true end
   local cleanupRuntime={owner=self}
   function cleanupRuntime:safetySnapshot(roomIDs) return self.owner:safetySnapshot(roomIDs) end
   function cleanupRuntime:beforeDelete(plan) return self.owner:beforeCleanupDelete(plan) end
@@ -1514,6 +1551,11 @@ function Main:start()
   end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.wrong,function(_,direction) self:callSpecialTransition("cancel","wrong_direction"); self.automapper:onWrongDirection(direction); self.walker:onWrongDirection(); self:refresh() end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.outgoing,function(_,command)
+    if self.skill_display and not self.skills_filter_sending and type(command)=="string"
+        and command:match("^%s*(.-)%s*$"):lower()=="skill" then self.skill_display:cancel() end
+    -- A HUD-owned probe is not player movement or autoroller input. Keep its
+    -- bookkeeping separate so it cannot steal an in-flight special exit.
+    if self.roundtime_check and self.roundtime_check:onOutgoing(command)==true then return end
     if self.roller and self.roller.onOutgoing then self.roller:onOutgoing(command) end
     local canonical=MapperModel.direction(command); local generated=command==self.generated_command
     if generated then self.generated_command=nil end
@@ -1536,6 +1578,11 @@ function Main:start()
   local function aliasArgument(value) if type(value)=="table" then return value[2] end; return value or (type(_G.matches)=="table" and _G.matches[2]) end
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
+  self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^(?i:skill)\\s+(.+)$",function(value)
+    local ok,err=self:requestSkills(aliasArgument(value))
+    if not ok and self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,err) end
+    return ok,err
+  end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud mapstatus$",function() return self:reportMapStatus() end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud chat clear$",function() return self:clearVisibleChat() end)
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^dghud chat clear saved$",function() if self.adapter.reportCommandError then self.adapter:reportCommandError("This permanently deletes saved DGHUD chat logs. Run: dghud chat clear saved confirm") end; return nil,"confirmation required" end)
@@ -1611,6 +1658,7 @@ function Main:start()
     pcall(self.needs.onLine,self.needs,line,"output",not collectingInfo)
     local ok,err=pcall(self.roller.onLine,self.roller,line)
     if not ok then self:captureFailure("autoroller",err,{operation="line_capture"}) end
+    if self.roundtime_check then pcall(self.roundtime_check.onLine,self.roundtime_check,line) end
   end)
   end)
   if not startupOk then pcall(function() self:shutdown() end); return nil,startupErr end
@@ -1644,6 +1692,10 @@ function Main:shutdown()
   end
   if self.roundtime_timer then self.adapter:cancelTimer(self.roundtime_timer); self.roundtime_timer=nil end
   if self.keybinding_retry_timer then self.adapter:cancelTimer(self.keybinding_retry_timer); self.keybinding_retry_timer=nil end
+  if self.roundtime_check then
+    self.roundtime_check_suspended=self:roundtimeHandoff().delay_check_suspended
+    self.roundtime_check:shutdown(); self.roundtime_check=nil
+  end
   local chat=self.chat; self.chat=nil; if chat then chat:shutdown() end
   local colorizer=self.colorizer; self.colorizer=nil; if colorizer then colorizer:shutdown() end
   local roller=self.roller; self.roller=nil; if roller then roller:shutdown() end

@@ -94,6 +94,19 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 ## Skill Settings
 
+### Show just the skills you want
+
+Enter `skill` or `skill all` for the full list. To narrow the main console output, add the beginning of a skill name:
+
+- `skill claw` or `skill clawing` — Clawing.
+- `skill bite` — Biting.
+- `skill c` — all your skills beginning with C.
+- `skill id` — all your Identify skills; `skill id weapon` narrows to Identify Weapon Quality.
+- `skill s` — all your skills beginning with S.
+- `skill ste` — Stealth, plus any future skill beginning with Ste.
+
+Matching ignores case and accepts full names or shortened display names. This is a literal prefix search, not a regular expression. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; filtering also works with formatting off. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
+
 Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
 
 **Main Display** and **Right Sidebar** have independent sorting choices. For each, choose a primary key: **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)**. Choose ascending or descending order, and optionally add a secondary key with its own direction. Both displays default to **Level descending**, then **Uses ascending**. For “level then uses,” choose **Level** as the primary key and **Uses** as the secondary key.

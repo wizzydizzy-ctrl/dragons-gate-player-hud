@@ -12,6 +12,12 @@ local function console(lines,settings)
       f.selections[#f.selections+1]={row=f.cursor,length=length}; return true
     end,
     replace=function(text) f.lines[f.cursor]=text; f.replaced=f.replaced+1 end,
+    deleteLine=function()
+      local last=f.cursor
+      for row in pairs(f.lines) do if type(row)=="number" then last=math.max(last,row) end end
+      for row=f.cursor,last do f.lines[row]=f.lines[row+1] end
+      f.deleted=(f.deleted or 0)+1
+    end,
     setFgColor=function(r,g,b) f.colors[f.cursor]={r,g,b} end,
     setBgColor=function(r,g,b) f.backgrounds[f.cursor]={r,g,b} end,
     setBold=function(value) f.bold[f.cursor]=value end,
@@ -20,6 +26,74 @@ local function console(lines,settings)
   local adapter=Adapter.new(); adapter.settings={colorization=settings or {}}
   return f,api,adapter
 end
+test("skill filtering compacts only skill rows and preserves interleaved combat and prompt",function()
+  local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]="An enemy attacks!",
+    [4]=" Clawing       201 3",[5]=" Swimming       100 1",[6]=">"}
+  local f,api,a=console(lines); f.cursor=6
+  assert(a:replaceSkillOutput({
+    {line_number=1,source_line=lines[1],display_text="Number  Skill    LVL  USES"},
+    {line_number=2,source_line=lines[2],display_text="    47  Clawing    3   201",style_id="skill_combat"},
+    {line_number=4,source_line=lines[4],remove=true},
+    {line_number=5,source_line=lines[5],remove=true},
+  },api))
+  eq(f.lines[1],"Number  Skill    LVL  USES"); eq(f.lines[2],"    47  Clawing    3   201")
+  eq(f.lines[3],"An enemy attacks!"); eq(f.lines[4],">"); eq(f.lines[5],nil)
+  eq(f.cursor,4); eq(f.column,2); eq(f.deleted,2)
+end)
+test("a no-match skill result keeps a message and prompt instead of empty skill rows",function()
+  local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]=" Clawing       201 3",[4]=">"}
+  local f,api,a=console(lines); f.cursor=4
+  assert(a:replaceSkillOutput({{line_number=1,source_line=lines[1],display_text="No skills match: xyz"},
+    {line_number=2,source_line=lines[2],remove=true},{line_number=3,source_line=lines[3],remove=true}},api))
+  eq(f.lines[1],"No skills match: xyz"); eq(f.lines[2],">"); eq(f.lines[3],nil); eq(f.cursor,2)
+end)
+test("filtered skills preflight all source rows before any deletion",function()
+  local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]="A new combat line!",[4]=">"}
+  local f,api,a=console(lines)
+  eq(a:replaceSkillOutput({{line_number=1,source_line=lines[1],display_text="No skills match: xyz"},
+    {line_number=2,source_line=lines[2],remove=true},
+    {line_number=3,source_line=" Clawing       201 3",remove=true}},api),nil)
+  eq(f.deleted,nil); eq(f.replaced,0); eq(f.lines[3],"A new combat line!"); eq(f.lines[4],">")
+end)
+test("skill filtering refuses prompts combat nonboolean actions and absent header ownership",function()
+  for _,source in ipairs({">","An enemy hits you for 12 damage.","OR:  13 DR: 74"}) do
+    local f,api,a=console({[1]="Skill Remain Level",[2]=source})
+    eq(a:replaceSkillOutput({{line_number=1,source_line="Skill Remain Level",display_text="No match"},
+      {line_number=2,source_line=source,remove=true}},api),nil)
+    eq(f.deleted,nil); eq(f.replaced,0)
+  end
+  for _,rows in ipairs({{{line_number=2,source_line=" Biting       400 4",remove=true}},
+      {{line_number=2,source_line=" Biting       400 4",display_text="x",remove="true"}}}) do
+    local f,api,a=console({[2]=" Biting       400 4"})
+    eq(a:replaceSkillOutput(rows,api),nil); eq(f.deleted,nil); eq(f.replaced,0)
+  end
+end)
+test("missing or rejected native deletion keeps filtered skill output unchanged",function()
+  for _,mode in ipairs({"missing","false","nil-error","throw"}) do
+    local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]=">"}
+    local f,api,a=console(lines)
+    if mode=="missing" then api.deleteLine=nil
+    elseif mode=="false" then api.deleteLine=function() return false end
+    elseif mode=="nil-error" then api.deleteLine=function() return nil,"failed" end
+    else api.deleteLine=function() error("failed") end end
+    eq(a:replaceSkillOutput({{line_number=1,source_line=lines[1],display_text="No match"},
+      {line_number=2,source_line=lines[2],remove=true}},api),nil)
+    eq(f.deleted,nil); eq(f.replaced,0); eq(f.lines[2]," Biting       400 4"); eq(f.lines[3],">")
+  end
+end)
+test("filtered skills validate the original cursor before any console mutation",function()
+  for _,invalid in ipairs({"missing","negative","nan","throw"}) do
+    local lines={[1]="Skill Remain Level",[2]=" Biting       400 4",[3]=">"}
+    local f,api,a=console(lines)
+    api.getColumnNumber=function()
+      if invalid=="negative" then return -1 elseif invalid=="nan" then return 0/0
+      elseif invalid=="throw" then error("cursor unavailable") end
+    end
+    eq(a:replaceSkillOutput({{line_number=1,source_line=lines[1],display_text="No match"},
+      {line_number=2,source_line=lines[2],remove=true}},api),nil)
+    eq(f.deleted,nil); eq(f.replaced,0); eq(f.lines[3],">")
+  end
+end)
 test("skill adapter tolerates only trailing fixed-width padding and selects exact buffer length",function()
   for _,buffer in ipairs({" Sharp Weapons       400 4"," Sharp Weapons       400 4      "}) do
     local f,api,a=console({[1]="Skill Remain Level",[2]=buffer})

@@ -494,19 +494,32 @@ function Adapter:replaceSkillOutput(rows,api)
     if type(api[key])~="function" then return nil,"Mudlet skill replacement API is unavailable" end
   end
   if type(rows)~="table" or #rows<1 or #rows>129 then return nil,"invalid skill output rows" end
-  local segments,seen={},{}
+  local segments,seen,hasRemovals={},{},false
+  local originalLine,originalColumn
   -- Preflight the entire batch. A shifted/deleted/replaced row leaves the raw
   -- response alone rather than painting sorted skills over unrelated output.
   local ok,err=pcall(function()
     local cursor=api.getLineNumber()
     assert(type(cursor)=="number" and cursor>=0 and cursor%1==0,"current console coordinate is unavailable")
+    originalLine=cursor; originalColumn=api.getColumnNumber()
+    assert(type(originalColumn)=="number" and originalColumn>=0 and originalColumn%1==0,"current console column is unavailable")
     for _,row in ipairs(rows) do
       assert(type(row)=="table" and type(row.line_number)=="number" and row.line_number>=0
         and row.line_number%1==0 and not seen[row.line_number],"invalid skill output coordinate")
       assert(type(row.source_line)=="string" and #row.source_line>0 and #row.source_line<=2048
         and not row.source_line:find("[\r\n]"),"invalid skill source line")
-      assert(type(row.display_text)=="string" and #row.display_text<=512
-        and not row.display_text:find("%c"),"invalid formatted skill line")
+      assert(row.remove==nil or type(row.remove)=="boolean","invalid skill row action")
+      if row.remove then
+        assert(type(api.deleteLine)=="function","Mudlet skill filtering API is unavailable")
+        assert(type(rows[1])=="table" and not rows[1].remove
+          and type(rows[1].source_line)=="string" and rows[1].source_line:match("^%s*Skill%s+Remain%s+Level%s*$"),"skill filtering requires the original table header")
+        local skillName=row.source_line:match("^%s*(.-)%s%s+%d+%s+%d+%s*$")
+        assert(skillName and skillName:find("%S") and not skillName:find("[%c<>:]"),"only captured skill rows may be removed")
+        hasRemovals=true
+      else
+        assert(type(row.display_text)=="string" and #row.display_text<=512
+          and not row.display_text:find("%c"),"invalid formatted skill line")
+      end
       seen[row.line_number]=true
       local current=api.getLines(row.line_number,row.line_number+1)
       local bufferLine=type(current)=="table" and current[1]
@@ -515,7 +528,7 @@ function Adapter:replaceSkillOutput(rows,api)
       -- shifted rows or wrapping. Select exactly what is actually in the buffer.
       assert(type(bufferLine)=="string" and bufferLine:gsub(" +$","")==row.source_line:gsub(" +$",""),"skill source row changed")
       local segment={start=1,length=#bufferLine,color={220,224,220},bold=false,underline=false,
-        line_number=row.line_number,source_line=bufferLine,display_text=row.display_text}
+        line_number=row.line_number,source_line=bufferLine,display_text=row.display_text,remove=row.remove==true}
       if row.style_id~=nil then
         assert(row.style_id=="skill_ready" or row.style_id=="skill_combat" or row.style_id=="skill_utility","invalid skill row style")
         local config=self.settings and self.settings.colorization or {}
@@ -535,6 +548,30 @@ function Adapter:replaceSkillOutput(rows,api)
   -- Map sorted skills into their original slots before this ordering step.
   -- Longer text may insert wrapped buffer rows: lower slots must be done first.
   table.sort(segments,function(a,b) return a.line_number>b.line_number end)
+  if hasRemovals then
+    local removedBeforeCursor=0
+    local applied,failure=pcall(function()
+      for _,segment in ipairs(segments) do
+        local current=api.getLines(segment.line_number,segment.line_number+1)
+        assert(type(current)=="table" and current[1]==segment.source_line,"skill source row changed during filtering")
+        if segment.remove then
+          assert(api.moveCursor(0,segment.line_number)==true,"Mudlet could not select a filtered skill row")
+          local deleted,deleteErr=api.deleteLine()
+          assert(deleted~=false and not (deleted==nil and deleteErr~=nil),"Mudlet could not hide a filtered skill row")
+          if segment.line_number<originalLine then removedBeforeCursor=removedBeforeCursor+1 end
+        else
+          local rendered,renderErr=self:applyLineColors({segment},api)
+          assert(rendered,renderErr)
+        end
+      end
+    end)
+    -- Deletion is bottom-up so unprocessed coordinates cannot shift. Restore
+    -- the player's cursor on the same prompt/output, accounting for hidden rows.
+    pcall(api.deselect)
+    pcall(api.moveCursor,originalColumn,math.max(0,originalLine-removedBeforeCursor))
+    if not applied then return nil,tostring(failure) end
+    return true
+  end
   return self:applyLineColors(segments,api)
 end
 function Adapter:applyLineColors(segments,api)
@@ -1139,6 +1176,27 @@ function Adapter:removeKeyBinding(id,api) api=api or _G; if type(api.killKey)~="
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end
+function Adapter:sendRoundtimeCheck(api)
+  api=api or _G
+  if type(api.send)~="function" then return nil,"Mudlet send API is unavailable" end
+  -- Fixed command and quiet local echo; manual sends keep their normal echo.
+  local called,result,err=pcall(api.send,"delay",false)
+  if not called or result==false or (result==nil and err~=nil) then return nil,called and (err or "delay check was not sent") or tostring(result) end
+  return true
+end
+function Adapter:hideRoundtimeCheckLine(source,api)
+  api=api or _G
+  if type(source)~="string" or #source>2048 or type(api.getCurrentLine)~="function" or type(api.deleteLine)~="function" then return false end
+  local function plain(value) return type(value)=="string" and value:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r",""):match("^%s*(.-)%s*$") or nil end
+  local expected=plain(source)
+  if not expected or not (expected:match("^You have %d+ second%(s%) remaining!$") or expected:match("^You have %d+ seconds? remaining!$")) then return false end
+  -- Other triggers or command echoes may have moved the current row. Never
+  -- delete any row unless it is still the exact isolated response we parsed.
+  local read,current=pcall(api.getCurrentLine)
+  if not read or plain(current)~=expected then return false end
+  local deleted,result=pcall(api.deleteLine)
+  return deleted and result~=false
+end
 function Adapter:getGMCP() return gmcp or {} end
 function Adapter:getPostureVariables()
   return {standing=rawget(_G,"standing"),sitting=rawget(_G,"sitting"),unconscious=rawget(_G,"unconscious")}

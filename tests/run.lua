@@ -14,6 +14,8 @@ end
 dofile(root .. "/tests/lua/test_command_parser.lua")
 dofile(root .. "/tests/lua/test_game_clock.lua")
 dofile(root .. "/tests/lua/test_roundtime.lua")
+dofile(root .. "/tests/lua/test_roundtime_check.lua")
+dofile(root .. "/tests/lua/test_roundtime_check_adapter.lua")
 dofile(root .. "/tests/lua/test_command_collector.lua")
 dofile(root .. "/tests/lua/test_skill_display.lua")
 dofile(root .. "/tests/lua/test_skill_sort.lua")

@@ -538,7 +538,7 @@ test("cleanup reconciliation requires a valid fresh current room after mutation"
 end)
 
 test("shutdown removes all cleanup and transfer map aliases",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+28)
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+29)
   local owned={}; for id,alias in pairs(f.aliases) do if alias.pattern:match("%^dghud map ") then owned[id]=true end end; eq(f:count(owned),17)
   assert(hud:shutdown()); for id in pairs(owned) do eq(f.killed[id],true) end; eq(f:count(f.aliases),0)
 end)
@@ -1832,6 +1832,123 @@ test("custom word highlights save, recolor immediately, survive restart, and del
   hud:shutdown()
 end)
 
+local function delayConsole(f)
+  function f:sendRoundtimeCheck()
+    self.delayChecks=(self.delayChecks or 0)+1
+    self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]="delay"
+    self:emit("sysDataSendRequest",nil,"delay")
+    return true
+  end
+  function f:hideRoundtimeCheckLine(line)
+    self.hiddenDelayReplies=self.hiddenDelayReplies or {}; self.hiddenDelayReplies[#self.hiddenDelayReplies+1]=line
+    return true
+  end
+  function f:output(line)
+    local callbacks={}
+    for _,callback in pairs(self.triggers) do callbacks[#callbacks+1]=callback end
+    for _,callback in ipairs(callbacks) do callback(line) end
+  end
+  function f:fireDelayTimer(delay,now)
+    if now then self.epochValue=now end
+    for id,callback in pairs(self.timers) do
+      if self.timer_delays[id]==delay then self.timers[id]=nil; callback(); return true end
+    end
+    return false
+  end
+  return f
+end
+test("runtime corrects a printed delay burst using one quiet owned response",function()
+  local f=delayConsole(fake()); f.gmcp={Char={Vitals={hp=1,hp_max=1,roundtime=0}}}
+  local hud=Main.new(f,{layout={}}); assert(hud:start())
+  f:output("[7 sec. delay]"); f:output("[2 sec. delay]")
+  eq(hud.roundtime_display,9); eq(f.delayChecks,nil)
+  f.gmcp.Char.Vitals.roundtime=9; f:emit("gmcp.Char.Vitals")
+  assert(f:fireDelayTimer(.25,100.25)); eq(f.delayChecks,1)
+  f:output("You have 6 second(s) remaining!")
+  eq(hud.roundtime_display,6); eq(hud.last_state.vitals.roundtime,6); eq(hud.walker.roundtime,6)
+  eq(#f.hiddenDelayReplies,1)
+  f:emit("gmcp.Char.Vitals"); eq(hud.roundtime_display,6)
+  hud:shutdown(); eq(f:count(f.timers),0)
+end)
+test("owned delay probes bypass movement and autoroller outgoing handlers only",function()
+  local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  local calls={walker=0,mapper=0,roller=0}
+  function hud.walker:onManualMovement() calls.walker=calls.walker+1 end
+  function hud.automapper:onOutgoing() calls.mapper=calls.mapper+1 end
+  function hud.roller:onOutgoing() calls.roller=calls.roller+1 end
+  hud:onRoundtime(7,"text"); assert(f:fireDelayTimer(.25,100.25))
+  eq(calls.walker,0); eq(calls.mapper,0); eq(calls.roller,0)
+  f:output("You have 6 second(s) remaining!")
+  f:emit("sysDataSendRequest",nil,"delay")
+  eq(calls.walker,1); eq(calls.mapper,1); eq(calls.roller,1)
+  hud:shutdown()
+end)
+test("manual delay stays visible and synchronizes HUD and walker",function()
+  local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud:onRoundtime(20,"gmcp")
+  f:emit("sysDataSendRequest",nil,"  DELAY  ")
+  f:output("You have 12 second(s) remaining!")
+  eq(hud.roundtime_display,12); eq(hud.walker.roundtime,12)
+  eq(f.hiddenDelayReplies,nil); eq(f.delayChecks,nil); hud:shutdown()
+end)
+test("manual overlap leaves both automatic and manual delay replies visible",function()
+  local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  f:output("[7 sec. delay]"); assert(f:fireDelayTimer(.25,100.25)); eq(f.delayChecks,1)
+  f:emit("sysDataSendRequest",nil,"delay")
+  f:output("You have 7 second(s) remaining!"); f:output("You have 6 second(s) remaining!")
+  eq(hud.roundtime_display,6); eq(f.hiddenDelayReplies,nil); eq(f.delayChecks,1); hud:shutdown()
+end)
+test("a manual delay cancels a queued automatic check",function()
+  local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  f:output("[7 sec. delay]"); f:emit("sysDataSendRequest",nil,"delay")
+  eq(f:fireDelayTimer(.25,100.25),false)
+  f:output("You have 5 second(s) remaining!")
+  eq(f.delayChecks,nil); eq(f.hiddenDelayReplies,nil); eq(hud.roundtime_display,5); hud:shutdown()
+end)
+test("delay checks are suppressed during data refresh autorolling and updates",function()
+  for _,busy in ipairs({"collector","roller","updater"}) do
+    local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+    if busy=="collector" then hud.collector.active={command="stat",lines={}}
+    elseif busy=="roller" then hud.roller.state.active=true
+    else hud.updater={lock="update"} end
+    hud:onRoundtime(7,"text"); f:fireDelayTimer(.25,100.25)
+    eq(f.delayChecks,nil); eq(hud.roundtime_display,7)
+    if busy=="collector" then hud.collector.active=nil elseif busy=="roller" then hud.roller.state.active=false else hud.updater=nil end
+    hud:shutdown()
+  end
+end)
+test("a timed out HUD delay check cannot conceal a later manual reply",function()
+  local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud:onRoundtime(7,"text"); assert(f:fireDelayTimer(.25,100.25))
+  assert(f:fireDelayTimer(4,104.25))
+  f:emit("sysDataSendRequest",nil,"delay")
+  f:output("You have 4 second(s) remaining!")
+  hud:onRoundtime(2,"text"); f:fireDelayTimer(.25,104.5)
+  eq(f.delayChecks,1); eq(f.hiddenDelayReplies,nil); hud:shutdown()
+end)
+test("character exit and shutdown cancel queued probes and uncertain reply ownership",function()
+  local f=delayConsole(fake()); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  hud:onRoundtime(7,"text"); hud:onCharacterExit()
+  eq(f:fireDelayTimer(.25,100.25),false); eq(f.delayChecks,nil)
+  hud:onRoundtime(7,"text"); assert(f:fireDelayTimer(.25,100.5))
+  f:emit("sysDisconnectionEvent"); eq(hud.roundtime_display,0)
+  f:output("You have 0 second(s) remaining!"); eq(f.hiddenDelayReplies,nil)
+  hud:shutdown(); eq(f:count(f.timers),0); eq(f:count(f.triggers),0)
+end)
+test("replacement HUD cannot hide a retired instance's pending delay reply",function()
+  local f=delayConsole(fake()); local old=Main.new(f,{layout={}}); assert(old:start())
+  old:onRoundtime(7,"text"); assert(f:fireDelayTimer(.25,100.25))
+  local snapshot=old:roundtimeHandoff(); eq(snapshot.delay_check_suspended,true)
+  old:shutdown(); eq(old:roundtimeHandoff().delay_check_suspended,true)
+  local hud=Main.new(f,{layout={}},nil,nil,snapshot); assert(hud:start())
+  hud:onRoundtime(2,"text"); eq(f:fireDelayTimer(.25,100.5),false); eq(f.delayChecks,1)
+  local before=hud.roundtime_display
+  f:output("You have 12 second(s) remaining!"); eq(hud.roundtime_display,before); eq(f.hiddenDelayReplies,nil)
+  f:emit("sysDataSendRequest",nil,"delay"); f:output("You have 4 second(s) remaining!")
+  eq(hud.roundtime_display,4); eq(f.hiddenDelayReplies,nil)
+  hud:reload(); eq(hud.roundtime_check.paused,true); eq(f.delayChecks,1)
+  hud:shutdown(); eq(f:count(f.timers),0)
+end)
 test("master color aliases report persistence failures without changing active colors",function()
   for _,command in ipairs({"on","off","toggle"}) do
     local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); f.failColorSave=true
@@ -2309,4 +2426,315 @@ test("optional main skills missing or failed registration keeps the rest of the 
     assert(f.commandErrors[1]:find("Main skills display is unavailable",1,true))
     eq(hud:mainSkillsEnabled(),true); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.events),0)
   end
+end)
+
+
+local skillPrefixPattern="^(?i:skill)\\s+(.+)$"
+local skillPrefixLines={"Skill Remain Level"," Sharp Weapons       400 4"," Dodging       50 5",
+  "An enemy attacks."," Shield Parry       80 3"," First Aid       0 2",">"}
+
+-- Capabilities used by these integration cases stay local to their fixtures.
+local function withSkillPrefix(enabled,fn)
+  local f=fake(); local hud
+  f.skillBatches={}; f.skillConsole={}; f.skillSendOwnership={}
+  function f:replaceSkillOutput(rows)
+    self.replacedSkills=rows; self.skillBatches[#self.skillBatches+1]=rows
+    for _,row in ipairs(rows) do
+      eq(self.skillConsole[row.line_number],row.source_line)
+      if row.remove then self.skillConsole[row.line_number]=nil
+      else assert(type(row.display_text)=="string"); self.skillConsole[row.line_number]=row.display_text end
+    end
+    return true
+  end
+  function f:sendCommand(command)
+    self.sent=command; self.sentCommands=self.sentCommands or {}; self.sentCommands[#self.sentCommands+1]=command
+    self.skillSendOwnership[#self.skillSendOwnership+1]=hud.skills_filter_sending==true
+    self:emit("sysDataSendRequest",nil,command)
+    return true
+  end
+  hud=Main.new(f,{layout={},display={main_skills=enabled}})
+  assert(hud:start())
+  local ok,err=pcall(fn,f,hud)
+  local stopped,stopErr=pcall(hud.shutdown,hud)
+  assert(ok,err); assert(stopped,stopErr)
+  eq(f:count(f.events),0); eq(f:count(f.aliases),0); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
+end
+local function skillPrefixLine(f,hud,line,row,displayFirst)
+  f.skillConsole[row]=line
+  local display=assert(f.triggers[hud.skill_display.trigger])
+  local collector=assert(f.triggers[hud.collector.runtime.triggers[1]])
+  if displayFirst then display(line,row); collector(line) else collector(line); display(line,row) end
+end
+local function skillPrefixResponse(f,hud,displayFirst,firstRow,boundary,firstIndex)
+  firstRow=firstRow or 1
+  for index=firstIndex or 1,#skillPrefixLines do
+    local line=index==#skillPrefixLines and (boundary or ">") or skillPrefixLines[index]
+    skillPrefixLine(f,hud,line,firstRow+index-1,displayFirst)
+  end
+end
+local function flushSkillPrefix(f,hud)
+  for _=1,8 do
+    local id=hud.collector.skill_boundary
+    if not id then id=hud.skill_display.timer end
+    if not id or f.timer_delays[id]~=0 then return end
+    local callback=assert(f.timers[id]); f.timers[id]=nil; callback()
+  end
+  error("skill response did not finish within its bounded callbacks")
+end
+local function skillPrefixText(f,firstRow)
+  local lines={}
+  for row=firstRow or 1,(firstRow or 1)+#skillPrefixLines-1 do
+    if f.skillConsole[row] then lines[#lines+1]=f.skillConsole[row] end
+  end
+  return table.concat(lines,"\n")
+end
+local function assertFullSkillSnapshot(hud)
+  for _,snapshot in ipairs({assert(hud.collector.snapshot.skills),assert(hud.last_state.skills)}) do
+    eq(#snapshot.items,4)
+    local expected={["Sharp Weapons"]={400,4},Dodging={50,5},["Shield Parry"]={80,3},["First Aid"]={0,2}}
+    for _,skill in ipairs(snapshot.items) do
+      local values=assert(expected[skill.name],"unexpected or duplicate skill: "..tostring(skill.name))
+      eq(skill.remain,values[1]); eq(skill.level,values[2]); expected[skill.name]=nil
+    end
+    eq(next(expected),nil)
+  end
+end
+local function assertSkillPrefixResult(f,formatted)
+  local text=skillPrefixText(f)
+  assert(text:find(formatted and "Sharps" or "Sharp Weapons",1,true)); assert(text:find("Shield Parry",1,true))
+  eq(text:find("Dodging",1,true),nil); eq(text:find("First Aid",1,true),nil)
+  eq(f.skillConsole[4],"An enemy attacks."); eq(f.skillConsole[7],">")
+end
+
+test("skill prefix alias uses scoped case insensitive capture and owns exactly one registration across reload",function()
+  withSkillPrefix(true,function(f,hud)
+    eq(f:count(f.aliases),#Events.aliases+29)
+    local callback=assert(aliasCallback(f,skillPrefixPattern))
+    eq(aliasCallback(f,"^skill$"),nil); eq(aliasCallback(f,"^(?i:skill)$"),nil)
+    local seen={}; hud.requestSkills=function(_,query) seen[#seen+1]=query; return true end
+    assert(callback("Sh")); assert(callback({"SKILL Sh","Sh"}))
+    local previous=_G.matches
+    _G.matches={"sKiLl Sh","Sh"}; local ok,err=pcall(callback); _G.matches=previous; assert(ok,err)
+    eq(#seen,3); for _,query in ipairs(seen) do eq(query,"Sh") end
+    local owned; for id,alias in pairs(f.aliases) do if alias.pattern==skillPrefixPattern then owned=id end end
+    assert(hud:start()); eq(f:count(f.aliases),#Events.aliases+29)
+    assert(hud:reload()); eq(f.killed[owned],true); eq(f:count(f.aliases),#Events.aliases+29)
+    local count=0; for _,alias in pairs(f.aliases) do if alias.pattern==skillPrefixPattern then count=count+1 end end; eq(count,1)
+  end)
+end)
+
+test("skill prefix alias sends only the fixed raw skill command without alias expansion or recursion",function()
+  withSkillPrefix(true,function(f,hud)
+    local previousSend,previousExpand=_G.send,_G.expandAlias
+    local queries={}; local request=hud.skill_display.requestFilter
+    hud.skill_display.requestFilter=function(self,query) queries[#queries+1]=query; return request(self,query) end
+    local sends,expansions=0,0
+    _G.expandAlias=function() expansions=expansions+1; error("skill command recursed through aliases") end
+    _G.send=function(command)
+      sends=sends+1; eq(sends,1); eq(command,"skill"); eq(hud.skills_filter_sending,true)
+      eq(hud.skill_display:filterPending(),true)
+      f:emit("sysDataSendRequest",nil,command)
+      eq(hud.skill_display:filterPending(),true)
+      return true
+    end
+    f.sendCommand=MudletAdapter.sendCommand
+    local ok,err=pcall(function() assert(aliasCallback(f,skillPrefixPattern)({"SKILL Sh","Sh"})) end)
+    _G.send=previousSend; _G.expandAlias=previousExpand
+    assert(ok,err); eq(sends,1); eq(expansions,0); eq(#queries,1); eq(queries[1],"sh")
+    eq(hud.skills_filter_sending,nil); eq(hud.collector.active.command,"skill")
+    skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertSkillPrefixResult(f,true); assertFullSkillSnapshot(hud)
+  end)
+end)
+
+test("skill prefix filters one response after full raw capture in either trigger order and table boundary",function()
+  for _,displayFirst in ipairs({false,true}) do
+    for _,boundary in ipairs({">",""}) do
+      withSkillPrefix(true,function(f,hud)
+        assert(hud:requestSkills("sh")); eq(f.sentCommands[1],"skill"); eq(#f.sentCommands,1)
+        eq(f.skillSendOwnership[1],true); eq(hud.skills_filter_sending,nil)
+        local raw=assert(hud.collector.active).lines
+        skillPrefixResponse(f,hud,displayFirst,1,boundary)
+        eq(#f.skillBatches,0); eq(#raw,#skillPrefixLines)
+        for index,line in ipairs(skillPrefixLines) do eq(raw[index],index==#skillPrefixLines and boundary or line) end
+        if boundary==">" then assertFullSkillSnapshot(hud) end
+        flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+        local text=skillPrefixText(f); assert(text:find("Sharps",1,true)); assert(text:find("Shield Parry",1,true))
+        eq(text:find("Dodging",1,true),nil); eq(text:find("First Aid",1,true),nil)
+        eq(f.skillConsole[4],"An enemy attacks."); eq(f.skillConsole[7],boundary)
+        eq(hud.skill_display:filterPending(),false); eq(#f.skillBatches,1)
+        f:sendCommand("skill"); skillPrefixResponse(f,hud,displayFirst,20); flushSkillPrefix(f,hud)
+        local full=skillPrefixText(f,20)
+        for _,name in ipairs({"Sharps","Shield Parry","Dodging","First Aid"}) do assert(full:find(name,1,true)) end
+        assertFullSkillSnapshot(hud); eq(#f.sentCommands,2)
+      end)
+    end
+  end
+end)
+
+test("skill all displays every skill and clears one request ownership with formatting on or off",function()
+  for _,enabled in ipairs({true,false}) do
+    withSkillPrefix(enabled,function(f,hud)
+      assert(aliasCallback(f,skillPrefixPattern)({"SkIlL ALL","ALL"}))
+      eq(f.sentCommands[1],"skill"); eq(#f.sentCommands,1)
+      skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      local text=skillPrefixText(f)
+      for _,name in ipairs({enabled and "Sharps" or "Sharp Weapons","Shield Parry","Dodging","First Aid"}) do
+        assert(text:find(name,1,true))
+      end
+      eq(hud.skill_display:filterPending(),false); eq(hud:mainSkillsEnabled(),enabled)
+    end)
+  end
+end)
+
+test("skill prefix no match consumes the response and treats pattern characters as literal query data",function()
+  for _,query in ipairs({"weapons","sh.*;quit"}) do
+    withSkillPrefix(true,function(f,hud)
+      assert(hud:requestSkills(query)); eq(f.sentCommands[1],"skill"); eq(#f.sentCommands,1)
+      skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      eq(f.skillConsole[1],"No skills match: "..query)
+      for _,row in ipairs({2,3,5,6}) do eq(f.skillConsole[row],nil) end
+      eq(f.skillConsole[4],"An enemy attacks."); eq(f.skillConsole[7],">")
+      eq(hud.skill_display:filterPending(),false)
+      assert(hud:requestSkills("fi")); skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud)
+      local text=skillPrefixText(f,20); assert(text:find("First Aid",1,true)); eq(text:find("Sharps",1,true),nil)
+    end)
+  end
+end)
+
+test("skill prefix remains functional with main formatting off and leaves the next bare skill response raw",function()
+  withSkillPrefix(false,function(f,hud)
+    assert(hud:requestSkills("sh")); skillPrefixResponse(f,hud); flushSkillPrefix(f,hud)
+    assertSkillPrefixResult(f,false); assertFullSkillSnapshot(hud)
+    eq(f.skillConsole[1],"Skill Remain Level"); eq(#f.skillBatches,1); eq(hud.skill_display.enabled,false)
+    eq(hud:mainSkillsEnabled(),false); eq(f.savedDisplaySettings,nil)
+    f:sendCommand("skill"); skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud)
+    for index,line in ipairs(skillPrefixLines) do eq(f.skillConsole[19+index],line) end
+    eq(#f.skillBatches,1); assertFullSkillSnapshot(hud)
+  end)
+end)
+
+test("skill prefix refuses an active character refresh without preparing a filter or sending another command",function()
+  withSkillPrefix(true,function(f,hud)
+    hud.collector:onOutgoing("stat"); local active=hud.collector.active; local timer=hud.collector.timeout
+    local prepared=0; local request=hud.skill_display.requestFilter
+    hud.skill_display.requestFilter=function(self,query) prepared=prepared+1; return request(self,query) end
+    local ok,err=aliasCallback(f,skillPrefixPattern)("sh")
+    eq(ok,nil); assert(type(err)=="string" and err:lower():find("refresh",1,true))
+    eq(prepared,0); eq(f.sentCommands,nil); eq(hud.collector.active,active); eq(hud.collector.timeout,timer)
+    eq(hud.skill_display:filterPending(),false); eq(f.commandErrors[1],err)
+    hud.collector:cancelActive(); assert(hud:requestSkills("sh")); eq(prepared,1)
+    skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertSkillPrefixResult(f,true)
+  end)
+end)
+
+test("skill prefix rejects overlapping queries while waiting collecting and awaiting deferred replacement",function()
+  for _,phase in ipairs({"waiting","collecting","pending"}) do
+    withSkillPrefix(true,function(f,hud)
+      assert(hud:requestSkills("sh"))
+      if phase=="collecting" then
+        skillPrefixLine(f,hud,skillPrefixLines[1],1); skillPrefixLine(f,hud,skillPrefixLines[2],2)
+      elseif phase=="pending" then skillPrefixResponse(f,hud) end
+      eq(hud.skill_display:filterPending(),true)
+      local display=hud.skill_display; local timer,response,pending=display.timer,display.response,display.pending
+      local cancels=f.timer_cancels[timer]; local active=hud.collector.active
+      -- Isolate the display ownership guard from the separate collector busy guard.
+      hud.collector.active=nil; local ok,err=hud:requestSkills("fi"); hud.collector.active=active
+      eq(ok,nil); assert(type(err)=="string" and err:lower():find("wait",1,true))
+      eq(#f.sentCommands,1); eq(display.timer,timer); eq(display.response,response); eq(display.pending,pending)
+      eq(f.timer_cancels[timer],cancels); eq(hud.skills_filter_sending,nil)
+      if phase=="collecting" then skillPrefixResponse(f,hud,false,1,">",3)
+      elseif phase=="waiting" then skillPrefixResponse(f,hud) end
+      flushSkillPrefix(f,hud); assertSkillPrefixResult(f,true); assertFullSkillSnapshot(hud)
+      assert(hud:requestSkills("fi")); eq(#f.sentCommands,2)
+    end)
+  end
+end)
+
+test("manual bare skill clears waiting collecting and deferred filters including late callbacks",function()
+  for _,phase in ipairs({"waiting","collecting","pending"}) do
+    withSkillPrefix(true,function(f,hud)
+      assert(hud:requestSkills("sh"))
+      if phase=="collecting" then
+        skillPrefixLine(f,hud,skillPrefixLines[1],1); skillPrefixLine(f,hud,skillPrefixLines[2],2)
+      elseif phase=="pending" then skillPrefixResponse(f,hud) end
+      local timer=hud.skill_display.timer; local late=assert(f.timers[timer])
+      f:sendCommand("  sKiLl  ")
+      eq(hud.skill_display:filterPending(),false); eq(f.timers[timer],nil); eq(hud.skills_filter_sending,nil)
+      late(); eq(#f.skillBatches,0); eq(f.skillSendOwnership[2],false); eq(f.sentCommands[2],"  sKiLl  ")
+      skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      local text=skillPrefixText(f,20)
+      for _,name in ipairs({"Sharps","Shield Parry","Dodging","First Aid"}) do assert(text:find(name,1,true)) end
+    end)
+  end
+end)
+
+test("only exact trimmed bare skill outgoing clears a queued prefix filter",function()
+  withSkillPrefix(true,function(f,hud)
+    assert(hud:requestSkills("sh"))
+    for _,command in ipairs({"skill sh","skills","info skill"}) do
+      f:emit("sysDataSendRequest",nil,command); eq(hud.skill_display:filterPending(),true)
+    end
+    eq(#f.sentCommands,1); skillPrefixResponse(f,hud); flushSkillPrefix(f,hud)
+    assertSkillPrefixResult(f,true); assertFullSkillSnapshot(hud)
+  end)
+end)
+
+test("disconnect clears every skill prefix phase and invalidates late display callbacks",function()
+  for _,phase in ipairs({"waiting","collecting","pending"}) do
+    withSkillPrefix(true,function(f,hud)
+      assert(hud:requestSkills("sh"))
+      if phase=="collecting" then
+        skillPrefixLine(f,hud,skillPrefixLines[1],1); skillPrefixLine(f,hud,skillPrefixLines[2],2)
+      elseif phase=="pending" then skillPrefixResponse(f,hud) end
+      local display=hud.skill_display; local timer=display.timer; local late=assert(f.timers[timer])
+      f:emit("sysDisconnectionEvent")
+      eq(display:filterPending(),false); eq(display.response,nil); eq(display.pending,nil); eq(display.timer,nil)
+      eq(hud.collector.active,nil); eq(f.timers[timer],nil); late(); eq(#f.skillBatches,0)
+      f:sendCommand("skill"); skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      local text=skillPrefixText(f,20); assert(text:find("Dodging",1,true)); assert(text:find("First Aid",1,true))
+    end)
+  end
+end)
+
+test("skill prefix send failures cancel ownership and timers then allow a fresh request",function()
+  for _,mode in ipairs({"false","false_error","nil_error","throws"}) do
+    withSkillPrefix(true,function(f,hud)
+      local send=f.sendCommand; local late,timer
+      function f:sendCommand(command)
+        eq(command,"skill"); eq(hud.skills_filter_sending,true); eq(hud.skill_display:filterPending(),true)
+        timer=hud.skill_display.timer; late=assert(self.timers[timer])
+        if mode=="throws" then error("send failed") end
+        if mode=="nil_error" then return nil,"send failed" end
+        if mode=="false_error" then return false,"send failed" end
+        return false
+      end
+      local ok,err=hud:requestSkills("sh")
+      eq(ok,nil); assert(type(err)=="string" and #err>0)
+      eq(hud.skills_filter_sending,nil); eq(hud.skill_display:filterPending(),false); eq(hud.skill_display.timer,nil)
+      eq(f.timers[timer],nil); late(); eq(#f.skillBatches,0)
+      f.sendCommand=send; assert(hud:requestSkills("fi")); skillPrefixResponse(f,hud); flushSkillPrefix(f,hud)
+      local text=skillPrefixText(f); assert(text:find("First Aid",1,true)); eq(text:find("Sharps",1,true),nil)
+      assertFullSkillSnapshot(hud)
+    end)
+  end
+end)
+
+test("skill prefix accepts a successful Mudlet send with no return value and retains owned outgoing filter",function()
+  withSkillPrefix(true,function(f,hud)
+    local send=f.sendCommand
+    function f:sendCommand(command) send(self,command) end
+    assert(hud:requestSkills("sh")); eq(hud.skills_filter_sending,nil); eq(hud.skill_display:filterPending(),true)
+    eq(#f.sentCommands,1); skillPrefixResponse(f,hud); flushSkillPrefix(f,hud)
+    assertSkillPrefixResult(f,true); assertFullSkillSnapshot(hud)
+  end)
+end)
+
+test("skill prefix invalid query data never prepares display state or sends commands",function()
+  withSkillPrefix(true,function(f,hud)
+    for _,query in ipairs({false,42,{},"sh\nquit","sh\0",string.rep("s",129)}) do
+      local ok,err=hud:requestSkills(query)
+      eq(ok,nil); assert(type(err)=="string" and #err>0)
+      eq(f.sentCommands,nil); eq(hud.skill_display:filterPending(),false); eq(hud.skills_filter_sending,nil)
+    end
+  end)
 end)

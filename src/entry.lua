@@ -68,6 +68,7 @@ local moduleNames={"defaults","keybindings","command_parser","command_collector"
 moduleNames[#moduleNames+1]="color_styles"; moduleNames[#moduleNames+1]="color_preferences"; moduleNames[#moduleNames+1]="travel_highlights"; moduleNames[#moduleNames+1]="roundtime"
 moduleNames[#moduleNames+1]="skill_display"
 moduleNames[#moduleNames+1]="skill_sort"; moduleNames[#moduleNames+1]="skill_settings_view"
+moduleNames[#moduleNames+1]="roundtime_check"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")

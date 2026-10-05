@@ -74,6 +74,14 @@ function Roundtime:gmcp(value)
   self.credit=recentText and unused+math.max(0,self.deadline-previous) or value; self.credit_at=now
   return math.ceil(self:remaining(now))
 end
+function Roundtime:sync(value)
+  value=duration(value); if not value then return self:display() end
+  local now=self:now()
+  -- DELAY reports a current total, not a new action penalty. Keep the last
+  -- GMCP marker so an unchanged cached packet cannot undo this correction.
+  self.deadline=now+value; self.credit=nil; self.credit_at=nil; self.text_at=nil; self.tick_seen=now
+  return math.ceil(self:remaining(now))
+end
 function Roundtime:tick()
   return math.ceil(self:remaining(self:now(true)))
 end

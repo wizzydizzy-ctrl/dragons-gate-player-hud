@@ -3,6 +3,7 @@ local SkillSort=require("skill_sort")
 local Display={}; Display.__index=Display
 Display.MAX_ROWS=128; Display.MAX_LINES=256; Display.MAX_LINE_BYTES=2048; Display.RESPONSE_TIMEOUT=5
 Display.BOUNDARY_DELAY=0
+Display.MAX_FILTER_BYTES=128
 
 local function plain(value)
   return value:gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\r","")
@@ -12,11 +13,45 @@ local function name(value)
 end
 Display.skillId=SkillSort.skillId
 Display.combatCategory=SkillSort.combatCategory
+local shortNames={["sharp weapons"]="Sharps",["blunt weapons"]="Blunts",["pole weapons"]="Poles",
+  ["throw weapons"]="Throws",["missile weapons"]="Missiles"}
+local filterAliases={
+  ["identify gems/minerals"]={"id gems/minerals","id gems"},
+  ["identify magick"]={"id magick"},
+  ["identify weapon quality"]={"id weapon quality","id weapon"},
+  ["identify armor quality"]={"id armor quality","id armor"},
+}
+local canonicalNames={}
+for full,short in pairs(shortNames) do canonicalNames[short:lower()]=full end
+for full,aliases in pairs(filterAliases) do
+  for _,alias in ipairs(aliases) do canonicalNames[alias]=full end
+end
 function Display.displayName(value)
   local cleaned=name(plain(tostring(value or ""))):gsub("%c"," ")
-  local short={["sharp weapons"]="Sharps",["blunt weapons"]="Blunts",["pole weapons"]="Poles",
-    ["throw weapons"]="Throws",["missile weapons"]="Missiles"}
-  return short[cleaned:lower()] or cleaned
+  return shortNames[cleaned:lower()] or cleaned
+end
+function Display.normalizeFilter(query)
+  if type(query)~="string" then return nil,"skill filter must be a string" end
+  if #query>Display.MAX_FILTER_BYTES then return nil,"skill filter exceeds 128 bytes" end
+  for index=1,#query do
+    local byte=query:byte(index)
+    if byte<32 or byte==127 then return nil,"skill filter must not contain control characters" end
+  end
+  local normalized=query:lower():gsub(" +"," "):match("^ *(.-) *$")
+  return normalized=="all" and "" or normalized
+end
+function Display.matchesFilter(skillName,query)
+  local prefix=Display.normalizeFilter(query)
+  if prefix==nil or type(skillName)~="string" or #skillName>Display.MAX_LINE_BYTES then return false end
+  if prefix=="" then return true end
+  local cleaned=name(plain(skillName)):lower()
+  local canonical=canonicalNames[cleaned] or cleaned
+  -- The query is data: literal leading bytes only, never a Lua pattern or code.
+  local function starts(value) return value:sub(1,#prefix)==prefix end
+  if starts(canonical) or starts(Display.displayName(canonical):lower()) then return true end
+  if canonical:sub(1,9)=="identify " and starts("id "..canonical:sub(10)) then return true end
+  for _,alias in ipairs(filterAliases[canonical] or {}) do if starts(alias) then return true end end
+  return prefix=="bite" and canonical=="biting"
 end
 function Display.category(skill)
   if skill.remain==0 then return "ready" end
@@ -56,7 +91,22 @@ function Display:disarmTimer()
   if timer then pcall(self.adapter.cancelTimer,self.adapter,timer) end
 end
 function Display:cancel()
-  self:disarmTimer(); self.response=nil; self.pending=nil
+  self:disarmTimer(); self.response=nil; self.pending=nil; self.filter_query=nil; self.pending_filter=nil
+end
+function Display:filterPending()
+  return self.filter_query~=nil or (self.response~=nil and self.response.filter_query~=nil) or self.pending_filter==true
+end
+function Display:requestFilter(query)
+  local normalized,err=Display.normalizeFilter(query)
+  if normalized==nil then return nil,err end
+  if self:filterPending() then return nil,"a skill filter request is already pending" end
+  if not self.started then return nil,"main skills display is not started" end
+  self:cancel()
+  self.filter_query=normalized
+  if not self:armTimer(Display.RESPONSE_TIMEOUT,function() self:cancel() end) then
+    return nil,"skill filter timeout registration failed"
+  end
+  return true
 end
 function Display:setEnabled(enabled)
   if type(enabled)~="boolean" then return nil,"main skills display must be a boolean" end
@@ -80,35 +130,53 @@ end
 function Display:finish()
   local response=self.response
   self:cancel()
-  if not response or #response.rows==0 or not self.enabled then return end
-  local items={}; for _,row in ipairs(response.rows) do items[#items+1]=row.skill end
-  items=SkillSort.sorted(items,self.sort)
-  local widths=columnWidths(items)
-  local rows={{line_number=response.header.line_number,source_line=response.header.source_line,
-    display_text=columns({"Number","Skill","LVL","USES"},widths),category="neutral"}}
-  for index,row in ipairs(response.rows) do
-    local category=Display.category(items[index])
-    rows[#rows+1]={line_number=row.line_number,source_line=row.source_line,display_text=Display.format(items[index],widths),
-      category=category,style_id="skill_"..category}
+  if not response then return end
+  local query=response.filter_query
+  if (not self.enabled and query==nil) or (#response.rows==0 and (query==nil or query=="")) then return end
+  local items,sources={},{}
+  for _,row in ipairs(response.rows) do
+    sources[row.skill]=row.source_line
+    if query==nil or Display.matchesFilter(row.skill.name,query) then items[#items+1]=row.skill end
   end
-  self.pending=rows
+  if self.enabled then items=SkillSort.sorted(items,self.sort) end
+  local widths=self.enabled and columnWidths(items) or nil
+  local heading=response.header.source_line
+  if #items==0 then heading="No skills match: "..query
+  elseif self.enabled then heading=columns({"Number","Skill","LVL","USES"},widths) end
+  local rows={{line_number=response.header.line_number,source_line=response.header.source_line,
+    display_text=heading,category="neutral"}}
+  for index,row in ipairs(response.rows) do
+    local output={line_number=row.line_number,source_line=row.source_line}
+    local skill=items[index]
+    if not skill then output.remove=true
+    elseif self.enabled then
+      output.display_text=Display.format(skill,widths)
+      output.category=Display.category(skill); output.style_id="skill_"..output.category
+    else output.display_text=sources[skill]; output.category="neutral" end
+    rows[#rows+1]=output
+  end
+  self.pending=rows; self.pending_filter=query~=nil
   -- Defer until the complete raw response has reached every Mudlet trigger.
-  -- Never delete lines: the original slots, combat, blank lines and prompt stay.
+  -- The adapter owns guarded rewrites/removals of the original skill slots.
   self:armTimer(0,function()
-    local pending=self.pending; self.pending=nil
-    if self.started and self.enabled and pending then pcall(self.adapter.replaceSkillOutput,self.adapter,pending) end
+    local pending,filtered=self.pending,self.pending_filter
+    self.pending=nil; self.pending_filter=nil
+    if self.started and (self.enabled or filtered) and pending then pcall(self.adapter.replaceSkillOutput,self.adapter,pending) end
   end)
 end
 function Display:onLine(value,number)
-  if not self.started or not self.enabled or type(value)~="string" then return false end
+  if not self.started or (not self.enabled and not self:filterPending()) or type(value)~="string" then return false end
   if #value>Display.MAX_LINE_BYTES then self:cancel(); return false end
   local source=plain(value); local text=source:match("^%s*(.-)%s*$")
   if text=="Dragon's Gate Menu" or text:find("Dragon's Gate Character Creator",1,true)
       or text:match("^Welcome to Dragon's Gate,") then self:cancel(); return false end
   if text:match("^Skill%s+Remain%s+Level$") then
+    local query=self.filter_query
     self:cancel()
+    if not self.enabled and query==nil then return false end
     if type(number)~="number" or number<0 or number%1~=0 then return false end
-    self.response={rows={},numbers={[number]=true},lines=0,header={line_number=number,source_line=source}}
+    self.response={rows={},numbers={[number]=true},lines=0,filter_query=query,
+      header={line_number=number,source_line=source}}
     return self:armTimer(Display.RESPONSE_TIMEOUT,function() self:cancel() end)==true
   end
   local response=self.response; if not response then return false end
