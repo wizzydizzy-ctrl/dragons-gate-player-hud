@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.89.
+Applies to DGHUD v0.3.90.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -135,7 +135,7 @@ To narrow one response in the main display, enter `skill <prefix>`, for example 
 
 Filters also work with **MAIN SKILLS** off, keeping the game's row format and order. If another refresh or skill request is loading, wait for it to finish and try again. Filtering finishes when the complete table ends, without needing Enter. DGHUD redraws removed rows locally so they do not leave a blank gap at the bottom, and preserves your position when reading scrollback. A filter applies to one response only; canceled or expired requests do not carry their filter into the next request.
 
-Three new group filters are ready for the next release, not yet available in v0.3.89: `skill combat` shows blue combat rows with uses left, and `skill utility` shows yellow utility rows with uses left. `skill train` shows every green zero-use row, whether combat or utility; it only displays the list and never sends a game training command. Group names ignore case and still work if you customize or disable the colors. `skill weapons` and name-prefix filters still include matching zero-use skills, and the sidebar always retains the full list.
+Use these exact group filters: `skill combat` shows blue combat rows with uses left, and `skill utility` shows yellow utility rows with uses left. `skill train` shows every green zero-use row, whether combat or utility; it only displays the list and never sends a game training command. Group names ignore case and still work if you customize or disable the colors. `skill weapons` and name-prefix filters still include matching zero-use skills, and the sidebar always retains the full list.
 
 Whole rows with **0 uses remaining are green**, combat skills are **blue**, and utility skills are **yellow**. The green ready-to-train color takes priority. Combat includes weapons, Focus Force, Biting, Clawing, First Aid, and other combat abilities; Identify skills, Swimming, Riding, and other utility skills stay yellow unless they have zero uses. Change or disable these styles under **OPTIONS → COLOR SETTINGS → TEXT STYLES → Skills**. These choices are saved with your profile.
 

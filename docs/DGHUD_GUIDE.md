@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.89**. These guides describe the current controls; older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.90**. These guides describe the current controls; older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,14 +24,14 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.89
+## What's new in v0.3.90
 
-- `skill weapons` shows your five weapon skills and any natural attacks you possess.
-- Filtered skill results refresh without the blank gap that sometimes remained until the next command.
-- Cancelled capture timers cannot interfere with newer skill requests.
-- Your chosen sorting, skill colors, and complete saved sidebar list are retained.
+- `skill combat` shows blue combat skills with uses left.
+- `skill utility` shows yellow utility skills with uses left.
+- `skill train` shows all green zero-use skills. It does not train automatically.
+- All three filters keep every skill in the sidebar and work with custom colors or formatting turned off.
 
-See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.89).
+See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.90).
 
 ## Complete guide index
 

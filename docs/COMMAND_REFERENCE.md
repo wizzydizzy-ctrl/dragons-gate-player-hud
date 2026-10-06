@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.89.
+Applies to DGHUD v0.3.90.
 
 Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
@@ -47,7 +47,7 @@ DGHUD handles the forms with an argument by requesting the full game `skill` res
 
 With **MAIN SKILLS** on, results use your main-display sorting, catalog numbers, and skill colors. With it off, filters still work but keep the game's row format and order. If a refresh or skill request is still loading, wait for it to finish, then repeat the command. If filtering is unavailable, run `dghud reload`, then try again.
 
-The three new group filters are ready for the next release, not yet available in v0.3.89. `combat`, `utility`, and `train` are exact group names, ignoring case. They use skill category and remaining uses even if you customize or disable the colors. Zero-use rows belong to `train` rather than `combat` or `utility`. The existing `weapons` group and name-prefix filters still include matching zero-use skills. Every filter applies to one main-display response; the sidebar retains the full list.
+`combat`, `utility`, and `train` are exact group names, ignoring case. They use skill category and remaining uses even if you customize or disable the colors. Zero-use rows belong to `train` rather than `combat` or `utility`. The existing `weapons` group and name-prefix filters still include matching zero-use skills. Every filter applies to one main-display response; the sidebar retains the full list.
 
 See [Screen and Character Data → Skills](HUD_SCREEN_AND_CHARACTER_DATA.md#skills) for sorting, colors, and display controls.
 

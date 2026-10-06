@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation checked for **DGHUD v0.3.89**.
+Documentation checked for **DGHUD v0.3.90**.
 
 ## Quick start
 
@@ -43,14 +43,14 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.89
+## Latest changes — v0.3.90
 
-- Added `skill weapons` for your five weapon skills plus possessed natural attacks.
-- Fixed the blank gap below filtered skill results without extra Enter prompts or scrollback jumps.
-- Fixed cancelled capture timers interfering with newer skill requests.
-- Kept full sidebar skills, your chosen sorting, aligned columns, and skill colors.
+- `skill combat` shows blue combat skills with uses left.
+- `skill utility` shows yellow utility skills with uses left.
+- `skill train` shows green skills with zero uses left; it only displays the list and never sends a training command.
+- Each filter keeps the full Skills sidebar, sorting, aligned columns, and existing weapon/name filters.
 
-[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.89).
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.90).
 
 ## Feature overview
 
@@ -89,7 +89,7 @@ Use `skill` or `skill all` to show every possessed skill. Add a case-insensitive
 
 Use `skill weapons` for a grouped list of your Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging. It shows only skills your character actually has, using your usual sorting and colors. The sidebar still receives the complete skill list.
 
-Three new group filters are ready for the next release (not yet available in v0.3.89):
+Use these exact group filters:
 
 - `skill combat` — non-ready combat rows (blue by default), excluding all zero-use rows.
 - `skill utility` — non-ready utility rows (yellow by default), excluding all zero-use rows.
@@ -143,7 +143,7 @@ This executes code from that release inside the current Mudlet profile. Use the 
 
 ## Publishing
 
-Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.89` for runtime `0.3.89`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
+Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.90` for runtime `0.3.90`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
 
 The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, and files under the profile's `DGHUDData` directory. It does not alter unrelated profile triggers, aliases, scripts, timers, keys, packages, modules, maps, or settings.
 

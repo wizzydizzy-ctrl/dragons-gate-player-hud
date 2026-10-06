@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.89**.
+Applies to DGHUD **v0.3.90**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -113,7 +113,7 @@ Enter `skill` or `skill all` for the full list. To narrow one main-console respo
 
 Matching ignores case and accepts full names or shortened display names. `weapons`, `combat`, `utility`, and `train` are exact group names; other arguments are literal name prefixes, not regular expressions. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; with formatting off, all filters still narrow the raw game output while preserving its row format and order. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
 
-The three new group filters are ready for the next release, not yet available in v0.3.89. They use skill category and remaining uses even if you customize or disable the colors. Zero-use combat and utility rows appear in `skill train`; `skill weapons` and name-prefix filters still include their matching zero-use skills.
+They use skill category and remaining uses even if you customize or disable the colors. Zero-use combat and utility rows appear in `skill train`; `skill weapons` and name-prefix filters still include their matching zero-use skills.
 
 Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
 

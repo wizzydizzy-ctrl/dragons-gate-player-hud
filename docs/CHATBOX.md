@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.89.
+Applies to DGHUD v0.3.90.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 

@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.89.
+Applies to DGHUD v0.3.90.
 
 The DGHUD autoroller watches the current Dragons Gate Character Creator, scores each complete set of 11 characteristics, and sends one `reroll` when the set does not meet your saved rules.
 
