@@ -1236,8 +1236,8 @@ test("skill weapons honors independent chosen number name and uses orders withou
   end
 end)
 
--- Semantic groups follow category/readiness even when their colors are changed.
--- This independent catalog pins every identifier and its non-ready category.
+-- Combat/utility membership includes ready rows; readiness still controls styling.
+-- This independent catalog pins every identifier and its skill category.
 local semanticSkillCatalog={
   {"Brawling","combat"},{"Sharp Weapons","combat"},{"Blunt Weapons","combat"},
   {"Pole Weapons","combat"},{"Throw Weapons","combat"},{"Missile Weapons","combat"},
@@ -1271,8 +1271,8 @@ local semanticSkillRows={
   {name="Riding",id=21,remain=0,level=12},
 }
 local semanticQueries={"combat","utility","train"}
-local semanticNumberOrder={combat={1,5},utility={3,6,8},train={4,9,2,7}}
-local semanticServerOrder={combat={1,5},utility={3,6,8},train={2,4,7,9}}
+local semanticNumberOrder={combat={4,1,7,5},utility={9,3,6,2,8},train={4,9,2,7}}
+local semanticServerOrder={combat={1,4,5,7},utility={2,3,6,8,9},train={2,4,7,9}}
 local function semanticFeed(f,first,skills,boundary,heading)
   f:feed(heading or "Skill Remain Level",first)
   for index,skill in ipairs(skills) do f:feed(groupedWeaponRaw(skill),first+index) end
@@ -1291,16 +1291,17 @@ local function assertSemanticOutput(f,first,order,enabled)
   end
 end
 
-test("skill semantic groups cover all 57 names and give readiness priority over combat and utility",function()
+test("skill semantic groups cover all 57 names including ready rows with independent readiness styling",function()
   eq(#semanticSkillCatalog,57); local counts={combat=0,utility=0}; local seen={}
   for id,entry in ipairs(semanticSkillCatalog) do
     local skillName,category=entry[1],entry[2]
     eq(Display.skillId(skillName),id); assert(not seen[skillName]); seen[skillName]=true
     counts[category]=counts[category]+1
     for _,remain in ipairs({0,1,17,1000000000000}) do
+      eq(Display.combatCategory({name=skillName,remain=remain}),category)
       eq(Display.category({name=skillName,remain=remain}),remain==0 and "ready" or category)
       for _,query in ipairs(semanticQueries) do
-        local expected=query=="train" and remain==0 or (query==category and remain>0)
+        local expected=query=="train" and remain==0 or query==category
         eq(Display.matchesFilter(skillName,query,remain),expected)
         local messy="\27[35m ** "..skillName:upper():gsub(" "," \t ").."  \27[0m"
         eq(Display.matchesFilter(messy,"  "..query:upper().."  ",remain),expected)
@@ -1338,14 +1339,17 @@ test("skill semantic groups handle canonical labels support skills and unknown s
   for _,skillName in ipairs({"Sharps","Blunts","Poles","Throws","Missiles","First Aid","Shield Parry"}) do
     eq(Display.matchesFilter(skillName,"combat",1),true)
     eq(Display.matchesFilter(skillName,"utility",1),false)
-    eq(Display.matchesFilter(skillName,"combat",0),false)
+    eq(Display.matchesFilter(skillName,"combat",0),true)
+    eq(Display.matchesFilter(skillName,"utility",0),false)
+    eq(Display.matchesFilter(skillName,"train",1),false)
     eq(Display.matchesFilter(skillName,"train",0),true)
   end
   for _,skillName in ipairs({"ID Weapon","ID Armor Quality","Weapon Smithing","Future Art",
     "Future Sharp Weapons","Quantum Élan 🐉"}) do
     eq(Display.matchesFilter(skillName,"utility",1),true)
     eq(Display.matchesFilter(skillName,"combat",1),false)
-    eq(Display.matchesFilter(skillName,"utility",0),false)
+    eq(Display.matchesFilter(skillName,"utility",0),true)
+    eq(Display.matchesFilter(skillName,"combat",0),false)
     eq(Display.matchesFilter(skillName,"train",0),true)
     eq(Display.matchesFilter(skillName,"train",1),false)
   end
@@ -1368,8 +1372,8 @@ end)
 
 test("skill semantic filtered output captures all rows before sorting and aligns only the matching rows",function()
   for _,case in ipairs({
-    {query="combat",order={5,1},widths={6,9,3,13},category="combat"},
-    {query="utility",order={3,8,6},widths={6,23,3,4},category="utility"},
+    {query="combat",order={5,4,1,7},widths={6,10,3,13},category="combat"},
+    {query="utility",order={2,9,3,8,6},widths={6,23,4,4},category="utility"},
     {query="train",order={2,9,4,7},widths={6,15,4,4},category="ready"},
   }) do
     local f,d=fakeSkills(); assert(d:requestFilter("  "..case.query:upper().."  "))
@@ -1389,8 +1393,9 @@ test("skill semantic filtered output captures all rows before sorting and aligns
       local skill=semanticSkillRows[fixtureIndex]; local row=rows[index+1]
       eq(row.display_text,string.format(format,tostring(skill.id or "?"),Display.displayName(skill.name),
         tostring(skill.level),tostring(skill.remain)))
-      eq(#row.display_text,#heading); eq(row.category,case.category)
-      eq(row.style_id,"skill_"..case.category); eq(row.remove,nil)
+      local category=skill.remain==0 and "ready" or case.category
+      eq(#row.display_text,#heading); eq(row.category,category)
+      eq(row.style_id,"skill_"..category); eq(row.remove,nil)
     end
     for index=2,#rows do
       eq(rows[index].line_number,index); eq(rows[index].source_line,groupedWeaponRaw(semanticSkillRows[index-1]))
@@ -1406,16 +1411,19 @@ end)
 
 test("skill semantic filters honor chosen number name and uses sorting without changing membership",function()
   for _,case in ipairs({
-    {query="combat",sort={primary="number",direction="asc",secondary="none"},ids="2,42"},
-    {query="utility",sort={primary="number",direction="desc",secondary="none"},ids="32,23,?"},
+    {query="combat",sort={primary="number",direction="asc",secondary="none"},ids="1,2,41,42"},
+    {query="utility",sort={primary="number",direction="desc",secondary="none"},ids="35,32,23,21,?"},
     {query="train",sort={primary="name",direction="asc",secondary="none"},ids="1,41,21,35"},
-    {query="utility",sort={primary="uses",direction="asc",secondary="none"},ids="23,?,32"},
+    {query="utility",sort={primary="uses",direction="asc",secondary="none"},ids="21,35,23,?,32"},
   }) do
     local f,d=fakeSkills(true,case.sort); assert(d:requestFilter(case.query))
     semanticFeed(f,1,semanticSkillRows); eq(groupedWeaponIds(d.pending),case.ids)
     for index=2,#d.pending do
       if not d.pending[index].remove then
-        eq(d.pending[index].category,case.query=="train" and "ready" or case.query)
+        local row=d.pending[index]
+        local remain=tonumber(row.display_text:match("(%d+)$"))
+        local category=remain==0 and "ready" or case.query
+        eq(row.category,category); eq(row.style_id,"skill_"..category)
       end
     end
     f:advance(0); eq(d.sort.primary,case.sort.primary); eq(d.sort.direction,case.sort.direction)
@@ -1444,6 +1452,31 @@ test("skill semantic formatting off preserves raw matched rows server order and 
   end
 end)
 
+test("skill semantic groups retain zero use rows with default green coloring and train excludes positive uses",function()
+  for _,query in ipairs(semanticQueries) do
+    local f,d=fakeSkills(true,{primary="number",direction="asc",secondary="none"})
+    local colors={}
+    f.api.setFgColor=function(r,g,b) colors[f.cursor]=table.concat({r,g,b},",") end
+    assert(d:requestFilter(query)); semanticFeed(f,1,semanticSkillRows)
+    local order=semanticNumberOrder[query]
+    f:advance(0); assertSemanticOutput(f,1,order,true)
+    local ready=0
+    for index,fixtureIndex in ipairs(order) do
+      local skill=semanticSkillRows[fixtureIndex]; local row=f.lastRows[index+1]
+      if skill.remain==0 then
+        ready=ready+1; eq(row.category,"ready"); eq(row.style_id,"skill_ready")
+        eq(colors[index+1],"80,210,120")
+      else
+        assert(query~="train"); eq(row.category,query); eq(row.style_id,"skill_"..query)
+        assert(colors[index+1]~="80,210,120")
+      end
+    end
+    eq(ready,query=="train" and 4 or 2)
+    eq(f.deletions,9-#order); eq(f.replacements,#order+1)
+    eq(d:filterPending(),false); eq(next(f.timers),nil); d:shutdown()
+  end
+end)
+
 test("skill semantic groups keep membership when all style colors coincide or highlighting is disabled",function()
   for _,query in ipairs(semanticQueries) do
     for _,mode in ipairs({"custom","master-off","skills-off","style-off"}) do
@@ -1456,7 +1489,10 @@ test("skill semantic groups keep membership when all style colors coincide or hi
       local colors={}; f.api.setFgColor=function(r,g,b) colors[#colors+1]=table.concat({r,g,b},",") end
       assert(d:requestFilter(query)); semanticFeed(f,1,semanticSkillRows)
       local rows=d.pending; local order=semanticNumberOrder[query]
-      for index=2,#order+1 do eq(rows[index].style_id,"skill_"..(query=="train" and "ready" or query)) end
+      for index,fixtureIndex in ipairs(order) do
+        local category=semanticSkillRows[fixtureIndex].remain==0 and "ready" or query
+        eq(rows[index+1].category,category); eq(rows[index+1].style_id,"skill_"..category)
+      end
       f:advance(0); assertSemanticOutput(f,1,order,true)
       local custom=0; for _,color in ipairs(colors) do if color=="170,17,204" then custom=custom+1 end end
       eq(custom,mode=="custom" and #order or 0)
@@ -1466,8 +1502,8 @@ test("skill semantic groups keep membership when all style colors coincide or hi
 end)
 
 test("skill semantic no matches and empty responses preserve combat prompts and a single normalized notice",function()
-  local excluded={combat={semanticSkillRows[4],semanticSkillRows[3]},
-    utility={semanticSkillRows[2],semanticSkillRows[1]},train={semanticSkillRows[1],semanticSkillRows[3]}}
+  local excluded={combat={semanticSkillRows[2],semanticSkillRows[3]},
+    utility={semanticSkillRows[4],semanticSkillRows[1]},train={semanticSkillRows[1],semanticSkillRows[3]}}
   for _,query in ipairs(semanticQueries) do
     for _,enabled in ipairs({true,false}) do
       for _,empty in ipairs({true,false}) do

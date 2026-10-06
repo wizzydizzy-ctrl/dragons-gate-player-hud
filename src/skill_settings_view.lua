@@ -6,7 +6,7 @@ function SkillSettingsView.attach(View,helpers)
 local skillSortKeys={"level","uses","name","number","ready","category"}
 local skillSortLabels={level="Level",uses="Remaining uses",name="Name",number="Skill number",ready="Training readiness<br>(0 uses)",category="Category<br>Combat / Utility",none="None"}
 local skillSortDirections={asc="Ascending",desc="Descending"}
-local skillFilterExamples="Main order changes on your next skill command; sidebar order changes when you save.<br>skill combat: blue skills with uses left.<br>skill utility: yellow skills with uses left.<br>skill train: green skills with 0 uses. Displays only; does not train.<br>The sidebar keeps all skills. Filters still work with custom colors and formatting OFF.<br>skill weapons and name prefixes also work."
+local skillFilterExamples="Main order changes on your next skill command; sidebar order changes when you save.<br>skill combat: all combat skills, including 0 uses.<br>skill utility: all utility skills, including 0 uses.<br>skill train: only 0-use skills (green). Displays only; does not train.<br>Zero-use rows stay green in every group.<br>The sidebar keeps all skills. Filters still work with custom colors and formatting OFF.<br>skill weapons and name prefixes also work."
 local skillSortHelp="Training readiness: ascending puts 0 uses first; descending puts other skills first.<br>Category: ascending puts Combat first; descending puts Utility first.<br>Save applies both tabs; Cancel discards this draft."
 local function skillSettingsSnapshot(display)
   display=type(display)=="table" and display or {}

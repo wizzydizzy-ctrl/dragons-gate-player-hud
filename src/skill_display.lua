@@ -53,11 +53,11 @@ function Display.matchesFilter(skillName,query,remain)
   local cleaned=name(plain(skillName)):lower()
   local canonical=canonicalNames[cleaned] or cleaned
   if prefix=="weapons" then return weaponSkillIds[Display.skillId(canonical)]==true end
-  -- Match the same semantic groups as the row styles, not configured RGB values.
-  -- Ready (green) rows belong to train only, even for combat/utility skills.
+  -- Category membership is independent of readiness and configured RGB values.
+  -- Zero-use skills remain in combat/utility as well as the train-only filter.
   if prefix=="train" then return remain==0 end
   if prefix=="combat" or prefix=="utility" then
-    return Display.category({name=canonical,remain=remain})==prefix
+    return Display.combatCategory(canonical)==prefix
   end
   -- The query is data: literal leading bytes only, never a Lua pattern or code.
   local function starts(value) return value:sub(1,#prefix)==prefix end

@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.90**.
+Applies to DGHUD **v0.3.91**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -103,8 +103,8 @@ Enter `skill` or `skill all` for the full list. To narrow one main-console respo
 - `skill claw` or `skill clawing` — Clawing.
 - `skill bite` — Biting.
 - `skill weapons` — Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging; only skills you have are shown.
-- `skill combat` — non-ready combat rows (blue by default), excluding all zero-use rows.
-- `skill utility` — non-ready utility rows (yellow by default), excluding all zero-use rows.
+- `skill combat` — all possessed combat rows, including ready-to-train zero-use rows; green for zero uses, otherwise blue by default.
+- `skill utility` — all possessed utility rows, including ready-to-train zero-use rows; green for zero uses, otherwise yellow by default.
 - `skill train` — all zero-use rows (green by default), from either category. Display only; sends no game training command.
 - `skill c` — all your skills beginning with C.
 - `skill id` — all your Identify skills; `skill id weapon` narrows to Identify Weapon Quality.
@@ -113,7 +113,7 @@ Enter `skill` or `skill all` for the full list. To narrow one main-console respo
 
 Matching ignores case and accepts full names or shortened display names. `weapons`, `combat`, `utility`, and `train` are exact group names; other arguments are literal name prefixes, not regular expressions. Longer prefixes narrow the result. No matches produces a clear message instead of a blank list. Each command requests fresh data and saves every skill to the right-hand list, even though the main output is filtered. Your sorting, columns, and skill colors still apply when formatting is on; with formatting off, all filters still narrow the raw game output while preserving its row format and order. The filter applies to one response only. If character data or a previous filtered list is still loading, wait for it to finish and try again.
 
-They use skill category and remaining uses even if you customize or disable the colors. Zero-use combat and utility rows appear in `skill train`; `skill weapons` and name-prefix filters still include their matching zero-use skills.
+Combat and utility membership uses skill category regardless of remaining uses; train membership uses zero remaining uses. Customizing or disabling colors does not change membership. Zero-use combat and utility rows appear in their category group and in `skill train`; `skill weapons` and name-prefix filters still include their matching zero-use skills.
 
 Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
 

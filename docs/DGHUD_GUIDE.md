@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.90**. These guides describe the current controls; older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.91**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,14 +24,15 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.90
+## What's new in v0.3.91
 
-- `skill combat` shows blue combat skills with uses left.
-- `skill utility` shows yellow utility skills with uses left.
-- `skill train` shows all green zero-use skills. It does not train automatically.
+- Corrected `skill combat` and `skill utility` to include every possessed skill in their category, including ready-to-train zero-use rows.
+- Zero-use rows stay green; other combat rows are blue and utility rows yellow by default. `skill train` remains zero-use-only and display-only, with no game training command.
 - All three filters keep every skill in the sidebar and work with custom colors or formatting turned off.
 
-See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.90).
+See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.91).
+
+Filtering remains independent of custom or disabled colors and works with MAIN SKILLS off, preserving the game's row format and order. Main-display and sidebar sorting remain independent.
 
 ## Complete guide index
 

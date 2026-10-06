@@ -3165,8 +3165,8 @@ groupedSkillItems[22]={"Combat Theory",11,6}
 groupedSkillItems[23]={"Utility Research",13,6}
 groupedSkillItems[24]={"Train Lore",7,6}
 local groupedSkillCases={
-  {query="combat",raw={1,3,5,6,7,9,11,12,16,19,20},sorted={6,19,20,12,5,3,9,7,16,11,1},category="combat"},
-  {query="utility",raw={4,13,17,18,22,23,24},sorted={18,17,4,13,24,22,23},category="utility"},
+  {query="combat",raw={1,2,3,5,6,7,9,10,11,12,14,15,16,19,20},sorted={10,6,19,2,20,12,15,5,3,14,9,7,16,11,1},category="combat"},
+  {query="utility",raw={4,8,13,17,18,21,22,23,24},sorted={18,17,8,4,13,21,24,22,23},category="utility"},
   {query="train",raw={2,8,10,14,15,21},sorted={10,8,2,21,15,14},category="ready"},
 }
 local function assertGroupedSkillRows(f,case,enabled)
@@ -3181,7 +3181,8 @@ local function assertGroupedSkillRows(f,case,enabled)
       eq(label,short[item[1]] or item[1])
       local level,remain=row.display_text:match("(%d+)%s+(%d+)%s*$")
       eq(tonumber(level),item[3]); eq(tonumber(remain),item[2])
-      eq(row.category,case.category); eq(row.style_id,"skill_"..case.category)
+      local category=item[2]==0 and "ready" or case.category
+      eq(row.category,category); eq(row.style_id,"skill_"..category)
     else
       eq(row.display_text,weaponRawRow(item)); eq(row.category,"neutral"); eq(row.style_id,nil)
     end

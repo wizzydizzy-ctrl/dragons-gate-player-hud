@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation checked for **DGHUD v0.3.90**.
+Documentation covers **DGHUD v0.3.91**.
 
 ## Quick start
 
@@ -43,14 +43,13 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.90
+## Latest changes — v0.3.91
 
-- `skill combat` shows blue combat skills with uses left.
-- `skill utility` shows yellow utility skills with uses left.
-- `skill train` shows green skills with zero uses left; it only displays the list and never sends a training command.
+- Corrected `skill combat` and `skill utility` to include every possessed skill in their category, including ready-to-train zero-use rows.
+- Zero-use rows stay green; other combat rows are blue and utility rows yellow by default. `skill train` remains zero-use-only and display-only, with no game training command.
 - Each filter keeps the full Skills sidebar, sorting, aligned columns, and existing weapon/name filters.
 
-[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.90).
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.91).
 
 ## Feature overview
 
@@ -89,13 +88,13 @@ Use `skill` or `skill all` to show every possessed skill. Add a case-insensitive
 
 Use `skill weapons` for a grouped list of your Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging. It shows only skills your character actually has, using your usual sorting and colors. The sidebar still receives the complete skill list.
 
-Use these exact group filters:
+The group filters are:
 
-- `skill combat` — non-ready combat rows (blue by default), excluding all zero-use rows.
-- `skill utility` — non-ready utility rows (yellow by default), excluding all zero-use rows.
+- `skill combat` — all possessed combat rows, including ready-to-train zero-use rows; green for zero uses, otherwise blue by default.
+- `skill utility` — all possessed utility rows, including ready-to-train zero-use rows; green for zero uses, otherwise yellow by default.
 - `skill train` — all zero-use rows (green by default), from either category. Display only; sends no game training command.
 
-These groups ignore case and use skill category and remaining uses, even with customized or disabled colors. Other arguments remain literal name prefixes, and `skill weapons` still includes matching zero-use skills. Every filter affects only one main-display response and keeps the full sidebar list. With **MAIN SKILLS** formatting off, all filters still narrow the raw game output while preserving its row format and order.
+These groups ignore case. Combat and utility membership uses skill category regardless of remaining uses; train membership uses zero remaining uses. Customizing or disabling colors does not change membership. Other arguments remain literal name prefixes, and `skill weapons` still includes matching zero-use skills. Every filter affects only one main-display response and keeps the full sidebar list. With **MAIN SKILLS** formatting off, all filters still narrow the raw game output while preserving its row format and order.
 
 **OPTIONS → Skill Settings** keeps the **MAIN SKILLS** formatting toggle (on by default) and separate sorting for **Main Display** and **Right Sidebar**. Each offers **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)** as a primary key, ascending or descending order, and an optional secondary key with its own direction. Both default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
@@ -143,7 +142,7 @@ This executes code from that release inside the current Mudlet profile. Use the 
 
 ## Publishing
 
-Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.90` for runtime `0.3.90`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
+Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.91` for runtime `0.3.91`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
 
 The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, and files under the profile's `DGHUDData` directory. It does not alter unrelated profile triggers, aliases, scripts, timers, keys, packages, modules, maps, or settings.
 

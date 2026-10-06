@@ -2071,6 +2071,11 @@ test("color grouped skill commands appear in visible and copyable help",function
     assert(view.help_content.message:find(command,1,true),"missing visible help: "..command)
     assert(copied:find(command,1,true),"missing copyable help: "..command)
   end
+  for _,kind in ipairs({"combat","utility"}) do
+    local text="Show all "..kind.." skills, including ready-to-train skills. Zero-use rows stay green."
+    assert(view.help_content.message:find(text,1,true),"missing inclusive help: "..kind)
+    assert(copied:find(text,1,true),"missing copyable inclusive help: "..kind)
+  end
 end)
 
 test("help overlay remains bounded and readable at every layout mode",function()
@@ -3440,6 +3445,9 @@ test("Skills Settings explains all grouped filters without covering tabs at smal
     for _,command in ipairs({"skill combat","skill utility","skill train"}) do
       assert(hint.message:find(command,1,true),"missing settings hint: "..command)
     end
+    assert(hint.message:find("all combat skills, including 0 uses",1,true))
+    assert(hint.message:find("all utility skills, including 0 uses",1,true))
+    assert(hint.message:find("Zero-use rows stay green in every group",1,true))
     assert(view.skill_settings_tabs.main.y>=hint.y+hint.height,"skill hint overlaps tabs")
     assert(view.skill_settings_content.content_height>=view.skill_settings_save.y+view.skill_settings_save.height)
   end
