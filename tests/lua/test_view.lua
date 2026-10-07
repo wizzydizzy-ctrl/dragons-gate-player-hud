@@ -315,9 +315,9 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   return geyser
 end
 
-local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds)
+local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds,display)
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
-  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible,sounds=chatSounds}})
+  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible,sounds=chatSounds},display=display})
   Geyser=original
   return view
 end
@@ -3242,15 +3242,49 @@ test("main skills display option starts on toggles independently and preserves s
   eq(view:setMainSkillsEnabled(true),true); eq(button.option_text,"MAIN SKILLS: ON")
 end)
 
-local function skillSettingsFixture(mainEnabled)
+local function skillSettingsFixture(mainEnabled,filterEnabled)
   local SkillSort=require("skill_sort")
-  return {main_skills=mainEnabled~=false,main_skill_sort=SkillSort.normalize(),sidebar_skill_sort=SkillSort.normalize()}
+  return {main_skills=mainEnabled~=false,skill_filter=filterEnabled~=false,main_skill_sort=SkillSort.normalize(),sidebar_skill_sort=SkillSort.normalize()}
 end
-local function skillSettingsView()
-  local view=chatView()
+local function skillSettingsView(display)
+  local view=chatView(nil,nil,nil,nil,nil,display)
   view:applyLayout(require("layout").compute(1200,800))
   return view
 end
+test("Skills Settings defaults missing filters to ON and preserves saved OFF snapshots",function()
+  eq(skillSettingsView().settings.display.skill_filter,true)
+  local legacy=skillSettingsFixture(); legacy.skill_filter=nil
+  for _,snapshot in ipairs({legacy,skillSettingsFixture(false,true),skillSettingsFixture(true,false)}) do
+    local view=skillSettingsView(snapshot); local expected=snapshot.skill_filter~=false
+    eq(view.settings.display.skill_filter,expected)
+    assert(view:showSkillSettings(snapshot))
+    eq(view.skill_settings_draft.skill_filter,expected); eq(view.skill_settings_dirty,false)
+    eq(view.skill_settings_filter.parent,view.skill_settings_content); eq(view.skill_settings_filter.visible,true)
+    assert(view.skill_settings_filter.message:find("SKILL FILTERS: "..(expected and "ON" or "OFF"),1,true))
+    local values=assert(view:skillSettingsValues()); eq(values.skill_filter,expected)
+    values.skill_filter=not expected; values.main_skill_sort.primary="name"
+    eq(view.skill_settings_draft.skill_filter,expected); eq(view.skill_settings_draft.main_skill_sort.primary,"level")
+    view:hideSkillSettings(); eq(view.skill_settings_filter.visible,false)
+  end
+end)
+test("Skills Settings filter clicks edit a shared draft independently of main formatting",function()
+  local active=skillSettingsFixture(); local view=skillSettingsView(active); local saves=0
+  view:setOptionsActionCallback(function(action)
+    if action=="skill_settings" then return active end
+    saves=saves+1; return active
+  end)
+  assert(view:showSkillSettings())
+  assert(view.skill_settings_filter.click()); eq(view.skill_settings_draft.skill_filter,false)
+  eq(view.skill_settings_draft.main_skills,true); eq(view.settings.display.skill_filter,true); eq(active.skill_filter,true)
+  eq(view.skill_settings_dirty,true); eq(saves,0)
+  assert(view.skill_settings_filter.message:find("SKILL FILTERS: OFF",1,true))
+  view.skill_settings_tabs.main.click(); eq(view.skill_settings_draft.skill_filter,false)
+  view.skill_settings_format.click(); eq(view.skill_settings_draft.main_skills,false); eq(view.skill_settings_draft.skill_filter,false)
+  assert(view.skill_settings_filter.click()); eq(view.skill_settings_draft.skill_filter,true)
+  assert(view.skill_settings_filter.message:find("SKILL FILTERS: ON",1,true))
+  view.skill_settings_tabs.sidebar.click(); eq(view.skill_settings_draft.skill_filter,true)
+  eq(view.settings.display.main_skills,true); eq(saves,0)
+end)
 test("Skills Settings routes through Options and retains the main skills action",function()
   local view=skillSettingsView(); local calls={}
   view:setOptionsActionCallback(function(action)
@@ -3263,6 +3297,7 @@ test("Skills Settings routes through Options and retains the main skills action"
   eq(button.option_text,"SKILL SETTINGS…"); eq(button.visible,true); eq(button.parent,view.options_scroll)
   assert(button.click()); eq(calls[1],"skill_settings"); eq(view.color_menu_visible,false)
   eq(view.skill_settings_visible,true); eq(view.skill_settings_draft.main_skills,false)
+  eq(view.skill_settings_draft.skill_filter,true); eq(view.skill_settings_filter.visible,true)
   view:hideSkillSettings(); assert(view.option_action_buttons.main_skills.click()); eq(calls[2],"main_skills")
 end)
 test("Skills Settings edits both independent tabs as a draft and applies the saved snapshot",function()
@@ -3273,14 +3308,16 @@ test("Skills Settings edits both independent tabs as a draft and applies the sav
     draft.sidebar_skill_sort.secondary_direction="desc"; return draft
   end)
   assert(view:showSkillSettings())
+  assert(view.skill_settings_filter.click()); eq(view.skill_settings_draft.skill_filter,false)
   view.skill_settings_primary_buttons.name.click(); view.skill_settings_direction_buttons.asc.click()
   view.skill_settings_secondary_buttons.number.click(); view.skill_settings_secondary_direction_buttons.desc.click()
   view.skill_settings_tabs.main.click(); view.skill_settings_primary_buttons.uses.click()
   view.skill_settings_direction_buttons.asc.click(); view.skill_settings_secondary_buttons.none.click()
   eq(view.settings.display.sidebar_skill_sort.primary,"level"); eq(snapshot.sidebar_skill_sort.primary,"level")
-  eq(view.skill_settings_draft.main_skills,false); eq(saves,0)
+  eq(view.skill_settings_draft.main_skills,false); eq(view.settings.display.skill_filter,true); eq(snapshot.skill_filter,true); eq(saves,0)
   local saved=assert(view.skill_settings_save.click())
-  eq(saves,1); eq(saved,payload); eq(payload.main_skills,false)
+  eq(saves,1); eq(saved,payload); eq(payload.main_skills,false); eq(payload.skill_filter,false)
+  eq(view.settings.display.skill_filter,false); eq(snapshot.skill_filter,true); eq(view.skill_settings_filter.visible,false)
   eq(view.settings.display.sidebar_skill_sort.primary,"name")
   eq(view.settings.display.sidebar_skill_sort.direction,"asc"); eq(view.settings.display.sidebar_skill_sort.secondary,"number")
   eq(view.settings.display.main_skill_sort.primary,"uses"); eq(view.settings.display.main_skill_sort.secondary,"none")
@@ -3291,46 +3328,107 @@ test("failed Skills Settings saves keep the edited draft visible and active sett
   view:setOptionsActionCallback(function(action,draft)
     if action=="skill_settings" then return active end
     -- A reentrant runtime refresh or callback mutation must not apply a failed save.
-    view:setSkillSortPreferences(skillSettingsFixture(true))
+    view:setSkillSortPreferences(skillSettingsFixture(true,false))
     draft.sidebar_skill_sort.primary="number"
+    draft.skill_filter=true
     return nil,"disk <full>"
   end)
   view:showSkillSettings(); view.skill_settings_primary_buttons.name.click(); view.skill_settings_format.click()
+  view.skill_settings_filter.click()
   local draft=view.skill_settings_draft
   local ok,err=view.skill_settings_save.click(); eq(ok,nil); eq(err,"disk <full>")
   eq(view.skill_settings_draft,draft); eq(draft.sidebar_skill_sort.primary,"name"); eq(draft.main_skills,true)
+  eq(draft.skill_filter,false); eq(view.settings.display.skill_filter,true)
+  assert(view.skill_settings_filter.message:find("SKILL FILTERS: OFF",1,true))
   eq(view.settings.display.main_skills,false); eq(view.settings.display.sidebar_skill_sort.primary,"level")
   eq(view.skill_settings_visible,true); eq(view.skill_settings_panel.visible,true)
   assert(view.skill_settings_status.message:find("disk &lt;full&gt;",1,true))
   view:setOptionsActionCallback(function() error("save <crashed>") end)
   ok,err=view.skill_settings_save.click(); eq(ok,nil); assert(err:find("save <crashed>",1,true))
   eq(view.skill_settings_draft,draft); eq(view.skill_settings_visible,true)
+  eq(draft.skill_filter,false); eq(view.settings.display.skill_filter,true)
+end)
+test("Skills Settings rejects missing or nonboolean saved filters without applying queued preferences",function()
+  for _,invalid in ipairs({{}, {skill_filter="false"}, {skill_filter=0}}) do
+    local active=skillSettingsFixture(); local view=skillSettingsView(active)
+    view:setOptionsActionCallback(function(action,payload)
+      if action=="skill_settings" then return active end
+      eq(action,"skill_settings_save"); eq(payload.skill_filter,false)
+      view:setSkillSortPreferences(skillSettingsFixture(false,false))
+      payload.skill_filter=invalid.skill_filter; return payload
+    end)
+    assert(view:showSkillSettings()); assert(view.skill_settings_filter.click())
+    local draft=view.skill_settings_draft
+    local ok,err=view.skill_settings_save.click(); eq(ok,nil); eq(type(err),"string"); assert(#err>0)
+    eq(view.settings.display.skill_filter,true); eq(view.settings.display.main_skills,true)
+    eq(view.skill_settings_visible,true); eq(view.skill_settings_draft,draft); eq(draft.skill_filter,false)
+    eq(view.skill_settings_saving,false); eq(view.skill_settings_pending_snapshot,nil)
+  end
+end)
+test("Skills Settings applies the returned filter snapshot after a successful save",function()
+  local view=skillSettingsView(); local saves=0
+  view:setOptionsActionCallback(function(action,payload)
+    if action=="skill_settings" then return skillSettingsFixture() end
+    eq(action,"skill_settings_save"); eq(payload.skill_filter,false); saves=saves+1
+    return skillSettingsFixture(false,true)
+  end)
+  assert(view:showSkillSettings()); view.skill_settings_filter.click()
+  local saved=assert(view.skill_settings_save.click()); eq(saved.skill_filter,true); eq(saves,1)
+  eq(view.settings.display.skill_filter,true); eq(view.settings.display.main_skills,false)
+  eq(view.skill_settings_visible,false); eq(view.skill_settings_draft,nil)
 end)
 test("Skills Settings cancel and reset make no writes and reopening discards unsaved edits",function()
-  local view=skillSettingsView(); local active=skillSettingsFixture(false); active.sidebar_skill_sort.primary="name"
+  local view=skillSettingsView(); local active=skillSettingsFixture(false,false); active.sidebar_skill_sort.primary="name"
   view:setSkillSortPreferences(active); local saves=0
   view:setOptionsActionCallback(function(action) if action=="skill_settings" then return active end; saves=saves+1; return nil end)
   view:showSkillSettings(); view.skill_settings_reset.click()
+  eq(view.skill_settings_draft.skill_filter,true); eq(view.settings.display.skill_filter,false)
+  assert(view.skill_settings_filter.message:find("SKILL FILTERS: ON",1,true))
   eq(view.skill_settings_draft.main_skills,true); eq(view.skill_settings_draft.sidebar_skill_sort.primary,"level")
   eq(view.skill_settings_draft.main_skill_sort.direction,"desc"); eq(view.skill_settings_draft.sidebar_skill_sort.secondary_direction,"asc")
   eq(view.settings.display.main_skills,false); eq(view.settings.display.sidebar_skill_sort.primary,"name")
   view.skill_settings_cancel.click(); eq(saves,0); eq(view.skill_settings_draft,nil)
   for _,widget in ipairs(view:skillSettingsWidgets()) do eq(widget.visible,false) end
   view:showSkillSettings(); eq(view.skill_settings_draft.sidebar_skill_sort.primary,"name"); eq(view.skill_settings_draft.main_skills,false)
+  eq(view.skill_settings_draft.skill_filter,false)
+  view.skill_settings_filter.click(); eq(view.skill_settings_draft.skill_filter,true)
   view.skill_settings_overlay.click(); eq(saves,0); eq(view.skill_settings_visible,false)
+  eq(view.settings.display.skill_filter,false)
+  view:showSkillSettings(); eq(view.skill_settings_draft.skill_filter,false)
+  view.skill_settings_filter.click(); view.skill_settings_cancel.click(); eq(saves,0)
+  eq(view.settings.display.skill_filter,false); eq(view.skill_settings_draft,nil)
+  view:showSkillSettings(); eq(view.skill_settings_draft.skill_filter,false)
+end)
+test("Skills Settings Reset restores filters only after Save",function()
+  local active=skillSettingsFixture(false,false); local view=skillSettingsView(); local saves=0
+  view:setSkillSortPreferences(active)
+  view:setOptionsActionCallback(function(action,payload)
+    if action=="skill_settings" then return active end
+    eq(action,"skill_settings_save"); eq(payload.skill_filter,true); saves=saves+1; return payload
+  end)
+  assert(view:showSkillSettings()); view.skill_settings_reset.click()
+  eq(view.skill_settings_draft.skill_filter,true); eq(view.settings.display.skill_filter,false); eq(saves,0)
+  assert(view.skill_settings_save.click()); eq(saves,1); eq(view.settings.display.skill_filter,true)
+  eq(active.skill_filter,false); eq(view.skill_settings_visible,false)
 end)
 test("preference and main format refreshes preserve dirty Skills Settings drafts",function()
   local view=skillSettingsView(); view:showSkillSettings(skillSettingsFixture())
   view.skill_settings_primary_buttons.number.click()
+  view.skill_settings_filter.click()
   local draft=view.skill_settings_draft
   local active=skillSettingsFixture(false); active.main_skill_sort.primary="name"
   view:setSkillSortPreferences(active); view:setMainSkillsEnabled(true); view:setDisplayTextSize("large")
   eq(view.skill_settings_draft,draft); eq(draft.sidebar_skill_sort.primary,"number")
   eq(draft.main_skills,true); eq(draft.main_skill_sort.primary,"level")
+  eq(draft.skill_filter,false); eq(view.settings.display.skill_filter,true)
   eq(view.settings.display.main_skill_sort.primary,"name")
   view:hideSkillSettings(); view:showSkillSettings(active)
-  active.main_skill_sort.primary="uses"; view:setSkillSortPreferences(active)
+  active.main_skill_sort.primary="uses"; active.skill_filter=false; view:setSkillSortPreferences(active)
   eq(view.skill_settings_draft.main_skill_sort.primary,"uses"); eq(view.skill_settings_dirty,false)
+  eq(view.skill_settings_draft.skill_filter,false); eq(view.settings.display.skill_filter,false)
+  view:setMainSkillsEnabled(true); view:setDisplayTextSize("small")
+  eq(view.settings.display.skill_filter,false); eq(view.skill_settings_draft.skill_filter,false)
+  assert(view.skill_settings_filter.message:find("SKILL FILTERS: OFF",1,true))
 end)
 test("Skills Settings keys directions and level then uses preset are independently selectable",function()
   local view=skillSettingsView(); view:showSkillSettings(skillSettingsFixture(false))
@@ -3398,11 +3496,14 @@ test("Skills Settings remains bounded readable and scrollable on narrow and shor
   for _,size in ipairs({{1200,900},{640,480},{400,300},{320,260},{240,120},{160,100},{40,40}}) do
     view:applyLayout(require("layout").compute(size[1],size[2]))
     eq(view.skill_settings_panel,panel); eq(view.skill_settings_content,content)
+    eq(view.skill_settings_filter.visible,true); eq(view.skill_settings_filter.container,content)
     eq(panel.x,0); eq(panel.y,math.min(size[2]-1,view.options_anchor.y+view.options_anchor.height+4))
     eq(panel.x>=0,true); eq(panel.y>=0,true); eq(panel.x+panel.width<=size[1],true); eq(panel.y+panel.height<=size[2],true)
     eq(content.width>0,true); eq(content.height>0,true)
     eq(content.x+content.width<=panel.width,true); eq(content.y+content.height<=panel.height,true)
     eq(view.skill_settings_font>=13,true); eq(content.content_height>=view.skill_settings_save.y+view.skill_settings_save.height,true)
+    eq(view.skill_settings_filter.y+view.skill_settings_filter.height<=content.content_height,true)
+    eq(view.skill_settings_filter.y+view.skill_settings_filter.height<=view.skill_settings_save.y,true)
     local buttons={}
     for _,widget in ipairs(view:skillSettingsWidgets()) do
       if widget.container==content then
@@ -3448,6 +3549,11 @@ test("Skills Settings explains all grouped filters without covering tabs at smal
     assert(hint.message:find("all combat skills, including 0 uses",1,true))
     assert(hint.message:find("all utility skills, including 0 uses",1,true))
     assert(hint.message:find("Zero-use rows stay green in every group",1,true))
+    assert(hint.message:find("skill Rath",1,true),"missing native staff command example")
+    assert(hint.message:find("OFF",1,true),"missing filter OFF explanation")
+    assert(view.skill_settings_filter.message:find("SKILL FILTERS: ON",1,true))
+    eq(view.skill_settings_filter.y,0); eq(view.skill_settings_filter.width,view.skill_settings_content.content_width)
+    assert(hint.y>=view.skill_settings_filter.y+view.skill_settings_filter.height,"filter toggle overlaps skill hint")
     assert(view.skill_settings_tabs.main.y>=hint.y+hint.height,"skill hint overlaps tabs")
     assert(view.skill_settings_content.content_height>=view.skill_settings_save.y+view.skill_settings_save.height)
   end
@@ -3462,16 +3568,33 @@ test("Skills Settings reuse validates new controls hides drafts and drops retire
   local save=view.skill_settings_save; view.skill_settings_save=nil
   ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("skill_settings_save",1,true))
   view.skill_settings_save=save
+  local filter=view.skill_settings_filter; view.skill_settings_filter=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("skill_settings_filter",1,true))
+  view.skill_settings_filter=filter
+  local parent=filter.container; filter.container=view.root
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("skill settings parent",1,true))
+  filter.container=parent
+  local bind=filter.setClickCallback; filter.setClickCallback=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("skill settings button",1,true))
+  filter.setClickCallback=bind; eq(View.validateReusable(view,view.settings),true)
   view:setOptionsActionCallback(function() error("retired callback") end)
   view:showSkillSettings(skillSettingsFixture()); view.skill_settings_format.click()
+  view.skill_settings_filter.click()
   local oldClick=view.skill_settings_save.click; local root=view.root
-  local snapshot=skillSettingsFixture(false)
+  local snapshot=skillSettingsFixture(false,false)
   local settings={view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme=view.settings.theme,chat=view.settings.chat,display=snapshot}
   assert(view:prepareForReuse(settings)); eq(view.root,root); eq(view.options_action_callback,nil)
   eq(view.skill_settings_visible,false); eq(view.skill_settings_draft,nil); eq(view.main_skills_enabled,false)
+  eq(view.settings.display.skill_filter,false); eq(view.skill_settings_filter,filter); eq(filter.visible,false)
   eq(oldClick(),nil)
+  eq(filter.click(),nil)
   for _,widget in ipairs(view:skillSettingsWidgets()) do eq(widget.visible,false) end
   eq(View.validateReusable(view,settings),true)
+  assert(view:showSkillSettings(snapshot)); eq(view.skill_settings_draft.skill_filter,false)
+  assert(filter.message:find("SKILL FILTERS: OFF",1,true)); assert(filter.click())
+  eq(view.skill_settings_draft.skill_filter,true); eq(view.settings.display.skill_filter,false)
+  view.skill_settings_cancel.click(); eq(view.settings.display.skill_filter,false)
   view:delete(); eq(view.root,nil); eq(view.skill_settings_draft,nil)
   eq(oldClick(),nil); eq(view.skill_settings_format.click(),nil); eq(view:showSkillSettings(snapshot),nil)
+  eq(filter.click(),nil)
 end)

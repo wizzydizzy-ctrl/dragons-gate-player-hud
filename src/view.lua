@@ -294,7 +294,7 @@ local help_entries={
   {command="skill combat",description="Show all combat skills, including ready-to-train skills. Zero-use rows stay green."},
   {command="skill utility",description="Show all utility skills, including ready-to-train skills. Zero-use rows stay green."},
   {command="skill train",description="Show green skills with 0 uses left, ready for training. Only displays the list; never sends a game train command."},
-  {command="skill <prefix>",description="Show only matching skills: skill claw, skill bite, skill c, skill id, or skill ste. Matching ignores case and supports shortened display names."},
+  {command="skill <prefix>",description="With SKILL FILTERS on, show matching skills: skill claw, skill bite, skill c, skill id, or skill ste. Matching ignores case and supports shortened names. OPTIONS > Skill Settings > SKILL FILTERS: OFF sends arguments to the game instead, allowing staff skill Rath."},
   {command="dghud colors [on|off|toggle|status]",description="Control all optional DGHUD output colors."},
   {command="dghud colors <feature> on|off|toggle|status",description="Toggle room, exits, currency, races, classes, travel, combat, spell, discovery, or illumination highlights."},
   {command="dghud check",description="Check GitHub for a newer HUD release."},

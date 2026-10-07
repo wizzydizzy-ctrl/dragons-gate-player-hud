@@ -353,7 +353,7 @@ function Main:displayPreferences(overrides)
   local display=type(self.settings.display)=="table" and self.settings.display or {}
   local result={side_text_scale=tonumber(display.side_text_scale) or 1,
     auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),
-    main_skills=self:mainSkillsEnabled(),
+    main_skills=self:mainSkillsEnabled(),skill_filter=self:skillFilterEnabled(),
     main_skill_sort=SkillSort.normalize(display.main_skill_sort),
     sidebar_skill_sort=SkillSort.normalize(display.sidebar_skill_sort)}
   for key,value in pairs(overrides or {}) do result[key]=value end
@@ -361,20 +361,24 @@ function Main:displayPreferences(overrides)
 end
 function Main:skillSettings()
   local display=self:displayPreferences()
-  return {main_skills=display.main_skills,main_skill_sort=display.main_skill_sort,sidebar_skill_sort=display.sidebar_skill_sort}
+  return {main_skills=display.main_skills,skill_filter=display.skill_filter,main_skill_sort=display.main_skill_sort,sidebar_skill_sort=display.sidebar_skill_sort}
 end
 function Main:setSkillSettings(config)
   if type(config)~="table" or type(config.main_skills)~="boolean" then return nil,"Choose whether main skill formatting is on or off." end
+  if config.skill_filter~=nil and type(config.skill_filter)~="boolean" then return nil,"Choose whether skill filters are on or off." end
   local mainSort,mainErr=SkillSort.validate(config.main_skill_sort)
   if not mainSort then return nil,mainErr end
   local sidebarSort,sidebarErr=SkillSort.validate(config.sidebar_skill_sort)
   if not sidebarSort then return nil,sidebarErr end
-  local candidate=self:displayPreferences({main_skills=config.main_skills,main_skill_sort=mainSort,sidebar_skill_sort=sidebarSort})
+  local filterEnabled=config.skill_filter
+  if filterEnabled==nil then filterEnabled=self:skillFilterEnabled() end
+  local candidate=self:displayPreferences({main_skills=config.main_skills,skill_filter=filterEnabled,main_skill_sort=mainSort,sidebar_skill_sort=sidebarSort})
   if self.adapter.saveDisplaySettings then
     local called,saved,err=pcall(self.adapter.saveDisplaySettings,self.adapter,candidate)
     if not called or not saved then return nil,"Could not save skill settings. Try again: "..tostring(called and err or saved) end
   end
   local wasEnabled=self:mainSkillsEnabled()
+  local wasFilterEnabled=self:skillFilterEnabled()
   self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}
   for key,value in pairs(candidate) do self.settings.display[key]=value end
   local root=rawget(_G,"DGHUD")
@@ -384,9 +388,11 @@ function Main:setSkillSettings(config)
     for key,value in pairs(candidate) do root.user_settings.display[key]=type(value)=="table" and SkillSort.normalize(value) or value end
   end
   if self.skill_display then
+    if wasFilterEnabled and not filterEnabled then self.skill_display:cancel() end
     if wasEnabled~=config.main_skills then self.skill_display:setEnabled(config.main_skills) end
     self.skill_display:setSort(mainSort)
   end
+  if self.collector then self.collector.native_skill_arguments=not filterEnabled end
   if self.view and self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(config.main_skills) end
   if self.view and self.view.setSkillSortPreferences then self.view:setSkillSortPreferences(self:skillSettings()) end
   return self:skillSettings()
@@ -409,9 +415,23 @@ end
 function Main:mainSkillsEnabled()
   return not (self.settings.display and self.settings.display.main_skills==false)
 end
-function Main:requestSkills(query)
+function Main:skillFilterEnabled()
+  return not (self.settings.display and self.settings.display.skill_filter==false)
+end
+function Main:requestSkills(query,originalCommand)
   local filter,err=SkillDisplay.normalizeFilter(query)
   if filter==nil then return nil,err end
+  if not self:skillFilterEnabled() then
+    -- sendCommand uses Mudlet send(), not alias expansion. Forward the native
+    -- command once without changing character-name casing or starting a filter.
+    local command="skill "..query
+    if type(originalCommand)=="string" and #originalCommand<=#query+64 and not originalCommand:find("%c")
+        and originalCommand:match("^[Ss][Kk][Ii][Ll][Ll]%s+(.+)$")==query then command=originalCommand end
+    if self.skill_display then self.skill_display:cancel() end
+    local called,sent,sendErr=pcall(self.adapter.sendCommand,self.adapter,command)
+    if not called or sent==false or (sent==nil and sendErr~=nil) then return nil,"Could not send your skill command. Try again." end
+    return true
+  end
   local display=self.skill_display
   if not self.started or not display or not display.started then return nil,"Skill filtering is unavailable. Run dghud reload and try again." end
   if self.collector and self.collector.active then return nil,"Character data is still refreshing. Try your skill command again when it finishes." end
@@ -1521,7 +1541,9 @@ function Main:start()
     if key=="time" then self:onClockSync(snapshot.time); return end
     if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
     self:refresh()
-  end,function(value,metadata) self:onRoundtime(value,metadata) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end); local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
+  end,function(value,metadata) self:onRoundtime(value,metadata) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end)
+  self.collector.native_skill_arguments=not self:skillFilterEnabled()
+  local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.skill_display=SkillDisplay.new(self.adapter,self:mainSkillsEnabled(),self.settings.package_name,self:skillSettings().main_skill_sort)
   local skillsCalled,skillsOk=pcall(self.skill_display.start,self.skill_display)
   if not skillsCalled or not skillsOk then
@@ -1579,7 +1601,8 @@ function Main:start()
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^(?i:skill)\\s+(.+)$",function(value)
-    local ok,err=self:requestSkills(aliasArgument(value))
+    local original=type(value)=="table" and value[1] or (type(_G.matches)=="table" and _G.matches[1])
+    local ok,err=self:requestSkills(aliasArgument(value),original)
     if not ok and self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,err) end
     return ok,err
   end)

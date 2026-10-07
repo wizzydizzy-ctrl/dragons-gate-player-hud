@@ -1,6 +1,6 @@
 # DGHUD Updates and Emergency Recovery
 
-Applies to DGHUD **v0.3.91**.
+Applies to DGHUD **v0.3.92**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -65,6 +65,7 @@ An update is scoped to the DGHUD package. It is designed to preserve:
 - roller settings and logs;
 - mapper settings;
 - HUD text size;
+- saved Skill Settings, including **SKILL FILTERS**, **MAIN SKILLS** formatting, and independent main-display/sidebar sorting;
 - automatic-update preference; and
 - local diagnostics.
 

@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.91**.
+Applies to DGHUD **v0.3.92**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -96,9 +96,15 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 ## Skill Settings
 
+**SKILL FILTERS: ON/OFF** is the first control in **OPTIONS → Skill Settings**. It defaults **ON** when no choice is saved (the boolean `display.skill_filter`). ON enables the HUD's group and name-prefix searches. Turn it **OFF** and click **Save** to send native staff commands such as `skill Rath` to the game.
+
+With filters OFF, every `skill` command with an argument—including `all`, `weapons`, `combat`, `utility`, and `train`—is sent unchanged exactly once, retaining casing and spacing. DGHUD queues no local search and does not reject these commands because a skill refresh is busy or the local display is unavailable. Bare `skill` still captures the complete sidebar list and follows **MAIN SKILLS** formatting. Filtering and formatting are independent: turning MAIN SKILLS off alone keeps enabled filters active.
+
+Changes remain a draft until **Save**, which applies filtering, formatting, and both sorting tabs together. **Cancel** or dismissing the panel discards the draft. **Reset to Defaults** restores filters ON in the draft and requires Save. A failed Save keeps the active choice unchanged; a successful Save to OFF cancels old pending filters. The saved choice survives other display changes, character changes, reloads, updates, and cold starts.
+
 ### Show just the skills you want
 
-Enter `skill` or `skill all` for the full list. To narrow one main-console response, use an exact group name or the beginning of a skill name:
+With **SKILL FILTERS ON**, enter `skill` or `skill all` for the full list. To narrow one main-console response, use an exact group name or the beginning of a skill name:
 
 - `skill claw` or `skill clawing` — Clawing.
 - `skill bite` — Biting.
@@ -115,11 +121,11 @@ Matching ignores case and accepts full names or shortened display names. `weapon
 
 Combat and utility membership uses skill category regardless of remaining uses; train membership uses zero remaining uses. Customizing or disabling colors does not change membership. Zero-use combat and utility rows appear in their category group and in `skill train`; `skill weapons` and name-prefix filters still include their matching zero-use skills.
 
-Open **OPTIONS → Skill Settings** to control skill formatting and sorting. **MAIN SKILLS** stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
+The separate **MAIN SKILLS** setting stays on by default and formats complete `skill` responses in aligned **Number / Skill / LVL / USES** columns. Turn it off to keep future responses in the game's original layout.
 
 **Main Display** and **Right Sidebar** have independent sorting choices. For each, choose a primary key: **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)**. Choose ascending or descending order, and optionally add a secondary key with its own direction. Both displays default to **Level descending**, then **Uses ascending**. For “level then uses,” choose **Level** as the primary key and **Uses** as the secondary key.
 
-Changing **Right Sidebar** ordering immediately reorders its existing skill rows. **Main Display** ordering applies to the next complete `skill` output; previously printed tables stay as they are. Formatting and sorting choices are saved for the whole Mudlet profile and survive character changes, reloads, restarts, and HUD updates.
+Saving **Right Sidebar** ordering immediately reorders its existing skill rows. **Main Display** ordering applies to the next complete `skill` output; previously printed tables stay as they are. Filtering, formatting, and sorting choices are saved for the whole Mudlet profile and survive character changes, reloads, restarts, and HUD updates.
 
 **Number** is the game's fixed catalog ID used for training, not a display rank. All captured skills remain visible; Category and Ready to train sorting only change their order.
 

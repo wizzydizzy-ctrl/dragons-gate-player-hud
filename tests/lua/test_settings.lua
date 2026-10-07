@@ -1,6 +1,85 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("skill filters default on and explicit choices survive migration and cold resolution",function()
+  eq(defaults.display.skill_filter,true)
+  for _,schema in ipairs({0,1}) do
+    local legacy={schema=schema,display={main_skills=false,auto_wrap=false,personal="keep"}}
+    eq(Settings.resolve(defaults,legacy).display.skill_filter,true); eq(legacy.display.skill_filter,nil)
+    for _,enabled in ipairs({false,true}) do
+      local user=Settings.merge(legacy,{display={skill_filter=enabled}})
+      local resolved,migrated=Settings.resolve(defaults,user)
+      eq(resolved.display.skill_filter,enabled); eq(migrated.display.skill_filter,enabled)
+      eq(Settings.resolve(defaults,migrated).display.skill_filter,enabled)
+      eq(resolved.display.main_skills,false); eq(resolved.display.auto_wrap,false); eq(resolved.display.personal,"keep")
+      eq(user.display.skill_filter,enabled); eq(defaults.display.skill_filter,true)
+    end
+  end
+end)
+
+test("skill filter display snapshots default legacy values on and reject non boolean values",function()
+  local Adapter=require("mudlet_adapter")
+  eq(assert(Adapter.displaySettingsSnapshot({side_text_scale=1})).skill_filter,true)
+  for _,enabled in ipairs({false,true}) do
+    local config={side_text_scale=.9,main_skills=false,align_input=true,auto_wrap=false,skill_filter=enabled}
+    local snapshot=assert(Adapter.displaySettingsSnapshot(config))
+    eq(snapshot.skill_filter,enabled); eq(snapshot.main_skills,false); eq(snapshot.align_input,true); eq(snapshot.auto_wrap,false)
+    snapshot.skill_filter=not enabled; eq(config.skill_filter,enabled)
+  end
+  for _,invalid in ipairs({"false","true",0,1,{},function() end}) do
+    local result,err=Adapter.displaySettingsSnapshot({side_text_scale=1,skill_filter=invalid})
+    eq(result,nil); assert(err:find("boolean",1,true))
+  end
+end)
+
+test("skill filter serialized settings round trip and failed writes retain the last saved choice",function()
+  local Adapter=require("mudlet_adapter")
+  local previous={io=io,os=os,lfs=lfs,getMudletHomeDir=getMudletHomeDir,loadfile=loadfile}
+  local files={}; local failure; local writes=0
+  local path="/skill-filter-test/DGHUDData/display-settings.lua"
+  local ok,err=xpcall(function()
+    -- Only synthetic files exist in this fixture; no profile or real disk access.
+    io={open=function(name,mode)
+      if mode=="rb" then return files[name] and {close=function() return true end} or nil,"missing" end
+      eq(mode,"wb")
+      if failure=="open" then return nil,"open failed" end
+      return {write=function(self,source)
+        writes=writes+1
+        if failure=="write" then return nil,"write failed" end
+        files[name]=source; return self
+      end,close=function() if failure=="close" then return nil,"close failed" end; return true end}
+    end}
+    os={remove=function(name) files[name]=nil; return true end,rename=function(from,to)
+      if failure=="replace" and from==path..".tmp" then return nil,"replace failed" end
+      if files[from]==nil then return nil,"missing" end
+      files[to]=files[from]; files[from]=nil; return true
+    end}
+    lfs={mkdir=function() return true end}
+    getMudletHomeDir=function() return "/skill-filter-test" end
+    loadfile=function(name) if not files[name] then return nil,"missing" end; return loadstring(files[name]) end
+    files[path]="return {side_text_scale=1,main_skills=false,auto_wrap=false}"
+    eq(assert(Adapter.loadDisplaySettings()).skill_filter,true)
+    local config={side_text_scale=.9,main_skills=false,auto_wrap=false,align_input=true,skill_filter=true}
+    for _,enabled in ipairs({false,true}) do
+      config.skill_filter=enabled; assert(Adapter.new():saveDisplaySettings(config))
+      assert(files[path]:find("skill_filter="..tostring(enabled),1,true))
+      local loaded=assert(Adapter.loadDisplaySettings())
+      eq(loaded.skill_filter,enabled); eq(loaded.main_skills,false); eq(loaded.auto_wrap,false); eq(loaded.align_input,true)
+      eq(Settings.resolve(defaults,{display=loaded}).display.skill_filter,enabled)
+    end
+    config.skill_filter=false; assert(Adapter.new():saveDisplaySettings(config))
+    local saved=files[path]; config.skill_filter=true
+    for _,stage in ipairs({"open","write","close","replace"}) do
+      failure=stage; eq(Adapter.new():saveDisplaySettings(config),nil); eq(files[path],saved)
+      eq(assert(Adapter.loadDisplaySettings()).skill_filter,false)
+    end
+    failure=nil; local before=writes; config.skill_filter="false"
+    eq(Adapter.new():saveDisplaySettings(config),nil); eq(writes,before); eq(files[path],saved)
+  end,debug.traceback)
+  io=previous.io; os=previous.os; lfs=previous.lfs; getMudletHomeDir=previous.getMudletHomeDir; loadfile=previous.loadfile
+  if not ok then error(err,0) end
+end)
+
 test("display skill ordering defaults and persisted choices resolve independently without changing callers",function()
   local input={display={main_skills=false,auto_wrap=false,personal="keep",
     main_skill_sort={primary="uses",direction="asc",secondary="level",secondary_direction="desc"},

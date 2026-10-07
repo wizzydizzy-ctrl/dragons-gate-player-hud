@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.91**.
+Applies to DGHUD **v0.3.92**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -65,7 +65,7 @@ Skills are an exception: a complete skill table ending in blank lines is saved o
 1. Run `dghud check` and update if your installed version is older than **0.3.89**.
 2. Wait for the current startup/refresh sequence or skill request to finish, then enter `skill bite`, `skill weapons`, or another filter once.
 3. Use `skill` or `skill all` for the complete list again. The sidebar always keeps every captured skill.
-4. If a gap remains on v0.3.91, send a report with the command, formatting toggle, whether you were reading scrollback, and a screenshot of the window.
+4. If a gap remains on v0.3.92, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
 
 The fix refreshes hidden-row edits locally. You should not need to send Enter or another game command just to make the blank area disappear.
 
@@ -240,7 +240,7 @@ The **Waiting** line from `rr status` explains the immediate pause, and `rr show
 
 ## A normal command behaves differently with DGHUD
 
-DGHUD handles the documented `dghud ...`, `rr ...`, walking, and local `skill` filtering commands. Skill filters request the normal game table rather than sending the filter as a game command. It does not intentionally create broad aliases for unrelated game commands.
+DGHUD handles the documented `dghud ...`, `rr ...`, walking, and local `skill` filtering commands. With **SKILL FILTERS ON**, skill filters request the normal game table. To send native arguments such as `skill Rath` unchanged, choose **OPTIONS → Skill Settings → SKILL FILTERS OFF → Save**. Bare `skill` still refreshes your complete sidebar; **MAIN SKILLS** controls formatting separately. The filter choice survives reloads and updates. DGHUD does not intentionally create broad aliases for unrelated game commands.
 
 If a command such as `lay hands` works only with different capitalization, inspect personal Mudlet aliases and triggers first. Disable them one at a time in an isolated profile before attributing the behavior to DGHUD.
 

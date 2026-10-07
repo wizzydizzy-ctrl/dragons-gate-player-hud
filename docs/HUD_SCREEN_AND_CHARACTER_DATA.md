@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.91.
+Applies to DGHUD v0.3.92.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -113,9 +113,13 @@ This puts the runes closest to needing renewal at the top.
 
 ## Skills
 
+**OPTIONS → Skill Settings → SKILL FILTERS** defaults **ON** for HUD name/group filtering. Save it **OFF** to use native staff commands such as `skill Rath`: every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, passes unchanged to the game exactly once with the original casing and spacing, without a queued local filter or busy/display-unavailable rejection. Bare `skill` still fills the complete sidebar and follows the independent **MAIN SKILLS** formatting setting.
+
+Save applies filtering, formatting, and sorting together; Cancel or dismissing the panel discards the draft. Reset restores filters ON in the draft until Save. Failed saves leave active settings unchanged, while saving OFF cancels pending local filters. The choice survives other display changes, character changes, reloads, restarts, and updates.
+
 `skill` fills the Skills list. **OPTIONS → Skill Settings** gives **Main Display** and **Right Sidebar** independent sorting choices. Each has a primary key, ascending or descending order, and an optional secondary key with its own direction. Available keys are **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, and **Category (combat vs utility)**. Both displays default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
-Sidebar sorting changes immediately reorder existing rows. Main sorting changes apply to the next complete `skill` output and leave previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and HUD updates. Category and Ready to train sorting keep every captured skill visible.
+Saving sidebar sorting immediately reorders existing rows. Main sorting changes apply to the next complete `skill` output and leave previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and HUD updates. Category and Ready to train sorting keep every captured skill visible.
 
 The sidebar shortens names for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. The formatted main table shortens weapon names to `Sharps`, `Blunts`, `Poles`, `Throws`, and `Missiles`. Columns stay aligned, and scrollbars appear when needed.
 
@@ -129,11 +133,11 @@ Number  Skill   LVL  USES
 
 The leading catalog number is the game's fixed training skill ID, not a display rank. Sharp Weapons stays `2` regardless of its level or where it sorts. Every skill in your response is included; skills you do not possess are not added. Future unrecognized skill names show `?` rather than an invented number. Turning **MAIN SKILLS** off keeps future responses in the game's original layout. This toggle does not change the sidebar's layout, send training commands, or replace unrelated game output.
 
-To narrow one response in the main display, enter `skill <prefix>`, for example `skill claw`, `skill bite`, `skill c`, `skill id`, or `skill ste`. Matching ignores case and checks the start of the name, including supported shortened names; the text is not a wildcard or pattern. Enter `skill` or `skill all` to show the full list again. Each request fetches the full table, so the Skills sidebar retains all your skills even when the main response is filtered.
+With **SKILL FILTERS ON**, to narrow one response in the main display, enter `skill <prefix>`, for example `skill claw`, `skill bite`, `skill c`, `skill id`, or `skill ste`. Matching ignores case and checks the start of the name, including supported shortened names; the text is not a wildcard or pattern. Enter `skill` or `skill all` to show the full list again. Each request fetches the full table, so the Skills sidebar retains all your skills even when the main response is filtered.
 
 `skill weapons` shows only your possessed Sharp, Blunt, Pole, Throw, and Missile Weapons and natural attacks: Biting, Clawing, Webbing, Breath Weapon, and Stinging. The group uses catalog IDs 2–6, 46–49, and 57. It does not include Identify Weapon Quality, Weapon Smithing, or every combat skill. A filter with no matches prints `No skills match: <prefix>`.
 
-Filters also work with **MAIN SKILLS** off, keeping the game's row format and order. If another refresh or skill request is loading, wait for it to finish and try again. Filtering finishes when the complete table ends, without needing Enter. DGHUD redraws removed rows locally so they do not leave a blank gap at the bottom, and preserves your position when reading scrollback. A filter applies to one response only; canceled or expired requests do not carry their filter into the next request.
+Enabled filters also work with **MAIN SKILLS** off, keeping the game's row format and order. With filters ON, if another refresh or skill request is loading, wait for it to finish and try again. Filtering finishes when the complete table ends, without needing Enter. DGHUD redraws removed rows locally so they do not leave a blank gap at the bottom, and preserves your position when reading scrollback. A filter applies to one response only; canceled or expired requests do not carry their filter into the next request.
 
 `skill combat` shows all possessed combat skills and `skill utility` shows all possessed utility skills, including ready-to-train zero-use rows in each category. With default colors and MAIN SKILLS on, zero-use rows stay green; other combat rows are blue and other utility rows are yellow. `skill train` remains a zero-use-only display from either category and never sends a game training command. Group names ignore case. Combat and utility membership uses category regardless of remaining uses; train membership uses zero remaining uses. Customizing or disabling colors does not change membership. All filters still work with MAIN SKILLS off, preserving the game's row format and order. `skill weapons` and name-prefix filters still include matching zero-use skills, and every request saves the full list to the sidebar.
 

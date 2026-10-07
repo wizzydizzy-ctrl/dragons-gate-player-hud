@@ -1,6 +1,6 @@
 # DGHUD Installation and First Start
 
-Applies to DGHUD **v0.3.91**.
+Applies to DGHUD **v0.3.92**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -97,7 +97,7 @@ Open **OPTIONS** and check these items:
 - Choose **HUD Text: Small, Normal, or Large** for your screen.
 - Open **Color Settings** and disable any highlight you do not want.
 - Open **Map Settings** and decide which special travel types should begin submaps; separate submaps start off by default.
-- Open **Skill Settings** to choose sorting for the main display and sidebar independently. Try `skill weapons` or `skill id` to narrow the main results without removing saved sidebar skills.
+- Open **Skill Settings** to choose main-display and sidebar sorting independently. **SKILL FILTERS** defaults ON: try `skill weapons` or `skill id` to narrow the main results while keeping the complete sidebar. For native arguments such as `skill Rath`, choose **SKILL FILTERS OFF → Save**; this choice survives reloads and updates, separately from **MAIN SKILLS** formatting.
 - Open **Chat Settings** to choose Show in ALL, hide the chatbox, or change each tab's sound. Hiding a source from ALL does not stop capture in its own tab.
 - Leave **AUTO MAIN WRAP** on for automatic wrapping, or turn it off before changing Mudlet's wrap preference manually.
 - Enable **Keybindings** only if you want HUD-managed numeric-keypad controls. Existing personal bindings are not replaced.

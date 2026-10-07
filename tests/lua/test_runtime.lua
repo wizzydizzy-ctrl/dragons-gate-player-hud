@@ -3334,3 +3334,350 @@ test("skill group near keywords and command shaped text remain literal prefix da
     end
   end
 end)
+
+local function saveSkillFilterChoice(f,hud,enabled)
+  local chosen=hud:skillSettings(); chosen.skill_filter=enabled
+  local saved=assert(f.optionsActionCallback("skill_settings_save",chosen))
+  eq(saved.skill_filter,enabled); eq(hud:skillFilterEnabled(),enabled)
+  return saved
+end
+
+test("saved skill filters OFF forwards alias arguments exactly once without local filtering",function()
+  local cases={{"skill Rath","Rath"},{"sKiLl   Rath  Alterac  ","Rath  Alterac  "},
+    {"SKILL ALL","ALL"},{"skill weapons","weapons"},{"skill combat","combat"},
+    {"skill utility","utility"},{"skill train","train"}}
+  for _,formatted in ipairs({true,false}) do
+    withSkillPrefix(formatted,function(f,hud)
+      saveSkillFilterChoice(f,hud,false)
+      local callback=assert(aliasCallback(f,skillPrefixPattern))
+      for index,case in ipairs(cases) do
+        assert(callback(case)); eq(#f.sentCommands,index); eq(f.sentCommands[index],case[1])
+        eq(f.skillSendOwnership[index],false); eq(hud.skills_filter_sending,nil)
+        eq(hud.skill_display:filterPending(),false); eq(hud.skill_display.timer,nil)
+        eq(hud.collector.active,nil); eq(#f.skillBatches,0); eq(f.commandErrors,nil)
+      end
+      assert(hud:requestSkills("Rath  Alterac  "))
+      eq(#f.sentCommands,#cases+1); eq(f.sentCommands[#cases+1],"skill Rath  Alterac  ")
+      eq(hud:mainSkillsEnabled(),formatted)
+    end)
+  end
+end)
+
+test("saved skill filters OFF uses native send without alias expansion and preserves Mudlet matches",function()
+  withSkillPrefix(true,function(f,hud)
+    saveSkillFilterChoice(f,hud,false)
+    local previous={send=_G.send,expandAlias=_G.expandAlias,matches=_G.matches}
+    local sent={}; local expansions=0
+    local ok,err=pcall(function()
+      _G.send=function(command)
+        sent[#sent+1]=command; f:emit("sysDataSendRequest",nil,command); return true
+      end
+      _G.expandAlias=function() expansions=expansions+1; error("native skill must not expand aliases") end
+      f.sendCommand=MudletAdapter.sendCommand
+      _G.matches={"SkIlL    Rath  Alterac  ","Rath  Alterac  "}
+      assert(aliasCallback(f,skillPrefixPattern)())
+      eq(#sent,1); eq(sent[1],_G.matches[1]); eq(expansions,0)
+      eq(hud.collector.active,nil); eq(hud.skill_display:filterPending(),false)
+    end)
+    _G.send=previous.send; _G.expandAlias=previous.expandAlias; _G.matches=previous.matches
+    assert(ok,err)
+  end)
+end)
+
+test("saved skill filters OFF forwards while collector busy or optional display unavailable",function()
+  for _,mode in ipairs({"busy","missing","stopped"}) do
+    local f=fake()
+    if mode=="missing" then f.addSkillDisplayTrigger=nil end
+    local hud=Main.new(f,{layout={},display={skill_filter=false}}); assert(hud:start())
+    local active
+    if mode=="busy" then
+      assert(hud.collector:begin("stat",false)); active=hud.collector.active
+      hud.skills_filter_sending=true
+    elseif mode=="stopped" then hud.skill_display:shutdown() end
+    local before=#(f.commandErrors or {})
+    assert(aliasCallback(f,skillPrefixPattern)({"skill Rath","Rath"}))
+    eq(#f.sentCommands,1); eq(f.sentCommands[1],"skill Rath"); eq(#(f.commandErrors or {}),before)
+    eq(hud.collector.active,active)
+    if hud.skill_display then eq(hud.skill_display:filterPending(),false) end
+    hud.skills_filter_sending=nil; assert(hud:shutdown())
+  end
+end)
+
+test("saved skill filters OFF still validates bounded queries before sending",function()
+  withSkillPrefix(true,function(f,hud)
+    saveSkillFilterChoice(f,hud,false)
+    for _,query in ipairs({false,{},string.rep("R",129),"Rath\rquit","Rath\nquit","Rath"..string.char(0)}) do
+      local ok,err=hud:requestSkills(query); eq(ok,nil); assert(type(err)=="string")
+      eq(f.sentCommands,nil); eq(hud.skill_display:filterPending(),false)
+    end
+  end)
+end)
+
+test("saved skill filters OFF leaves bare skill formatting and full sidebar collection independent",function()
+  for _,formatted in ipairs({true,false}) do
+    for _,displayFirst in ipairs({false,true}) do
+      withSkillPrefix(formatted,function(f,hud)
+        saveSkillFilterChoice(f,hud,false)
+        f:sendCommand("skill"); skillPrefixResponse(f,hud,displayFirst); flushSkillPrefix(f,hud)
+        eq(#f.sentCommands,1); eq(f.sentCommands[1],"skill"); assertFullSkillSnapshot(hud)
+        eq(#hud.view.state.skills.items,4); eq(hud.skill_display:filterPending(),false)
+        eq(#f.skillBatches,formatted and 1 or 0)
+        if formatted then
+          for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
+        else
+          for row,line in ipairs(skillPrefixLines) do eq(f.skillConsole[row],line) end
+        end
+        eq(hud:skillFilterEnabled(),false); eq(hud:mainSkillsEnabled(),formatted)
+      end)
+    end
+  end
+end)
+
+test("saved skill filters reenabled restore local prefix filtering and the full sidebar",function()
+  for _,formatted in ipairs({true,false}) do
+    withSkillPrefix(formatted,function(f,hud)
+      saveSkillFilterChoice(f,hud,false); saveSkillFilterChoice(f,hud,true)
+      assert(aliasCallback(f,skillPrefixPattern)({"SKILL Sh","Sh"}))
+      eq(#f.sentCommands,1); eq(f.sentCommands[1],"skill"); eq(f.skillSendOwnership[1],true)
+      eq(hud.skill_display.filter_query,"sh")
+      skillPrefixResponse(f,hud); flushSkillPrefix(f,hud)
+      assertSkillPrefixResult(f,formatted); assertFullSkillSnapshot(hud)
+      eq(hud:skillFilterEnabled(),true); eq(hud:mainSkillsEnabled(),formatted)
+    end)
+  end
+end)
+
+test("saving skill filters OFF cancels waiting collecting and deferred display callbacks",function()
+  for _,phase in ipairs({"waiting","collecting","pending"}) do
+    withSkillPrefix(true,function(f,hud)
+      assert(hud:requestSkills("sh"))
+      if phase=="collecting" then
+        skillPrefixLine(f,hud,skillPrefixLines[1],1); skillPrefixLine(f,hud,skillPrefixLines[2],2)
+      elseif phase=="pending" then skillPrefixResponse(f,hud) end
+      local timer=hud.skill_display.timer; local late=assert(f.timers[timer])
+      saveSkillFilterChoice(f,hud,false)
+      eq(hud.skill_display:filterPending(),false); eq(hud.skill_display.response,nil); eq(hud.skill_display.pending,nil)
+      eq(hud.skill_display.timer,nil); eq(f.timers[timer],nil)
+      late(); eq(#f.skillBatches,0); eq(#f.sentCommands,1)
+      -- A fresh bare request must not inherit the canceled filter.
+      f:sendCommand("skill"); skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud)
+      assertFullSkillSnapshot(hud)
+      for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f,20):find(name,1,true)) end
+      late(); eq(#f.skillBatches,1); eq(#f.sentCommands,2)
+    end)
+  end
+end)
+
+test("invalid skill filter booleans and failed saves preserve active filters and saved settings",function()
+  withSkillPrefix(true,function(f,hud)
+    local previous=_G.DGHUD
+    local ok,err=pcall(function()
+      _G.DGHUD={user_settings={display={skill_filter=true,personal="keep"}}}
+      assert(hud:requestSkills("sh"))
+      local display=hud.skill_display; local timer=display.timer; local late=f.timers[timer]
+      local updates=f.skillSortUpdates; local chosen=hud:skillSettings()
+      for _,invalid in ipairs({"false","true",0,1,{},function() end}) do
+        chosen.skill_filter=invalid
+        eq(f.optionsActionCallback("skill_settings_save",chosen),nil)
+        eq(f.savedDisplaySettings,nil); eq(hud:skillFilterEnabled(),true); eq(display.timer,timer)
+      end
+      chosen.skill_filter=false
+      local save=f.saveDisplaySettings
+      for _,mode in ipairs({"return","throw","false"}) do
+        function f:saveDisplaySettings()
+          if mode=="throw" then error("disk full") end
+          if mode=="false" then return false,"disk full" end
+          return nil,"disk full"
+        end
+        local saved,why=f.optionsActionCallback("skill_settings_save",chosen)
+        eq(saved,nil); assert(why:find("disk full",1,true)); eq(hud:skillFilterEnabled(),true)
+        eq(display.timer,timer); eq(f.timers[timer],late); eq(display.filter_query,"sh")
+        eq(f.skillSortUpdates,updates); eq(f.savedDisplaySettings,nil)
+        eq(_G.DGHUD.user_settings.display.skill_filter,true); eq(_G.DGHUD.user_settings.display.personal,"keep")
+      end
+      f.saveDisplaySettings=save
+      skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertSkillPrefixResult(f,true)
+    end)
+    _G.DGHUD=previous; assert(ok,err)
+  end)
+end)
+
+test("saved skill filter choice survives legacy callers other display setters reload update and cold start",function()
+  withSkillPrefix(true,function(f,hud)
+    local previous=_G.DGHUD; local replacement,cold
+    local ok,err=pcall(function()
+      _G.DGHUD={controller=hud,user_settings={display={personal="keep"}}}
+      saveSkillFilterChoice(f,hud,false)
+      eq(_G.DGHUD.user_settings.display.skill_filter,false); eq(_G.DGHUD.user_settings.display.personal,"keep")
+      local legacy=hud:skillSettings(); legacy.skill_filter=nil; assert(hud:setSkillSettings(legacy))
+      eq(hud:skillFilterEnabled(),false); eq(f.savedDisplaySettings.skill_filter,false)
+      local setters={function() return hud:setDisplayTextSize("small") end,
+        function() return hud:setMainConsoleAutoWrap(false) end,
+        function() return hud:setMainInputAligned(true) end,
+        function() return hud:setMainSkillsEnabled(false) end}
+      for _,setter in ipairs(setters) do
+        local _,why=setter(); eq(why,nil); eq(f.savedDisplaySettings.skill_filter,false); eq(hud:skillFilterEnabled(),false)
+      end
+      assert(hud:reload()); eq(hud:skillFilterEnabled(),false); eq(f.viewSkillSettings.skill_filter,false)
+      hud.update_handoff=true; hud.update_preserve_view=true; assert(hud:shutdown())
+      replacement=Main.new(f,Settings.resolve(require("defaults"),{display=f.savedDisplaySettings}))
+      assert(replacement:start()); eq(replacement:skillFilterEnabled(),false); eq(f.viewSkillSettings.skill_filter,false)
+      local coldFake=fake(); cold=Main.new(coldFake,Settings.resolve(require("defaults"),{display=f.savedDisplaySettings}))
+      assert(cold:start()); eq(cold:skillFilterEnabled(),false); eq(coldFake.viewSkillSettings.skill_filter,false)
+    end)
+    if cold then cold:shutdown() end
+    if replacement then replacement:shutdown() end
+    _G.DGHUD=previous; assert(ok,err)
+  end)
+end)
+
+test("native target skills while filters OFF never replace the own sidebar snapshot",function()
+  for _,displayFirst in ipairs({false,true}) do
+    withSkillPrefix(true,function(f,hud)
+      saveSkillFilterChoice(f,hud,false)
+      f:sendCommand("skill"); skillPrefixResponse(f,hud,displayFirst); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      assert(aliasCallback(f,skillPrefixPattern)({"skill Rath","Rath"}))
+      eq(hud.collector.active,nil)
+      local target=weaponSkillResponse(f,hud,{{"Claw",777,42}},displayFirst,20)
+      flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      eq(#hud.view.state.skills.items,4); eq(#f.sentCommands,2); eq(f.sentCommands[2],"skill Rath")
+      eq(hud.skill_display:filterPending(),false); eq(f.skillConsole[target.boundary_row],">")
+    end)
+  end
+end)
+
+test("native target skills after disabling an in flight filter preserve own sidebar and invalidate old callbacks",function()
+  for _,phase in ipairs({"waiting","collecting","boundary"}) do
+    withSkillPrefix(true,function(f,hud)
+      f:sendCommand("skill"); skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+      assert(hud:requestSkills("sh"))
+      if phase~="waiting" then
+        skillPrefixLine(f,hud,"Skill Remain Level",20)
+        skillPrefixLine(f,hud," Sharp Weapons       400 4",21)
+        if phase=="boundary" then skillPrefixLine(f,hud,"",22); assert(hud.collector.skill_boundary) end
+      end
+      local retired={}
+      for _,id in pairs({timeout=hud.collector.timeout,boundary=hud.collector.skill_boundary,display=hud.skill_display.timer}) do
+        retired[#retired+1]={id=id,callback=assert(f.timers[id])}
+      end
+      saveSkillFilterChoice(f,hud,false)
+      assert(aliasCallback(f,skillPrefixPattern)({"skill Rath","Rath"}))
+      eq(hud.collector.active,nil); eq(hud.collector.timeout,nil); eq(hud.collector.skill_boundary,nil)
+      for _,item in ipairs(retired) do eq(f.timers[item.id],nil); item.callback() end
+      weaponSkillResponse(f,hud,{{"Claw",777,42}},false,30); flushSkillPrefix(f,hud)
+      assertFullSkillSnapshot(hud); eq(#hud.view.state.skills.items,4)
+      eq(#f.sentCommands,3); eq(f.sentCommands[3],"skill Rath")
+      f:sendCommand("skill")
+      local active=hud.collector.active; local timeout=hud.collector.timeout; local batches=#f.skillBatches
+      for _,item in ipairs(retired) do item.callback() end
+      eq(hud.collector.active,active); eq(hud.collector.timeout,timeout); assert(f.timers[timeout])
+      eq(#f.skillBatches,batches); eq(#f.sentCommands,4)
+      skillPrefixResponse(f,hud,false,50); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+    end)
+  end
+end)
+
+test("native target skill during own startup capture drops the sequence without replacing its snapshot",function()
+  withSkillPrefix(true,function(f,hud)
+    saveSkillFilterChoice(f,hud,false)
+    f:sendCommand("skill"); skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
+    hud.collector.sequence_index=6; assert(hud.collector:begin("skill",true))
+    local timeout=hud.collector.timeout; local late=assert(f.timers[timeout])
+    assert(aliasCallback(f,skillPrefixPattern)({"skill Rath","Rath"}))
+    eq(hud.collector.active,nil); eq(hud.collector.sequence_index,nil); eq(hud.collector.retry_startup,false)
+    eq(f.timers[timeout],nil); late()
+    weaponSkillResponse(f,hud,{{"Claw",777,42}},false,30); flushSkillPrefix(f,hud)
+    assertFullSkillSnapshot(hud); eq(#f.sentCommands,3); eq(f.sentCommands[3],"skill Rath")
+  end)
+end)
+
+
+test("resaving skill filters OFF while changing sort preserves an in flight bare formatter",function()
+  for _,phase in ipairs({"collecting","pending"}) do
+    withSkillPrefix(true,function(f,hud)
+      saveSkillFilterChoice(f,hud,false)
+      f:sendCommand("skill")
+      if phase=="collecting" then
+        skillPrefixLine(f,hud,skillPrefixLines[1],1); skillPrefixLine(f,hud,skillPrefixLines[2],2)
+      else skillPrefixResponse(f,hud) end
+      local display=hud.skill_display; local response=display.response; local pending=display.pending
+      local timer=display.timer; local callback=assert(f.timers[timer])
+      local chosen=hud:skillSettings(); chosen.main_skill_sort.primary="number"
+      chosen.main_skill_sort.direction="asc"; chosen.sidebar_skill_sort.primary="name"
+      local saved=assert(f.optionsActionCallback("skill_settings_save",chosen))
+      eq(saved.skill_filter,false); eq(display.response,response); eq(display.pending,pending)
+      eq(display.timer,timer); eq(f.timers[timer],callback); eq(#f.sentCommands,1)
+      eq(display:filterPending(),false); eq(display.enabled,true)
+      if phase=="collecting" then skillPrefixResponse(f,hud,false,1,">",3) end
+      flushSkillPrefix(f,hud); eq(#f.skillBatches,1); assertFullSkillSnapshot(hud)
+      for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
+      eq(f.savedDisplaySettings.skill_filter,false); eq(hud:skillFilterEnabled(),false)
+    end)
+  end
+end)
+
+local function withSkillFilterSettingsView(fn)
+  local previous=_G.Geyser
+  local function widget(_,container)
+    return {container=container,setClickCallback=function(self,callback) self.clickCallback=callback end,
+      setToolTip=function() end,hide=function(self) self.visible=false end,show=function(self) self.visible=true end,
+      move=function() end,resize=function() end,setStyleSheet=function() end,
+      echo=function(self,value) self.text=value end}
+  end
+  local class={withFont=function(value) return value end,raiseCards=function() end}
+  require("skill_settings_view").attach(class,{label=widget,copy=function(value) return type(value)=="table" and Settings.merge({},value) or value end,safeText=tostring})
+  class.__index=class
+  class.setMainSkillsEnabled=function(self,value) self.main_skills_enabled=value end
+  for _,name in ipairs({"hideHelp","hideMapSettings","hideMapLibrary","hideRollerSettings","hideChatSettings",
+      "hideKeybindingSettings","hideColorSettings","hideSupport","hideLatentPsionAlert","setColorMenuVisible"}) do
+    class[name]=function() return true end
+  end
+  _G.Geyser={Container={new=function(_,_,container) return widget(nil,container) end},
+    ScrollBox={new=function(_,_,container) return widget(nil,container) end}}
+  local view=setmetatable({root={},settings=Settings.merge(require("defaults"),{})},class)
+  local ok,err=pcall(function() view:createSkillSettings(); fn(view) end)
+  _G.Geyser=previous; assert(ok,err)
+end
+
+test("Skill Settings filter toggle remains draft only until save and Cancel Reset preserve the saved choice",function()
+  withSkillPrefix(true,function(f,hud)
+    withSkillFilterSettingsView(function(view)
+      view.options_action_callback=f.optionsActionCallback
+      assert(view:showSkillSettings()); eq(view:skillSettingsValues().skill_filter,true)
+      assert(view.skill_settings_filter.clickCallback()); view:renderSkillSettings()
+      assert(view.skill_settings_filter.text:find("SKILL FILTERS: OFF",1,true))
+      eq(view:skillSettingsValues().skill_filter,false); eq(hud:skillFilterEnabled(),true)
+      eq(view.settings.display.skill_filter,true); eq(f.savedDisplaySettings,nil)
+      local copy=view:skillSettingsValues(); copy.skill_filter=true; eq(view:skillSettingsValues().skill_filter,false)
+      view.skill_settings_cancel.clickCallback(); assert(view:showSkillSettings())
+      eq(view:skillSettingsValues().skill_filter,true)
+      view.skill_settings_filter.clickCallback(); local saved=assert(view.skill_settings_save.clickCallback())
+      eq(saved.skill_filter,false); eq(view.skill_settings_visible,false); eq(hud:skillFilterEnabled(),false)
+      eq(view.settings.display.skill_filter,false); eq(view.main_skills_enabled,true)
+      assert(view:showSkillSettings()); eq(view:skillSettingsValues().skill_filter,false)
+      view.skill_settings_reset.clickCallback(); eq(view:skillSettingsValues().skill_filter,true)
+      eq(hud:skillFilterEnabled(),false); eq(f.savedDisplaySettings.skill_filter,false)
+      view.skill_settings_cancel.clickCallback(); assert(view:showSkillSettings())
+      eq(view:skillSettingsValues().skill_filter,false)
+      view.skill_settings_reset.clickCallback(); assert(view.skill_settings_save.clickCallback())
+      eq(hud:skillFilterEnabled(),true); eq(view.settings.display.skill_filter,true)
+    end)
+  end)
+end)
+
+test("Skill Settings failed save keeps filter draft open without changing runtime or applied view",function()
+  withSkillPrefix(true,function(f,hud)
+    withSkillFilterSettingsView(function(view)
+      view.options_action_callback=f.optionsActionCallback
+      assert(view:showSkillSettings()); view.skill_settings_filter.clickCallback()
+      f.failDisplaySettingsSave="disk full"
+      local saved,err=view.skill_settings_save.clickCallback()
+      eq(saved,nil); assert(err:find("disk full",1,true)); eq(view.skill_settings_visible,true)
+      eq(view:skillSettingsValues().skill_filter,false); eq(view.settings.display.skill_filter,true)
+      eq(hud:skillFilterEnabled(),true); eq(f.savedDisplaySettings,nil)
+      eq(view.skill_settings_saving,false); eq(view.skill_settings_pending_snapshot,nil)
+      f.failDisplaySettingsSave=nil; assert(view.skill_settings_save.clickCallback())
+      eq(hud:skillFilterEnabled(),false); eq(view.settings.display.skill_filter,false)
+    end)
+  end)
+end)

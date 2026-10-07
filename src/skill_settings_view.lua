@@ -6,17 +6,17 @@ function SkillSettingsView.attach(View,helpers)
 local skillSortKeys={"level","uses","name","number","ready","category"}
 local skillSortLabels={level="Level",uses="Remaining uses",name="Name",number="Skill number",ready="Training readiness<br>(0 uses)",category="Category<br>Combat / Utility",none="None"}
 local skillSortDirections={asc="Ascending",desc="Descending"}
-local skillFilterExamples="Main order changes on your next skill command; sidebar order changes when you save.<br>skill combat: all combat skills, including 0 uses.<br>skill utility: all utility skills, including 0 uses.<br>skill train: only 0-use skills (green). Displays only; does not train.<br>Zero-use rows stay green in every group.<br>The sidebar keeps all skills. Filters still work with custom colors and formatting OFF.<br>skill weapons and name prefixes also work."
+local skillFilterExamples="SKILL FILTERS ON: skill bite, weapons, combat, utility and train filter your skills.<br>OFF: skill with any argument goes to the game unchanged. Staff can use skill Rath.<br>Save applies this profile-wide choice; updates keep it. Formatting and sorting are separate.<br>Main order changes on your next skill command; sidebar order changes when you save.<br>skill combat: all combat skills, including 0 uses.<br>skill utility: all utility skills, including 0 uses.<br>skill train: only 0-use skills (green). Displays only; does not train.<br>Zero-use rows stay green in every group.<br>The sidebar keeps all skills. Enabled filters work with custom colors and formatting OFF.<br>skill weapons and name prefixes also work when filters are ON."
 local skillSortHelp="Training readiness: ascending puts 0 uses first; descending puts other skills first.<br>Category: ascending puts Combat first; descending puts Utility first.<br>Save applies both tabs; Cancel discards this draft."
 local function skillSettingsSnapshot(display)
   display=type(display)=="table" and display or {}
-  return {main_skills=display.main_skills~=false,
+  return {main_skills=display.main_skills~=false,skill_filter=display.skill_filter~=false,
     main_skill_sort=viewCopy(SkillSort.normalize(display.main_skill_sort)),
     sidebar_skill_sort=viewCopy(SkillSort.normalize(display.sidebar_skill_sort))}
 end
 function View:skillSettingsWidgets()
   local widgets={}
-  for _,name in ipairs({"overlay","panel","bg","title","content","text","format","preset","primary_caption","direction_caption","secondary_caption","secondary_direction_caption","summary","status","reset","cancel","save"}) do
+  for _,name in ipairs({"overlay","panel","bg","title","content","text","format","filter","preset","primary_caption","direction_caption","secondary_caption","secondary_direction_caption","summary","status","reset","cancel","save"}) do
     widgets[#widgets+1]=self["skill_settings_"..name]
   end
   for _,group in ipairs({"tabs","primary_buttons","secondary_buttons","direction_buttons","secondary_direction_buttons"}) do
@@ -31,7 +31,7 @@ function View:createSkillSettings()
   self.skill_settings_bg=label("DGHUD.SkillSettings.Background",self.skill_settings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.skill_settings_title=label("DGHUD.SkillSettings.Title",self.skill_settings_panel)
   self.skill_settings_content=Geyser.ScrollBox:new({name="DGHUD.SkillSettings.Content",x=12,y=44,width=616,height=664},self.skill_settings_panel)
-  for _,name in ipairs({"text","format","preset","primary_caption","direction_caption","secondary_caption","secondary_direction_caption","summary","status","reset","cancel","save"}) do
+  for _,name in ipairs({"text","format","filter","preset","primary_caption","direction_caption","secondary_caption","secondary_direction_caption","summary","status","reset","cancel","save"}) do
     self["skill_settings_"..name]=label("DGHUD.SkillSettings."..name,self.skill_settings_content)
   end
   self.skill_settings_tabs={}
@@ -73,6 +73,11 @@ function View:bindSkillSettingsCallbacks()
     self.skill_settings_draft.main_skills=not self.skill_settings_draft.main_skills
     self.skill_settings_dirty=true; self.skill_settings_error=nil; self:renderSkillSettings(); return true
   end)
+  self.skill_settings_filter:setClickCallback(function()
+    if not live() then return nil,"Skills settings are unavailable." end
+    self.skill_settings_draft.skill_filter=not self.skill_settings_draft.skill_filter
+    self.skill_settings_dirty=true; self.skill_settings_error=nil; self:renderSkillSettings(); return true
+  end)
   self.skill_settings_preset:setClickCallback(function()
     if not live() then return nil,"Skills settings are unavailable." end
     self.skill_settings_draft[self.skill_settings_target.."_skill_sort"]=skillSettingsSnapshot().main_skill_sort
@@ -93,7 +98,7 @@ function View:setSkillSortPreferences(display)
   -- Runtime may refresh the view inside Save. Apply only its successful result.
   if self.skill_settings_saving then self.skill_settings_pending_snapshot=snapshot; return true end
   if type(self.settings.display)~="table" then self.settings.display={} end
-  for _,key in ipairs({"main_skills","main_skill_sort","sidebar_skill_sort"}) do self.settings.display[key]=viewCopy(snapshot[key]) end
+  for _,key in ipairs({"main_skills","skill_filter","main_skill_sort","sidebar_skill_sort"}) do self.settings.display[key]=viewCopy(snapshot[key]) end
   self:setMainSkillsEnabled(snapshot.main_skills)
   if self.skill_settings_visible and not self.skill_settings_dirty then self.skill_settings_draft=viewCopy(snapshot); self:renderSkillSettings() end
   self.skills_signature=nil
@@ -155,7 +160,7 @@ function View:saveSkillSettings()
   local called,saved,err=pcall(self.options_action_callback,"skill_settings_save",draft)
   if not called then return failed(saved) end
   if type(saved)~="table" then return failed(err) end
-  if type(saved.main_skills)~="boolean" then return failed("Save returned invalid Skills settings.") end
+  if type(saved.main_skills)~="boolean" or type(saved.skill_filter)~="boolean" then return failed("Save returned invalid Skills settings.") end
   for _,key in ipairs({"main_skill_sort","sidebar_skill_sort"}) do
     local ok,why=SkillSort.validate(saved[key]); if not ok then return failed(why or "Save returned invalid skill sort settings.") end
   end
@@ -175,6 +180,7 @@ function View:renderSkillSettings()
   self.skill_settings_title:setStyleSheet("background:transparent;color:"..t.accent..";font-weight:700;")
   self.skill_settings_title:echo(View.withFont("<b>SKILL SETTINGS</b>",font+3))
   text(self.skill_settings_text,skillFilterExamples)
+  button(self.skill_settings_filter,"SKILL FILTERS: "..(self.skill_settings_draft.skill_filter and "ON" or "OFF"),self.skill_settings_draft.skill_filter)
   for _,key in ipairs({"main","sidebar"}) do button(self.skill_settings_tabs[key],key=="main" and "MAIN DISPLAY" or "SIDEBAR",self.skill_settings_target==key) end
   button(self.skill_settings_format,"MAIN SKILLS FORMAT: "..(self.skill_settings_draft.main_skills and "ON" or "OFF"),self.skill_settings_draft.main_skills)
   button(self.skill_settings_preset,"LEVEL THEN USES<br>Highest level, fewest uses",false)
@@ -215,6 +221,7 @@ function View:layoutSkillSettings(layout)
   self.skill_settings_font=math.max(13,math.min(15,tonumber(layout.body_font) or 13))
   local font=self.skill_settings_font; local row=font*2+12; local y=0; local gap=6
   local function full(widget,h) place(widget,0,y,inner,h); y=y+h+gap end
+  full(self.skill_settings_filter,row)
   local hintRows=0
   local hintColumns=math.max(1,math.floor(inner/(font*.65)))
   for line in (skillFilterExamples.."<br>"):gmatch("(.-)<br>") do
@@ -255,13 +262,13 @@ end
 function SkillSettingsView.validate(candidate,widgetValid,labelValid)
   local panel=candidate.skill_settings_panel
   local content=candidate.skill_settings_content
-  for _,name in ipairs({"panel","content","overlay","bg","title","text","format","preset","primary_caption","direction_caption","secondary_caption","secondary_direction_caption","summary","status","reset","cancel","save"}) do
+  for _,name in ipairs({"panel","content","overlay","bg","title","text","format","filter","preset","primary_caption","direction_caption","secondary_caption","secondary_direction_caption","summary","status","reset","cancel","save"}) do
     local widget=candidate["skill_settings_"..name]
     local valid=(name=="panel" or name=="content") and widgetValid or labelValid
     if not valid(widget) then return nil,"preserved HUD view is missing skill_settings_"..name end
     local parent=(name=="panel" or name=="overlay") and candidate.root or (name=="bg" or name=="title" or name=="content") and panel or content
     if widget.container~=parent then return nil,"preserved HUD skill settings parent is invalid" end
-    if ({overlay=true,format=true,preset=true,reset=true,cancel=true,save=true})[name] and type(widget.setClickCallback)~="function" then return nil,"preserved HUD skill settings button is incomplete" end
+    if ({overlay=true,format=true,filter=true,preset=true,reset=true,cancel=true,save=true})[name] and type(widget.setClickCallback)~="function" then return nil,"preserved HUD skill settings button is incomplete" end
   end
   for _,group in ipairs({"tabs","primary_buttons","secondary_buttons","direction_buttons","secondary_direction_buttons"}) do
     local buttons=candidate["skill_settings_"..group]

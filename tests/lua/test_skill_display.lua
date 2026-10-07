@@ -1613,7 +1613,7 @@ test("skill semantic requests send only skill and keep the full sidebar collecto
         for _,boundary in ipairs({">",""}) do
           local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
           local updates=0; local collector=Collector.new(f,Parser,function(_,key) if key=="skills" then updates=updates+1 end end)
-          local hud={started=true,adapter=f,skill_display=d,collector=collector}
+          local hud=setmetatable({started=true,settings={},adapter=f,skill_display=d,collector=collector},{__index=Main})
           local sent={}
           function f:sendCommand(command) sent[#sent+1]=command; collector:onOutgoing(command); return true end
           local feed=f.feed

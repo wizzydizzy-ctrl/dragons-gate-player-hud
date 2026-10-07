@@ -183,6 +183,13 @@ function Collector:onLine(value)
 end
 function Collector:onOutgoing(command)
   command=tostring(command or ""):match("^%s*(.-)%s*$"):lower()
+  if self.native_skill_arguments and command:match("^skill%s+.+$") then
+    -- Native staff requests inspect someone else's skills. Do not let their
+    -- response replace this character's saved list if a prior SKILL is pending.
+    -- HUD filters send bare skill, so they never take this path.
+    if self.active and self.active.command=="skill" then self:cancelActive() end
+    return
+  end
   if command=="inv" then command="inventory" end
   if command=="info mag" then command="info magic" end
   if not SPECS[command] or self.sending_startup_command==command then return end

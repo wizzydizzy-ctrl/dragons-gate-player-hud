@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.91**.
+Documentation covers **DGHUD v0.3.92**.
 
 ## Quick start
 
@@ -43,13 +43,14 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.91
+## Latest changes — v0.3.92
 
-- Corrected `skill combat` and `skill utility` to include every possessed skill in their category, including ready-to-train zero-use rows.
-- Zero-use rows stay green; other combat rows are blue and utility rows yellow by default. `skill train` remains zero-use-only and display-only, with no game training command.
-- Each filter keeps the full Skills sidebar, sorting, aligned columns, and existing weapon/name filters.
+- Choose **OPTIONS → Skill Settings → SKILL FILTERS OFF → Save** to send `skill Rath` and other native skill arguments to the game unchanged.
+- Filters default **ON**; your saved choice survives updates, reloads, and restarts.
+- Native arguments preserve your own Skills sidebar; bare `skill` still refreshes it in either mode.
+- **MAIN SKILLS** formatting and independent main-display/sidebar sorting remain separate controls.
 
-[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.91).
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.92).
 
 ## Feature overview
 
@@ -84,7 +85,9 @@ The HUD runs `info magic` during character startup and whenever that command is 
 
 ## Skills and combat updates
 
-Use `skill` or `skill all` to show every possessed skill. Add a case-insensitive name prefix to narrow only the main output: `skill claw` or `skill clawing` shows Clawing; `skill bite` shows Biting; `skill c` shows all names beginning with C; `skill id` shows Identify skills; `skill ste` shows Stealth. Full names and shortened display names are supported. Each request refreshes the complete saved Skills list, so filtering does not remove anything from the right sidebar. A no-match result says so clearly. Prefix filtering also works with MAIN SKILLS formatting off.
+**OPTIONS → Skill Settings → SKILL FILTERS** defaults **ON**, keeping the HUD's name and group filters. Set it **OFF** and click **Save** to use native staff commands such as `skill Rath`. Every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, then goes to the game unchanged exactly once, preserving casing and spacing. DGHUD queues no local filter and applies no skill-loading or display-availability check to these commands. Bare `skill` still refreshes the sidebar and follows the separate **MAIN SKILLS** formatting choice.
+
+With **SKILL FILTERS ON**, use `skill` or `skill all` to show every possessed skill. Add a case-insensitive name prefix to narrow only the main output: `skill claw` or `skill clawing` shows Clawing; `skill bite` shows Biting; `skill c` shows all names beginning with C; `skill id` shows Identify skills; `skill ste` shows Stealth. Full names and shortened display names are supported. Each request refreshes the complete saved Skills list, so filtering does not remove anything from the right sidebar. A no-match result says so clearly. Prefix filtering also works with MAIN SKILLS formatting off.
 
 Use `skill weapons` for a grouped list of your Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging. It shows only skills your character actually has, using your usual sorting and colors. The sidebar still receives the complete skill list.
 
@@ -98,7 +101,9 @@ These groups ignore case. Combat and utility membership uses skill category rega
 
 **OPTIONS → Skill Settings** keeps the **MAIN SKILLS** formatting toggle (on by default) and separate sorting for **Main Display** and **Right Sidebar**. Each offers **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)** as a primary key, ascending or descending order, and an optional secondary key with its own direction. Both default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
-Sidebar ordering changes immediately reorder existing rows. Main ordering changes apply to the next complete `skill` output, leaving previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and updates. See [Skill Settings](docs/OPTIONS_AND_DISPLAY.md#skill-settings).
+**Save** applies the filtering, formatting, and sorting draft together; **Cancel** or dismissing the panel discards it. **Reset to Defaults** restores filters ON in the draft and requires Save. A failed Save leaves active settings unchanged. Saving filters OFF cancels pending local filters, and other display changes preserve the saved choice.
+
+Saving sidebar ordering immediately reorders existing rows. Main ordering changes apply to the next complete `skill` output, leaving previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and updates. See [Skill Settings](docs/OPTIONS_AND_DISPLAY.md#skill-settings).
 
 Formatted output uses aligned **Number / Skill / LVL / USES** columns. The catalog number is the fixed training ID, not a display rank. Category and Ready to train sorting keep every captured skill visible. Completed blank-ended tables update on the next UI tick without waiting for a later prompt or sending an extra Enter.
 
@@ -142,7 +147,7 @@ This executes code from that release inside the current Mudlet profile. Use the 
 
 ## Publishing
 
-Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.91` for runtime `0.3.91`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
+Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.92` for runtime `0.3.92`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
 
 The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, and files under the profile's `DGHUDData` directory. It does not alter unrelated profile triggers, aliases, scripts, timers, keys, packages, modules, maps, or settings.
 
