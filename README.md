@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.93**.
+Documentation covers **DGHUD v0.3.94**.
 
 ## Quick start
 
@@ -43,14 +43,16 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.93
+## Latest changes — v0.3.94
 
-- Retain equipped inventory items with their reported hand/location, alongside carried items.
-- Recognize Piercing Weapons, Thrown Weapons, and Shield Use with their existing skill numbers, filters, groups, and colors; older names remain compatible.
-- Retain numeric INFO characteristics separately from ranks and show optional MP only when reported. The autoroller still uses eleven characteristics.
-- Refresh equipment location labels even when the item's name and weight are unchanged.
+- Switch between **Equipped** and **Carried** tabs in Inventory. Both lists stay saved; switching tabs sends no extra game command.
+- Capture current unnumbered inventory output and locations such as **legs (pants)** and **torso (shirt)** without dropping those items.
+- Keep gold, silver, and carry totals available for either tab, with scrollbars and readable rows in smaller windows.
+- Show **Water: Dehydrated** as a red warning instead of incorrectly reporting Ok.
+- Expand rune rows for long names such as **Translocation**, keeping the full weave count reachable with horizontal scrolling.
+- Keep inventory tab buttons beneath open Options and settings windows during refreshes.
 
-[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.93).
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.94).
 
 ## Feature overview
 

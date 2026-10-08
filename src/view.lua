@@ -119,8 +119,8 @@ function View.identityContent(character,t,layout,needs)
   local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
   local standingLine=#standing>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(standing," · ").."</span>" or ""
   needs=type(needs)=="table" and needs or {}; local hunger=needs.hunger or {}; local thirst=needs.thirst or {}
-  local hungerText={unknown="—",ok="Ok",satiated="Satiated",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",ok="Ok",quenched="Quenched",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched"}
-  local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42"}
+  local hungerText={unknown="—",ok="Ok",satiated="Satiated",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",ok="Ok",quenched="Quenched",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched",dehydrated="Dehydrated"}
+  local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42",dehydrated="#d34a42"}
   local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
   local role=character.class
   if tostring(character.race or ""):lower()=="dragon" then
@@ -143,6 +143,15 @@ function View.inventoryRows(items,capacity)
   if #items<=capacity then for _,item in ipairs(items) do rows[#rows+1]=item end; return rows end
   local visible=math.max(0,capacity-1); for i=1,visible do rows[#rows+1]=items[i] end
   if capacity>0 then rows[#rows+1]={label="+"..(#items-visible).." more",overflow=#items-visible} end
+  return rows
+end
+function View.inventorySectionItems(items,section)
+  local rows={}
+  for _,item in ipairs(type(items)=="table" and items or {}) do
+    -- Older carried-only snapshots have no section metadata.
+    local key=item.section=="equipped" and "equipped" or "carried"
+    if key==section then rows[#rows+1]=item end
+  end
   return rows
 end
 local function clipped(value,width)
@@ -243,6 +252,16 @@ function View.inventoryRequiredColumns(items)
   end
   return columns
 end
+function View.runesRequiredColumns(items)
+  local columns=28
+  for _,rune in ipairs(type(items)=="table" and items or {}) do
+    local name=tostring(rune.name or rune.rune or rune.label or "—")
+    local amount=rune.remaining or rune.remain or rune.weaves or rune.count
+    local text=name..(amount~=nil and " - "..tostring(amount).." weaves remain" or "")
+    columns=math.max(columns,math.min(160,#text))
+  end
+  return columns
+end
 function View.inventoryFooterLines(vitals,t,capacity)
   vitals=type(vitals)=="table" and vitals or {}; t=type(t)=="table" and t or {}
   capacity=math.max(4,math.floor(tonumber(capacity) or 40))
@@ -285,17 +304,82 @@ local function gauge(name,parent,color,theme)
   return g
 end
 local function place(item,x,y,w,h) item:move(x,y); item:resize(w,h); item:show() end
+local function widgetVisible(item)
+  if not item or item.hidden or item.auto_hidden then return false end
+  -- Native Geyser tracks hidden flags; some adapters expose a visible flag.
+  return item.visible==nil or item.visible==true
+end
+local function widgetHeight(item,fallback)
+  if item and type(item.get_height)=="function" then
+    local ok,value=pcall(item.get_height,item); value=ok and tonumber(value) or nil
+    if value and value>=0 and value<math.huge then return value end
+  end
+  local raw=item and item.height
+  local value=tonumber(raw) or (type(raw)=="string" and tonumber(raw:match("^([%d%.]+)px$")))
+  if value and value>=0 and value<math.huge then return value end
+  return fallback or 0
+end
 SkillSettingsView.attach(View,{label=label,copy=viewCopy,safeText=safeText})
+function View:ensureInventoryTabs()
+  self.inventory_active=self.inventory_active=="equipped" and "equipped" or "carried"
+  self.inventory_tabs=self.inventory_tabs or {}; self.inventory_scroll_tabs=self.inventory_scroll_tabs or {}
+  for _,key in ipairs({"equipped","carried"}) do
+    for _,target in ipairs({{self.inventory_tabs,self.inventory_title,"Header"},{self.inventory_scroll_tabs,self.inventory_output,"Scroll"}}) do
+      local button=target[1][key]
+      if not button then button=label("DGHUD.Inventory."..target[3].."Tab."..key,target[2],nil,self.geyser); target[1][key]=button end
+      button:setClickCallback(function() return self:selectInventorySection(key) end); button:hide()
+    end
+  end
+end
+function View:selectInventorySection(section)
+  if section~="equipped" and section~="carried" then return nil end
+  self.inventory_active=section; self.inventory_signature=nil
+  if self.layout then self:applyLayout(self.layout) end
+  if self.last_state then self:renderInventory(self.last_state) end
+  return section
+end
+function View:positionInventoryTabs()
+  local layout=self.layout; if not layout then return end
+  local visible=widgetVisible(self.inventory_output)
+  local inHeader=visible and widgetVisible(self.inventory_title)
+  local width=math.max(1,self.list_viewport_width or self.list_outer_width or 100)
+  local height=math.max(18,(layout.list_font or 11)+8); local gap=3; local buttonWidth=math.max(1,(width-gap)/2)
+  -- On very short panes the section controls scroll with the items instead of
+  -- taking away the last full-height item row or hiding either section.
+  self.inventory_scroll_header_height=visible and not inHeader and height+4 or 0
+  local theme=self.settings.theme
+  local overlayOpen=self.color_menu_visible or self.color_settings_visible or self.chat_settings_visible or self.keybindings_visible or self.skill_settings_visible or self.help_visible or self.feedback_visible or self.support_visible or self.roller_settings_visible or self.latent_alert_visible or self.map_settings_visible or self.map_library_visible
+  for index,key in ipairs({"equipped","carried"}) do
+    for _,target in ipairs({{self.inventory_tabs,inHeader},{self.inventory_scroll_tabs,visible and not inHeader}}) do
+      local button=target[1][key]
+      if target[2] then
+        local selected=key==self.inventory_active
+        place(button,(index-1)*(buttonWidth+gap),0,buttonWidth,height)
+        button:setStyleSheet("background:"..(selected and "#193024" or "#111713")..";border:1px solid "..(selected and theme.jade or theme.border)..";border-radius:4px;color:"..(selected and theme.jade or theme.muted)..";font-weight:700;")
+        if button.setFontSize then button:setFontSize(layout.list_font) end
+        local text=key=="equipped" and "Equipped" or "Carried"
+        if buttonWidth<65 then text=key=="equipped" and "Equip" or "Carry" end
+        button:echo(View.withFont("<center><b>"..text.."</b></center>",layout.list_font))
+        if button.setToolTip then button:setToolTip(key=="equipped" and "Show saved equipped items" or "Show saved carried items") end
+        -- Header labels are native main-window siblings. A data refresh must
+        -- not lift them above an open settings overlay.
+        if not overlayOpen then button:raise() end
+      else button:hide() end
+    end
+  end
+end
 function View:resizeInventoryContent(rows,minimumHeight)
-  local layout=self.layout; local height=math.max(1,rows*layout.list_row_height)
+  local layout=self.layout; local offset=self.inventory_scroll_header_height or 0
+  local height=math.max(1,rows*layout.list_row_height)
   if self.inventory_footer_scrolling then
     -- Both labels stay in the same native scrollbox; resizing never reparents
     -- widgets. The footer follows the actual items, including an empty list.
     local lineHeight=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/layout.list_font),math.ceil((layout.list_font+2)*1.3))
-    place(self.inventory_scroll_footer,0,height+4,self.list_viewport_width,lineHeight*self.inventory_footer_rows+6)
+    place(self.inventory_scroll_footer,0,offset+height+4,self.list_viewport_width,lineHeight*self.inventory_footer_rows+6)
   else
-    height=math.max(minimumHeight or 0,height)
+    height=math.max((minimumHeight or 0)-offset,height)
   end
+  self.inventory_content:move(0,offset)
   self.inventory_content:resize(self.inventory_content_width or self.list_content_width or 1,height)
 end
 local help_entries={
@@ -556,6 +640,7 @@ function View.new(settings)
   self.inventory_footer=label("DGHUD.Inventory.Footer",self.root,"background:transparent;color:"..t.text..";")
   self.inventory_scroll_footer=label("DGHUD.Inventory.ScrollFooter",self.inventory_output,"background:transparent;color:"..t.text..";")
   self.inventory_scroll_footer:resize(1,1); self.inventory_scroll_footer:hide()
+  self:ensureInventoryTabs()
   self.runes=label("DGHUD.Runes",self.root,"background:#101713;border:1px solid "..t.border..";border-radius:7px;color:"..t.text..";")
   self.runes_title=label("DGHUD.Runes.Title",self.root,"background:transparent;color:"..t.accent..";")
   self.runes_output=Geyser.ScrollBox:new({name="DGHUD.Runes.Output",x=0,y=0,width=100,height=100},self.root)
@@ -920,13 +1005,13 @@ function View:layoutCompactLists(layout,top)
   local rp=math.max(1,math.min(7,layout.list_padding or 4,math.floor(math.max(2,card_h-row_h)/2)))
   local card_x=6; local card_w=width-12; local list_x=card_x+rp; local list_w=math.max(1,card_w-rp*2)
   self.list_outer_width=list_w; self.list_viewport_width,self.list_resolved_scrollbar_width=listViewportWidth(active=="inventory" and self.inventory_output or active=="runes" and self.runes_output or self.skills_output,list_w,self.list_scrollbar_width)
-  self.skills_content_width=math.max(self.list_viewport_width,29*self.list_character_width); self.runes_content_width=math.max(self.list_viewport_width,28*self.list_character_width)
-  local inventoryItems=self.last_state and self.last_state.inventory and self.last_state.inventory.items or {}; self.inventory_content_width=math.max(self.list_viewport_width,View.inventoryRequiredColumns(inventoryItems)*self.list_character_width); self.list_content_width=self.skills_content_width
+  self.skills_content_width=math.max(self.list_viewport_width,29*self.list_character_width); self.runes_content_width=math.max(self.list_viewport_width,View.runesRequiredColumns(self.last_state and self.last_state.runes and self.last_state.runes.items)*self.list_character_width)
+  local inventoryItems=View.inventorySectionItems(self.last_state and self.last_state.inventory and self.last_state.inventory.items,self.inventory_active); self.inventory_content_width=math.max(self.list_viewport_width,View.inventoryRequiredColumns(inventoryItems)*self.list_character_width); self.list_content_width=self.skills_content_width
   self.inventory_horizontal_overflow=self.inventory_content_width>self.list_viewport_width; self.runes_horizontal_overflow=self.runes_content_width>self.list_viewport_width; self.skills_horizontal_overflow=self.skills_content_width>self.list_viewport_width
   self.skill_character_capacity=math.max(1,math.floor(self.skills_content_width/self.list_character_width)); self.skill_level_width=self.skill_character_capacity>=8 and 3 or 2; self.skill_use_width=self.skill_character_capacity>=8 and 4 or 3
   local fixedColumns=self.skill_level_width+self.skill_use_width; self.skill_column_gaps=math.min(2,math.max(0,self.skill_character_capacity-fixedColumns-1)); self.skill_name_width=math.min(20,math.max(1,self.skill_character_capacity-fixedColumns-self.skill_column_gaps))
   for key,widgets in pairs(listWidgets) do if key~=active then for _,widget in ipairs(widgets) do widget:hide() end end end
-  local inventory_rows=self.last_state and self.last_state.inventory and #(self.last_state.inventory.items or {}) or 0; local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0; local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
+  local inventory_rows=#inventoryItems; local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0; local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
   if active=="inventory" then
     local vitals=self.last_state and self.last_state.vitals or {}; local footer_capacity=math.max(4,math.floor(list_w/math.max(1,self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font))))); self.inventory_footer_capacity=footer_capacity
     local footer_lines=View.inventoryFooterLines(vitals,t,footer_capacity); local footer_h=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/math.max(1,layout.list_font)),math.ceil((layout.list_font+2)*1.3))*#footer_lines+3; local inner_h=math.max(1,card_h-rp*2)
@@ -1029,8 +1114,8 @@ function View:applyLayout(layout)
     self.list_outer_width=list_w
     self.list_viewport_width,self.list_resolved_scrollbar_width=listViewportWidth(self.skills_output,self.list_outer_width,self.list_scrollbar_width)
     self.skills_content_width=math.max(self.list_viewport_width,29*self.list_character_width)
-    self.runes_content_width=math.max(self.list_viewport_width,28*self.list_character_width)
-    local inventoryItems=self.last_state and self.last_state.inventory and self.last_state.inventory.items or {}
+    self.runes_content_width=math.max(self.list_viewport_width,View.runesRequiredColumns(self.last_state and self.last_state.runes and self.last_state.runes.items)*self.list_character_width)
+    local inventoryItems=View.inventorySectionItems(self.last_state and self.last_state.inventory and self.last_state.inventory.items,self.inventory_active)
     self.inventory_content_width=math.max(self.list_viewport_width,View.inventoryRequiredColumns(inventoryItems)*self.list_character_width)
     self.list_content_width=self.skills_content_width
     self.inventory_horizontal_overflow=self.inventory_content_width>self.list_viewport_width
@@ -1043,7 +1128,7 @@ function View:applyLayout(layout)
     local fixedColumns=self.skill_level_width+self.skill_use_width
     self.skill_column_gaps=math.min(2,math.max(0,self.skill_character_capacity-fixedColumns-1))
     self.skill_name_width=math.min(20,math.max(1,self.skill_character_capacity-fixedColumns-self.skill_column_gaps))
-    local inventory_rows=self.last_state and self.last_state.inventory and #(self.last_state.inventory.items or {}) or 0
+    local inventory_rows=#inventoryItems
     local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0
     local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
     self.inventory_content:resize(self.inventory_content_width,math.max(layout.list_row_height*5,inventory_rows*layout.list_row_height))
@@ -1119,6 +1204,9 @@ function View:applyLayout(layout)
         viewport_h=card_h-rp*2-inventory_title_h-footer_h-4
         if viewport_h<minimum_viewport then
           self.inventory_footer_scrolling=true
+          -- Scrolling totals use a slightly larger font than item rows. Allow
+          -- one complete totals line above the horizontal scrollbar as well.
+          minimum_viewport=math.max(minimum_viewport,footer_line_height+math.ceil(6/math.max(1,self.inventory_footer_rows))+inventory_scroll_h)
           viewport_h=card_h-rp*2-inventory_title_h
           if viewport_h<minimum_viewport then inventory_title_h=0; viewport_h=card_h-rp*2 end
           if inventory_title_h==0 and viewport_h<minimum_viewport and card_h>=minimum_viewport then
@@ -1205,6 +1293,9 @@ function View:applyLayout(layout)
     -- it on every refresh would clamp the native scroll position above the footer.
     self.inventory_scroll_footer:hide(); self.inventory_scroll_footer:move(0,0); self.inventory_scroll_footer:resize(1,1)
   end
+  self:positionInventoryTabs()
+  local inventoryItems=View.inventorySectionItems(self.last_state and self.last_state.inventory and self.last_state.inventory.items,self.inventory_active)
+  self:resizeInventoryContent(math.max(1,#inventoryItems),widgetHeight(self.inventory_output))
   local listLayoutSignature=table.concat({tostring(layout.mode),tostring(layout.list_font),tostring(math.floor(tonumber(self.list_outer_width) or 0)),tostring(self.skill_name_width or 0)},":")
   if self.list_layout_signature~=listLayoutSignature then
     self.list_layout_signature=listLayoutSignature
@@ -2722,19 +2813,24 @@ function View:updateRoundtime(remaining,total)
 end
 function View:renderInventory(s)
   local t=self.settings.theme; local layout=self.layout; if not layout then return end
-  local inventory=s.inventory or {}; local v=s.vitals or {}; local carry=v.carry or {}; local signature={tostring(inventory.total_weight or ""),tostring(v.gold or 0),tostring(v.silver or 0),tostring(carry.current or ""),tostring(carry.maximum or ""),tostring(carry.percent or "")}
+  local inventory=s.inventory or {}; local v=s.vitals or {}; local carry=v.carry or {}; local signature={self.inventory_active or "carried",tostring(inventory.total_weight or ""),tostring(v.gold or 0),tostring(v.silver or 0),tostring(carry.current or ""),tostring(carry.maximum or ""),tostring(carry.percent or "")}
   for _,item in ipairs(inventory.items or {}) do signature[#signature+1]=tostring(item.name or "").."\31"..tostring(item.weight or "").."\31"..tostring(item.section or "").."\31"..tostring(item.location or "") end
   signature=table.concat(signature,"\30"); if signature==self.inventory_signature then return end; self.inventory_signature=signature
-  self.inventory_title:echo("<b>INVENTORY</b>")
-  local lines={}; for _,item in ipairs(inventory.items or {}) do lines[#lines+1]=View.inventoryItemContent(item,t) end
+  self.inventory_title:echo("")
+  self.inventory_sections={equipped=View.inventorySectionItems(inventory.items,"equipped"),carried=View.inventorySectionItems(inventory.items,"carried")}
+  local lines={}; for _,item in ipairs(self.inventory_sections[self.inventory_active or "carried"]) do lines[#lines+1]=View.inventoryItemContent(item,t) end
+  if #lines==0 then lines[1]="<span style='color:"..t.muted.."'>No "..(self.inventory_active or "carried").." items.</span>" end
   self:renderInventoryFooter(v)
-  self.inventory_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.inventory_content:move(0,0); self:resizeInventoryContent(#lines,layout.list_row_height*5); self.inventory_content:show()
+  self:positionInventoryTabs()
+  self.inventory_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self:resizeInventoryContent(#lines,widgetHeight(self.inventory_output,layout.list_row_height*5)); self.inventory_content:show()
 end
 function View:renderRunes(s)
   local layout=self.layout; if not layout then return end
   local runes=s.runes or {}; local items=runes.items or {}; local signature={}
   for _,rune in ipairs(items) do signature[#signature+1]=tostring(rune.name or rune.rune or rune.label or "").."\31"..tostring(rune.remaining or rune.remain or rune.weaves or rune.count or "") end
   signature=table.concat(signature,"\30"); if signature==self.runes_signature then return end; self.runes_signature=signature
+  self.runes_content_width=math.max(self.list_viewport_width or self.list_outer_width or 1,View.runesRequiredColumns(items)*(self.list_character_width or layout.list_font))
+  self.runes_horizontal_overflow=self.runes_content_width>(self.list_viewport_width or self.list_outer_width or 1)
   self.runes_title:echo("<b>RUNES</b>")
   local lines={}; for _,rune in ipairs(items) do
     local name=esc(rune.name or rune.rune or rune.label or "—"); local amount=rune.remaining or rune.remain or rune.weaves or rune.count
@@ -2972,6 +3068,13 @@ function View.validateReusable(candidate,settings)
     if type(order)~="table" or type(items)~="table" then return nil,"preserved HUD controls are incomplete" end
     for _,key in ipairs(order) do if not reusableLabel(items[key]) then return nil,"preserved HUD controls are incomplete" end end
   end
+  for _,group in ipairs({{"inventory_tabs","inventory_title"},{"inventory_scroll_tabs","inventory_output"}}) do
+    local buttons=candidate[group[1]]
+    if type(buttons)~="table" then return nil,"preserved HUD inventory tabs are incomplete" end
+    for _,key in ipairs({"equipped","carried"}) do
+      if not reusableLabel(buttons[key]) or buttons[key].container~=candidate[group[2]] then return nil,"preserved HUD inventory tabs are incomplete" end
+    end
+  end
   if type(candidate.keybinding_order)~="table" or type(candidate.keybinding_fields)~="table" then return nil,"preserved HUD keybinding controls are incomplete" end
   for _,key in ipairs(candidate.keybinding_order) do local field=candidate.keybinding_fields[key]; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD keybinding controls are incomplete" end end
   for _,collection in ipairs({{"map_library_rows","map library rows"},{"map_collection_rows","map collection rows"}}) do
@@ -2991,6 +3094,7 @@ end
 function View:prepareForReuse(settings)
   local valid,why=View.validateReusable(self,settings); if not valid then return nil,why end
   self.settings=settings or self.settings
+  self:ensureInventoryTabs()
   self:hideSkillSettings()
   self.skill_settings_saving=false; self.skill_settings_pending_snapshot=nil
   self:bindSkillSettingsCallbacks()

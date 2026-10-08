@@ -161,6 +161,193 @@ test("inventory collector keeps equipped locations and section metadata",functio
   eq(#c.snapshot.inventory.items,2); eq(c.snapshot.inventory.items[1].location,"right hand")
   eq(c.snapshot.inventory.items[2].section,"carried"); eq(c.active,nil)
 end)
+-- Item and rune rows from the October 8 player log; unrelated room/chat text is omitted.
+local playerInventory={"Items equipped:","",
+  "  A simple wooden boomerang [3.3 lbs] (right hand)",
+  "  A heavy tin armor [22.0 lbs] (body armor)",
+  "  A bone shield [2.2 lbs] (shield arm)",
+  "  A grey sash of Unknown [0.2 lbs] (on belt)","",
+  "Items carried:","",
+  "  An open large leather backpack [15.1 lbs]",
+  "  A simple wooden long sword [0.2 lbs]",
+  "  A simple wooden cudgel [0.5 lbs]",
+  "  A simple wooden spear [0.5 lbs]","",
+  "Your inventory totals 120.5 lbs.",">"}
+local playerRunes={"info magic","l","",
+  "You have the following elemental runes available to you...","",
+  "   force       -  62 weaves remain   metal       -  59 weaves remain",
+  "   strength    -  60 weaves remain   agility     -  58 weaves remain",
+  "   dexterity   -  57 weaves remain   war         -  64 weaves remain","",">"}
+local function withPrompt(lines,prompt)
+  local copy={}; for index,value in ipairs(lines) do copy[index]=value end
+  copy[#copy]=prompt; return copy
+end
+local function assertPlayerInventory(parsed)
+  local expected={
+    {"A simple wooden boomerang",3.3,"equipped","right hand"},
+    {"A heavy tin armor",22,"equipped","body armor"},
+    {"A bone shield",2.2,"equipped","shield arm"},
+    {"A grey sash of Unknown",.2,"equipped","on belt"},
+    {"An open large leather backpack",15.1,"carried"},
+    {"A simple wooden long sword",.2,"carried"},
+    {"A simple wooden cudgel",.5,"carried"},
+    {"A simple wooden spear",.5,"carried"},
+  }
+  eq(#parsed.items,8); eq(parsed.total_weight,120.5)
+  for index,item in ipairs(expected) do
+    eq(parsed.items[index].name,item[1]); eq(parsed.items[index].weight,item[2])
+    eq(parsed.items[index].section,item[3]); eq(parsed.items[index].location,item[4])
+  end
+end
+local function assertPlayerRunes(parsed)
+  local expected={{"Dexterity",57},{"Agility",58},{"Metal",59},{"Strength",60},{"Force",62},{"War",64}}
+  eq(#parsed.items,6)
+  for index,rune in ipairs(expected) do
+    eq(parsed.items[index].name,rune[1]); eq(parsed.items[index].remaining,rune[2])
+  end
+end
+for _,case in ipairs({{name="plain",prompt=">"},{name="vitals",prompt="[199] 301/301 hp, 173/173 ftg >"}}) do
+  local prompt=case.prompt
+  test("manual collector applies all eight player inventory items with "..case.name.." prompt",function()
+    local f=fake(); local applied; local changes=0
+    local c=Collector.new(f,Parser,function(snapshot,key,parsed)
+      if key=="inventory" then changes=changes+1; applied=parsed; eq(snapshot.inventory,parsed) end
+    end); assert(c:start()); f:outgoing("inventory")
+    local response=withPrompt(playerInventory,prompt)
+    for index=1,#response-1 do f:line(response[index]) end
+    eq(changes,0); eq(c.snapshot.inventory,nil); eq(c.active.command,"inventory")
+    f:line(response[#response]); eq(changes,1); eq(applied,c.snapshot.inventory)
+    assertPlayerInventory(applied); eq(c.active,nil); eq(c.timeout,nil); eq(c.prompt_nudge,nil); eq(#f.sent,0)
+    c:shutdown(); eq(f:owned(),0)
+  end)
+  test("startup collector retains all eight player inventory items with "..case.name.." prompt",function()
+    local f=fake(); local changes=0; local applied
+    local c=Collector.new(f,Parser,function(snapshot,key)
+      if key=="inventory" then changes=changes+1; applied=snapshot.inventory end
+    end); assert(c:start()); f:line("Welcome to Dragon's Gate, Test!")
+    eq(c.active.command,"inventory"); eq(f.sent[1],"inventory")
+    f:lines(withPrompt(playerInventory,prompt)); eq(changes,1); assertPlayerInventory(applied)
+    eq(c.active.command,"stat"); eq(f.sent[2],"stat")
+    f:lines(withPrompt(stat,prompt)); f:lines(withPrompt(info,prompt)); f:lines(withPrompt(religion,prompt))
+    f:lines(withPrompt(playerRunes,prompt)); f:lines(withPrompt(skills,prompt)); f:lines(withPrompt(time,prompt))
+    eq(c.snapshot.inventory,applied); assertPlayerInventory(c.snapshot.inventory)
+    eq(table.concat(f.sent,","),"inventory,stat,info,info religion,info magic,skill,time")
+    eq(c.active,nil); eq(c.sequence_index,nil); c:shutdown(); eq(f:owned(),0)
+  end)
+  test("manual collector retains six logged runes through look and "..case.name.." prompt interleaving",function()
+    local f=fake(); local applied; local changes=0
+    local c=Collector.new(f,Parser,function(snapshot,key,parsed)
+      if key=="runes" then changes=changes+1; applied=parsed; eq(snapshot.runes,parsed) end
+    end); assert(c:start()); f:outgoing("info magic"); local active=c.active
+    f:line(prompt); eq(c.active,active); eq(changes,0)
+    f:outgoing("l"); eq(c.active,active)
+    local response=withPrompt(playerRunes,prompt)
+    for index=1,#response-1 do f:line(response[index]) end
+    eq(c.active,active); eq(c.snapshot.runes,nil); eq(changes,0)
+    f:line(response[#response]); eq(changes,1); assertPlayerRunes(applied); eq(c.active,nil)
+    f:line(prompt); f:outgoing("skill"); f:line(prompt); f:lines(withPrompt(skills,prompt))
+    eq(changes,1); eq(c.snapshot.runes,applied); assertPlayerRunes(c.snapshot.runes)
+    eq(#c.snapshot.skills.items,2); eq(#f.sent,0); c:shutdown(); eq(f:owned(),0)
+  end)
+  test("startup collector retains six logged runes through look and "..case.name.." prompt interleaving",function()
+    local f=fake(); local changes=0; local applied
+    local c=Collector.new(f,Parser,function(snapshot,key)
+      if key=="runes" then changes=changes+1; applied=snapshot.runes end
+    end); assert(c:start()); f:line("Welcome to Dragon's Gate, Test!")
+    f:lines(withPrompt(playerInventory,prompt)); f:lines(withPrompt(stat,prompt))
+    f:lines(withPrompt(info,prompt)); f:lines(withPrompt(religion,prompt))
+    eq(c.active.command,"info magic"); eq(f.sent[5],"info magic"); local active=c.active
+    f:line(prompt); eq(c.active,active); eq(changes,0)
+    f:outgoing("l"); eq(c.active,active)
+    local response=withPrompt(playerRunes,prompt)
+    for index=1,#response-1 do f:line(response[index]) end
+    eq(c.active,active); eq(c.snapshot.runes,nil); eq(changes,0)
+    f:line(response[#response]); eq(changes,1); assertPlayerRunes(applied)
+    eq(c.active.command,"skill"); eq(f.sent[6],"skill")
+    f:line(prompt); f:lines(withPrompt(skills,prompt)); f:lines(withPrompt(time,prompt))
+    eq(changes,1); eq(c.snapshot.runes,applied); assertPlayerRunes(c.snapshot.runes)
+    assertPlayerInventory(c.snapshot.inventory)
+    eq(table.concat(f.sent,","),"inventory,stat,info,info religion,info magic,skill,time")
+    eq(c.active,nil); eq(c.sequence_index,nil); c:shutdown(); eq(f:owned(),0)
+  end)
+end
+
+-- Bounded October 8 startup output; local command echoes and private log data
+-- are excluded. The interleaved look is represented by synthetic room text.
+local octoberStartupRunes={"","You have the following elemental runes available to you...","",
+  "   force       - 100 weaves remain   heal        -  99 weaves remain",
+  "   holy        - 100 weaves remain   vigor       - 100 weaves remain",
+  "   light       - 100 weaves remain   purify      - 100 weaves remain",
+  "   strength    - 100 weaves remain   translocation - 100 weaves remain",
+  "   death       - 100 weaves remain   aegis       - 100 weaves remain",""}
+local octoberStartupSkills={"","Skill                     Remain Level",
+  " First Aid                 481    5",
+  "*Spellcasting              0      5",
+  " Channeling                149    5",
+  "*Piercing Weapons          0      5",
+  "*Sharp Weapons             0      5",
+  "*Blunt Weapons             0      5",
+  "*Missile Weapons           0      5",
+  "*Thrown Weapons            0      5",
+  "*Brawling                  0      5",
+  "*Quickdraw                 0      5",
+  " Shield Use                424    5",
+  "*Hiding                    0      5",
+  " Stealth                   100    1",
+  " Bargaining                510    5",
+  " Disarming                 194    2",
+  " Swimming                  134    5",
+  " Play Instruments          550    5",
+  " Identify Magick           154    5",
+  "*Identify Gems/Minerals    0      5",
+  " Identify Weapon Quality   526    5",
+  " Identify Armor Quality    550    5",
+  " Detect Traps              100    1",""}
+local function assertOctoberStartupRunes(parsed)
+  local expected={{"Heal",99},{"Aegis",100},{"Death",100},{"Force",100},{"Holy",100},
+    {"Light",100},{"Purify",100},{"Strength",100},{"Translocation",100},{"Vigor",100}}
+  eq(#parsed.items,10)
+  for index,rune in ipairs(expected) do
+    eq(parsed.items[index].name,rune[1]); eq(parsed.items[index].remaining,rune[2])
+  end
+end
+for _,case in ipairs({{name="plain",prompt=">"},{name="vitals",prompt="[199] 301/301 hp, 173/173 ftg >"}}) do
+  test("startup retains all ten October 8 runes through prompt nudges skill and time with "..case.name.." prompt",function()
+    local f=fake(); local prompt=case.prompt; local applied; local runeChanges=0
+    local send=f.sendCommand
+    function f:sendCommand(command) send(self,command); self:outgoing(command) end
+    local c=Collector.new(f,Parser,function(snapshot,key)
+      if key=="runes" then runeChanges=runeChanges+1; applied=snapshot.runes end
+    end); assert(c:start()); f:line("Welcome to Dragon's Gate, SyntheticTester!")
+    local syntheticInfo={}; for index,line in ipairs(info) do syntheticInfo[index]=line:gsub("Test Tester","SyntheticTester") end
+    for _,response in ipairs({{command="inventory",lines=inventory},{command="stat",lines=stat},
+        {command="info",lines=syntheticInfo},{command="info religion",lines=religion}}) do
+      eq(c.active.command,response.command); eq(f:fireDelay(.15),true); eq(f.sent[#f.sent],"")
+      eq(f:fireDelay(.15),false); f:lines(withPrompt(response.lines,prompt))
+    end
+    eq(c.active.command,"info magic"); local active=c.active
+    eq(f:fireDelay(.15),true); eq(f.sent[#f.sent],""); eq(f:fireDelay(.15),false)
+    f:line(prompt); f:lines(octoberStartupRunes)
+    eq(c.active,active); eq(c.snapshot.runes,nil); eq(runeChanges,0)
+    f:outgoing("l"); f:lines({"Synthetic room output from an interleaved look.",""})
+    eq(c.active,active); f:line(prompt)
+    eq(runeChanges,1); assertOctoberStartupRunes(applied); eq(c.active.command,"skill")
+    eq(f:fireDelay(.15),false); f:lines(octoberStartupSkills)
+    eq(c.active.command,"skill"); eq(c.snapshot.skills,nil); eq(c.snapshot.runes,applied)
+    eq(f:fireDelay(0),true); eq(c.active.command,"time"); eq(#c.snapshot.skills.items,22)
+    eq(runeChanges,1); eq(c.snapshot.runes,applied); assertOctoberStartupRunes(c.snapshot.runes)
+    eq(f:fireDelay(.15),false); f:line(prompt)
+    f:lines({"","Server local time is: Thu Oct  8 12:20:18 2026 (pacific).","",
+      "Today is the 46th day of Mateth in the year 362. The time is 2:42.","",
+      "You have been adventuring for 1 sec this session.","",prompt})
+    eq(c.snapshot.time.hour,2); eq(c.snapshot.time.minute,42); eq(c.snapshot.time.day,46)
+    eq(c.snapshot.time.month_name,"Mateth"); eq(runeChanges,1); eq(c.snapshot.runes,applied)
+    assertOctoberStartupRunes(c.snapshot.runes)
+    eq(table.concat(f.sent,","),"inventory,,stat,,info,,info religion,,info magic,,skill,time")
+    eq(c.active,nil); eq(c.sequence_index,nil); c:shutdown(); eq(f:owned(),0)
+  end)
+end
+
 test("INFO rank refresh removes stale MP and stale numeric values",function()
   local f=fake(); local c=Collector.new(f,Parser,function() end); assert(c:start())
   local header="Str Int Wis Dex Agi Con Cha Wil Pre Per Luk"

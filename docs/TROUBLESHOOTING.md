@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.93**.
+Applies to DGHUD **v0.3.94**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -69,7 +69,7 @@ DGHUD refreshes skills after character login; it does not send `skill` every min
 1. Run `dghud check` and update if your installed version is older than **0.3.89**.
 2. Wait for the current startup/refresh sequence or skill request to finish, then enter `skill bite`, `skill weapons`, or another filter once.
 3. Use `skill` or `skill all` for the complete list again. The sidebar always keeps every captured skill.
-4. If a gap remains on v0.3.93, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
+4. If a gap remains on v0.3.94, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
 
 The fix refreshes hidden-row edits locally. You should not need to send Enter or another game command just to make the blank area disappear.
 

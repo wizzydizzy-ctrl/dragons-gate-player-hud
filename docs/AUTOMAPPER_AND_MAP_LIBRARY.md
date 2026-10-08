@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.93. To check for an update without installing it, enter:
+Applies to DGHUD v0.3.94. To check for an update without installing it, enter:
 
 ```text
 dghud check

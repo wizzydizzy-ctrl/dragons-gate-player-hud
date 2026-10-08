@@ -8,6 +8,7 @@ local function detected(line)
   elseif text:find("you are ravenously hungry",1,true) or text:find("you are ravenous",1,true) then hunger="ravenous"
   elseif text:find("you are hungry",1,true) or text:find("starting to feel hungry",1,true) then hunger="hungry" end
   if text:find("your thirst is quenched.",1,true) then thirst="quenched"
+  elseif text:find("you are dehydrated",1,true) then thirst="dehydrated"
   elseif text:find("you are parched",1,true) then thirst="parched"
   elseif text:find("you are very thirsty",1,true) then thirst="very_thirsty"
   elseif text:find("you are thirsty",1,true) or text:find("starting to feel thirsty",1,true) then thirst="thirsty" end

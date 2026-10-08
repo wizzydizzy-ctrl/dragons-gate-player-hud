@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.93.
+Applies to DGHUD v0.3.94.
 
 ## Feedback and feature requests
 

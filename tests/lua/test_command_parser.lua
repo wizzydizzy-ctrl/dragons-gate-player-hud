@@ -17,6 +17,120 @@ test("parses staff inventory and accepts the staff vitals prompt",function()
   local r=assert(Parser.parseInventory(lines)); eq(r.items[1].name,"An open large leather backpack"); eq(r.items[2].weight,7.7); eq(Parser.isComplete("inventory",lines),true)
 end)
 test("rejects incomplete inventory",function() eq(Parser.parseInventory({"Items carried:","  A torch [1.0 lb]."}),nil) end)
+test("inventory parses all eight unnumbered player items from the October 8 log",function()
+  local lines={"Items equipped:","",
+    "  A simple wooden boomerang [3.3 lbs] (right hand)",
+    "  A heavy tin armor [22.0 lbs] (body armor)",
+    "  A bone shield [2.2 lbs] (shield arm)",
+    "  A grey sash of Unknown [0.2 lbs] (on belt)","",
+    "Items carried:","",
+    "  An open large leather backpack [15.1 lbs]",
+    "  A simple wooden long sword [0.2 lbs]",
+    "  A simple wooden cudgel [0.5 lbs]",
+    "  A simple wooden spear [0.5 lbs]","",
+    "Your inventory totals 120.5 lbs.",">"}
+  local expected={
+    {"A simple wooden boomerang",3.3,"equipped","right hand"},
+    {"A heavy tin armor",22,"equipped","body armor"},
+    {"A bone shield",2.2,"equipped","shield arm"},
+    {"A grey sash of Unknown",.2,"equipped","on belt"},
+    {"An open large leather backpack",15.1,"carried"},
+    {"A simple wooden long sword",.2,"carried"},
+    {"A simple wooden cudgel",.5,"carried"},
+    {"A simple wooden spear",.5,"carried"},
+  }
+  local r=assert(Parser.parseInventory(lines)); eq(#r.items,8); eq(r.total_weight,120.5)
+  for index,item in ipairs(expected) do
+    eq(r.items[index].name,item[1]); eq(r.items[index].weight,item[2])
+    eq(r.items[index].section,item[3]); eq(r.items[index].location,item[4])
+  end
+  eq(Parser.isComplete("inventory",lines),true)
+end)
+test("inventory preserves balanced nested locations in numbered and unnumbered rows",function()
+  local locations={"legs (pants)","torso (shirt)","body (armor (lining))"}
+  for _,prefix in ipairs({'  A test item','[1] "A test item"'}) do
+    for _,location in ipairs(locations) do
+      local r=assert(Parser.parseInventory({"Items equipped:",
+        prefix.." [0.4 lbs] ("..location..")","Your inventory totals 0.4 lbs."}))
+      eq(#r.items,1); eq(r.items[1].name,"A test item"); eq(r.items[1].weight,.4)
+      eq(r.items[1].section,"equipped"); eq(r.items[1].location,location)
+    end
+  end
+end)
+test("inventory rejects unbalanced nested locations and repeated outer blocks",function()
+  local tails={"(legs (pants)","(legs pants))","(legs (pants)))","((legs (pants))",
+    "(legs )pants))(","(legs (pants)) (torso (shirt))","(legs (pants))(torso (shirt))"}
+  for _,prefix in ipairs({'  A malformed item','[1] "A malformed item"'}) do
+    for _,tail in ipairs(tails) do
+      local r=assert(Parser.parseInventory({"Items equipped:",prefix.." [0.4 lbs] "..tail,
+        "  A valid item [1.0 lb] (right hand)","Your inventory totals 1.0 lbs."}))
+      eq(#r.items,1); eq(r.items[1].name,"A valid item"); eq(r.items[1].location,"right hand")
+    end
+  end
+end)
+test("inventory parses all ten items from the October 8 15-20-10 log",function()
+  local lines={"Items equipped:","",
+    "  A silver studded snakeskin gauntlets [1.2 lb] (over hands)",
+    "  Some plain leather boots [0.9 lbs] (on feet)",
+    "  A pair of plain cotton pants [0.4 lbs] (legs (pants))",
+    "  A plain cotton shirt [0.2 lbs] (torso (shirt))",
+    "  An open canvas sack [0.0 lbs] (on belt)",
+    "  A closed small hardened leather sheath [0.2 lbs] (on belt)","",
+    "Items carried:","",
+    "  An open large leather backpack [41.6 lbs]",
+    "  A small vial of healing [0.1 lbs]",
+    "  A heavy tin armor [18.0 lbs]",
+    "  A two-handed elm lance [6.3 lbs]","",
+    "Your inventory totals 68.9 lbs.",">"}
+  local expected={
+    {"A silver studded snakeskin gauntlets",1.2,"equipped","over hands"},
+    {"Some plain leather boots",.9,"equipped","on feet"},
+    {"A pair of plain cotton pants",.4,"equipped","legs (pants)"},
+    {"A plain cotton shirt",.2,"equipped","torso (shirt)"},
+    {"An open canvas sack",0,"equipped","on belt"},
+    {"A closed small hardened leather sheath",.2,"equipped","on belt"},
+    {"An open large leather backpack",41.6,"carried"},
+    {"A small vial of healing",.1,"carried"},
+    {"A heavy tin armor",18,"carried"},
+    {"A two-handed elm lance",6.3,"carried"},
+  }
+  local r=assert(Parser.parseInventory(lines)); eq(#r.items,10); eq(r.total_weight,68.9)
+  local equipped,carried=0,0
+  for index,item in ipairs(expected) do
+    local actual=r.items[index]
+    eq(actual.name,item[1]); eq(actual.weight,item[2]); eq(actual.section,item[3]); eq(actual.location,item[4])
+    if actual.section=="equipped" then equipped=equipped+1 elseif actual.section=="carried" then carried=carried+1 end
+  end
+  eq(equipped,6); eq(carried,4); eq(Parser.isComplete("inventory",lines),true)
+end)
+test("unnumbered inventory preserves duplicate rows across equipped and carried sections",function()
+  local r=assert(Parser.parseInventory({"Items equipped:","  A wooden torch [1.0 lb] (right hand)",
+    "Items carried:","  A wooden torch [1.0 lb]","  A wooden torch [1.0 lb]",
+    "  A wooden torch [0.2 lbs].","Your inventory totals 3.2 lbs."}))
+  eq(#r.items,4)
+  for _,item in ipairs(r.items) do eq(item.name,"A wooden torch") end
+  eq(r.items[1].section,"equipped"); eq(r.items[1].location,"right hand")
+  for index=2,4 do eq(r.items[index].section,"carried"); eq(r.items[index].location,nil) end
+  eq(r.items[2].weight,1); eq(r.items[3].weight,1); eq(r.items[4].weight,.2)
+end)
+test("new unnumbered inventory rows require indentation and an inventory section",function()
+  local r=assert(Parser.parseInventory({"  A row outside inventory [9.0 lbs]",
+    "  A row outside inventory [9.0 lbs] (right hand)","  A legacy torch [0.5 lbs].",
+    "Items carried:","A row without indentation [9.0 lbs]",
+    "  A valid torch [1.0 lb]","Your inventory totals 1.5 lbs."}))
+  eq(#r.items,2); eq(r.items[1].name,"A legacy torch"); eq(r.items[1].section,nil)
+  eq(r.items[2].name,"A valid torch"); eq(r.items[2].section,"carried")
+end)
+test("unnumbered inventory rejects malformed weights locations and trailing text",function()
+  local r=assert(Parser.parseInventory({"Items equipped:",
+    "  A bad item [1..2 lbs] (right hand)","  A bad item [1.0 lbs] extra",
+    "  A bad item [1.0 lbs] (right hand) extra","  A bad item [1.0 lbs] ()",
+    "  A bad item [1.0 lbs] (right (hand)","  A bad item [1.0 lbs] (right\t hand)",
+    "  A bad item [1.0 lbs] ("..string.rep("x",81)..")",
+    "  A bad item [1.0 lbs] (right hand) [99.0 lbs].","  [1.0 lbs]",
+    "  A valid item [1.0 lb] (right hand)","Your inventory totals 1.0 lbs."}))
+  eq(#r.items,1); eq(r.items[1].name,"A valid item"); eq(r.items[1].location,"right hand")
+end)
 test("inventory retains equipped hand locations and carried items from the new format",function()
   local lines={"Items equipped:",
     '[ 8] "A practice long-bow" (0d0+0, +AR 0%(+0)) [2.2 lbs] (right hand)',
@@ -38,7 +152,7 @@ end)
 test("inventory does not accept malformed weights or unrelated trailing text",function()
   local r=assert(Parser.parseInventory({"Items equipped:",
     '[1] "A bad item" [1..2 lbs] (right hand)', '[2] "A bad item" [1.0 lbs] (right hand) extra',
-    '[3] "A bad item" [1.0 lbs] ()', '[4] "A bad item" [1.0 lbs] (right (hand))',
+    '[3] "A bad item" [1.0 lbs] ()', '[4] "A bad item" [1.0 lbs] (right (hand)',
     '[5] "A bad item" [1.0 lbs] (right\t hand)', '[6] "A valid item" [1.0 lbs] (right hand)',
     "Your inventory totals 1.0 lbs."}))
   eq(#r.items,1); eq(r.items[1].name,"A valid item")

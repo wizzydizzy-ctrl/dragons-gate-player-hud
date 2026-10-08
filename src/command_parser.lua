@@ -44,20 +44,27 @@ function Parser.parseInventory(lines)
     if trim(line)=="Items equipped:" then section="equipped"
     elseif trim(line)=="Items carried:" then section="carried" end
     local name,weight,tail=line:match('^%s*%[%s*%d+%]%s+"(.-)".-%[([%d%.]+)%s+lbs?%](.-)%s*$')
+    -- Never reinterpret an indexed row as an unnumbered item. The current
+    -- player format needs an inventory section; legacy period rows still work.
+    if not name and not line:match("^%s*%[") then
+      name,weight,tail=line:match("^%s+(.-)%s+%[([%d%.]+)%s+lbs?%](.-)%s*$")
+      if name then
+        name=trim(name); tail=trim(tail)
+        if tail=="." then tail="" elseif not section then name=nil end
+        if name=="" then name=nil end
+      end
+    end
     local location
     if name then
       tail=trim(tail)
       if tail~="" then
         -- Location is display data, never a command. Reject unrelated trailing
         -- prose instead of silently accepting an incomplete inventory row.
-        location=tail:match("^%(([^%(%)]-)%)$")
+        local wrapped=tail:match("^%b()$")
+        location=wrapped and wrapped:sub(2,-2) or nil
         if location then location=trim(location) end
         if not location or location=="" or #location>80 or location:find("%c") then name=nil end
       end
-    end
-    -- An indexed row that failed validation is not a legacy sentence row.
-    if not name and not line:match("^%s*%[") then
-      name,weight=line:match("^%s+(.+)%s+%[([%d%.]+)%s+lbs?%]%.$")
     end
     weight=tonumber(weight)
     if name and weight then result.items[#result.items+1]={name=name,weight=weight,section=section,location=location} end

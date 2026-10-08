@@ -2157,6 +2157,96 @@ test("runes retain supplied order and scroll beyond five visible rows",function(
   eq(view.runes_content.message:find("199 weaves remain",1,true)~=nil,true)
   eq(view.runes_content.height,view.list_row_height*30); eq(view.runes_content.height>view.runes_output.height,true)
 end)
+local function runeWidthState(items)
+  return {character={full_name="SyntheticTester",physical={}},attributes={},combat={},equipment={items={}},
+    inventory={items={}},runes={items=items},skills={items={}},
+    vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},carry={current=1,maximum=1},
+      psi={visible=false},web={visible=false},gold=0,silver=0,roundtime=0,position=0},
+    room={name="Synthetic Room",players={},flags={},exits={}}}
+end
+
+test("rune width measures the complete 33-column Translocation row with bounded columns",function()
+  eq(#"Translocation - 100 weaves remain",33)
+  eq(View.runesRequiredColumns(nil),28); eq(View.runesRequiredColumns({}),28)
+  eq(View.runesRequiredColumns({{name="Force",remaining=100}}),28)
+  eq(View.runesRequiredColumns({{name="Translocation",remaining=100}}),33)
+  eq(View.runesRequiredColumns({{rune="Translocation",weaves=100}}),33)
+  eq(View.runesRequiredColumns({{label="Translocation",count=100}}),33)
+  eq(View.runesRequiredColumns({{name="Translocation",remain=100}}),33)
+  eq(View.runesRequiredColumns({{name="Translocation"}}),28)
+  eq(View.runesRequiredColumns({{name=string.rep("x",300),remaining=100}}),160)
+end)
+
+test("long Rune rows overflow horizontally in narrow normal and compact layouts without shrinking fonts",function()
+  local Layout=require("layout")
+  for _,size in ipairs({{900,700,"medium","tabbed"},{1400,1000,"wide","stacked"},{240,500,"compact","compact-tabs"}}) do
+    local view=chatView(8); local layout=Layout.compute(size[1],size[2])
+    local state=runeWidthState({{name="Translocation",remaining=100}})
+    view.last_state=state; view:applyLayout(layout); view:update(state); view.right_list_tabs.runes.click()
+    eq(layout.mode,size[3]); eq(layout.right_lists_mode,size[4])
+    eq(view.runes.visible,true); eq(view.runes_output.visible,true); eq(view.runes_content.visible,true)
+    eq(view.runes_output.kind,"scrollbox"); eq(view.runes_content.parent,view.runes_output)
+    eq(view.runes_content.fontSize,layout.list_font); eq(view.runes_content.font,view.list_font_family)
+    eq(view.runes_content.width,33*view.list_character_width)
+    eq(view.runes_content.width>view.runes_output.width,true); eq(view.runes_horizontal_overflow,true)
+    eq(view.runes_content.x,0); eq(view.runes_content.y,0)
+    eq(view.runes_content.message:gsub("<[^>]+>",""),"Translocation - 100 weaves remain")
+    assert(view.runes_content.message:find("white-space:nowrap",1,true))
+    local measuredWidth=view.runes_content:getSizeHint()
+    eq(view.runes_content.width>=measuredWidth,true)
+    eq(view.runes_output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+  end
+end)
+
+test("renderRunes expands and contracts short long and empty rows without a layout refresh",function()
+  local Layout=require("layout")
+  for _,size in ipairs({{900,700},{1400,1000},{240,500}}) do
+    local view=chatView(8); local layout=Layout.compute(size[1],size[2]); view:applyLayout(layout)
+    view.right_list_tabs.runes.click()
+    local state={runes={items={{name="Force",remaining=100}}}}
+    view:renderRunes(state)
+    local shortWidth=math.max(view.list_viewport_width,28*view.list_character_width)
+    eq(view.runes_content.width,shortWidth)
+    state.runes.items={{name="Translocation",remaining=100}}; view:renderRunes(state)
+    eq(view.runes_content.width,33*view.list_character_width); eq(view.runes_content.width>shortWidth,true)
+    eq(view.runes_content.message:gsub("<[^>]+>",""),"Translocation - 100 weaves remain")
+    state.runes.items={{name="Force",remaining=100}}; view:renderRunes(state)
+    eq(view.runes_content.width,shortWidth); eq(view.runes_content.message:find("Translocation",1,true),nil)
+    state.runes.items={}; view:renderRunes(state)
+    eq(view.runes_content.width,shortWidth); eq(view.runes_content.fontSize,layout.list_font)
+  end
+end)
+
+test("short to long Rune updates retain full width and normal font through narrow and compact resize",function()
+  local Layout=require("layout"); local view=chatView(8)
+  local state=runeWidthState({{name="Force",remaining=100}})
+  view:applyLayout(Layout.compute(1920,1080)); view:update(state)
+  state.runes.items={{name="Translocation",remaining=100}}; view:update(state)
+  for _,size in ipairs({{900,700},{240,500},{1400,1000},{1920,1080},{900,1000}}) do
+    local layout=Layout.compute(size[1],size[2]); view:applyLayout(layout); view.right_list_tabs.runes.click()
+    eq(view.last_state,state); eq(state.runes.items[1].name,"Translocation"); eq(state.runes.items[1].remaining,100)
+    eq(view.runes_content.width,math.max(view.list_viewport_width,33*view.list_character_width))
+    eq(view.runes_horizontal_overflow,33*view.list_character_width>view.list_viewport_width)
+    eq(view.runes_content.fontSize,layout.list_font); eq(view.runes_content.font,view.list_font_family)
+    eq(view.runes_content.message:gsub("<[^>]+>",""),"Translocation - 100 weaves remain")
+  end
+  state.runes.items={{name="Force",remaining=100}}; view:update(state)
+  eq(view.runes_content.width,math.max(view.list_viewport_width,28*view.list_character_width))
+  eq(view.runes_content.message:find("Translocation",1,true),nil)
+end)
+
+test("Rune width uses visible text while names and weave counts remain HTML escaped",function()
+  local view=chatView(8); local layout=require("layout").compute(900,700); view:applyLayout(layout)
+  local rune={name="Translocation<&>",remaining="100<&>"}; view:renderRunes({runes={items={rune}}})
+  eq(View.runesRequiredColumns({rune}),39)
+  eq(view.runes_content.width,math.max(view.list_viewport_width,39*view.list_character_width))
+  assert(view.runes_content.message:find("Translocation&lt;&amp;&gt;",1,true))
+  assert(view.runes_content.message:find("100&lt;&amp;&gt; weaves remain",1,true))
+  eq(view.runes_content.message:find("Translocation<&>",1,true),nil)
+  eq(view.runes_content.message:find("100<&>",1,true),nil)
+  eq(rune.name,"Translocation<&>"); eq(rune.remaining,"100<&>"); eq(view.runes_content.fontSize,layout.list_font)
+end)
+
 test("scrollable list content uses resolved numeric widths",function()
   local view=chatView(); local layout=require("layout").compute(1920,1080); view:applyLayout(layout)
   local state={character={physical={}},attributes={},combat={},equipment={items={}},inventory={items={{name="One",weight=1}},total_weight=1},skills={items={{name="Biting",level=4,remain=10}}},vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},carry={current=1,maximum=1},psi={visible=false},web={visible=false},gold=0,silver=0,roundtime=0,position=0},room={players={},flags={},exits={}}}
@@ -2333,11 +2423,12 @@ end)
 
 test("inventory refresh redraws when only equipment location changes",function()
   local view=chatView(); view:applyLayout(require("layout").compute(1920,1080))
-  local item={name="One",weight=1,section="carried"}
+  view:selectInventorySection("equipped")
+  local item={name="One",weight=1,section="equipped"}
   local state={inventory={items={item}},vitals={gold=0,silver=0,carry={current=1,maximum=10,percent=10}}}
   view:renderInventory(state); local initial=view.inventory_signature
   eq(view.inventory_content.message:find("right hand",1,true),nil)
-  item.section="equipped"; item.location="right hand"; view:renderInventory(state)
+  item.location="right hand"; view:renderInventory(state)
   assert(view.inventory_signature~=initial); assert(view.inventory_content.message:find("right hand",1,true))
   item.location="left hand"; view:renderInventory(state)
   assert(view.inventory_content.message:find("left hand",1,true)); eq(view.inventory_content.message:find("right hand",1,true),nil)
@@ -2553,7 +2644,7 @@ test("short MultiView panes keep a full inventory row and scrollbars at normal a
     end
   end
 end)
-test("408px Large inventory reduces only local vertical padding to fit a row and scrollbar",function()
+test("408px Large inventory reduces only local vertical padding to fit item and footer rows",function()
   local Layout=require("layout"); local view=chatView(7,24); local state=shortPaneInventoryState(1)
   for _,height in ipairs({408,500,408}) do
     local layout=Layout.compute(800,height,nil,nil,state.vitals,{side_text_scale=1.1})
@@ -2563,9 +2654,10 @@ test("408px Large inventory reduces only local vertical padding to fit a row and
     eq(view.inventory_scroll_footer.fontSize,16); eq(view.inventory_footer_scrolling,true)
     eq(output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
     eq(output.y+output.height<=card.y+card.height,true)
+    assertInventoryRowFits(view,layout)
     if height==408 then
-      eq(view.inventory_title.visible,false); eq(output.height,40)
-      eq(output.y-card.y,4); eq(card.y+card.height-output.y-output.height,4)
+      eq(view.inventory_title.visible,false); eq(output.height,46)
+      eq(output.y-card.y,1); eq(card.y+card.height-output.y-output.height,1)
     else
       eq(view.inventory_title.visible,true); eq(output.y-card.y,layout.list_padding+layout.list_row_height+4)
     end
@@ -2604,12 +2696,13 @@ test("scrolling inventory footer follows changing item counts and safely renders
     local state=shortPaneInventoryState(count)
     local layout=Layout.compute(800,500,nil,nil,state.vitals,{side_text_scale=1.1})
     view:applyLayout(layout); view:update(state); assertInventoryRowFits(view,layout)
-    eq(view.inventory_content.height,math.max(1,count*layout.list_row_height))
+    eq(view.inventory_content.height,math.max(1,count)*layout.list_row_height)
+    if count==0 then assert(view.inventory_content.message:find("No carried items.",1,true)) end
     state.vitals.gold="<gold>"; state.vitals.carry.percent="<percent>"
     view:renderInventory(state)
     assert(view.inventory_scroll_footer.message:find("&lt;gold&gt;",1,true))
     assert(view.inventory_scroll_footer.message:find("&lt;percent&gt;",1,true))
-    eq(view.inventory_scroll_footer.y,view.inventory_content.height+4)
+    eq(view.inventory_scroll_footer.y,view.inventory_content.y+view.inventory_content.height+4)
   end
 end)
 test("refreshing a scrolling inventory never temporarily removes its footer scroll extent",function()
@@ -2624,6 +2717,479 @@ test("refreshing a scrolling inventory never temporarily removes its footer scro
   view:applyLayout(layout); view:update(state); assertInventoryRowFits(view,layout)
   footer.move=move; footer.resize=resize; footer.hide=hide
 end)
+
+local function inventoryTabsState(equippedCount,carriedCount)
+  local state=shortPaneInventoryState(0)
+  for index=1,equippedCount do
+    state.inventory.items[#state.inventory.items+1]={name="Equipped item "..index,weight=index,section="equipped",location="right hand"}
+  end
+  for index=1,carriedCount do
+    state.inventory.items[#state.inventory.items+1]={name="Carried item "..index,weight=index,section="carried"}
+  end
+  state.inventory.total_weight=120.5
+  state.runes.items={{name="Force",remaining=62}}
+  state.skills.items={{name="Biting",level=4,remain=105}}
+  return state
+end
+local function assertInventorySectionControls(view)
+  local inHeader=view.inventory_title.visible==true
+  local buttons=inHeader and view.inventory_tabs or view.inventory_scroll_tabs
+  local hidden=inHeader and view.inventory_scroll_tabs or view.inventory_tabs
+  local parent=inHeader and view.inventory_title or view.inventory_output
+  for _,key in ipairs({"equipped","carried"}) do
+    local button=buttons[key]
+    eq(button.visible,true); eq(hidden[key].visible,false); eq(button.parent,parent)
+    eq(button.x>=0,true); eq(button.width>0,true); eq(button.height>0,true)
+    eq(button.x+button.width<=view.list_viewport_width,true)
+    if inHeader then eq(button.y+button.height<=view.inventory_title.height,true)
+    else eq(button.y+button.height<=view.inventory_content.y,true) end
+  end
+  eq(buttons.equipped.x+buttons.equipped.width<=buttons.carried.x,true)
+  return buttons
+end
+
+test("inventory sections retain source rows order duplicates locations and legacy carried items",function()
+  local view=chatView(); local state=inventoryTabsState(0,0)
+  local items={
+    {name="Duplicate torch",weight=1,section="equipped",location="right hand"},
+    {name="Carried bag",weight=2,section="carried"},
+    {name="Equipped blade",weight=3,section="equipped",location="on belt"},
+    {name="Duplicate torch",weight=.1,section="carried"},
+    {name="Legacy carried item",weight=.2},
+  }
+  state.inventory.items=items
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  eq(view.inventory_active,"carried"); eq(view.last_state,state)
+  eq(#view.inventory_sections.equipped,2); eq(#view.inventory_sections.carried,3)
+  eq(view.inventory_sections.equipped[1],items[1]); eq(view.inventory_sections.equipped[2],items[3])
+  eq(view.inventory_sections.carried[1],items[2]); eq(view.inventory_sections.carried[2],items[4]); eq(view.inventory_sections.carried[3],items[5])
+  assert(view.inventory_content.message:find("Carried bag",1,true))
+  assert(view.inventory_content.message:find("Legacy carried item",1,true))
+  eq(view.inventory_content.message:find("Equipped blade",1,true),nil)
+  for _,key in ipairs({"equipped","carried","equipped","carried"}) do eq(view.inventory_tabs[key].click(),key) end
+  eq(state.inventory.items,items); eq(#items,5); eq(state.inventory.total_weight,120.5)
+  eq(items[1].name,"Duplicate torch"); eq(items[1].weight,1); eq(items[1].location,"right hand")
+  eq(items[3].section,"equipped"); eq(items[3].location,"on belt"); eq(items[4].weight,.1); eq(items[5].section,nil)
+  eq(view.inventory_sections.equipped[1],items[1]); eq(view.inventory_sections.carried[3],items[5])
+end)
+test("inventory section clicks repaint unchanged snapshots while cache hits preserve content position",function()
+  local view=chatView(); local state=inventoryTabsState(1,1)
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  local echo=view.inventory_content.echo; local echoes=0
+  function view.inventory_content:echo(message) echoes=echoes+1; return echo(self,message) end
+  local carriedMessage=view.inventory_content.message; local carriedSignature=view.inventory_signature
+  eq(view.inventory_tabs.equipped.click(),"equipped")
+  assert(view.inventory_signature~=carriedSignature); assert(view.inventory_content.message:find("Equipped item 1",1,true))
+  eq(view.inventory_content.message:find("Carried item 1",1,true),nil)
+  eq(view.inventory_tabs.carried.click(),"carried"); eq(view.inventory_content.message,carriedMessage)
+  eq(echoes,2)
+  view.inventory_content:move(0,-37); view:renderInventory(state)
+  eq(echoes,2); eq(view.inventory_content.y,-37)
+  local signature=view.inventory_signature
+  eq(view:selectInventorySection("unknown"),nil); eq(view.inventory_active,"carried")
+  eq(view.inventory_signature,signature); eq(echoes,2); eq(view.inventory_content.message,carriedMessage)
+end)
+test("inventory refresh retains changes to the hidden section and moves rows between sections",function()
+  local view=chatView(); local state=inventoryTabsState(1,1); local equipped=state.inventory.items[1]
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  equipped.name="Updated equipped blade"; equipped.location="left hand"
+  view:update(state); eq(view.inventory_active,"carried")
+  eq(view.inventory_content.message:find("Updated equipped blade",1,true),nil)
+  eq(view.inventory_sections.equipped[1],equipped)
+  view.inventory_tabs.equipped.click()
+  assert(view.inventory_content.message:find("Updated equipped blade",1,true)); assert(view.inventory_content.message:find("left hand",1,true))
+  equipped.section="carried"; equipped.location=nil; view:update(state)
+  eq(view.inventory_active,"equipped"); assert(view.inventory_content.message:find("No equipped items.",1,true))
+  eq(#view.inventory_sections.equipped,0); eq(#view.inventory_sections.carried,2)
+  view.inventory_tabs.carried.click(); assert(view.inventory_content.message:find("Updated equipped blade",1,true))
+  eq(#state.inventory.items,2)
+end)
+test("empty inventory sections clear prior rows and render their own cached empty messages",function()
+  local view=chatView(); local state=inventoryTabsState(0,1)
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  view.inventory_tabs.equipped.click()
+  assert(view.inventory_content.message:find("No equipped items.",1,true))
+  eq(view.inventory_content.message:find("Carried item 1",1,true),nil)
+  view.inventory_tabs.carried.click(); assert(view.inventory_content.message:find("Carried item 1",1,true))
+  state.inventory.items={}; view:update(state)
+  assert(view.inventory_content.message:find("No carried items.",1,true))
+  local carriedSignature=view.inventory_signature
+  view.inventory_tabs.equipped.click(); assert(view.inventory_signature~=carriedSignature)
+  assert(view.inventory_content.message:find("No equipped items.",1,true))
+  eq(view.inventory_content.message:find("No carried items.",1,true),nil)
+  eq(#view.inventory_sections.equipped,0); eq(#view.inventory_sections.carried,0)
+  view.inventory_tabs.carried.click(); assert(view.inventory_content.message:find("No carried items.",1,true))
+  eq(view.inventory_content.message:find("Carried item 1",1,true),nil)
+end)
+test("inventory tabs escape names locations and footer values without altering saved data",function()
+  local view=chatView(); local state=inventoryTabsState(1,1)
+  local equipped,carried=state.inventory.items[1],state.inventory.items[2]
+  equipped.name="<b>Blade & shield</b>"; equipped.location="<img src=x>"
+  carried.name="Pack & <script>"
+  state.vitals.gold="<gold>"; state.vitals.silver="&silver"; state.vitals.carry.percent="<percent>"
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  assert(view.inventory_content.message:find("Pack &amp; &lt;script&gt;",1,true))
+  eq(view.inventory_content.message:find("<script>",1,true),nil)
+  view.inventory_tabs.equipped.click()
+  assert(view.inventory_content.message:find("&lt;b&gt;Blade &amp; shield&lt;/b&gt;",1,true))
+  assert(view.inventory_content.message:find("&lt;img src=x&gt;",1,true))
+  eq(view.inventory_content.message:find("<img src=x>",1,true),nil)
+  assert(view.inventory_footer.message:find("&lt;gold&gt;",1,true))
+  assert(view.inventory_footer.message:find("&amp;silver",1,true))
+  assert(view.inventory_footer.message:find("&lt;percent&gt;",1,true))
+  eq(equipped.name,"<b>Blade & shield</b>"); eq(equipped.location,"<img src=x>"); eq(carried.name,"Pack & <script>")
+end)
+test("inventory section footers keep character totals and follow filtered rows including empty sections",function()
+  local view=chatView(7,24); local state=inventoryTabsState(40,1)
+  local layout=require("layout").compute(800,500,nil,nil,state.vitals,{side_text_scale=1.1})
+  view:applyLayout(layout); view:update(state); assertInventoryRowFits(view,layout)
+  eq(view.inventory_footer_scrolling,true)
+  local footer=view.inventory_scroll_footer; local totals=footer.message
+  for _,key in ipairs({"equipped","carried"}) do
+    view.inventory_tabs[key].click(); assertInventoryRowFits(view,layout)
+    local rows=key=="equipped" and 40 or 1
+    eq(view.inventory_content.height,rows*layout.list_row_height)
+    eq(footer.y,view.inventory_content.y+view.inventory_content.height+4)
+    eq(footer.message,totals); eq(state.inventory.total_weight,120.5)
+  end
+  state.inventory.items={state.inventory.items[1]}; view:update(state)
+  assert(view.inventory_content.message:find("No carried items.",1,true))
+  eq(view.inventory_content.height,layout.list_row_height)
+  eq(footer.y,view.inventory_content.y+view.inventory_content.height+4); eq(footer.message,totals)
+  view.inventory_tabs.equipped.click(); eq(#view.inventory_sections.equipped,1)
+  eq(footer.message,totals); assertInventoryRowFits(view,layout)
+end)
+test("inventory section tabs occupy the existing title header in stacked and ordinary tabbed layouts",function()
+  local Layout=require("layout")
+  for _,size in ipairs({{1920,1080},{1200,800},{800,500}}) do
+    local view=chatView(7,24); local state=inventoryTabsState(1,1)
+    local layout=Layout.compute(size[1],size[2],nil,nil,state.vitals)
+    view:applyLayout(layout); view:update(state)
+    eq(view.inventory_title.visible,true); local buttons=assertInventorySectionControls(view)
+    eq(buttons,view.inventory_tabs); eq(view.inventory_content.y,0)
+    eq(view.inventory_output.y,view.inventory_title.y+view.inventory_title.height)
+    eq(buttons.equipped.click(),"equipped"); eq(view.inventory_active,"equipped")
+    assert(view.inventory_content.message:find("Equipped item 1",1,true))
+  end
+end)
+test("inventory section controls retain a full row and scrollbars in short MultiView panes",function()
+  local Layout=require("layout"); local failures={}
+  for _,width in ipairs({800,960,1075}) do
+    for _,height in ipairs({408,500}) do
+      for _,scale in ipairs({1,1.1}) do
+        for _,count in ipairs({0,1,40}) do
+          local ok,err=pcall(function()
+          local view=chatView(7,24); local state=inventoryTabsState(count,count==40 and 1 or count)
+          local layout=Layout.compute(width,height,nil,nil,state.vitals,{side_text_scale=scale})
+          view:applyLayout(layout); view:update(state)
+          local viewportHeight=view.inventory_output.height
+          for _,key in ipairs({"equipped","carried"}) do
+            local buttons=assertInventorySectionControls(view); eq(buttons[key].click(),key)
+            eq(view.inventory_active,key); eq(view.inventory_output.height,viewportHeight)
+            assertInventorySectionControls(view); assertInventoryRowFits(view,layout)
+            eq(view.inventory_scroll_footer.y,view.inventory_content.y+view.inventory_content.height+4)
+            if count==0 then assert(view.inventory_content.message:find("No "..key.." items.",1,true)) end
+          end
+          end)
+          if not ok then failures[#failures+1]=width.."x"..height.." scale="..scale.." count="..count..": "..tostring(err) end
+        end
+      end
+    end
+  end
+  assert(#failures==0,table.concat(failures,"\n"))
+end)
+test("tiny compact inventory section controls scroll above rows without consuming the viewport",function()
+  local Layout=require("layout")
+  for _,size in ipairs({{799,600,1.1},{400,300,1.1},{320,260,1}}) do
+    local view=chatView(7,24); local state=inventoryTabsState(40,1)
+    state.vitals.psi={visible=true,current=1,maximum=1}; state.vitals.web={visible=true,current=1,maximum=1}
+    local layout=Layout.compute(size[1],size[2],nil,nil,state.vitals,{side_text_scale=size[3]})
+    view:applyLayout(layout); view:update(state)
+    local viewportHeight=view.inventory_output.height
+    eq(view.inventory_title.visible,false); eq(layout.console_remainder>=60,true)
+    for _,key in ipairs({"equipped","carried"}) do
+      local buttons=assertInventorySectionControls(view); eq(buttons,view.inventory_scroll_tabs)
+      eq(buttons[key].click(),key); eq(view.inventory_output.height,viewportHeight)
+      eq(view.inventory_output.height>=layout.list_row_height,true)
+      eq(view.inventory_output.y+view.inventory_output.height<=view.inventory.y+view.inventory.height,true)
+      assertInventorySectionControls(view); eq(view.inventory_content.parent,view.inventory_output)
+      assert(view.inventory_content.message:find(key=="equipped" and "Equipped item 1" or "Carried item 1",1,true))
+    end
+  end
+end)
+test("inventory selection and control ownership survive responsive resize and outer list switches",function()
+  local view=chatView(7,24); local state=inventoryTabsState(2,1); local Layout=require("layout")
+  view:applyLayout(Layout.compute(1920,1080)); view:update(state); view.inventory_tabs.equipped.click()
+  local headerTabs,scrollTabs=view.inventory_tabs,view.inventory_scroll_tabs
+  for _,size in ipairs({{1920,1080},{1400,800},{1399,800},{800,500},{800,408},{799,600},{400,300},{320,260,1},{800,500},{1920,1080}}) do
+    local layout=Layout.compute(size[1],size[2],nil,nil,state.vitals,{side_text_scale=size[3] or 1.1})
+    view:applyLayout(layout)
+    eq(view.inventory_active,"equipped"); assert(view.inventory_content.message:find("Equipped item 2",1,true))
+    eq(view.inventory_tabs,headerTabs); eq(view.inventory_scroll_tabs,scrollTabs)
+    assertInventorySectionControls(view)
+    if layout.right_lists_mode~="stacked" then
+      for _,key in ipairs({"runes","skills"}) do
+        view.right_list_tabs[key].click(); eq(view[key.."_output"].visible,true)
+        for _,section in ipairs({"equipped","carried"}) do
+          eq(headerTabs[section].visible,false); eq(scrollTabs[section].visible,false)
+        end
+      end
+      view.right_list_tabs.inventory.click(); eq(view.inventory_active,"equipped")
+      assert(view.inventory_content.message:find("Equipped item 2",1,true)); assertInventorySectionControls(view)
+    end
+    eq(headerTabs.equipped.parent,view.inventory_title); eq(scrollTabs.equipped.parent,view.inventory_output)
+  end
+end)
+test("reused inventory views keep selection rebind both tab sets and repaint unchanged snapshots",function()
+  local view=chatView(7,24); local state=inventoryTabsState(1,1); local Layout=require("layout")
+  view:applyLayout(Layout.compute(1920,1080)); view:update(state); view.inventory_tabs.equipped.click()
+  local root,headerTabs,scrollTabs=view.root,view.inventory_tabs,view.inventory_scroll_tabs
+  for _,buttons in ipairs({headerTabs,scrollTabs}) do
+    for _,key in ipairs({"equipped","carried"}) do buttons[key]:setClickCallback(function() error("retired inventory callback") end) end
+  end
+  view.inventory_content.message="stale inventory content"
+  eq(view:prepareForReuse(view.settings),true); eq(view.inventory_signature,nil)
+  eq(view.inventory_active,"equipped"); eq(view.root,root); eq(root.deleted,nil)
+  view:update(state); assert(view.inventory_content.message:find("Equipped item 1",1,true))
+  eq(view.inventory_tabs,headerTabs); eq(view.inventory_scroll_tabs,scrollTabs)
+  eq(headerTabs.carried.click(),"carried"); assert(view.inventory_content.message:find("Carried item 1",1,true))
+  view:applyLayout(Layout.compute(800,408,nil,nil,state.vitals,{side_text_scale=1.1}))
+  eq(view.inventory_title.visible,false); eq(scrollTabs.equipped.click(),"equipped")
+  assert(view.inventory_content.message:find("Equipped item 1",1,true)); assertInventorySectionControls(view)
+end)
+test("inventory view reuse rejects missing damaged or incorrectly parented section controls",function()
+  for _,group in ipairs({"inventory_tabs","inventory_scroll_tabs"}) do
+    for _,damage in ipairs({"group","button","echo","parent"}) do
+      local view=chatView()
+      if damage=="group" then view[group]=nil
+      elseif damage=="button" then view[group].equipped=nil
+      elseif damage=="echo" then view[group].carried.echo=nil
+      else view[group].equipped.parent=view.root; view[group].equipped.container=view.root end
+      local ok,err=View.validateReusable(view,view.settings)
+      eq(ok,nil); assert(err:find("inventory tabs",1,true))
+    end
+  end
+end)
+test("independent inventory views retain separate section selections snapshots callbacks and footers",function()
+  local first,second=chatView(7,24),chatView(7,24); local Layout=require("layout")
+  local firstState,secondState=inventoryTabsState(1,1),inventoryTabsState(1,1)
+  secondState.inventory.items[1].name="Second equipped blade"; secondState.inventory.items[2].name="Second carried bag"
+  firstState.vitals.gold=11; secondState.vitals.gold=22
+  first:applyLayout(Layout.compute(1920,1080)); first:update(firstState)
+  second:applyLayout(Layout.compute(800,408,nil,nil,secondState.vitals,{side_text_scale=1.1})); second:update(secondState)
+  assert(first.inventory_tabs~=second.inventory_tabs); assert(first.inventory_scroll_tabs~=second.inventory_scroll_tabs)
+  eq(first.inventory_tabs.equipped.click(),"equipped"); eq(second.inventory_active,"carried")
+  assert(first.inventory_content.message:find("Equipped item 1",1,true))
+  assert(second.inventory_content.message:find("Second carried bag",1,true))
+  eq(second.inventory_scroll_tabs.equipped.click(),"equipped"); eq(first.inventory_active,"equipped")
+  first.inventory_tabs.carried.click(); eq(second.inventory_active,"equipped")
+  first:update(firstState); second:update(secondState)
+  eq(first.last_state,firstState); eq(second.last_state,secondState)
+  eq(first.inventory_sections.carried[1],firstState.inventory.items[2]); eq(second.inventory_sections.equipped[1],secondState.inventory.items[1])
+  assert(first.inventory_footer.message:find("11gp",1,true)); assert(second.inventory_scroll_footer.message:find("22gp",1,true))
+  eq(first.inventory_content.message:find("Second",1,true),nil); eq(second.inventory_content.message:find("Carried item 1",1,true),nil)
+end)
+test("inventory section switching recalculates horizontal extent from only the selected rows",function()
+  local view=chatView(7,24); local state=inventoryTabsState(1,1)
+  state.inventory.items[1].name=string.rep("Equipped long name ",7)
+  view:applyLayout(require("layout").compute(800,500)); view:update(state)
+  local carriedWidth=view.inventory_content.width
+  view.inventory_tabs.equipped.click(); local equippedWidth=view.inventory_content.width
+  eq(equippedWidth>carriedWidth,true); eq(view.inventory_horizontal_overflow,true)
+  view.inventory_tabs.carried.click(); eq(view.inventory_content.width,carriedWidth)
+  eq(#state.inventory.items,2); eq(#view.inventory_sections.equipped,1); eq(#view.inventory_sections.carried,1)
+end)
+
+local function nativeInventoryVisibility(widget)
+  widget.hidden=widget.visible~=true; widget.auto_hidden=false; widget.visible=nil
+  function widget:hide(auto)
+    if auto then self.auto_hidden=true else self.hidden=true end
+  end
+  function widget:show(auto)
+    if self.container and (self.container.hidden or self.container.auto_hidden) then
+      if not auto then self.hidden=false end
+      return false
+    end
+    if auto then self.auto_hidden=false else self.hidden=false end
+  end
+end
+local function useNativeInventoryVisibility(view)
+  nativeInventoryVisibility(view.inventory_output); nativeInventoryVisibility(view.inventory_title)
+  for _,buttons in ipairs({view.inventory_tabs,view.inventory_scroll_tabs}) do
+    for _,key in ipairs({"equipped","carried"}) do nativeInventoryVisibility(buttons[key]) end
+  end
+end
+local function nativeInventoryVisible(widget)
+  eq(widget.visible,nil)
+  return not widget.hidden and not widget.auto_hidden
+end
+
+test("native Geyser hidden flags show inventory header tabs without visible fields",function()
+  local view=chatView(); local state=inventoryTabsState(1,1)
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  useNativeInventoryVisibility(view)
+  eq(nativeInventoryVisible(view.inventory_output),true); eq(nativeInventoryVisible(view.inventory_title),true)
+  view:positionInventoryTabs()
+  for _,key in ipairs({"equipped","carried"}) do
+    eq(nativeInventoryVisible(view.inventory_tabs[key]),true)
+    eq(nativeInventoryVisible(view.inventory_scroll_tabs[key]),false)
+    eq(view.inventory_tabs[key].parent,view.inventory_title)
+  end
+  eq(view.inventory_scroll_header_height,0)
+end)
+test("native hidden and auto_hidden title flags select scrolling inventory section controls",function()
+  for _,flag in ipairs({"hidden","auto_hidden"}) do
+    local view=chatView(); local state=inventoryTabsState(1,1)
+    view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+    useNativeInventoryVisibility(view); view.inventory_title[flag]=true
+    view:positionInventoryTabs(); view:resizeInventoryContent(1,123)
+    eq(nativeInventoryVisible(view.inventory_output),true); eq(nativeInventoryVisible(view.inventory_title),false)
+    for _,key in ipairs({"equipped","carried"}) do
+      eq(nativeInventoryVisible(view.inventory_tabs[key]),false)
+      eq(nativeInventoryVisible(view.inventory_scroll_tabs[key]),true)
+      eq(view.inventory_scroll_tabs[key].parent,view.inventory_output)
+      eq(view.inventory_scroll_tabs[key].y+view.inventory_scroll_tabs[key].height<=view.inventory_content.y,true)
+    end
+    eq(view.inventory_content.y>0,true)
+  end
+end)
+test("native hidden and auto_hidden inventory output flags hide both sets of section controls",function()
+  for _,flag in ipairs({"hidden","auto_hidden"}) do
+    local view=chatView(); local state=inventoryTabsState(1,1)
+    view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+    useNativeInventoryVisibility(view); view.inventory_output[flag]=true
+    view:positionInventoryTabs()
+    eq(nativeInventoryVisible(view.inventory_output),false)
+    for _,key in ipairs({"equipped","carried"}) do
+      eq(nativeInventoryVisible(view.inventory_tabs[key]),false)
+      eq(nativeInventoryVisible(view.inventory_scroll_tabs[key]),false)
+    end
+    eq(view.inventory_scroll_header_height,0)
+  end
+end)
+test("inventory render honors native get_height before a pixel string viewport height",function()
+  local view=chatView(); local state=inventoryTabsState(1,1)
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  view.inventory_output.height="91px"
+  local reads=0
+  function view.inventory_output:get_height() reads=reads+1; return 321 end
+  view.inventory_signature=nil; view:renderInventory(state)
+  eq(reads>0,true); eq(view.inventory_content.height,321); eq(view.inventory_content.y,0)
+  eq(view.inventory_output.height,"91px")
+end)
+test("inventory render resolves pixel string viewport heights when the native getter is unavailable",function()
+  for _,getter in ipairs({"missing","nil","error"}) do
+    local view=chatView(); local state=inventoryTabsState(1,1)
+    view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+    view.inventory_output.height="321px"; view.inventory_output.get_height=nil
+    if getter=="nil" then function view.inventory_output:get_height() return nil end
+    elseif getter=="error" then function view.inventory_output:get_height() error("native height unavailable") end end
+    view.inventory_signature=nil; view:renderInventory(state)
+    eq(view.inventory_content.height,321); eq(view.inventory_content.y,0)
+    eq(view.inventory_output.height,"321px")
+  end
+end)
+test("native short inventory rendering keeps scrolling controls rows and footer in distinct vertical ranges",function()
+  local view=chatView(7,24); local state=inventoryTabsState(0,0)
+  local layout=require("layout").compute(800,408,nil,nil,state.vitals,{side_text_scale=1.1})
+  view:applyLayout(layout); view:update(state)
+  eq(view.inventory_title.visible,false); eq(view.inventory_footer_scrolling,true)
+  useNativeInventoryVisibility(view)
+  view.inventory_output.height="40px"
+  function view.inventory_output:get_height() return 40 end
+  view.inventory_signature=nil; view:renderInventory(state)
+  for _,key in ipairs({"equipped","carried"}) do
+    eq(nativeInventoryVisible(view.inventory_tabs[key]),false)
+    eq(nativeInventoryVisible(view.inventory_scroll_tabs[key]),true)
+    eq(view.inventory_scroll_tabs[key].y+view.inventory_scroll_tabs[key].height<=view.inventory_content.y,true)
+  end
+  eq(view.inventory_content.height,layout.list_row_height)
+  eq(view.inventory_scroll_footer.y,view.inventory_content.y+view.inventory_content.height+4)
+  eq(view.inventory_output.height,"40px")
+  assert(view.inventory_content.message:find("No carried items.",1,true))
+end)
+
+local inventoryOverlaySizes={{1920,1080,header=true},{800,408,header=false}}
+local function inventoryOverlayView(size)
+  local view=chatView(7,24); local state=inventoryTabsState(1,1)
+  view:applyLayout(require("layout").compute(size[1],size[2],nil,nil,state.vitals,{side_text_scale=1.1})); view:update(state)
+  eq(view.inventory_title.visible,size.header); assertInventorySectionControls(view)
+  return view,state
+end
+local function trackInventoryTabRaises(view,events)
+  local counts={}
+  for _,buttons in ipairs({view.inventory_tabs,view.inventory_scroll_tabs}) do
+    for _,key in ipairs({"equipped","carried"}) do
+      local button=buttons[key]; local raise=button.raise; counts[button]=0
+      function button:raise()
+        counts[self]=counts[self]+1; events[#events+1]="tab"
+        return raise(self)
+      end
+    end
+  end
+  return counts
+end
+local function assertInventoryTabRaiseCounts(view,counts,suppressed)
+  for _,buttons in ipairs({view.inventory_tabs,view.inventory_scroll_tabs}) do
+    for _,key in ipairs({"equipped","carried"}) do
+      local button=buttons[key]
+      if suppressed or not button.visible then eq(counts[button],0)
+      else eq(counts[button]>0,true) end
+    end
+  end
+end
+for _,case in ipairs({
+  {name="Options",flag="color_menu_visible",overlay="color_menu_scrim",
+    open=function(view) return view.color_toggle.click() end,
+    close=function(view) return view:setColorMenuVisible(false) end},
+  {name="Map Settings",flag="map_settings_visible",overlay="map_settings_overlay",
+    open=function(view) return view:showMapSettings({}) end,
+    close=function(view) return view:hideMapSettings() end},
+}) do
+  test("full updates repaint inventory after "..case.name.." without raising section tabs above the overlay",function()
+    for _,size in ipairs(inventoryOverlaySizes) do
+      local view,state=inventoryOverlayView(size)
+      case.open(view); eq(view[case.flag],true)
+      local overlay=view[case.overlay]; eq(overlay.visible,true)
+      local events={}; local counts=trackInventoryTabRaises(view,events)
+      local raise=overlay.raise
+      function overlay:raise() events[#events+1]="overlay"; return raise(self) end
+      local echo=view.inventory_content.echo
+      function view.inventory_content:echo(message) events[#events+1]="inventory"; return echo(self,message) end
+      local signature=view.inventory_signature
+      state.vitals.gold=state.vitals.gold+1
+      state.inventory.items[2].name="Updated carried item"
+      view:update(state)
+      eq(view[case.flag],true); eq(overlay.visible,true)
+      local overlayIndex,inventoryIndex
+      for index,event in ipairs(events) do
+        if event=="overlay" then overlayIndex=index elseif event=="inventory" then inventoryIndex=index end
+      end
+      assert(overlayIndex and inventoryIndex and overlayIndex<inventoryIndex)
+      eq(view.inventory_signature~=signature,true)
+      assert(view.inventory_content.message:find("Updated carried item",1,true))
+      assertInventorySectionControls(view); assertInventoryTabRaiseCounts(view,counts,true)
+      case.close(view); eq(view[case.flag],false); eq(overlay.visible,false)
+      state.vitals.gold=state.vitals.gold+1; view:update(state)
+      assertInventoryTabRaiseCounts(view,counts,false)
+    end
+  end)
+end
+for _,flag in ipairs({
+  "color_menu_visible","color_settings_visible","chat_settings_visible","keybindings_visible",
+  "skill_settings_visible","help_visible","feedback_visible","support_visible",
+  "roller_settings_visible","latent_alert_visible","map_settings_visible","map_library_visible",
+}) do
+  test("inventory section tabs suppress raises for isolated "..flag.." and resume when cleared",function()
+    for _,size in ipairs(inventoryOverlaySizes) do
+      local view=inventoryOverlayView(size); local counts=trackInventoryTabRaises(view,{})
+      view[flag]=true; view:positionInventoryTabs()
+      assertInventorySectionControls(view); assertInventoryTabRaiseCounts(view,counts,true)
+      view[flag]=false; view:positionInventoryTabs()
+      assertInventorySectionControls(view); assertInventoryTabRaiseCounts(view,counts,false)
+    end
+  end)
+end
 
 test("crossing responsive breakpoints repeatedly restores every desktop card",function()
   local Layout=require("layout"); local view=chatView(7)

@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.93.
+Applies to DGHUD v0.3.94.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -48,6 +48,8 @@ Alignment wording is made more readable in the HUD: order becomes **Orderly**, e
 Food and Water begin unknown. A complete character INFO description updates both: any reported hunger or thirst status is shown, while a missing status shows **Ok** in green. This works whenever that description appears in game output, including wrapped lines, not just during the startup command sequence.
 
 `You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green. Later hunger or thirst messages replace the corresponding status independently. A lone hunger notice does not reset Water, and eating or drinking alone does not prove either status is healthy. Incomplete INFO responses do not clear previous warnings.
+
+`You are dehydrated.` shows **Water: Dehydrated** in red, whether it appears by itself or within a complete INFO description. It is not treated as an absent thirst status or reset to Ok.
 
 Identity and characteristics come from GMCP plus `info` and `info religion`. When INFO includes an **MP** column, its confirmed rank also appears in the header. Numeric characteristic values are retained separately from the rank labels. Older INFO formats without MP remain supported; MP is not added to the eleven-characteristic autoroller.
 
@@ -95,7 +97,7 @@ After printed delays, DGHUD requests a quiet `delay` check once the output burst
 
 ## Inventory, money, and carrying capacity
 
-Inventory shows every captured item in a scrollable list. Long names and large inventories use horizontal and vertical scrollbars rather than shrinking the text indefinitely.
+Inventory has **Equipped** and **Carried** tabs. Both lists are retained from the same inventory response; switching tabs immediately shows the saved list without sending another command. **Carried** is selected initially, and your selected tab stays selected during refreshes and window resizing. Long names and large inventories use horizontal and vertical scrollbars rather than shrinking the text indefinitely.
 
 Below the list, DGHUD shows:
 
@@ -103,9 +105,11 @@ Below the list, DGHUD shows:
 - silver as `sp` in silver coloring; and
 - carry current / maximum / percentage.
 
-Items and total carried weight come from `inventory`. Both **Items equipped** and **Items carried** are retained. Equipped items show their reported location, such as **right hand** or **left hand**; identical names in different sections remain separate items. The Equipment readiness card still shows only weapon/shield readiness. Money comes from GMCP Vitals; the Carry figures use GMCP Vitals when available, with INFO values as a fallback. In a short tabbed Inventory panel, money and Carry may appear inside the scrollable list; scroll below the items to find them.
+Items and total carried weight come from `inventory`. Both **Items equipped** and **Items carried** are retained, including the current unnumbered player output and numbered staff output. Equipped items show their reported location, such as **right hand**, **body armor**, or **shield arm**; identical names in different sections remain separate items. The Equipment readiness card still shows only weapon/shield readiness. Money comes from GMCP Vitals; the Carry figures use GMCP Vitals when available, with INFO values as a fallback. Gold, silver, and Carry remain your character's totals regardless of the selected Inventory tab. In very short panels, the section buttons and totals may be inside the scrollable area: scroll to the top to switch sections and below the items to find the totals.
 
 ## Runes
+
+Long rune names such as **Translocation** expand the scrollable content to fit the full name and weave count. In narrow windows, use the horizontal scrollbar rather than shrinking the text.
 
 `info magic` fills the Runes list. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
 

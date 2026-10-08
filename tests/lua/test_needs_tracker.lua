@@ -4,6 +4,23 @@ local function eq(a,b) assert(a==b,tostring(a).." ~= "..tostring(b)) end
 local Parser=require("command_parser")
 local biography=[[You are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian. You are 7'0" and weigh 247 lbs.]]
 
+test("dehydrated standalone ANSI and wrapped INFO notices retain a water warning",function()
+  local n=Needs.new({epoch=function() return 42 end})
+  n:onLine("You are hungry.")
+  for _,line in ipairs({"You are dehydrated.","\27[31m[199] 147/147 hp, 60/60 ftg >You are dehydrated.\27[0m"}) do
+    assert(n:onLine(line)); eq(n:status().thirst.status,"dehydrated"); eq(n:status().hunger.status,"hungry")
+  end
+  local parsed=assert(Parser.parseInfo({biography,"You are seated. You are dehydrated.",">"}))
+  assert(n:onInfo(parsed)); eq(n:status().thirst.status,"dehydrated"); eq(n:status().hunger.status,"ok")
+  assert(n:onLine("Your thirst is quenched.")); eq(n:status().thirst.status,"quenched")
+end)
+
+test("dehydrated INFO appears as a red warning in the identity box",function()
+  local View=require("view"); local theme=require("defaults").theme
+  local html=View.identityContent({full_name="Test",race="Human",class="Fighter"},theme,{body_font=14,heading_font=18},{hunger={status="ok"},thirst={status="dehydrated"}})
+  assert(html:find("Water:",1,true)); assert(html:find("color:#d34a42'><b>Dehydrated</b>",1,true))
+end)
+
 test("quoted room biographies cannot default either need to ok",function()
   local prose=[[You are in a gallery, where a plaque reads "You are Synthetic Tester, a stocky bodied 28 year old Entropic Male young Human. You are 6'0" and weigh 180 lbs."]]
   for _,lines in ipairs({
