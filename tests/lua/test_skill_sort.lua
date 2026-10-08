@@ -83,6 +83,141 @@ test("skill sort owns all 57 catalog identifiers and normalizes ANSI stars spaci
   end
 end)
 
+
+
+-- Synthetic fixture pins exactly the supplied TRAIN catalog pairs. IDs are
+-- explicit game identifiers, not positions in this possessed-skill subset.
+local latestTrainCatalog={
+  {id=16,name="Detect Traps"},
+  {id=33,name="Play Instruments"},
+  {id=50,name="Identify Armor Quality"},
+  {id=40,name="Psionics"},
+  {id=42,name="First Aid"},
+  {id=22,name="Hiding"},
+  {id=3,name="Blunt Weapons",aliases={"Blunts"}},
+  {id=1,name="Brawling"},
+  {id=2,name="Sharp Weapons",aliases={"Sharps"}},
+  {id=4,name="Piercing Weapons",aliases={"Pole Weapons","Poles","Piercing"}},
+  {id=5,name="Thrown Weapons",aliases={"Throw Weapons","Throws","Thrown"}},
+  {id=6,name="Missile Weapons",aliases={"Missiles"}},
+  {id=7,name="Shield Use",aliases={"Shield Parry"}},
+  {id=8,name="Quickdraw"},
+  {id=13,name="Bargaining"},
+  {id=54,name="Spellcasting"},
+  {id=39,name="Disarming"},
+  {id=29,name="Stealth"},
+  {id=23,name="Swimming"},
+  {id=14,name="Identify Gems/Minerals"},
+  {id=31,name="Identify Magick"},
+  {id=32,name="Identify Weapon Quality"},
+}
+
+test("latest TRAIN catalog pins every supplied ID across current names and legacy aliases",function()
+  eq(#latestTrainCatalog,22); local seen={}
+  for _,entry in ipairs(latestTrainCatalog) do
+    assert(not seen[entry.id]); seen[entry.id]=true
+    local names={entry.name}
+    for _,alias in ipairs(entry.aliases or {}) do names[#names+1]=alias end
+    for _,value in ipairs(names) do
+      local messy="\27[32m ** "..value:upper():gsub(" "," \t ").." \27[0m\r"
+      eq(SkillSort.skillId(value),entry.id); eq(SkillSort.skillId(messy),entry.id)
+      eq(SkillSort.canonicalName(value),entry.name); eq(SkillSort.canonicalName(messy),entry.name)
+      eq(SkillSort.skillId(Display.displayName(value)),entry.id)
+    end
+  end
+end)
+
+test("latest TRAIN number sorting preserves exactly the supplied possessed rows and game IDs",function()
+  local numberOrder={8,9,7,10,11,12,13,14,15,20,1,6,19,18,21,22,2,17,4,5,3,16}
+  for variant=0,3 do
+    local items,names={},{}
+    for index,entry in ipairs(latestTrainCatalog) do
+      local value=entry.aliases and entry.aliases[variant] or entry.name
+      items[index]={name=value,level=3,remain=0}; names[index]=value
+    end
+    for _,direction in ipairs({"asc","desc"}) do
+      local expected={}
+      for index=1,#numberOrder do
+        local position=direction=="asc" and index or #numberOrder-index+1
+        expected[index]=items[numberOrder[position]]
+      end
+      local sorted=SkillSort.sorted(items,{primary="number",direction=direction,secondary="none"})
+      sequence(sorted,expected); eq(#sorted,22)
+      for index,item in ipairs(items) do
+        eq(item.name,names[index]); eq(item.level,3); eq(item.remain,0)
+        eq(SkillSort.skillId(item.name),latestTrainCatalog[index].id)
+      end
+    end
+  end
+end)
+
+test("skill sort renamed skills and legacy labels share stable IDs and current canonical names",function()
+  local cases={
+    {id=4,canonical="Piercing Weapons",names={"Piercing Weapons","Piercing","Pole Weapons","Poles"}},
+    {id=5,canonical="Thrown Weapons",names={"Thrown Weapons","Thrown","Throw Weapons","Throws"}},
+    {id=7,canonical="Shield Use",names={"Shield Use","Shield Parry"}},
+  }
+  for _,case in ipairs(cases) do
+    for _,value in ipairs(case.names) do
+      local messy="\27[32m ** "..value:upper():gsub(" "," \t ").." \27[0m\r"
+      eq(SkillSort.skillId(value),case.id); eq(SkillSort.skillId(messy),case.id)
+      eq(SkillSort.canonicalName(messy),case.canonical)
+      for _,remain in ipairs({0,17}) do
+        eq(SkillSort.combatCategory({name=messy,remain=remain}),"combat")
+        eq(Display.category({name=messy,remain=remain}),remain==0 and "ready" or "combat")
+      end
+    end
+  end
+  for _,value in ipairs({"Piercing Weapons Training","Thrown Weapons Training","Shield Usage","Future Piercing Weapons",
+    "Pole","Throw","Shield","pole.*",string.rep("x",2049)}) do
+    eq(SkillSort.skillId(value),nil); eq(SkillSort.canonicalName(value),nil)
+    eq(SkillSort.combatCategory(value),"utility")
+  end
+  eq(SkillSort.canonicalName(nil),nil); eq(SkillSort.canonicalName({}),nil)
+end)
+
+test("skill sort uses current canonical alphabetical names and retains every legacy duplicate",function()
+  local a={name="Pole Weapons",level=3,remain=17}
+  local b={name="Piercing Weapons",level=3,remain=17}
+  local c={name="Play Instruments",level=3,remain=17}
+  local d={name="Shield Parry",level=3,remain=17}
+  local e={name="Shield Use",level=3,remain=17}
+  local f={name="Shield Training",level=3,remain=17}
+  local g={name="Throw Weapons",level=3,remain=17}
+  local h={name="Thrown Weapons",level=3,remain=17}
+  local i={name="Throwing",level=3,remain=17}
+  local j={name="Swimming",level=3,remain=17}
+  local items={a,b,c,d,e,f,g,h,i,j,a}
+  sequence(SkillSort.sorted(items,{primary="number",direction="asc",secondary="none"}),{a,b,a,g,h,d,e,j,c,f,i})
+  sequence(SkillSort.sorted(items,{primary="number",direction="desc",secondary="none"}),{c,j,d,e,g,h,a,b,a,f,i})
+  sequence(SkillSort.sorted(items,{primary="name",direction="asc",secondary="none"}),{a,b,a,c,f,d,e,j,i,g,h})
+  sequence(SkillSort.sorted(items,{primary="name",direction="desc",secondary="none"}),{g,h,i,j,d,e,f,c,a,b,a})
+  sequence(SkillSort.sorted(items),{a,b,a,c,f,d,e,j,i,g,h})
+  sequence(items,{a,b,c,d,e,f,g,h,i,j,a})
+  eq(a.name,"Pole Weapons"); eq(d.name,"Shield Parry"); eq(g.name,"Throw Weapons")
+end)
+
+test("skill sort renamed combat membership stays independent of zero use ready priority",function()
+  local a={name="Piercing Weapons",level=3,remain=9}
+  local b={name="Thrown Weapons",level=3,remain=0}
+  local c={name="Shield Use",level=3,remain=0}
+  local d={name="Swimming",level=3,remain=0}
+  local e={name="Poles",level=3,remain=0}
+  local f={name="Throws",level=3,remain=7}
+  local g={name="Shield Parry",level=3,remain=4}
+  local h={name="Piercing Weapons Training",level=3,remain=1}
+  local items={a,b,c,d,e,f,g,h}
+  sequence(SkillSort.sorted(items,{primary="category",direction="asc",secondary="ready",secondary_direction="asc"}),
+    {e,c,b,a,g,f,d,h})
+  sequence(SkillSort.sorted(items,{primary="category",direction="desc",secondary="ready",secondary_direction="asc"}),
+    {d,h,e,c,b,a,g,f})
+  sequence(SkillSort.sorted(items,{primary="ready",direction="asc",secondary="number",secondary_direction="asc"}),
+    {e,b,c,d,a,f,g,h})
+  sequence(SkillSort.sorted(items,{primary="ready",direction="desc",secondary="number",secondary_direction="asc"}),
+    {a,f,g,h,e,b,c,d})
+  sequence(items,{a,b,c,d,e,f,g,h})
+end)
+
 test("skill sort default is level descending uses ascending then canonical alphabetical",function()
   local a={name="Sharp Weapons",level=4,remain=400}
   local b={name="First Aid",level=4,remain=50}

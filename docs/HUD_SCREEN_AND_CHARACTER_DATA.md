@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.92.
+Applies to DGHUD v0.3.93.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -49,7 +49,7 @@ Food and Water begin unknown. A complete character INFO description updates both
 
 `You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green. Later hunger or thirst messages replace the corresponding status independently. A lone hunger notice does not reset Water, and eating or drinking alone does not prove either status is healthy. Incomplete INFO responses do not clear previous warnings.
 
-Identity and characteristics come from GMCP plus `info` and `info religion`.
+Identity and characteristics come from GMCP plus `info` and `info religion`. When INFO includes an **MP** column, its confirmed rank also appears in the header. Numeric characteristic values are retained separately from the rank labels. Older INFO formats without MP remain supported; MP is not added to the eleven-characteristic autoroller.
 
 ## Equipment readiness
 
@@ -103,7 +103,7 @@ Below the list, DGHUD shows:
 - silver as `sp` in silver coloring; and
 - carry current / maximum / percentage.
 
-Items and total carried weight come from `inventory`. Money comes from GMCP Vitals; the Carry figures use GMCP Vitals when available, with INFO values as a fallback. In a short tabbed Inventory panel, money and Carry may appear inside the scrollable list; scroll below the items to find them.
+Items and total carried weight come from `inventory`. Both **Items equipped** and **Items carried** are retained. Equipped items show their reported location, such as **right hand** or **left hand**; identical names in different sections remain separate items. The Equipment readiness card still shows only weapon/shield readiness. Money comes from GMCP Vitals; the Carry figures use GMCP Vitals when available, with INFO values as a fallback. In a short tabbed Inventory panel, money and Carry may appear inside the scrollable list; scroll below the items to find them.
 
 ## Runes
 
@@ -121,7 +121,7 @@ Save applies filtering, formatting, and sorting together; Cancel or dismissing t
 
 Saving sidebar sorting immediately reorders existing rows. Main sorting changes apply to the next complete `skill` output and leave previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and HUD updates. Category and Ready to train sorting keep every captured skill visible.
 
-The sidebar shortens names for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. The formatted main table shortens weapon names to `Sharps`, `Blunts`, `Poles`, `Throws`, and `Missiles`. Columns stay aligned, and scrollbars appear when needed.
+The sidebar shortens names for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. The formatted main table shortens weapon names to `Sharps`, `Blunts`, `Piercing`, `Thrown`, and `Missiles`. **Shield Use** keeps skill ID **7**. Older Pole Weapons, Throw Weapons, and Shield Parry output and filters remain compatible with the same IDs and combat categories. Columns stay aligned, and scrollbars appear when needed.
 
 The **MAIN SKILLS** toggle in **Skill Settings** is on by default. It formats complete `skill` responses in the main game console using the **Main Display** order, for example:
 
@@ -135,7 +135,7 @@ The leading catalog number is the game's fixed training skill ID, not a display 
 
 With **SKILL FILTERS ON**, to narrow one response in the main display, enter `skill <prefix>`, for example `skill claw`, `skill bite`, `skill c`, `skill id`, or `skill ste`. Matching ignores case and checks the start of the name, including supported shortened names; the text is not a wildcard or pattern. Enter `skill` or `skill all` to show the full list again. Each request fetches the full table, so the Skills sidebar retains all your skills even when the main response is filtered.
 
-`skill weapons` shows only your possessed Sharp, Blunt, Pole, Throw, and Missile Weapons and natural attacks: Biting, Clawing, Webbing, Breath Weapon, and Stinging. The group uses catalog IDs 2–6, 46–49, and 57. It does not include Identify Weapon Quality, Weapon Smithing, or every combat skill. A filter with no matches prints `No skills match: <prefix>`.
+`skill weapons` shows only your possessed Sharp, Blunt, Piercing, Thrown, and Missile Weapons and natural attacks: Biting, Clawing, Webbing, Breath Weapon, and Stinging. The group uses catalog IDs 2–6, 46–49, and 57. It does not include Identify Weapon Quality, Weapon Smithing, or every combat skill. A filter with no matches prints `No skills match: <prefix>`.
 
 Enabled filters also work with **MAIN SKILLS** off, keeping the game's row format and order. With filters ON, if another refresh or skill request is loading, wait for it to finish and try again. Filtering finishes when the complete table ends, without needing Enter. DGHUD redraws removed rows locally so they do not leave a blank gap at the bottom, and preserves your position when reading scrollback. A filter applies to one response only; canceled or expired requests do not carry their filter into the next request.
 

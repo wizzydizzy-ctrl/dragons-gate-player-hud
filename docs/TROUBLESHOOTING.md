@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.92**.
+Applies to DGHUD **v0.3.93**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -60,12 +60,16 @@ DGHUD keeps the previous valid value when a response is incomplete. A panel may 
 
 Skills are an exception: a complete skill table ending in blank lines is saved on the next UI tick, without waiting for another prompt. Commands still depend on the game sending the response; DGHUD cannot show fresh results before they arrive.
 
+## A `skill` command repeats at the login menu
+
+DGHUD refreshes skills after character login; it does not send `skill` every minute at the character-selection menu. Open Mudlet's **Timers** editor and check for a separate personal `skill` timer, especially one set to **59 seconds**. Deactivate only that timer, then **Save Profile**. Keep your other timers, triggers, aliases, and packages intact. If it still repeats, report the timer names and when it happens; do not share passwords or your complete profile.
+
 ## Filtered skills leave a blank gap or seem stuck
 
 1. Run `dghud check` and update if your installed version is older than **0.3.89**.
 2. Wait for the current startup/refresh sequence or skill request to finish, then enter `skill bite`, `skill weapons`, or another filter once.
 3. Use `skill` or `skill all` for the complete list again. The sidebar always keeps every captured skill.
-4. If a gap remains on v0.3.92, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
+4. If a gap remains on v0.3.93, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
 
 The fix refreshes hidden-row edits locally. You should not need to send Enter or another game command just to make the blank area disappear.
 

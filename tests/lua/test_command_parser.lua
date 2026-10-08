@@ -17,6 +17,40 @@ test("parses staff inventory and accepts the staff vitals prompt",function()
   local r=assert(Parser.parseInventory(lines)); eq(r.items[1].name,"An open large leather backpack"); eq(r.items[2].weight,7.7); eq(Parser.isComplete("inventory",lines),true)
 end)
 test("rejects incomplete inventory",function() eq(Parser.parseInventory({"Items carried:","  A torch [1.0 lb]."}),nil) end)
+test("inventory retains equipped hand locations and carried items from the new format",function()
+  local lines={"Items equipped:",
+    '[ 8] "A practice long-bow" (0d0+0, +AR 0%(+0)) [2.2 lbs] (right hand)',
+    '[ 9] "A quiver of practice arrows" (0d0+0, +AR 0%(+0)) [0.8 lbs] (left hand)',
+    "Items carried:",'[ 1] "An open leather backpack" (0d0+0, +AR 0%(+0)) [66.0 lbs]',
+    "Your inventory totals 69.0 lbs.","[199] 299/299 hp, 188/188 ftg >"}
+  local r=assert(Parser.parseInventory(lines)); eq(#r.items,3); eq(r.total_weight,69)
+  eq(r.items[1].section,"equipped"); eq(r.items[1].location,"right hand"); eq(r.items[1].weight,2.2)
+  eq(r.items[2].section,"equipped"); eq(r.items[2].location,"left hand"); eq(r.items[2].weight,.8)
+  eq(r.items[3].section,"carried"); eq(r.items[3].location,nil); eq(r.items[3].weight,66)
+  eq(Parser.isComplete("inventory",lines),true)
+end)
+test("inventory preserves duplicates across equipped and carried sections",function()
+  local r=assert(Parser.parseInventory({"Items equipped:",'[1] "A wooden torch" [1.0 lb] (right hand)',
+    "Items carried:",'[2] "A wooden torch" [0.1 lbs]',"  A wooden torch [0.2 lbs].","Your inventory totals 1.3 lbs."}))
+  eq(#r.items,3); eq(r.items[1].name,r.items[2].name); eq(r.items[1].location,"right hand")
+  eq(r.items[2].section,"carried"); eq(r.items[3].section,"carried"); eq(r.items[3].weight,.2)
+end)
+test("inventory does not accept malformed weights or unrelated trailing text",function()
+  local r=assert(Parser.parseInventory({"Items equipped:",
+    '[1] "A bad item" [1..2 lbs] (right hand)', '[2] "A bad item" [1.0 lbs] (right hand) extra',
+    '[3] "A bad item" [1.0 lbs] ()', '[4] "A bad item" [1.0 lbs] (right (hand))',
+    '[5] "A bad item" [1.0 lbs] (right\t hand)', '[6] "A valid item" [1.0 lbs] (right hand)',
+    "Your inventory totals 1.0 lbs."}))
+  eq(#r.items,1); eq(r.items[1].name,"A valid item")
+end)
+test("malformed indexed inventory cannot fall through to legacy sentence parsing",function()
+  local r=assert(Parser.parseInventory({"Items equipped:",
+    '  [1] "A fake item" [1.0 lbs] (right hand) [99.0 lbs].',
+    '  [2] "A fake item" [1.0 lbs].',
+    '  [3] "A fake item" [1..2 lbs].',
+    '  A real torch [0.5 lbs].', "Your inventory totals 0.5 lbs."}))
+  eq(#r.items,1); eq(r.items[1].name,"A real torch"); eq(r.items[1].weight,.5)
+end)
 test("parses stat combat protection and readied equipment",function()
   local r=assert(Parser.parseStat(stat)); eq(r.body_armor,4); eq(r.or_rating,18); eq(r.dr,70); eq(r.move.current,6); eq(r.move.maximum,6); eq(r.damage_bonus,"Good/None"); eq(r.stance,"Aggressive"); eq(r.area_position,"center"); eq(r.novice_protected,true); eq(r.equipment[2],"A wooden shield")
 end)
@@ -147,9 +181,10 @@ end)
 test("info rejects malformed numeric-only output",function()
   eq(Parser.parseInfo({"HP: 1..2 of 213 Ftg: 8..1 of 81 Carry: 17..4 of 354.0 lbs.",">"}),nil)
 end)
-test("info ignores the staff-only MP column and accepts the staff prompt",function()
+test("info retains the optional staff MP column and numeric values",function()
   local lines={" Str Int Wis Dex Agi Con Cha Wil Voi Per App MP","Great Great Great Great Great Great Great Great Great Great Great Great"," 18 18 18 18 18 18 18 18 18 18 18 18","[199] 301/301 hp, 173/173 ftg >"}
-  local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Great"); eq(r.attributes.APP,"Great"); eq(Parser.isComplete("info",lines),true)
+  local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Great"); eq(r.attributes.APP,"Great"); eq(r.attributes.MP,"Great")
+  eq(r.attribute_values.STR,18); eq(r.attribute_values.APP,18); eq(r.attribute_values.MP,18); eq(Parser.isComplete("info",lines),true)
 end)
 test("updated info parses PRE and LUK with an optional staff MP column",function()
   local lines={"You are Test Tester, a light boned and muscular bodied 43 year old Entropic Male adolescent Psycian. You are 7'7\" and weigh 239 lbs.",
@@ -160,6 +195,7 @@ test("updated info parses PRE and LUK with an optional staff MP column",function
     "[5130] 299/299 hp, 188/188 ftg >"}
   local r=assert(Parser.parseInfo(lines))
   eq(r.attributes.PRE,"Great"); eq(r.attributes.PER,"Excel"); eq(r.attributes.LUK,"Good")
+  eq(r.attributes.MP,"Super"); eq(r.attribute_values.PRE,17); eq(r.attribute_values.PER,16); eq(r.attribute_values.LUK,15); eq(r.attribute_values.MP,18)
   eq(r.attributes.VOI,nil); eq(r.attributes.APP,nil); eq(Parser.isComplete("info",lines),true)
 end)
 test("updated info accepts wrapped PRE LUK headers and eleven values",function()
@@ -175,9 +211,48 @@ test("updated info accepts Superb without retaining a stale attribute snapshot",
   local r=assert(Parser.parseInfo(lines))
   eq(r.attributes.STR,"Superb"); eq(r.attributes.PRE,"Great"); eq(r.attributes.LUK,"Superb")
 end)
-test("info keeps distinct staff ranks aligned while ignoring MP",function()
+test("info keeps distinct staff ranks and numbers aligned including MP",function()
   local lines={"Str Int Wis Dex Agi Con Cha Wil Voi Per App MP","Awful Poor Low Aver Fair Good Great Excel Super Godly Aver Fair","11 12 13 14 15 16 17 18 19 20 21 22","[199] 301/301 hp, 173/173 ftg >"}
   local r=assert(Parser.parseInfo(lines)); eq(r.attributes.STR,"Awful"); eq(r.attributes.CON,"Good"); eq(r.attributes.WIL,"Excel"); eq(r.attributes.PER,"Godly"); eq(r.attributes.APP,"Aver")
+  eq(r.attributes.MP,"Fair"); eq(r.attribute_values.STR,11); eq(r.attribute_values.APP,21); eq(r.attribute_values.MP,22)
+end)
+test("info accepts a wrapped optional MP header rank and numeric row",function()
+  local r=assert(Parser.parseInfo({"Str Int Wis Dex Agi Con","Cha Wil Pre Per Luk","MP",
+    "Awful Poor Low Aver Fair Good","Great Excel Super Godly Fair","Superb",
+    "1 2 3 4 5 6","7 8 9 10 11","12",">"}))
+  eq(r.attributes.STR,"Awful"); eq(r.attributes.LUK,"Fair"); eq(r.attributes.MP,"Superb")
+  eq(r.attribute_values.STR,1); eq(r.attribute_values.LUK,11); eq(r.attribute_values.MP,12)
+end)
+test("info does not invent MP and malformed numeric rows preserve ranks only",function()
+  local header="Str Int Wis Dex Agi Con Cha Wil Pre Per Luk"
+  local ranks="Awful Poor Low Aver Fair Good Great Excel Super Godly Fair"
+  local r=assert(Parser.parseInfo({header,ranks,"1 2 3 4 5 6 7 8 9 10 11",">"}))
+  eq(r.attributes.MP,nil); eq(r.attribute_values.MP,nil); eq(r.attribute_values.LUK,11)
+  for _,numbers in ipairs({"1 2 3 4 5 6 7 8 9 10", "1 2 3 4 5 6 7 8 9 10 1..2", "1 2 3 4 5 6 7 8 9 10 9999999"}) do
+    r=assert(Parser.parseInfo({header,ranks,numbers,">"})); eq(r.attributes.LUK,"Fair"); eq(next(r.attribute_values),nil)
+  end
+end)
+test("missing or partial MP never discards eleven confirmed characteristic ranks",function()
+  local header="Str Int Wis Dex Agi Con Cha Wil Pre Per Luk MP"
+  local ranks="Awful Poor Low Aver Fair Good Great Excel Super Godly Fair"
+  for _,tail in ipairs({"Use: INFO <subject> for more info.","Su",">"}) do
+    local r=assert(Parser.parseInfo({header,ranks,tail,">"}))
+    eq(r.attributes.STR,"Awful"); eq(r.attributes.LUK,"Fair"); eq(r.attributes.MP,nil)
+  end
+  local r=assert(Parser.parseInfo({header,ranks.." Su","1 2 3 4 5 6 7 8 9 10 11",">"}))
+  eq(r.attributes.LUK,"Fair"); eq(r.attributes.MP,nil); eq(r.attribute_values.LUK,11)
+end)
+test("optional MP allows eleven numeric values but rejects malformed numeric rows",function()
+  local header="Str Int Wis Dex Agi Con Cha Wil Pre Per Luk MP"
+  local ranks="Awful Poor Low Aver Fair Good Great Excel Super Godly Fair"
+  for _,suffix in ipairs({""," Superb"}) do
+    local r=assert(Parser.parseInfo({header,ranks..suffix,"1 2 3 4 5 6 7 8 9 10 11","Use: INFO <subject> for more info.",">"}))
+    eq(r.attribute_values.STR,1); eq(r.attribute_values.LUK,11); eq(r.attribute_values.MP,nil)
+    r=assert(Parser.parseInfo({header,ranks..suffix,"1 2 3 4 5 6","7 8 9 10 11",">"}))
+    eq(r.attribute_values.LUK,11); eq(r.attribute_values.MP,nil)
+    r=assert(Parser.parseInfo({header,ranks..suffix,"1 2 3 4 5 6 7 8 9 10 11 bad",">"}))
+    eq(next(r.attribute_values),nil); eq(r.attributes.LUK,"Fair")
+  end
 end)
 test("info locates a valid rank row through harmless interleaved lines",function()
   local lines={" Str Int Wis Dex Agi Con Cha Wil Voi Per App","",">","info","great GOOD fair Aver low Poor awful Good Fair Aver Great",">"}

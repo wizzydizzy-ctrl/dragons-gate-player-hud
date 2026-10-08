@@ -13,15 +13,18 @@ local function name(value)
 end
 Display.skillId=SkillSort.skillId
 Display.combatCategory=SkillSort.combatCategory
-local shortNames={["sharp weapons"]="Sharps",["blunt weapons"]="Blunts",["pole weapons"]="Poles",
-  ["throw weapons"]="Throws",["missile weapons"]="Missiles"}
+local shortNames={["sharp weapons"]="Sharps",["blunt weapons"]="Blunts",["piercing weapons"]="Piercing",
+  ["thrown weapons"]="Thrown",["missile weapons"]="Missiles",["shield use"]="Shield Use"}
 -- Only catalogued weapon/natural attacks belong to this named group. Do not
 -- treat Identify Weapon Quality, smithing, or every combat skill as a weapon.
 local weaponSkillIds={
-  [2]=true,[3]=true,[4]=true,[5]=true,[6]=true, -- Sharp, Blunt, Pole, Throw, Missile
+  [2]=true,[3]=true,[4]=true,[5]=true,[6]=true, -- Sharp, Blunt, Piercing, Thrown, Missile
   [46]=true,[47]=true,[48]=true,[49]=true,[57]=true, -- Bite, Claw, Web, Breath, Sting
 }
 local filterAliases={
+  ["piercing weapons"]={"pole weapons","poles"},
+  ["thrown weapons"]={"throw weapons","throws"},
+  ["shield use"]={"shield parry"},
   ["identify gems/minerals"]={"id gems/minerals","id gems"},
   ["identify magick"]={"id magick"},
   ["identify weapon quality"]={"id weapon quality","id weapon"},
@@ -34,7 +37,8 @@ for full,aliases in pairs(filterAliases) do
 end
 function Display.displayName(value)
   local cleaned=name(plain(tostring(value or ""))):gsub("%c"," ")
-  return shortNames[cleaned:lower()] or cleaned
+  local canonical=SkillSort.canonicalName(cleaned) or cleaned
+  return shortNames[canonical:lower()] or cleaned
 end
 function Display.normalizeFilter(query)
   if type(query)~="string" then return nil,"skill filter must be a string" end
@@ -51,7 +55,8 @@ function Display.matchesFilter(skillName,query,remain)
   if prefix==nil or type(skillName)~="string" or #skillName>Display.MAX_LINE_BYTES then return false end
   if prefix=="" then return true end
   local cleaned=name(plain(skillName)):lower()
-  local canonical=canonicalNames[cleaned] or cleaned
+  local canonical=SkillSort.canonicalName(cleaned)
+  canonical=canonical and canonical:lower() or canonicalNames[cleaned] or cleaned
   if prefix=="weapons" then return weaponSkillIds[Display.skillId(canonical)]==true end
   -- Category membership is independent of readiness and configured RGB values.
   -- Zero-use skills remain in combat/utility as well as the train-only filter.

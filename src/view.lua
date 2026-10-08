@@ -168,6 +168,7 @@ function View.skillHeader(nameWidth,gaps,levelWidth,useWidth)
 end
 function View.skillDisplayName(value)
   value=tostring(value or ""):gsub("%c"," ")
+  value=SkillSort.canonicalName(value) or value
   value=value:gsub("^Identify%s+","ID "):gsub("Gems/Minerals","Gems"):gsub("%s+Quality$","")
   return value
 end
@@ -205,6 +206,7 @@ function View.attributeStripContent(attributes,t,layout)
   local parts={}; attributes=attributes or {}
   local oldNames=attributes.VOI~=nil or attributes.APP~=nil
   local names=oldNames and {"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"} or {"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
+  if attributes.MP~=nil then names[#names+1]="MP" end
   for _,key in ipairs(names) do
     parts[#parts+1]="<span style='color:"..t.muted.."'>"..key.."</span> <b>"..esc(attributes[key] or "—").."</b>"
   end
@@ -219,15 +221,24 @@ end
 function View.inventoryContent(inventory,vitals,t,layout,capacity)
   inventory=inventory or {}; vitals=vitals or {}
   local rows=View.inventoryRows(inventory.items,capacity); local lines={"<span style='color:"..t.accent.."'><b>INVENTORY</b></span>"}
-  for _,item in ipairs(rows) do if item.overflow then lines[#lines+1]="<span style='color:"..t.muted.."'>"..item.label.."</span>" else lines[#lines+1]=esc(item.name).." <span style='color:"..t.muted.."'>"..esc(item.weight or "").." lb</span>" end end
+  for _,item in ipairs(rows) do if item.overflow then lines[#lines+1]="<span style='color:"..t.muted.."'>"..item.label.."</span>" else lines[#lines+1]=View.inventoryItemContent(item,t) end end
   lines[#lines+1]="<span style='color:"..(t.gold or "#e0b84f").."'><b>"..esc(vitals.gold or 0).."gp</b></span> &nbsp; <span style='color:"..(t.silver or "#c0c0c0").."'><b>"..esc(vitals.silver or 0).."sp</b></span>"
   local carry=vitals.carry or {}; lines[#lines+1]="Carry <b>"..esc(carry.current or 0).."/"..esc(carry.maximum or 0).."</b> <span style='color:"..t.muted.."'><b>"..esc(carry.percent or 0).."%</b></span>"
   return View.withFont(table.concat(lines,"<br>"),layout.inventory_font)
+end
+local function inventoryLocation(item)
+  return item.location or (item.section=="equipped" and "equipped" or nil)
+end
+function View.inventoryItemContent(item,t)
+  local location=inventoryLocation(item)
+  return esc(item.name or "").."  <span style='color:"..t.muted.."'>"..esc(item.weight or "").." lb"..
+    (location and " · "..esc(location) or "").."</span>"
 end
 function View.inventoryRequiredColumns(items)
   local columns=36
   for _,item in ipairs(type(items)=="table" and items or {}) do
     local text=tostring(item.name or "").."  "..tostring(item.weight or "").." lb"
+    local location=inventoryLocation(item); if location then text=text.." · "..tostring(location) end
     columns=math.max(columns,math.min(160,#text))
   end
   return columns
@@ -2712,10 +2723,10 @@ end
 function View:renderInventory(s)
   local t=self.settings.theme; local layout=self.layout; if not layout then return end
   local inventory=s.inventory or {}; local v=s.vitals or {}; local carry=v.carry or {}; local signature={tostring(inventory.total_weight or ""),tostring(v.gold or 0),tostring(v.silver or 0),tostring(carry.current or ""),tostring(carry.maximum or ""),tostring(carry.percent or "")}
-  for _,item in ipairs(inventory.items or {}) do signature[#signature+1]=tostring(item.name or "").."\31"..tostring(item.weight or "") end
+  for _,item in ipairs(inventory.items or {}) do signature[#signature+1]=tostring(item.name or "").."\31"..tostring(item.weight or "").."\31"..tostring(item.section or "").."\31"..tostring(item.location or "") end
   signature=table.concat(signature,"\30"); if signature==self.inventory_signature then return end; self.inventory_signature=signature
   self.inventory_title:echo("<b>INVENTORY</b>")
-  local lines={}; for _,item in ipairs(inventory.items or {}) do lines[#lines+1]=esc(item.name or "").."  <span style='color:"..t.muted.."'>"..esc(item.weight or "").." lb</span>" end
+  local lines={}; for _,item in ipairs(inventory.items or {}) do lines[#lines+1]=View.inventoryItemContent(item,t) end
   self:renderInventoryFooter(v)
   self.inventory_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.inventory_content:move(0,0); self:resizeInventoryContent(#lines,layout.list_row_height*5); self.inventory_content:show()
 end

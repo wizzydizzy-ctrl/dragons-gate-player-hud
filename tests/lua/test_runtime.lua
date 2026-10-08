@@ -2489,6 +2489,8 @@ local function skillPrefixText(f,firstRow)
   return table.concat(lines,"\n")
 end
 local function assertFullSkillSnapshot(hud)
+  -- Collection retains legacy server names even when formatted labels use the
+  -- current canonical names. Raw formatting-OFF output must stay unchanged.
   for _,snapshot in ipairs({assert(hud.collector.snapshot.skills),assert(hud.last_state.skills)}) do
     eq(#snapshot.items,4)
     local expected={["Sharp Weapons"]={400,4},Dodging={50,5},["Shield Parry"]={80,3},["First Aid"]={0,2}}
@@ -2501,7 +2503,8 @@ local function assertFullSkillSnapshot(hud)
 end
 local function assertSkillPrefixResult(f,formatted)
   local text=skillPrefixText(f)
-  assert(text:find(formatted and "Sharps" or "Sharp Weapons",1,true)); assert(text:find("Shield Parry",1,true))
+  assert(text:find(formatted and "Sharps" or "Sharp Weapons",1,true))
+  assert(text:find(formatted and "Shield Use" or "Shield Parry",1,true))
   eq(text:find("Dodging",1,true),nil); eq(text:find("First Aid",1,true),nil)
   eq(f.skillConsole[4],"An enemy attacks."); eq(f.skillConsole[7],">")
 end
@@ -2558,13 +2561,13 @@ test("skill prefix filters one response after full raw capture in either trigger
         for index,line in ipairs(skillPrefixLines) do eq(raw[index],index==#skillPrefixLines and boundary or line) end
         if boundary==">" then assertFullSkillSnapshot(hud) end
         flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
-        local text=skillPrefixText(f); assert(text:find("Sharps",1,true)); assert(text:find("Shield Parry",1,true))
+        local text=skillPrefixText(f); assert(text:find("Sharps",1,true)); assert(text:find("Shield Use",1,true))
         eq(text:find("Dodging",1,true),nil); eq(text:find("First Aid",1,true),nil)
         eq(f.skillConsole[4],"An enemy attacks."); eq(f.skillConsole[7],boundary)
         eq(hud.skill_display:filterPending(),false); eq(#f.skillBatches,1)
         f:sendCommand("skill"); skillPrefixResponse(f,hud,displayFirst,20); flushSkillPrefix(f,hud)
         local full=skillPrefixText(f,20)
-        for _,name in ipairs({"Sharps","Shield Parry","Dodging","First Aid"}) do assert(full:find(name,1,true)) end
+        for _,name in ipairs({"Sharps","Shield Use","Dodging","First Aid"}) do assert(full:find(name,1,true)) end
         assertFullSkillSnapshot(hud); eq(#f.sentCommands,2)
       end)
     end
@@ -2578,7 +2581,7 @@ test("skill all displays every skill and clears one request ownership with forma
       eq(f.sentCommands[1],"skill"); eq(#f.sentCommands,1)
       skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
       local text=skillPrefixText(f)
-      for _,name in ipairs({enabled and "Sharps" or "Sharp Weapons","Shield Parry","Dodging","First Aid"}) do
+      for _,name in ipairs({enabled and "Sharps" or "Sharp Weapons",enabled and "Shield Use" or "Shield Parry","Dodging","First Aid"}) do
         assert(text:find(name,1,true))
       end
       eq(hud.skill_display:filterPending(),false); eq(hud:mainSkillsEnabled(),enabled)
@@ -2663,7 +2666,7 @@ test("manual bare skill clears waiting collecting and deferred filters including
       late(); eq(#f.skillBatches,0); eq(f.skillSendOwnership[2],false); eq(f.sentCommands[2],"  sKiLl  ")
       skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
       local text=skillPrefixText(f,20)
-      for _,name in ipairs({"Sharps","Shield Parry","Dodging","First Aid"}) do assert(text:find(name,1,true)) end
+      for _,name in ipairs({"Sharps","Shield Use","Dodging","First Aid"}) do assert(text:find(name,1,true)) end
     end)
   end
 end)
@@ -2776,7 +2779,7 @@ test("skill filter runtime audit one result and no match retain every sidebar sk
             f:sendCommand("skill"); skillPrefixResponse(f,hud,displayFirst,20); flushSkillPrefix(f,hud)
             assertFullSkillSnapshot(hud); eq(#hud.view.state.skills.items,4)
             local full=skillPrefixText(f,20)
-            for _,name in ipairs({enabled and "Sharps" or "Sharp Weapons","Dodging","Shield Parry","First Aid"}) do
+            for _,name in ipairs({enabled and "Sharps" or "Sharp Weapons","Dodging",enabled and "Shield Use" or "Shield Parry","First Aid"}) do
               assert(full:find(name,1,true),name.." missing from the subsequent full query")
             end
             eq(#f.sentCommands,2); eq(f.skillSendOwnership[2],false)
@@ -2822,7 +2825,7 @@ test("skill filter runtime audit expired query leaves the recovering collector o
     local ok,err=hud:requestSkills("fi"); eq(ok,nil); assert(err:lower():find("refresh",1,true))
     eq(#f.sentCommands,1); eq(hud.collector.timeout,timer)
     skillPrefixResponse(f,hud); flushSkillPrefix(f,hud); assertFullSkillSnapshot(hud)
-    for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
+    for _,name in ipairs({"Sharps","Dodging","Shield Use","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
     eq(f.timers[timer],nil); assert(hud:requestSkills("fi")); eq(#f.sentCommands,2)
   end)
 end)
@@ -2919,7 +2922,7 @@ test("skill filter runtime audit only owned package install and uninstall cancel
         eq(f.timers[timer],nil); late(); eq(#f.skillBatches,0)
         f:sendCommand("skill"); skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud)
         assertFullSkillSnapshot(hud)
-        for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f,20):find(name,1,true)) end
+        for _,name in ipairs({"Sharps","Dodging","Shield Use","First Aid"}) do assert(skillPrefixText(f,20):find(name,1,true)) end
         eq(display:filterPending(),false)
       end)
     end
@@ -3031,8 +3034,8 @@ test("skill weapons runtime exact group preserves snapshots formatted styles raw
     flushSkillPrefix(f,hud)
     local expected={
       {6,"Missiles",5,400}, {3,"Blunts",4,0}, {47,"Clawing",4,50}, {2,"Sharps",4,400},
-      {48,"Webbing",3,0}, {49,"Breath Weapon",3,25}, {5,"Throws",3,50}, {57,"Stinging",3,100},
-      {4,"Poles",2,100}, {46,"Biting",1,10},
+      {48,"Webbing",3,0}, {49,"Breath Weapon",3,25}, {5,"Thrown",3,50}, {57,"Stinging",3,100},
+      {4,"Piercing",2,100}, {46,"Biting",1,10},
     }
     eq(f.replacedSkills[1].display_text,string.format("%6s  %-13s  %3s  %4s","Number","Skill","LVL","USES"))
     local rows=weaponOutputRows(f); eq(#rows,#expected)
@@ -3172,8 +3175,8 @@ local groupedSkillCases={
 local function assertGroupedSkillRows(f,case,enabled)
   local expected=enabled and case.sorted or case.raw
   local rows=weaponOutputRows(f); eq(#rows,#expected)
-  local short={ ["Sharp Weapons"]="Sharps",["Blunt Weapons"]="Blunts",["Pole Weapons"]="Poles",
-    ["Throw Weapons"]="Throws",["Missile Weapons"]="Missiles" }
+  local short={ ["Sharp Weapons"]="Sharps",["Blunt Weapons"]="Blunts",["Pole Weapons"]="Piercing",
+    ["Throw Weapons"]="Thrown",["Missile Weapons"]="Missiles",["Shield Parry"]="Shield Use" }
   for index,itemIndex in ipairs(expected) do
     local item=groupedSkillItems[itemIndex]; local row=rows[index]
     if enabled then
@@ -3423,7 +3426,7 @@ test("saved skill filters OFF leaves bare skill formatting and full sidebar coll
         eq(#hud.view.state.skills.items,4); eq(hud.skill_display:filterPending(),false)
         eq(#f.skillBatches,formatted and 1 or 0)
         if formatted then
-          for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
+          for _,name in ipairs({"Sharps","Dodging","Shield Use","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
         else
           for row,line in ipairs(skillPrefixLines) do eq(f.skillConsole[row],line) end
         end
@@ -3462,7 +3465,7 @@ test("saving skill filters OFF cancels waiting collecting and deferred display c
       -- A fresh bare request must not inherit the canceled filter.
       f:sendCommand("skill"); skillPrefixResponse(f,hud,false,20); flushSkillPrefix(f,hud)
       assertFullSkillSnapshot(hud)
-      for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f,20):find(name,1,true)) end
+      for _,name in ipairs({"Sharps","Dodging","Shield Use","First Aid"}) do assert(skillPrefixText(f,20):find(name,1,true)) end
       late(); eq(#f.skillBatches,1); eq(#f.sentCommands,2)
     end)
   end
@@ -3610,7 +3613,7 @@ test("resaving skill filters OFF while changing sort preserves an in flight bare
       eq(display:filterPending(),false); eq(display.enabled,true)
       if phase=="collecting" then skillPrefixResponse(f,hud,false,1,">",3) end
       flushSkillPrefix(f,hud); eq(#f.skillBatches,1); assertFullSkillSnapshot(hud)
-      for _,name in ipairs({"Sharps","Dodging","Shield Parry","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
+      for _,name in ipairs({"Sharps","Dodging","Shield Use","First Aid"}) do assert(skillPrefixText(f):find(name,1,true)) end
       eq(f.savedDisplaySettings.skill_filter,false); eq(hud:skillFilterEnabled(),false)
     end)
   end

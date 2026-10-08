@@ -78,6 +78,281 @@ test("main skills authoritative 57 identifiers are unique and normalize case whi
   eq(Display.format({name="* Sharp Weapons",level=4,remain=400}),"     2  Sharps    4   400")
 end)
 
+
+
+-- Synthetic permanent fixture: only the 22 supplied TRAIN catalog pairs.
+-- Levels and remaining uses below are test data, not player records.
+local latestTrainCatalog={
+  {id=16,name="Detect Traps",label="Detect Traps"},
+  {id=33,name="Play Instruments",label="Play Instruments"},
+  {id=50,name="Identify Armor Quality",label="Identify Armor Quality"},
+  {id=40,name="Psionics",label="Psionics"},
+  {id=42,name="First Aid",label="First Aid"},
+  {id=22,name="Hiding",label="Hiding"},
+  {id=3,name="Blunt Weapons",label="Blunts",aliases={"Blunts"}},
+  {id=1,name="Brawling",label="Brawling"},
+  {id=2,name="Sharp Weapons",label="Sharps",aliases={"Sharps"}},
+  {id=4,name="Piercing Weapons",label="Piercing",aliases={"Pole Weapons","Poles","Piercing"}},
+  {id=5,name="Thrown Weapons",label="Thrown",aliases={"Throw Weapons","Throws","Thrown"}},
+  {id=6,name="Missile Weapons",label="Missiles",aliases={"Missiles"}},
+  {id=7,name="Shield Use",label="Shield Use",aliases={"Shield Parry"}},
+  {id=8,name="Quickdraw",label="Quickdraw"},
+  {id=13,name="Bargaining",label="Bargaining"},
+  {id=54,name="Spellcasting",label="Spellcasting"},
+  {id=39,name="Disarming",label="Disarming"},
+  {id=29,name="Stealth",label="Stealth"},
+  {id=23,name="Swimming",label="Swimming"},
+  {id=14,name="Identify Gems/Minerals",label="Identify Gems/Minerals"},
+  {id=31,name="Identify Magick",label="Identify Magick"},
+  {id=32,name="Identify Weapon Quality",label="Identify Weapon Quality"},
+}
+local function assertLatestTrainRow(text,entry,level,remain)
+  assert(not text:find("?",1,true),"known TRAIN skill rendered with ?")
+  local id,label,actualLevel,actualRemain=text:match("^%s*(%S+)%s%s+(.-)%s%s+(%d+)%s+(%d+)$")
+  eq(id,tostring(entry.id)); eq(label,entry.label)
+  eq(tonumber(actualLevel),level); eq(tonumber(actualRemain),remain)
+end
+local function latestTrainFixture(variant,mixed,indices)
+  local result={}
+  for index,entry in ipairs(latestTrainCatalog) do
+    local value=entry.name
+    if variant=="legacy" then value=entry.aliases and entry.aliases[1] or value
+    elseif variant=="labels" then value=entry.label
+    elseif variant=="decorated" then
+      value="\27[32m ** "..(entry.aliases and entry.aliases[1] or value):gsub(" ","   ").." \27[0m\r"
+    end
+    result[index]={name=value,id=entry.id,label=entry.label,level=3,remain=mixed and index%2==0 and 17 or 0}
+  end
+  if not indices then return result end
+  local subset={}; for _,index in ipairs(indices) do subset[#subset+1]=result[index] end
+  return subset
+end
+local function assertLatestTrainTable(variant,query,direction,mixed,indices,expectedIds)
+  local fixture=latestTrainFixture(variant,mixed,indices)
+  local f,d=fakeSkills(true,{primary="number",direction=direction,secondary="none"})
+  local colors,sourceLines,byId={},{},{}
+  f.api.setFgColor=function(r,g,b) colors[f.cursor]=table.concat({r,g,b},",") end
+  if query then assert(d:requestFilter(query)) end
+  f:feed("Skill Remain Level",1)
+  for index,skill in ipairs(fixture) do
+    f:feed(" "..skill.name.."       "..skill.remain.." "..skill.level,index+1)
+    sourceLines[index]=f.lines[index+1]; byId[skill.id]=skill
+  end
+  eq(f.replacements,0); eq(f.deletions,0)
+  f:feed(">",#fixture+2)
+  local rows=assert(d.pending); eq(#rows,#fixture+1)
+  eq(f.replacements,0); eq(f.deletions,0)
+  for index,source in ipairs(sourceLines) do
+    eq(rows[index+1].source_line,source); eq(f.lines[index+1],source)
+  end
+  f:advance(0); eq(f.lastRows,rows)
+  assert(f.lines[1]:match("^Number%s+Skill%s+LVL%s+USES$"))
+  local seen={}
+  for index,id in ipairs(expectedIds) do
+    local skill=assert(byId[id],"output invented an unpossessed skill")
+    assert(not seen[id]); seen[id]=true
+    local row=rows[index+1]; eq(row.remove,nil)
+    assertLatestTrainRow(row.display_text,skill,skill.level,skill.remain)
+    eq(f.lines[index+1],row.display_text)
+    eq(skill.remain,0); eq(row.category,"ready"); eq(row.style_id,"skill_ready")
+    eq(colors[index+1],"80,210,120")
+  end
+  for index=#expectedIds+2,#rows do eq(rows[index].remove,true); eq(rows[index].display_text,nil) end
+  eq(f.replacements,#expectedIds+1); eq(f.deletions,#fixture-#expectedIds)
+  eq(f.lines[#expectedIds+2],">"); eq(f.lines[#expectedIds+3],nil)
+  eq(d.pending,nil); eq(d:filterPending(),false); eq(next(f.timers),nil)
+  d:shutdown()
+end
+
+test("latest TRAIN formatted main rows have each exact ID and never ? for names and legacy aliases",function()
+  eq(#latestTrainCatalog,22)
+  for _,entry in ipairs(latestTrainCatalog) do
+    local names={entry.name}
+    for _,alias in ipairs(entry.aliases or {}) do names[#names+1]=alias end
+    for _,value in ipairs(names) do
+      for _,skillName in ipairs({value,"\27[32m ** "..value:gsub(" "," \t ").." \27[0m\r"}) do
+        eq(Display.skillId(skillName),entry.id); eq(Display.displayName(skillName),entry.label)
+        for _,remain in ipairs({0,17}) do
+          assertLatestTrainRow(Display.format({name=skillName,level=3,remain=remain}),entry,3,remain)
+          eq(Display.matchesFilter(skillName,"train",remain),remain==0)
+        end
+      end
+    end
+  end
+end)
+
+test("latest TRAIN complete main output retains exactly 22 possessed rows with IDs and zero use green",function()
+  local ascending={1,2,3,4,5,6,7,8,13,14,16,22,23,29,31,32,33,39,40,42,50,54}
+  local descending={54,50,42,40,39,33,32,31,29,23,22,16,14,13,8,7,6,5,4,3,2,1}
+  for _,variant in ipairs({"current","legacy","labels","decorated"}) do
+    for _,query in ipairs({false,"train"}) do
+      assertLatestTrainTable(variant,query,"asc",false,nil,ascending)
+      assertLatestTrainTable(variant,query,"desc",false,nil,descending)
+    end
+  end
+end)
+
+test("latest TRAIN filter excludes positive uses and never invents skills absent from a possessed subset",function()
+  for _,variant in ipairs({"current","legacy","labels","decorated"}) do
+    assertLatestTrainTable(variant,"train","asc",true,nil,{2,3,5,7,13,16,23,31,39,42,50})
+    assertLatestTrainTable(variant,"train","asc",false,{1,13,16},{7,16,54})
+    assertLatestTrainTable(variant,"train","asc",true,{1,13,16},{7,16})
+  end
+end)
+
+test("skill renamed full names labels and legacy prefixes work in both directions with literal matching",function()
+  local cases={
+    {id=4,label="Piercing",weapon=true,names={"Piercing Weapons","Piercing","Pole Weapons","Poles"},
+      queries={"p","pi","pier","piercing","piercing weapons","po","pole","pole w","pole weapons","poles"}},
+    {id=5,label="Thrown",weapon=true,names={"Thrown Weapons","Thrown","Throw Weapons","Throws"},
+      queries={"th","throw","throw w","throw weapons","throws","thrown","thrown w","thrown weapons"}},
+    {id=7,label="Shield Use",weapon=false,names={"Shield Use","Shield Parry"},
+      queries={"sh","shield","shield u","shield use","shield p","shield par","shield parry"}},
+  }
+  for _,case in ipairs(cases) do
+    for _,skillName in ipairs(case.names) do
+      local messy="\27[32m ** "..skillName:upper():gsub(" "," \t ").." \27[0m\r"
+      eq(Display.skillId(messy),case.id); eq(Display.displayName(messy),case.label)
+      for _,remain in ipairs({0,17}) do
+        eq(Display.matchesFilter(messy,"weapons",remain),case.weapon)
+        eq(Display.matchesFilter(messy,"combat",remain),true)
+        eq(Display.matchesFilter(messy,"utility",remain),false)
+        eq(Display.matchesFilter(messy,"train",remain),remain==0)
+        eq(Display.category({name=messy,remain=remain}),remain==0 and "ready" or "combat")
+        for _,query in ipairs(case.queries) do
+          eq(Display.matchesFilter(messy,"  "..query:upper():gsub(" ","   ").."  ",remain),true)
+        end
+        for _,query in ipairs({"weaponsx","pole.*","throw.*","shield.*","parry","weapons","use","polesx",
+          "thrown weaponsx","shield parryx","pole;quit"}) do
+          if query~="weapons" then eq(Display.matchesFilter(messy,query,remain),false) end
+        end
+      end
+    end
+  end
+  for _,skillName in ipairs({"Future Piercing Weapons","Piercing Weapons Training","Thrown Weapons Training","Shield Usage"}) do
+    eq(Display.skillId(skillName),nil)
+    eq(Display.matchesFilter(skillName,"weapons",17),false)
+    eq(Display.matchesFilter(skillName,"combat",17),false)
+    eq(Display.matchesFilter(skillName,"utility",17),true)
+    for _,query in ipairs({"pole","poles","throw weapons","throws","shield parry"}) do
+      eq(Display.matchesFilter(skillName,query,17),false)
+    end
+  end
+  eq(Display.matchesFilter("Piercing Weapons","shield"),false)
+  eq(Display.matchesFilter("Shield Use","pole"),false)
+  eq(Display.matchesFilter("Thrown Weapons","piercing"),false)
+  eq(Display.displayName(" ** mArTiAl aRtS "),"mArTiAl aRtS")
+  eq(Display.displayName(" ** Future Art "),"Future Art")
+end)
+
+-- Synthetic rows include both generations together to guard against collapsing
+-- possessed rows that share a stable ID. No player logs are needed.
+local function renamedSkillRaw(skill)
+  return " "..skill.name.."       "..skill.remain.." "..skill.level
+end
+local function renamedSkillFeed(f,first,skills)
+  f:feed("Skill Remain Level",first)
+  for index,skill in ipairs(skills) do f:feed(renamedSkillRaw(skill),first+index) end
+  f:feed(">",first+#skills+1)
+end
+local function renamedSkillFixture(remain)
+  return {
+    {name="Shield Use",id=7,label="Shield Use",remain=remain,level=3},
+    {name="Thrown Weapons",id=5,label="Thrown",remain=remain,level=3},
+    {name="Piercing Weapons",id=4,label="Piercing",remain=remain,level=3},
+    {name="Shield Parry",id=7,label="Shield Use",remain=remain,level=3},
+    {name="Throw Weapons",id=5,label="Thrown",remain=remain,level=3},
+    {name="Pole Weapons",id=4,label="Piercing",remain=remain,level=3},
+    {name="Swimming",id=23,label="Swimming",remain=0,level=3},
+    {name="Future Piercing Weapons",label="Future Piercing Weapons",remain=17,level=3},
+  }
+end
+local function assertRenamedSkillRows(f,d,fixture,order,enabled)
+  local rows=assert(d.pending); eq(#rows,#fixture+1)
+  eq(rows[1].category,"neutral"); eq(rows[1].style_id,nil)
+  for index,fixtureIndex in ipairs(order) do
+    local skill=fixture[fixtureIndex]; local row=rows[index+1]; eq(row.remove,nil)
+    if enabled then
+      local id,label,level,remain=row.display_text:match("^%s*(%S+)%s%s+(.-)%s%s+(%d+)%s+(%d+)$")
+      eq(id,tostring(skill.id or "?")); eq(label,skill.label)
+      eq(tonumber(level),skill.level); eq(tonumber(remain),skill.remain)
+      eq(#row.display_text,#rows[1].display_text)
+      local category=skill.remain==0 and "ready" or (fixtureIndex<=6 and "combat" or "utility")
+      eq(row.category,category); eq(row.style_id,"skill_"..category)
+    else
+      eq(row.display_text,renamedSkillRaw(skill)); eq(row.category,"neutral"); eq(row.style_id,nil)
+    end
+  end
+  for index=2,#rows do
+    eq(rows[index].source_line,renamedSkillRaw(fixture[index-1]))
+    if index>#order+1 then eq(rows[index].remove,true); eq(rows[index].display_text,nil) end
+  end
+  local colors={}; f.api.setFgColor=function(r,g,b) colors[f.cursor]=table.concat({r,g,b},",") end
+  f:advance(0); eq(f.lastRows,rows); eq(f.deletions,#fixture-#order); eq(f.replacements,#order+1)
+  for index,fixtureIndex in ipairs(order) do
+    eq(f.lines[index+1],rows[index+1].display_text)
+    if enabled then eq(colors[index+1]=="80,210,120",fixture[fixtureIndex].remain==0) end
+  end
+  eq(f.lines[#order+2],">"); eq(f.lines[#order+3],nil)
+  eq(d.enabled,enabled); eq(d:filterPending(),false); eq(next(f.timers),nil)
+end
+
+test("skill renamed rows retain number name category and ready sorting without collapsing aliases",function()
+  for _,remain in ipairs({0,17}) do
+    local fixture=renamedSkillFixture(remain)
+    for _,case in ipairs({
+      {sort={primary="number",direction="asc",secondary="none"},order={3,6,2,5,1,4,7,8}},
+      {sort={primary="number",direction="desc",secondary="none"},order={7,1,4,2,5,3,6,8}},
+      {sort={primary="name",direction="asc",secondary="none"},order={8,3,6,1,4,7,2,5}},
+      {sort={primary="name",direction="desc",secondary="none"},order={2,5,7,1,4,3,6,8}},
+      {sort={primary="category",direction="asc",secondary="number",secondary_direction="asc"},order={3,6,2,5,1,4,7,8}},
+      {sort={primary="ready",direction="asc",secondary="number",secondary_direction="asc"},
+        order=remain==0 and {3,6,2,5,1,4,7,8} or {7,3,6,2,5,1,4,8}},
+    }) do
+      local f,d=fakeSkills(true,case.sort)
+      renamedSkillFeed(f,1,fixture); assertRenamedSkillRows(f,d,fixture,case.order,true)
+      for _,skill in ipairs(fixture) do eq(skill.remain,skill.id==23 and 0 or (skill.id and remain or 17)) end
+      d:shutdown()
+    end
+  end
+end)
+
+test("skill renamed filtered tables honor new and old full prefix aliases in either formatting mode",function()
+  for _,enabled in ipairs({true,false}) do
+    for _,remain in ipairs({0,17}) do
+      local fixture=renamedSkillFixture(remain)
+      local all=enabled and {3,6,2,5,1,4,7,8} or {1,2,3,4,5,6,7,8}
+      local combat=enabled and {3,6,2,5,1,4} or {1,2,3,4,5,6}
+      local weapons=enabled and {3,6,2,5} or {2,3,5,6}
+      local train=remain==0 and (enabled and {3,6,2,5,1,4,7} or {1,2,3,4,5,6,7}) or {7}
+      local cases={{query=false,order=all},{query="all",order=all},{query="weapons",order=weapons},
+        {query="combat",order=combat},{query="utility",order={7,8}},{query="train",order=train}}
+      for _,query in ipairs({"pole weapons","poles","po","pole w","piercing weapons","piercing","pier"}) do
+        cases[#cases+1]={query=query,order={3,6}}
+      end
+      for _,query in ipairs({"throw weapons","throws","throw w","thrown weapons","thrown","th"}) do
+        cases[#cases+1]={query=query,order={2,5}}
+      end
+      for _,query in ipairs({"shield parry","shield p","shield use","shield u"}) do
+        cases[#cases+1]={query=query,order={1,4}}
+      end
+      for _,case in ipairs(cases) do
+        local f,d=fakeSkills(enabled,{primary="number",direction="asc",secondary="none"})
+        -- Disabled bare output is intentionally untouched; an explicit all
+        -- request still exercises the complete raw response in that mode.
+        if enabled or case.query then
+          if case.query then assert(d:requestFilter(case.query)) end
+          renamedSkillFeed(f,1,fixture); assertRenamedSkillRows(f,d,fixture,case.order,enabled)
+        else
+          renamedSkillFeed(f,1,fixture); eq(f.replacements,0); eq(f.deletions,0); eq(d.pending,nil)
+          for index,skill in ipairs(fixture) do eq(f.lines[index+1],renamedSkillRaw(skill)) end
+        end
+        d:shutdown()
+      end
+    end
+  end
+end)
+
 test("main skills only formats possessed rows after completion and keeps raw observers unchanged",function()
   local f,d=fakeSkills(); local raw=" Sharp Weapons             400    4   "
   f:feed("Skill                     Remain Level",10); f:feed(raw,11)

@@ -38,12 +38,29 @@ local function infoBlock(lines,startPattern,limit)
 end
 
 function Parser.parseInventory(lines)
-  local result={items={}}
+  local result={items={}}; local section
   for _,raw in ipairs(lines or {}) do
     local line=clean(raw)
-    local name,weight=line:match('^%s*%[%s*%d+%]%s+"(.-)".-%[([%d%.]+)%s+lbs?%]%s*$')
-    if not name then name,weight=line:match("^%s+(.+)%s+%[([%d%.]+)%s+lbs?%]%.$") end
-    if name then result.items[#result.items+1]={name=name,weight=tonumber(weight)} end
+    if trim(line)=="Items equipped:" then section="equipped"
+    elseif trim(line)=="Items carried:" then section="carried" end
+    local name,weight,tail=line:match('^%s*%[%s*%d+%]%s+"(.-)".-%[([%d%.]+)%s+lbs?%](.-)%s*$')
+    local location
+    if name then
+      tail=trim(tail)
+      if tail~="" then
+        -- Location is display data, never a command. Reject unrelated trailing
+        -- prose instead of silently accepting an incomplete inventory row.
+        location=tail:match("^%(([^%(%)]-)%)$")
+        if location then location=trim(location) end
+        if not location or location=="" or #location>80 or location:find("%c") then name=nil end
+      end
+    end
+    -- An indexed row that failed validation is not a legacy sentence row.
+    if not name and not line:match("^%s*%[") then
+      name,weight=line:match("^%s+(.+)%s+%[([%d%.]+)%s+lbs?%]%.$")
+    end
+    weight=tonumber(weight)
+    if name and weight then result.items[#result.items+1]={name=name,weight=weight,section=section,location=location} end
     local total=line:match("^Your inventory totals ([%d%.]+) lbs?%.$")
     if total then result.total_weight=tonumber(total); return result end
   end
@@ -150,7 +167,7 @@ function Parser.parseInfo(lines)
   local carry,carryMax=vitals:match("Carry:%s*(%d+%.?%d*)%s+of%s+(%d+%.?%d*)%s+lbs?%.")
   if hp or fatigue or carry then result.vitals={hp=tonumber(hp),hp_max=tonumber(hpMax),fatigue=tonumber(fatigue),fatigue_max=tonumber(fatigueMax),carry=tonumber(carry),carry_max=tonumber(carryMax)} end
 
-  local headerEnd,headerAttrs
+  local headerEnd,headerAttrs,baseCount
   for _,attrs in ipairs(ATTR_ORDERS) do
     for start=1,#lines do
       local expected=1
@@ -163,7 +180,16 @@ function Parser.parseInfo(lines)
             expected=expected+1
           end
         end
-        if expected==#attrs+1 then headerEnd=index; headerAttrs=attrs; break end
+        if expected==#attrs+1 then
+          headerEnd=index; headerAttrs={}; baseCount=#attrs
+          for n,key in ipairs(attrs) do headerAttrs[n]=key end
+          -- MP is optional INFO data, not a twelfth autoroller characteristic.
+          if words[#words]=="mp" then headerAttrs[#headerAttrs+1]="MP"
+          elseif lines[index+1] and trim(lines[index+1]):lower()=="mp" then
+            headerAttrs[#headerAttrs+1]="MP"; headerEnd=index+1
+          end
+          break
+        end
         if expected==0 then break end
       end
       if headerEnd then break end
@@ -179,10 +205,43 @@ function Parser.parseInfo(lines)
           local rank=RANKS[word:lower()]; if not rank then valid=false; break end
           values[#values+1]=rank; found=found+1
         end
-        if not valid or found==0 then break end
+        if not valid or found==0 then
+          -- The optional MP value can be absent or incomplete without losing
+          -- the eleven characteristic ranks already confirmed before it.
+          if not valid and #values>=baseCount and found>0 then index=index+1 end
+          break
+        end
         index=index+1
       end
-      if valid and #values>=#headerAttrs then for n,key in ipairs(headerAttrs) do result.attributes[key]=values[n] end; break end
+      if #values>=baseCount and #values<=#headerAttrs then
+        for n,key in ipairs(headerAttrs) do result.attributes[key]=values[n] end
+        result.attribute_values={}
+        -- Preserve numeric values when the server supplies them. A malformed
+        -- or partial numeric row must not erase the confirmed rank strings.
+        local numbers={}; local cursor=index; local numericValid=true
+        while #numbers<#headerAttrs and cursor<=math.min(#lines,index+#headerAttrs) do
+          local numericLine=trim(lines[cursor])
+          if numericLine=="" then break end
+          local row={}
+          for token in numericLine:gmatch("%S+") do
+            if not token:match("^%d+$") or #token>6 then numericValid=false; break end
+            row[#row+1]=tonumber(token)
+          end
+          if not numericValid then
+            -- Help/prompt text ends a complete eleven-value row when optional
+            -- MP is absent. Never accept a partly numeric malformed row.
+            if #row==0 and #numbers>=baseCount then numericValid=true end
+            break
+          end
+          if #row==0 then break end
+          for _,number in ipairs(row) do numbers[#numbers+1]=number end
+          cursor=cursor+1
+        end
+        if numericValid and (#numbers==baseCount or #numbers==#headerAttrs) then
+          for n,key in ipairs(headerAttrs) do result.attribute_values[key]=numbers[n] end
+        end
+        break
+      end
     end
   end
   if not result.physical.age and not result.attributes.STR and not result.vitals then return nil,"unrecognized info response" end

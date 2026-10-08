@@ -33,8 +33,8 @@ end
 
 -- Authoritative game identifiers, never possessed skills or display ordinals.
 local catalog={
-  "Brawling","Sharp Weapons","Blunt Weapons","Pole Weapons","Throw Weapons","Missile Weapons",
-  "Shield Parry","Quickdraw","Dodging","Focus Force","Berserk Attack","Parry Blows","Bargaining",
+  "Brawling","Sharp Weapons","Blunt Weapons","Piercing Weapons","Thrown Weapons","Missile Weapons",
+  "Shield Use","Quickdraw","Dodging","Focus Force","Berserk Attack","Parry Blows","Bargaining",
   "Identify Gems/Minerals","Climbing","Detect Traps","Remove Traps","Skinning","Disguise","Pick Locks",
   "Riding","Hiding","Swimming","Alchemy","Backstab","Martial Arts","Picking Pockets","Shoplifting",
   "Stealth","Poisoning","Identify Magick","Identify Weapon Quality","Play Instruments","Armor Smithing",
@@ -48,7 +48,9 @@ local function cleanName(value)
     :match("^%s*(.-)%s*$"):gsub("^[%*%s]+",""):gsub("%s+"," "):lower())
 end
 local ids={}; for id,value in ipairs(catalog) do ids[cleanName(value)]=id end
-local aliases={sharps=2,blunts=3,poles=4,throws=5,missiles=6}
+-- Legacy full names and labels keep their original game IDs after renames.
+local aliases={sharps=2,blunts=3,piercing=4,thrown=5,missiles=6,
+  ["pole weapons"]=4,poles=4,["throw weapons"]=5,throws=5,["shield parry"]=7}
 local combatIds={
   [1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true,[9]=true,[10]=true,[11]=true,[12]=true,
   [25]=true,[26]=true,[30]=true,[39]=true,[40]=true,[41]=true,[42]=true,[43]=true,[44]=true,[45]=true,[46]=true,
@@ -58,6 +60,10 @@ function SkillSort.skillId(value)
   if type(value)~="string" or #value>2048 then return nil end
   local cleaned=cleanName(value)
   return ids[cleaned] or aliases[cleaned]
+end
+function SkillSort.canonicalName(value)
+  local id=SkillSort.skillId(value)
+  return id and catalog[id] or nil
 end
 function SkillSort.combatCategory(skill)
   local value=type(skill)=="table" and skill.name or skill

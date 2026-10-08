@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.92.
+Applies to DGHUD v0.3.93.
 
 Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
@@ -41,13 +41,15 @@ For setup and repair steps, see [Installation and First Start](INSTALLATION_AND_
 | --- | --- |
 | `skill` | Request every possessed skill and refresh the full Skills sidebar. |
 | `skill all` | Show every possessed skill, clearing any previous filter. |
-| `skill weapons` | Show possessed Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Webbing, Breath Weapon, and Stinging. |
+| `skill weapons` | Show possessed Sharp, Blunt, Piercing, Thrown, and Missile Weapons, plus Biting, Clawing, Webbing, Breath Weapon, and Stinging. |
 | `skill combat` | Show all possessed combat rows, including ready-to-train zero-use rows; green for zero uses, otherwise blue by default. |
 | `skill utility` | Show all possessed utility rows, including ready-to-train zero-use rows; green for zero uses, otherwise yellow by default. |
 | `skill train` | Show all zero-use rows (green by default) from either category. Display only; sends no game training command. |
 | `skill <prefix>` | Show skills whose names begin with the supplied text; for example, `skill claw`, `skill bite`, `skill c`, `skill id`, or `skill ste`. |
 
 With **SKILL FILTERS ON**, DGHUD handles the forms with an argument by requesting the full game `skill` response, then filtering only that response in the main display. The sidebar keeps every captured skill. Prefixes are literal text, ignore case, and also match supported shortened display names. `weapons` is an exact group name, not a search for every name containing “weapon”; it uses skill IDs 2–6, 46–49, and 57 and never adds skills you do not possess.
+
+The current skill names **Piercing Weapons**, **Thrown Weapons**, and **Shield Use** retain IDs **4**, **5**, and **7**. Older output and filters using `pole`, `poles`, `throw`, `throws`, or `shield parry` still work. Formatted tables use the current names; turning **MAIN SKILLS** off preserves the game's original names and layout.
 
 With **MAIN SKILLS** on, results use your main-display sorting, catalog numbers, and skill colors. With it off, enabled filters still work but keep the game's row format and order. When filters are ON, if a refresh or skill request is still loading, wait for it to finish, then repeat the command. If local filtering is unavailable, run `dghud reload`, then try again.
 

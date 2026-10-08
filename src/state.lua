@@ -29,6 +29,7 @@ function State.normalize(source,command_snapshot)
   return {
     character={name=name,surname=surname,full_name=full,race=characterRace,class=characterClass,alignment=status.alignment or parsedCharacter.alignment or "Unknown",physical=tableAt(info.physical),religion=status.religion or religion.rank,deity=status.deity or religion.deity,favors=tonumber(status.favors) or religion.favors,religious_balance=status.religious_balance or religion.balance,religious_alignment=status.religious_alignment or religion.alignment},
     attributes=tableAt(info.attributes),
+    attribute_values=tableAt(info.attribute_values),
     combat={body_armor=stat.body_armor,or_rating=stat.or_rating,dr=stat.dr,move=stat.move,damage_bonus=stat.damage_bonus,stance=stat.stance,area_position=stat.area_position,novice_protected=stat.novice_protected},
     equipment={items=tableAt(stat.equipment)},
     inventory={items=tableAt(inventory.items),total_weight=inventory.total_weight},

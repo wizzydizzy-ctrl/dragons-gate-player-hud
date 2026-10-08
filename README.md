@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.92**.
+Documentation covers **DGHUD v0.3.93**.
 
 ## Quick start
 
@@ -43,14 +43,14 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.92
+## Latest changes — v0.3.93
 
-- Choose **OPTIONS → Skill Settings → SKILL FILTERS OFF → Save** to send `skill Rath` and other native skill arguments to the game unchanged.
-- Filters default **ON**; your saved choice survives updates, reloads, and restarts.
-- Native arguments preserve your own Skills sidebar; bare `skill` still refreshes it in either mode.
-- **MAIN SKILLS** formatting and independent main-display/sidebar sorting remain separate controls.
+- Retain equipped inventory items with their reported hand/location, alongside carried items.
+- Recognize Piercing Weapons, Thrown Weapons, and Shield Use with their existing skill numbers, filters, groups, and colors; older names remain compatible.
+- Retain numeric INFO characteristics separately from ranks and show optional MP only when reported. The autoroller still uses eleven characteristics.
+- Refresh equipment location labels even when the item's name and weight are unchanged.
 
-[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.92).
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.93).
 
 ## Feature overview
 
@@ -89,7 +89,7 @@ The HUD runs `info magic` during character startup and whenever that command is 
 
 With **SKILL FILTERS ON**, use `skill` or `skill all` to show every possessed skill. Add a case-insensitive name prefix to narrow only the main output: `skill claw` or `skill clawing` shows Clawing; `skill bite` shows Biting; `skill c` shows all names beginning with C; `skill id` shows Identify skills; `skill ste` shows Stealth. Full names and shortened display names are supported. Each request refreshes the complete saved Skills list, so filtering does not remove anything from the right sidebar. A no-match result says so clearly. Prefix filtering also works with MAIN SKILLS formatting off.
 
-Use `skill weapons` for a grouped list of your Sharp, Blunt, Pole, Throw, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging. It shows only skills your character actually has, using your usual sorting and colors. The sidebar still receives the complete skill list.
+Use `skill weapons` for a grouped list of your Sharp, Blunt, Piercing, Thrown, and Missile Weapons, plus Biting, Clawing, Breath Weapon, Webbing, and Stinging. It shows only skills your character actually has, using your usual sorting and colors. The sidebar still receives the complete skill list. Legacy Pole Weapons, Throw Weapons, and Shield Parry names and filters remain supported with the same skill IDs.
 
 The group filters are:
 
@@ -147,7 +147,7 @@ This executes code from that release inside the current Mudlet profile. Use the 
 
 ## Publishing
 
-Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.92` for runtime `0.3.92`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
+Maintainers: the release tag must match `src/defaults.lua` exactly (for example, `v0.3.93` for runtime `0.3.93`). Build and test the matching source before pushing a new tag to the configured repository. Documentation-only changes do not require a version bump or a release tag. GitHub Actions tests and attaches `DragonsGateHUD.mpackage`, `DGHUDRecovery.mpackage`, `DGHUDMigration.mpackage`, and `manifest.json` to the release. Release actions are pinned to immutable commits, use minimum scoped permissions, and publish GitHub OIDC-backed build-provenance attestations for every artifact. Verify downloads with `gh attestation verify DragonsGateHUD.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud` and `gh attestation verify DGHUDMigration.mpackage --repo wizzydizzy-ctrl/dragons-gate-player-hud`.
 
 The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, and files under the profile's `DGHUDData` directory. It does not alter unrelated profile triggers, aliases, scripts, timers, keys, packages, modules, maps, or settings.
 

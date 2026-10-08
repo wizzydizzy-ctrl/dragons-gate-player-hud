@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.92**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.93**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,14 +24,14 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.92
+## What's new in v0.3.93
 
-- Choose **OPTIONS → Skill Settings → SKILL FILTERS OFF → Save** to send `skill Rath` and other native skill arguments to the game unchanged.
-- Filters default **ON**; your saved choice survives updates, reloads, and restarts.
-- Native arguments preserve your own Skills sidebar; bare `skill` still refreshes it in either mode.
-- **MAIN SKILLS** formatting and independent main-display/sidebar sorting remain separate controls.
+- Equipped inventory items now remain visible, including their reported hand or location; carried items and duplicates remain separate.
+- **Piercing Weapons (4)**, **Thrown Weapons (5)**, and **Shield Use (7)** use their correct training numbers in formatted skill output, filters, sorting, and categories. Older names remain compatible.
+- INFO retains numeric characteristics separately from rank labels and displays optional MP only when reported. Missing or partial MP does not discard the eleven confirmed stats.
+- Skill-filter toggles, raw formatting, independent main/sidebar sorting, and the eleven-characteristic autoroller remain supported.
 
-See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.92).
+See [Skill Settings](OPTIONS_AND_DISPLAY.md#skill-settings) for filtering examples and independent main-display/sidebar sorting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.93).
 
 With **SKILL FILTERS ON**, filtering remains independent of custom or disabled colors and works with MAIN SKILLS off, preserving the game's row format and order. Main-display and sidebar sorting remain independent.
 

@@ -133,6 +133,19 @@ test("skill display names abbreviate identify categories without changing source
     eq(skill.name,case[1])
   end
 end)
+test("sidebar maps renamed skills to current labels without mutating captured names",function()
+  local cases={{"Pole Weapons","Piercing Weapons"},{"Throw Weapons","Thrown Weapons"},{"Shield Parry","Shield Use"}}
+  for _,case in ipairs(cases) do
+    for _,name in ipairs({case[1],case[2]}) do
+      local skill={name=name,level=4,remain=100}
+      local row=View.skillLine(skill,24,2,3,4)
+      eq(row:sub(1,24):match("^%s*(.-)%s*$"),case[2])
+      eq(skill.name,name)
+      eq(row:sub(26,28):match("^%s*(.-)%s*$"),"4")
+      eq(row:sub(30,33):match("^%s*(.-)%s*$"),"100")
+    end
+  end
+end)
 test("identity details render while attributes move to the top strip",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
   local identity=View.identityContent({full_name="Test Tester",race="Monitanian",class="Fighter",alignment="entropy",physical={age=28,sex="Male",height="6'10\""}},theme,layout)
@@ -144,6 +157,27 @@ test("identity details render while attributes move to the top strip",function()
   eq(details:find("Roundtime",1,true)~=nil,true); eq(details:find("Position",1,true)~=nil,true)
   eq(strip:find("STR",1,true)~=nil,true); eq(strip:find("Good",1,true)~=nil,true); eq(strip:find("APP",1,true)~=nil,true); eq(strip:find("Fair",1,true)~=nil,true)
   eq(equipment:find("A spear",1,true),nil); eq(equipment:find("Weapon",1,true)~=nil,true); eq(equipment:find("Shield",1,true)~=nil,true)
+end)
+test("attribute strip includes MP only when INFO confirmed its rank",function()
+  local theme={muted="#91a098"}; local layout={attribute_strip_font=12}
+  local plain=View.attributeStripContent({STR="Good",LUK="Fair"},theme,layout)
+  eq(plain:find(">MP<",1,true),nil)
+  local staff=View.attributeStripContent({STR="Good",PRE="Great",LUK="Fair",MP="Super"},theme,layout)
+  assert(staff:find(">MP<",1,true)); assert(staff:find("<b>Super</b>",1,true)); assert(staff:find(">PRE<",1,true))
+  local old=View.attributeStripContent({VOI="Good",APP="Fair",MP="Great"},theme,layout)
+  assert(old:find(">MP<",1,true)); assert(old:find(">VOI<",1,true)); eq(old:find(">PRE<",1,true),nil)
+end)
+test("inventory hand-location labels are escaped and included in required width",function()
+  local theme={muted="#91a098"}
+  local item={name="A practice bow",weight=2.2,section="equipped",location="right hand"}
+  local content=View.inventoryItemContent(item,theme)
+  assert(content:find("A practice bow",1,true)); assert(content:find("right hand",1,true))
+  local normal=View.inventoryRequiredColumns({{name=string.rep("x",45),weight=2.2}})
+  local located=View.inventoryRequiredColumns({{name=string.rep("x",45),weight=2.2,location="right hand"}})
+  assert(located>normal)
+  item.location="<hand&test>"; content=View.inventoryItemContent(item,theme)
+  assert(content:find("&lt;hand&amp;test&gt;",1,true)); eq(content:find("<hand&test>",1,true),nil)
+  item.location=nil; assert(View.inventoryItemContent(item,theme):find("equipped",1,true))
 end)
 test("identity includes compact religion information",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
@@ -2297,6 +2331,17 @@ test("unchanged HUD refreshes preserve inventory and skill scroll positions",fun
   state.skills.items={{name="Clawing",level=5,remain=2}}; view:update(state); eq(view.skills_content.message:find("Clawing",1,true)~=nil,true)
 end)
 
+test("inventory refresh redraws when only equipment location changes",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1920,1080))
+  local item={name="One",weight=1,section="carried"}
+  local state={inventory={items={item}},vitals={gold=0,silver=0,carry={current=1,maximum=10,percent=10}}}
+  view:renderInventory(state); local initial=view.inventory_signature
+  eq(view.inventory_content.message:find("right hand",1,true),nil)
+  item.section="equipped"; item.location="right hand"; view:renderInventory(state)
+  assert(view.inventory_signature~=initial); assert(view.inventory_content.message:find("right hand",1,true))
+  item.location="left hand"; view:renderInventory(state)
+  assert(view.inventory_content.message:find("left hand",1,true)); eq(view.inventory_content.message:find("right hand",1,true),nil)
+end)
 test("right rail orders combat inventory runes and skills without overlap",function()
   for _,size in ipairs({{1920,1080},{1200,800},{1200,650}}) do
     local layout=require("layout").compute(size[1],size[2]); local view=chatView(); view.last_state={vitals={psi={visible=false},web={visible=false}},equipment={items={}}}; view:applyLayout(layout)
