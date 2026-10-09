@@ -554,8 +554,8 @@ end)
 
 -- Exercise native handle management with an in-memory filesystem. All global
 -- functions are restored even when an assertion fails.
-local function withNative(fault, fn)
-  local api = fake({[PATH]=HEADER.."toggle|enabled|1\n"})
+local function withNative(fault, fn, api)
+  api = api or fake({[PATH]=HEADER.."toggle|enabled|1\n"})
   local oldOpen, oldRename, oldRemove, oldLfs = io.open, os.rename, os.remove, rawget(_G, "lfs")
   api.opened = {}
   _G.lfs = {
@@ -608,6 +608,285 @@ test("color preferences native IO closes handles and preserves original on failu
       eq(api.files[PATH], HEADER.."toggle|enabled|1\n"); eq(next(api.opened), nil)
       eq(api.renames, 0)
     end)
+  end
+end)
+
+local WINDOWS_HOME = "C:\\Users\\Player Name\\Mudlet\\profiles\\Pavel\\"
+local WINDOWS_BASE = WINDOWS_HOME:gsub("\\+$", "")
+local WINDOWS_DIR = WINDOWS_BASE.."/DGHUDData"
+local WINDOWS_PATH = WINDOWS_DIR.."/color-settings.dat"
+local windowsInspectionCases = {
+  {name="nil error and errno", result="errno"},
+  {name="table without mode", result="table"},
+  {name="exception", result="throw"},
+}
+
+-- The documented lfs mode request returns a string or nil/error/errno and
+-- avoids the Windows full-table link-target lookup. The table/throw cases
+-- perturb only that lookup; neither result is itself proof of absence.
+local function windowsFake(case, seed)
+  local api = fake(seed)
+  api.modes = {[WINDOWS_BASE]="directory", [WINDOWS_DIR]="directory"}
+  api.inspections = {}
+  function api.symlinkattributes(path, request)
+    api.inspections[#api.inspections+1] = {path=path, request=request}
+    if api.statFailure == path then return nil, "Permission denied", 13 end
+    local mode = api.modes[path] or (api.files[path] ~= nil and "file")
+    if request == "mode" then
+      if mode then return mode end
+      return nil, "cannot obtain information from file '"..path.."': No such file or directory", 2
+    end
+    eq(request, nil)
+    if mode then return {mode=mode} end
+    if case.result == "table" then return {} end
+    if case.result == "throw" then
+      error("cannot obtain information from file '"..path.."': The system cannot find the file specified.")
+    end
+    return nil, "The system cannot find the file specified.", 2
+  end
+  local read = api.read
+  api.read = function(path, limit)
+    local text, err, code = read(path, limit)
+    if text == nil and err == nil then return nil, "No such file or directory", 2 end
+    return text, err, code
+  end
+  return api
+end
+
+local function windowsFirstSave(api, native)
+  local injected = not native and api or nil
+  local value, err = Preferences.load(WINDOWS_HOME, injected)
+  eq(value, nil); eq(err, nil); eq(api.mutations, 0)
+  assert(Preferences.save(WINDOWS_HOME, {enabled=false, skills_enabled=false, room_color={1,2,3}}, injected))
+  local loaded = assert(Preferences.load(WINDOWS_HOME, injected))
+  eq(loaded.enabled, false); eq(loaded.skills_enabled, false)
+  eq(loaded.styles.room.foreground, "#010203")
+  eq(api.files[WINDOWS_PATH..".tmp"], nil); eq(api.files[WINDOWS_PATH..".bak"], nil)
+  eq(api.renames, 1)
+  assert(Preferences.save(WINDOWS_HOME, {enabled=true, skills_enabled=true}, injected))
+  loaded = assert(Preferences.load(WINDOWS_HOME, injected))
+  eq(loaded.enabled, true); eq(loaded.skills_enabled, true); eq(api.renames, 3)
+  assert(Preferences.save(WINDOWS_HOME, {enabled=true, skills_enabled=false, room_color={4,5,6}}, injected))
+  -- Reload a fresh module as after a HUD update/restart, with no remembered
+  -- config. Restore the shared require cache even if loading the module fails.
+  local previous = package.loaded["color_preferences"]
+  package.loaded["color_preferences"] = nil
+  local restarted, fresh = pcall(require, "color_preferences")
+  package.loaded["color_preferences"] = previous
+  assert(restarted, fresh); assert(fresh ~= Preferences)
+  local persisted = assert(fresh.load(WINDOWS_HOME, injected))
+  eq(persisted.enabled, true); eq(persisted.skills_enabled, false)
+  eq(persisted.styles.room.foreground, "#040506")
+  eq(api.renames, 5); eq(api.files[WINDOWS_PATH..".tmp"], nil)
+  eq(api.files[WINDOWS_PATH..".bak"], nil)
+  for path in pairs(api.files) do eq(path, WINDOWS_PATH) end
+  assert(#api.inspections > 0)
+  if native then eq(next(api.opened), nil) end
+end
+
+for _, route in ipairs({"direct API", "injected lfs", "native lfs"}) do
+  local apiRoute = route
+  test("color preferences Windows use mode-only when full-table inspection throws through "..route, function()
+    local api = windowsFake(windowsInspectionCases[1])
+    local inspect, fullTableCalls = api.symlinkattributes, 0
+    api.symlinkattributes = function(path, request)
+      if request == nil then
+        fullTableCalls = fullTableCalls + 1
+        -- lfs 1.8.0's Windows full-table target lookup can try to set a
+        -- field on nil after CreateFile fails for a normal directory.
+        error("attempt to index a nil value")
+      end
+      return inspect(path, request)
+    end
+    local function exercise(native)
+      windowsFirstSave(api, native)
+      local injected = not native and api or nil
+      local committed = api.files[WINDOWS_PATH]
+      for _, path in ipairs({WINDOWS_BASE, WINDOWS_DIR, WINDOWS_PATH, WINDOWS_PATH..".tmp", WINDOWS_PATH..".bak"}) do
+        local previous = api.modes[path]
+        api.modes[path] = "link"
+        local mutations, reads = api.mutations, #api.reads
+        reject(Preferences.load, WINDOWS_HOME, injected)
+        reject(Preferences.save, WINDOWS_HOME, {enabled=false}, injected)
+        eq(api.mutations, mutations); eq(#api.reads, reads)
+        eq(api.files[WINDOWS_PATH], committed)
+        api.modes[path] = previous
+        api.statFailure = path
+        reject(Preferences.load, WINDOWS_HOME, injected)
+        reject(Preferences.save, WINDOWS_HOME, {enabled=false}, injected)
+        eq(api.mutations, mutations); eq(#api.reads, reads)
+        eq(api.files[WINDOWS_PATH], committed)
+        api.statFailure = nil
+      end
+      eq(fullTableCalls, 0)
+      for _, inspection in ipairs(api.inspections) do eq(inspection.request, "mode") end
+    end
+    if apiRoute == "native lfs" then
+      withNative(nil, function() exercise(true) end, api)
+    else
+      if apiRoute == "injected lfs" then
+        api.lfs = {symlinkattributes=api.symlinkattributes}
+        api.symlinkattributes = nil
+      end
+      exercise(false)
+    end
+  end)
+end
+
+test("color preferences Windows reject a wrapper with no underlying symlink checker", function()
+  local original = HEADER.."toggle|enabled|1\n"
+  for _, route in ipairs({"direct API", "injected lfs", "native lfs"}) do
+    local api = windowsFake(windowsInspectionCases[1], {[WINDOWS_PATH]=original})
+    local orig_lfs_symlinkattributes = nil
+    api.symlinkattributes = function(path, request)
+      return orig_lfs_symlinkattributes(path, request)
+    end
+    local function exercise(native)
+      local injected = not native and api or nil
+      reject(Preferences.load, WINDOWS_HOME, injected)
+      reject(Preferences.save, WINDOWS_HOME, {enabled=false}, injected)
+      eq(api.mutations, 0); eq(#api.reads, 0); eq(api.files[WINDOWS_PATH], original)
+      if native then eq(next(api.opened), nil) end
+    end
+    if route == "native lfs" then
+      withNative(nil, function() exercise(true) end, api)
+    else
+      if route == "injected lfs" then
+        api.lfs = {symlinkattributes=api.symlinkattributes}
+        api.symlinkattributes = nil
+      end
+      exercise(false)
+    end
+  end
+end)
+
+for _, case in ipairs(windowsInspectionCases) do
+  for _, route in ipairs({"direct API", "injected lfs", "native lfs"}) do
+    local inspectionCase, apiRoute = case, route
+    test("color preferences Windows first save with "..case.name.." through "..route, function()
+      local api = windowsFake(inspectionCase)
+      if apiRoute == "native lfs" then
+        withNative(nil, function(native) windowsFirstSave(native, true) end, api)
+      else
+        if apiRoute == "injected lfs" then
+          api.lfs = {symlinkattributes=api.symlinkattributes}
+          api.symlinkattributes = nil
+        end
+        windowsFirstSave(api, false)
+      end
+    end)
+  end
+
+  local inspectionCase = case
+  test("color preferences Windows atomic save preserves previous data with "..case.name, function()
+    local original = HEADER.."toggle|enabled|1\nstyle|room|#112233|-|0|0|1\n"
+    for _, fault in ipairs({"return", "throw", "success", "backup rename", "install rename", "rollback"}) do
+      local api = windowsFake(inspectionCase, {[WINDOWS_PATH]=original})
+      if fault == "backup rename" then api.failRename = {[1]=true}
+      elseif fault == "install rename" then api.failRename = {[2]=true}
+      elseif fault == "rollback" then api.failRename = {[2]=true, [3]=true}
+      else api.partial = fault end
+      local err = reject(Preferences.save, WINDOWS_HOME, {enabled=false}, api)
+      -- A rejection at the initial guard cannot masquerade as a write test.
+      eq(api.writes, 1); eq(api.files[WINDOWS_PATH..".tmp"], nil)
+      if fault == "rollback" then
+        assert(err:find("rollback failed", 1, true))
+        eq(api.renames, 3); eq(api.files[WINDOWS_PATH], nil)
+        eq(api.files[WINDOWS_PATH..".bak"], original)
+      else
+        eq(api.files[WINDOWS_PATH], original); eq(api.files[WINDOWS_PATH..".bak"], nil)
+        if fault == "backup rename" then eq(api.renames, 1)
+        elseif fault == "install rename" then eq(api.renames, 3)
+        else eq(api.renames, 0) end
+      end
+      local mutations = api.mutations
+      local loaded = assert(Preferences.load(WINDOWS_HOME, api))
+      eq(loaded.enabled, true); eq(loaded.styles.room.foreground, "#112233")
+      eq(api.mutations, mutations)
+      api.partial, api.failRename = nil, nil
+      assert(Preferences.save(WINDOWS_HOME, {enabled=false}, api))
+      eq(assert(Preferences.load(WINDOWS_HOME, api)).enabled, false)
+      eq(api.files[WINDOWS_PATH..".tmp"], nil); eq(api.files[WINDOWS_PATH..".bak"], nil)
+    end
+  end)
+end
+
+test("color preferences Windows accept explicit absent-file errno contracts", function()
+  for _, code in ipairs({2, "2", "ENOENT"}) do
+    local api = windowsFake(windowsInspectionCases[1])
+    local inspect = api.symlinkattributes
+    api.symlinkattributes = function(path, request)
+      if api.modes[path] == nil and api.files[path] == nil then
+        return nil, "cannot obtain information from file '"..path.."': No such file or directory", code
+      end
+      return inspect(path, request)
+    end
+    windowsFirstSave(api, false)
+  end
+end)
+
+test("color preferences Windows reject reported links including dangling reserved paths", function()
+  local original = HEADER.."toggle|enabled|1\n"
+  for _, path in ipairs({WINDOWS_BASE, WINDOWS_DIR, WINDOWS_PATH, WINDOWS_PATH..".tmp", WINDOWS_PATH..".bak"}) do
+    for _, hasPrimary in ipairs({false, true}) do
+      local seed = hasPrimary and {[WINDOWS_PATH]=original} or {}
+      local api = windowsFake(windowsInspectionCases[1], seed)
+      api.modes[path] = "link"
+      reject(Preferences.load, WINDOWS_HOME, api); reject(Preferences.save, WINDOWS_HOME, {}, api)
+      eq(api.mutations, 0); eq(#api.reads, 0); eq(api.writes, 0); eq(api.renames, 0)
+      eq(api.files[WINDOWS_PATH], seed[WINDOWS_PATH])
+    end
+  end
+end)
+
+test("color preferences Windows reject permission unknown and thrown inspection errors", function()
+  local failures = {
+    {message="Permission denied", code=13}, {message="Access is denied.", code="EACCES"},
+    {message="Unknown filesystem error", code=5}, {message="Unknown filesystem error"},
+    {message="No such file or directory", code=13},
+    {message="The system cannot find the file specified.", code="EACCES"},
+    {message="The system cannot find the path specified.", code=3},
+    {message="No such file or directory", code="UNKNOWN"},
+    {message="Permission denied", throws=true}, {message="Unknown filesystem error", throws=true},
+    {message="The system cannot find the file specified.", throws=true},
+  }
+  local original = HEADER.."toggle|enabled|1\n"
+  for _, failure in ipairs(failures) do
+    for _, path in ipairs({WINDOWS_PATH, WINDOWS_PATH..".tmp", WINDOWS_PATH..".bak"}) do
+      for _, hasPrimary in ipairs({false, true}) do
+        local seed = hasPrimary and {[WINDOWS_PATH]=original} or {}
+        local api = windowsFake(windowsInspectionCases[1], seed)
+        local inspect = api.symlinkattributes
+        api.symlinkattributes = function(current, request)
+          if current == path then
+            if failure.throws then error(failure.message) end
+            return nil, failure.message, failure.code
+          end
+          return inspect(current, request)
+        end
+        -- A readable primary, or an absent read result, cannot override a
+        -- denied or unknown inspection of any reserved transaction path.
+        reject(Preferences.load, WINDOWS_HOME, api); reject(Preferences.save, WINDOWS_HOME, {}, api)
+        eq(api.mutations, 0); eq(#api.reads, 0); eq(api.files[WINDOWS_PATH], seed[WINDOWS_PATH])
+      end
+    end
+  end
+end)
+
+test("color preferences Windows reject malformed inspection results without guessing absence", function()
+  local original = HEADER.."toggle|enabled|1\n"
+  for _, result in ipairs({{}, {target="C:\\outside\\settings.dat"}, {mode=false}, {mode=""}, false}) do
+    for _, hasPrimary in ipairs({false, true}) do
+      local seed = hasPrimary and {[WINDOWS_PATH]=original} or {}
+      local api = windowsFake(windowsInspectionCases[1], seed)
+      local inspect = api.symlinkattributes
+      api.symlinkattributes = function(path, request)
+        if path == WINDOWS_PATH then return result end
+        return inspect(path, request)
+      end
+      reject(Preferences.load, WINDOWS_HOME, api); reject(Preferences.save, WINDOWS_HOME, {}, api)
+      eq(api.mutations, 0); eq(#api.reads, 0); eq(api.files[WINDOWS_PATH], seed[WINDOWS_PATH])
+    end
   end
 end)
 

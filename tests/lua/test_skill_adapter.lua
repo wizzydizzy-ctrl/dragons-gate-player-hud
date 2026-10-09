@@ -27,6 +27,95 @@ local function console(lines,settings)
   return f,api,adapter
 end
 
+-- Synthetic Mudlet console state: replace uses the current format; setters paint
+-- selected text AND affect later output. resetFormat restores profile defaults
+-- and deselects without repainting the selected text.
+-- Keep the profile background nonblack to catch hardcoded "clear to black" fixes.
+local function copyFormat(style)
+  local result={}
+  for key,value in pairs(style) do
+    result[key]=type(value)=="table" and {value[1],value[2],value[3]} or value
+  end
+  return result
+end
+local function formattedConsole(lines,settings)
+  local f,api,a=console(lines,settings)
+  f.defaultFormat={foreground={220,224,220},background={9,13,17},bold=false,underline=false,italics=false}
+  f.format={foreground={255,215,80},background={80,25,20},bold=true,underline=true,italics=false}
+  f.cells={}
+  for row,text in pairs(lines) do
+    f.cells[row]={}
+    for column=1,#text do f.cells[row][column]=copyFormat(f.defaultFormat) end
+  end
+  local select,replace,delete=api.selectSection,api.replace,api.deleteLine
+  api.selectSection=function(start,length)
+    local ok=select(start,length)
+    f.selected={row=f.cursor,start=start,length=length}
+    return ok
+  end
+  api.replace=function(text)
+    assert(f.selected and f.selected.row==f.cursor,"replacement lost its native selection")
+    eq(f.selected.start,0); eq(f.selected.length,#f.lines[f.cursor])
+    replace(text)
+    f.cells[f.cursor]={}
+    for column=1,#text do f.cells[f.cursor][column]=copyFormat(f.format) end
+  end
+  api.deleteLine=function()
+    local row=f.cursor; local last=row
+    for number in pairs(f.cells) do last=math.max(last,number) end
+    delete()
+    for number=row,last do f.cells[number]=f.cells[number+1] end
+    f.selected=nil
+  end
+  api.deselect=function() f.selected=nil end
+  api.resetFormat=function()
+    f.format=copyFormat(f.defaultFormat)
+    api.deselect()
+  end
+  local function apply(field,value)
+    f.format[field]=type(value)=="table" and {value[1],value[2],value[3]} or value
+    local selected=f.selected
+    if selected then
+      for column=selected.start+1,selected.start+selected.length do
+        local cell=assert(f.cells[selected.row][column],"formatting extends beyond replacement")
+        cell[field]=type(value)=="table" and {value[1],value[2],value[3]} or value
+      end
+    end
+  end
+  api.setFgColor=function(r,g,b) f.colors[f.cursor]={r,g,b}; apply("foreground",{r,g,b}) end
+  api.setBgColor=function(r,g,b) f.backgrounds[f.cursor]={r,g,b}; apply("background",{r,g,b}) end
+  api.setBold=function(value) f.bold[f.cursor]=value; apply("bold",value) end
+  api.setUnderline=function(value) apply("underline",value) end
+  api.getBgColor=function()
+    if not f.selected then return nil,"no selected text" end
+    local color=f.cells[f.selected.row][f.selected.start+1].background
+    return color[1],color[2],color[3]
+  end
+  api.getBackgroundColor=function(window)
+    assert(window==nil or window=="main")
+    local color=f.defaultFormat.background
+    return color[1],color[2],color[3],255
+  end
+  api.echo=function(text) f.echoed={text=text,format=copyFormat(f.format)} end
+  return f,api,a
+end
+local function formatEquals(actual,expected,context)
+  for _,field in ipairs({"foreground","background","bold","underline","italics"}) do
+    if type(expected[field])=="table" then
+      for channel=1,3 do
+        assert(actual[field][channel]==expected[field][channel],
+          context.." "..field.." channel "..channel..": expected "..expected[field][channel]..", got "..actual[field][channel])
+      end
+    else
+      assert(actual[field]==expected[field],context.." "..field..": expected "..tostring(expected[field])..", got "..tostring(actual[field]))
+    end
+  end
+end
+local function rowFormatEquals(f,row,expected)
+  eq(#f.cells[row],#f.lines[row])
+  for column,cell in ipairs(f.cells[row]) do formatEquals(cell,expected,"row "..row.." column "..column) end
+end
+
 -- Mudlet deletes buffer rows without changing the painted viewport. Its empty
 -- main-console echo refreshes tail mode but does not add a line or send a command.
 local function viewportConsole(lines,scroll)
@@ -270,4 +359,223 @@ test("skill colors are editable and saved as data with category enabled state",f
   assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="23. Swimming 1 100",style_id="skill_utility"}},api))
   eq(f.colors[2][1],18); eq(f.colors[2][2],52); eq(f.colors[2][3],86)
   eq(f.backgrounds[2][1],34); eq(f.bold[2],true)
+end)
+
+-- All fixtures are synthetic; no player logs, profile files, or live APIs.
+for _,id in ipairs({"skill_ready","skill_combat","skill_utility"}) do
+  test(id.." replacement clears inherited red background and other console attributes",function()
+    local raw=" Original Skill       100 1"
+    local f,api,a=formattedConsole({[2]=raw,[9]=">"})
+    for _,cell in ipairs(f.cells[2]) do cell.background={80,25,20} end
+    local text="1. Skill 1 100"
+    assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text=text,style_id=id}},api))
+    local expected=copyFormat(f.defaultFormat)
+    expected.foreground=assert(Styles.toRGB(Styles.defaults(id).foreground))
+    rowFormatEquals(f,2,expected); eq(f.lines[2],text)
+    rowFormatEquals(f,9,f.defaultFormat); eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+  end)
+end
+for _,text in ipairs({"Number  Skill  LVL  USES","No skills match: xyz"}) do
+  test("neutral skill replacement clears inherited formatting: "..text,function()
+    local raw="Skill Remain Level"; local f,api,a=formattedConsole({[1]=raw,[9]=">"})
+    assert(a:replaceSkillOutput({{line_number=1,source_line=raw,display_text=text}},api))
+    rowFormatEquals(f,1,f.defaultFormat); eq(f.lines[1],text)
+    eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+  end)
+end
+test("filtered skill replacement clears inherited background without painting combat or prompt",function()
+  local lines=viewportLines(); local f,api,a=formattedConsole(lines); f.cursor=6
+  assert(a:replaceSkillOutput(filteredViewportRows(lines),api))
+  local expected=copyFormat(f.defaultFormat); expected.foreground=assert(Styles.toRGB(Styles.defaults("skill_combat").foreground))
+  rowFormatEquals(f,1,f.defaultFormat); rowFormatEquals(f,2,expected)
+  eq(f.lines[3],"An enemy attacks!"); eq(f.lines[4],">"); eq(f.lines[5],nil)
+  rowFormatEquals(f,3,f.defaultFormat); rowFormatEquals(f,4,f.defaultFormat)
+  eq(f.deleted,2); eq(f.cursor,4); eq(f.column,2); eq(f.selected,nil)
+end)
+for _,disabled in ipairs({
+  {name="master",config={enabled=false}},
+  {name="Skill Row Colors",config={skills_enabled=false}},
+  {name="legacy highlights",config={highlights_enabled=false}},
+  {name="individual skill",config={styles={skill_combat={enabled=false}}}},
+}) do
+  test("skill replacement with "..disabled.name.." off clears inherited formatting and ignores overrides",function()
+    local raw=" Sharp Weapons       400 4"; local config={}
+    for key,value in pairs(disabled.config) do config[key]=value end
+    local enabled=not (config.styles and config.styles.skill_combat.enabled==false)
+    config.styles={skill_combat={enabled=enabled,foreground="#123456",background="#223344",bold=true,underline=true}}
+    local f,api,a=formattedConsole({[2]=raw,[9]=">"},config)
+    assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="2. Sharps 4 400",style_id="skill_combat"}},api))
+    rowFormatEquals(f,2,f.defaultFormat); eq(f.replaced,1); eq(f.cursor,9); eq(f.column,2)
+  end)
+end
+test("Skill Row Colors on then off removes the previous intentional background on replacement",function()
+  local raw=" Swimming       100 1"
+  local config={skills_enabled=true,styles={skill_utility={foreground="#123456",background="#223344",bold=true,underline=true}}}
+  local f,api,a=formattedConsole({[2]=raw,[9]=">"},config)
+  local text="23. Swimming 1 100"
+  assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text=text,style_id="skill_utility"}},api))
+  local expected=copyFormat(f.defaultFormat)
+  expected.foreground={18,52,86}; expected.background={34,51,68}; expected.bold=true; expected.underline=true
+  -- First prove the configured style was applied, then toggle the same adapter.
+  for _,cell in ipairs(f.cells[2]) do
+    for channel=1,3 do
+      eq(cell.foreground[channel],expected.foreground[channel])
+      eq(cell.background[channel],expected.background[channel])
+    end
+    eq(cell.bold,true); eq(cell.underline,true)
+  end
+  config.skills_enabled=false
+  assert(a:replaceSkillOutput({{line_number=2,source_line=text,display_text="23. Swimming 1 99",style_id="skill_utility"}},api))
+  rowFormatEquals(f,2,f.defaultFormat); eq(f.replaced,2); eq(f.cursor,9); eq(f.column,2)
+  api.echo("Synthetic future output after toggle off")
+  formatEquals(f.echoed.format,f.defaultFormat,"future output after toggle off")
+end)
+for _,background in ipairs({false,"#223344","#501914"}) do
+  test("skill replacement preserves configured foreground bold underline and background "..tostring(background),function()
+    for _,attributes in ipairs({
+      {bold=true,underline=true}, {bold=true,underline=false},
+      {bold=false,underline=true}, {bold=false,underline=false},
+    }) do
+      local raw=" Swimming       100 1"
+      local config={styles={skill_utility={
+        foreground="#123456",background=background,
+        bold=attributes.bold,underline=attributes.underline,
+      }}}
+      local f,api,a=formattedConsole({[2]=raw,[9]=">"},config)
+      assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="23. Swimming 1 100",style_id="skill_utility"}},api))
+      local expected=copyFormat(f.defaultFormat); expected.foreground={18,52,86}
+      if background then expected.background=assert(Styles.toRGB(background)) end
+      expected.bold=attributes.bold; expected.underline=attributes.underline
+      rowFormatEquals(f,2,expected)
+      eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+    end
+  end)
+end
+test("skill replacement settles the current console format after an intentional row background",function()
+  local raw=" Swimming       100 1"
+  local f,api,a=formattedConsole({[2]=raw,[9]=">"},{styles={skill_utility={foreground="#123456",background="#223344",bold=true,underline=true}}})
+  assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="23. Swimming 1 100",style_id="skill_utility"}},api))
+  api.echo("Synthetic future output")
+  eq(f.echoed.text,"Synthetic future output")
+  formatEquals(f.echoed.format,f.defaultFormat,"future output after replacement")
+  eq(f.selected,nil); eq(f.cursor,9); eq(f.column,2)
+end)
+test("skill replacement cleans current formatting after a later row fails",function()
+  local lines={[1]="Skill Remain Level",[2]=" Swimming       100 1",[9]=">"}
+  local f,api,a=formattedConsole(lines,{styles={skill_utility={background="#223344",bold=true,underline=true}}})
+  local replace=api.replace
+  api.replace=function(text)
+    if f.cursor==1 then return false,"synthetic replacement failure" end
+    return replace(text)
+  end
+  local ok,err=a:replaceSkillOutput({
+    {line_number=1,source_line=lines[1],display_text="Number Skill LVL USES"},
+    {line_number=2,source_line=lines[2],display_text="23. Swimming 1 100",style_id="skill_utility"},
+  },api)
+  eq(ok,nil); assert(err:find("could not replace",1,true))
+  eq(f.replaced,1); eq(f.lines[1],"Skill Remain Level")
+  api.echo("Synthetic future output after failure")
+  formatEquals(f.echoed.format,f.defaultFormat,"future output after failed replacement")
+  eq(f.selected,nil); eq(f.cursor,9); eq(f.column,2)
+end)
+test("failed skill preflight leaves inherited formatting and unrelated rows untouched",function()
+  local raw=" Swimming       100 1"; local f,api,a=formattedConsole({[2]=raw,[9]=">"})
+  local before=copyFormat(f.format)
+  eq(a:replaceSkillOutput({{line_number=2,source_line=" Swimming       99 1",display_text="23. Swimming 1 99",style_id="skill_utility"}},api),nil)
+  eq(f.replaced,0); eq(f.lines[2],raw)
+  formatEquals(f.format,before,"current format after rejected preflight")
+  rowFormatEquals(f,2,f.defaultFormat); rowFormatEquals(f,9,f.defaultFormat)
+  eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+end)
+test("native notice formatting is preserved while later skill rows and unrelated echoes stay clean",function()
+  for _,id in ipairs({"skill_combat","skill_utility"}) do
+    local notice="(There are new version notes.)"; local raw=" Original Skill       100 1"
+    local f,api,a=formattedConsole({[1]=notice,[2]=raw,[9]=">"})
+    f.format=copyFormat(f.defaultFormat)
+    local style=assert(Styles.defaults("notice"))
+    local expected=copyFormat(f.defaultFormat)
+    expected.foreground=assert(Styles.toRGB(style.foreground))
+    expected.background=assert(Styles.toRGB(style.background))
+    expected.bold=style.bold; expected.underline=style.underline
+    assert(a:applyLineColors({{line_number=1,source_line=notice,start=1,length=#notice,
+      display_text="*** IMPORTANT - PLEASE READ: SYNTHETIC VERSION NOTES ***",
+      color=expected.foreground,background=expected.background,bold=style.bold,underline=style.underline}},api))
+    rowFormatEquals(f,1,expected)
+    api.echo("Synthetic output after notice")
+    local afterNotice=copyFormat(f.echoed.format)
+    eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+    assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="1. Skill 1 100",style_id=id}},api))
+    local skill=copyFormat(f.defaultFormat); skill.foreground=assert(Styles.toRGB(Styles.defaults(id).foreground))
+    rowFormatEquals(f,2,skill); rowFormatEquals(f,1,expected)
+    api.echo("Synthetic output after skills")
+    formatEquals(afterNotice,f.defaultFormat,"future output after notice")
+    formatEquals(f.echoed.format,f.defaultFormat,"future output after notice and skills")
+    eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+  end
+end)
+test("native notice setter exception restores cursor and future echo formatting",function()
+  local notice="(There are new version notes.)"
+  local f,api,a=formattedConsole({[1]=notice,[9]=">"})
+  f.format=copyFormat(f.defaultFormat)
+  local underline=api.setUnderline
+  api.setUnderline=function(value) underline(value); error("synthetic underline failure") end
+  local ok,err=a:applyLineColors({{line_number=1,source_line=notice,start=1,length=#notice,
+    display_text="*** SYNTHETIC NOTICE ***",color={255,215,80},background={80,25,20},bold=true,underline=true}},api)
+  eq(ok,nil); assert(err:find("synthetic underline failure",1,true)); eq(f.replaced,1)
+  eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+  api.echo("Synthetic output after notice exception")
+  formatEquals(f.echoed.format,f.defaultFormat,"future output after notice setter exception")
+end)
+test("skill style setter exception restores cursor and future echo formatting",function()
+  local raw=" Swimming       100 1"
+  local f,api,a=formattedConsole({[2]=raw,[9]=">"},{styles={skill_utility={background="#223344",bold=true,underline=true}}})
+  local underline=api.setUnderline
+  api.setUnderline=function(value) underline(value); error("synthetic skill underline failure") end
+  local ok,err=a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="23. Swimming 1 100",style_id="skill_utility"}},api)
+  eq(ok,nil); assert(err:find("synthetic skill underline failure",1,true)); eq(f.replaced,1)
+  eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+  api.echo("Synthetic output after skill setter exception")
+  formatEquals(f.echoed.format,f.defaultFormat,"future output after skill setter exception")
+end)
+test("generic foreground coloring preserves a selected object's intentional background",function()
+  local raw="A synthetic object is here."; local f,api,a=formattedConsole({[2]=raw,[9]=">"})
+  f.format=copyFormat(f.defaultFormat)
+  for _,cell in ipairs(f.cells[2]) do cell.background={42,41,40} end
+  assert(a:applyLineColors({{line_number=2,source_line=raw,start=1,length=#raw,color={18,52,86},bold=false,underline=false}},api))
+  local expected=copyFormat(f.defaultFormat); expected.foreground={18,52,86}; expected.background={42,41,40}
+  rowFormatEquals(f,2,expected); eq(f.replaced,0)
+  api.echo("Synthetic output after object coloring")
+  formatEquals(f.echoed.format,f.defaultFormat,"future output after generic coloring")
+  eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+end)
+test("skill default background safely falls back when the native background API is absent or invalid",function()
+  for _,mode in ipairs({
+    "missing","throw","nil","string","table","negative","large",
+    "fractional","nan","infinite","missing-channel",
+  }) do
+    local raw=" Original Skill       100 1"; local f,api,a=formattedConsole({[2]=raw,[9]=">"})
+    if mode=="missing" then api.getBackgroundColor=nil
+    else
+      api.getBackgroundColor=function(window)
+        eq(window,"main")
+        if mode=="throw" then error("synthetic background API failure")
+        elseif mode=="nil" then return nil,"unavailable"
+        elseif mode=="string" then return "9",13,17
+        elseif mode=="table" then return {9,13,17}
+        elseif mode=="negative" then return -1,13,17
+        elseif mode=="large" then return 9,256,17
+        elseif mode=="fractional" then return 9,13,17.5
+        elseif mode=="nan" then return 0/0,13,17
+        elseif mode=="infinite" then return 9,math.huge,17 end
+        return 9,13
+      end
+    end
+    assert(a:replaceSkillOutput({{line_number=2,source_line=raw,display_text="1. Skill 1 100",style_id="skill_combat"}},api))
+    local expected=copyFormat(f.defaultFormat)
+    expected.foreground=assert(Styles.toRGB(Styles.defaults("skill_combat").foreground))
+    expected.background={0,0,0}
+    rowFormatEquals(f,2,expected); eq(f.cursor,9); eq(f.column,2); eq(f.selected,nil)
+    api.echo("Synthetic output with background fallback")
+    formatEquals(f.echoed.format,f.defaultFormat,"future output after background fallback "..mode)
+  end
 end)

@@ -1,4 +1,4 @@
-# DGHUD v0.3.94 manual acceptance checklist
+# DGHUD v0.3.95 manual acceptance checklist
 
 This is a checklist for a disposable test profile, not a claim that these live checks were performed. Never use it as permission to change a live profile or publish a release.
 
@@ -18,7 +18,7 @@ Input alignment acceptance: turn **OPTIONS → ALIGN INPUT** on with an unsent d
 
 Mudlet starter UI acceptance: in a disposable Mudlet 5 profile that has the `mudlet-base-ui` package, install DGHUD while the starter dock has no saved show/hide choice. Confirm only the extra dock hides, leaving main game text, input, native toolbar, and DGHUD mapper usable. Choose **OPTIONS → MUDLET UI: OFF** to show it and **ON** to hide it; resize in MultiView and verify the Options button remains reachable. Show it again, reload/update DGHUD, and restart the profile; the explicit choice must survive. Remove the starter package in the disposable profile and confirm clicking the option reports unavailability without sending a command to the game.
 
-1. Build the v0.3.94 package locally and install it only into the disposable profile. Record the profile's existing personal triggers, aliases, scripts, packages, map data, and settings before installation.
+1. Build the v0.3.95 package locally and install it only into the disposable profile. Record the profile's existing personal triggers, aliases, scripts, packages, map data, and settings before installation.
 2. Confirm Identity and optional Equipment are left, Combat plus Inventory/Runes/Skills are right, Location/mapper/compass are lower-left, and Vitals span the center immediately above the input line. Enter a character and confirm exactly one sequential startup refresh.
 3. Compare inventory, weapon/shield readiness, attributes, physical details, armor, OR/DR, movement, damage bonus, stance, and novice protection with command output. Run each command manually and confirm its HUD section refreshes.
 4. Confirm available compass directions are bright and clickable; unavailable directions are dim and inert. In a safe test room, verify `GO PORTAL`, `GO DOOR`, `GO GATE`, and `GO ARCH` send their exact commands.

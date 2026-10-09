@@ -1,6 +1,6 @@
 -- Data-only persistence for the colorization table, never the root settings.
 -- api (optional) supplies read(path, limit), write(path, text), mkdir(path),
--- rename(from, to), remove(path), and optionally symlinkattributes(path).
+-- rename(from, to), remove(path), and optionally symlinkattributes(path, "mode").
 -- read returns nil without an error (or errno 2) for an absent file. mkdir is
 -- idempotent. write must flush/close before reporting success. All paths are
 -- derived here; saved data cannot select a path. One writer owns each profile.
@@ -330,7 +330,10 @@ end
 
 local function guard(store, path, kind)
   if store.api.symlinkattributes == nil then return true end
-  local attr, err, code = call(store.api, "symlinkattributes", path)
+  -- Request only the no-follow file type. Some Windows LuaFileSystem builds
+  -- throw while adding a link target to the full attribute table, even for a
+  -- normal directory. Mode-only avoids that branch without following links.
+  local attr, err, code = call(store.api, "symlinkattributes", path, "mode")
   if attr == nil then
     if missing(err, code) then return true end
     return nil, err or "could not inspect color settings"

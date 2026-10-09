@@ -496,6 +496,16 @@ function Adapter:replaceSkillOutput(rows,api)
   if type(rows)~="table" or #rows<1 or #rows>129 then return nil,"invalid skill output rows" end
   local segments,seen,hasRemovals={},{},false
   local originalLine,originalColumn
+  -- Replacements inherit Mudlet's active echo format, which can retain an
+  -- earlier notice's highlight. Skill rows without an explicit highlight use
+  -- the actual main-console background, not the selected text's background.
+  local defaultBackground={0,0,0}
+  if type(api.getBackgroundColor)=="function" then
+    local got,r,g,b=pcall(api.getBackgroundColor,"main")
+    if got and type(r)=="number" and type(g)=="number" and type(b)=="number"
+      and r>=0 and r<=255 and g>=0 and g<=255 and b>=0 and b<=255
+      and r%1==0 and g%1==0 and b%1==0 then defaultBackground={r,g,b} end
+  end
   -- Preflight the entire batch. A shifted/deleted/replaced row leaves the raw
   -- response alone rather than painting sorted skills over unrelated output.
   local ok,err=pcall(function()
@@ -527,7 +537,7 @@ function Adapter:replaceSkillOutput(rows,api)
       -- omit. Only that padding may differ: never ignore leading/interior text,
       -- shifted rows or wrapping. Select exactly what is actually in the buffer.
       assert(type(bufferLine)=="string" and bufferLine:gsub(" +$","")==row.source_line:gsub(" +$",""),"skill source row changed")
-      local segment={start=1,length=#bufferLine,color={220,224,220},bold=false,underline=false,
+      local segment={start=1,length=#bufferLine,color={220,224,220},background=defaultBackground,bold=false,underline=false,
         line_number=row.line_number,source_line=bufferLine,display_text=row.display_text,remove=row.remove==true}
       if row.style_id~=nil then
         assert(row.style_id=="skill_ready" or row.style_id=="skill_combat" or row.style_id=="skill_utility","invalid skill row style")
@@ -537,7 +547,7 @@ function Adapter:replaceSkillOutput(rows,api)
         if skillsEnabled==nil then skillsEnabled=config.highlights_enabled~=false end
         if config.enabled~=false and skillsEnabled~=false and style.enabled then
           segment.color=styles.toRGB(style.foreground)
-          segment.background=style.background and styles.toRGB(style.background) or nil
+          segment.background=style.background and styles.toRGB(style.background) or defaultBackground
           segment.bold=style.bold; segment.underline=style.underline
         end
       end
@@ -645,7 +655,12 @@ function Adapter:applyLineColors(segments,api)
     if type(api.deselect)=="function" then api.deselect() end
   end)
   if moved and type(api.moveCursor)=="function" then pcall(api.moveCursor,originalColumn,originalLine) end
-  if not ok then if type(api.deselect)=="function" then pcall(api.deselect) end; return nil,tostring(err) end
+  -- Native color setters also change the format used by subsequent scripted
+  -- output. Clear that temporary format only after deselecting so cleanup does
+  -- not erase the intended colors on the selected game text.
+  if not ok and type(api.deselect)=="function" then pcall(api.deselect) end
+  if type(api.resetFormat)=="function" then pcall(api.resetFormat) end
+  if not ok then return nil,tostring(err) end
   return true
 end
 function Adapter:saveColorSettings(config)

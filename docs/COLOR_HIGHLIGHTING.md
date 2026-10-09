@@ -1,6 +1,6 @@
 # DGHUD Color Highlighting Guide
 
-Applies to DGHUD **v0.3.94**.
+Applies to DGHUD **v0.3.95**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -42,6 +42,14 @@ All highlight categories are enabled by default. Open **OPTIONS → COLOR SETTIN
 6. Choose **SWATCHES: TEXT** or **SWATCHES: HIGHLIGHT** to decide which color the swatches change. Turn Highlight on for a colored background, or off for text-only coloring.
 7. Set Bold, Underline, and the individual style's On/Off choice.
 8. Click **SAVE** to apply. **CANCEL** discards unsaved edits. **RESET** restores the original style in the preview; click Save to keep it.
+
+## Prefer plain gray skill text?
+
+Open **OPTIONS → COLOR SETTINGS → CATEGORIES** and switch **SKILL ROW COLORS** off. The skill table keeps its sorting and aligned columns, but new results use plain gray text on your normal main-display background.
+
+For a custom shade, leave Skill Row Colors on, open **TEXT STYLES**, and choose the **Skills** group. Change each of the three skill styles—ready to train, combat, and utility—to your preferred text color, turn **Highlight** off if you do not want a colored background, and click **SAVE** for each style.
+
+Blue means combat, yellow/gold means utility, and green means zero uses remaining (ready to train). These colors describe the skill category or training readiness, not its level. Changes affect the next skill output; run `skill` again to see them.
 
 ## Custom words and phrases
 

@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.94**.
+Documentation covers **DGHUD v0.3.95**.
 
 ## Quick start
 
@@ -43,7 +43,17 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.94
+## Latest changes — v0.3.95
+
+- Fixed a Windows color-settings save failure that prevented category buttons and text styles from saving.
+- Skill results no longer inherit an unintended red background or other formatting from previous highlighted output.
+- Turning **SKILL ROW COLORS** off keeps the aligned table in plain gray on the normal main-display background.
+- Saved skill color choices survive restarts and updates; intentional custom background highlights remain supported.
+- Added clearer [plain gray skill instructions](docs/COLOR_HIGHLIGHTING.md#prefer-plain-gray-skill-text) without weakening file-safety checks.
+
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.95).
+
+## Previous changes — v0.3.94
 
 - Switch between **Equipped** and **Carried** tabs in Inventory. Both lists stay saved; switching tabs sends no extra game command.
 - Capture current unnumbered inventory output and locations such as **legs (pants)** and **torso (shirt)** without dropping those items.

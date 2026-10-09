@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.94**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.95**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,17 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.94
+## What's new in v0.3.95
+
+- Fixed a Windows color-settings save failure that prevented category buttons and text styles from saving.
+- Skill results no longer inherit an unintended red background or other formatting from previous highlighted output.
+- Turning **SKILL ROW COLORS** off keeps the aligned table in plain gray on the normal main-display background.
+- Saved skill color choices survive restarts and updates; intentional custom background highlights remain supported.
+- Added clearer [plain gray skill instructions](COLOR_HIGHLIGHTING.md#prefer-plain-gray-skill-text) without weakening file-safety checks.
+
+[Read the release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.95).
+
+## Previous changes in v0.3.94
 
 - Inventory now has **Equipped** and **Carried** tabs. Each keeps its own saved list, so switching is immediate and does not send another game command.
 - Current unnumbered inventory rows and nested locations such as **legs (pants)** are captured correctly. Duplicates remain separate.

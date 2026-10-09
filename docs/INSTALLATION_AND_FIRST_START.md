@@ -1,6 +1,6 @@
 # DGHUD Installation and First Start
 
-Applies to DGHUD **v0.3.94**.
+Applies to DGHUD **v0.3.95**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 

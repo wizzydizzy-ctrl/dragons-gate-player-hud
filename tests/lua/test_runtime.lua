@@ -1805,6 +1805,71 @@ test("color style changes persist independently and save failures leave runtime 
   cold:shutdown(); hud:shutdown()
 end)
 
+test("Windows color category and gray skill styles persist through runtime restart",function()
+  local Preferences=require("color_preferences")
+  local home="C:/Users/Synthetic Player/Mudlet/profiles/Color Test"
+  local directory=home.."/DGHUDData"; local path=directory.."/color-settings.dat"
+  local files,dirs={}, {[home]=true}; local mutations=0
+  local api={}
+  function api.symlinkattributes(file,request)
+    -- Model the Windows full-table failure, without relaxing link checks.
+    if request~="mode" then error("synthetic Windows full-table inspection failure") end
+    if dirs[file] then return "directory" end
+    if files[file]~=nil then return "file" end
+    return nil,"No such file or directory",2
+  end
+  function api.read(file,limit)
+    if files[file]==nil then return nil,"No such file or directory",2 end
+    return files[file]:sub(1,limit)
+  end
+  function api.mkdir(file) dirs[file]=true; mutations=mutations+1; return true end
+  function api.write(file,text) files[file]=text; mutations=mutations+1; return true end
+  function api.rename(from,to)
+    if files[from]==nil or files[to]~=nil then return nil,"rename rejected" end
+    files[to],files[from]=files[from],nil; mutations=mutations+1; return true
+  end
+  function api.remove(file) files[file]=nil; mutations=mutations+1; return true end
+  local function persistentFake()
+    local f=fake()
+    function f:saveColorSettings(config) return Preferences.save(home,config,api) end
+    return f
+  end
+  local f=persistentFake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
+  eq(f.colorOptionsCallback("skills",false),false)
+  eq(hud.colorizer:status().skills,false); eq(f.viewColorOptions.skills,false)
+  local saved=assert(Preferences.load(home,api)); eq(saved.skills_enabled,false)
+  for _,id in ipairs({"skill_ready","skill_combat","skill_utility"}) do
+    local style=require("color_styles").defaults(id)
+    style.foreground="#C0C0C0"; style.background=false; style.bold=false; style.underline=false
+    eq(f.colorStyleCallback(id,style),true)
+  end
+  saved=assert(Preferences.load(home,api))
+  for _,id in ipairs({"skill_ready","skill_combat","skill_utility"}) do
+    eq(saved.styles[id].foreground,"#C0C0C0"); eq(saved.styles[id].background,false)
+  end
+  local committed=files[path]; local before=mutations
+  local inspect=api.symlinkattributes
+  api.symlinkattributes=function(file,request)
+    if file==path then return nil,"Permission denied",13 end
+    return inspect(file,request)
+  end
+  local ok,err=f.colorOptionsCallback("skills",true)
+  eq(ok,nil); assert(err:find("Permission denied",1,true))
+  eq(hud.colorizer:status().skills,false); eq(f.viewColorOptions.skills,false)
+  eq(files[path],committed); eq(mutations,before)
+  api.symlinkattributes=inspect; hud:shutdown()
+  local coldFake=persistentFake()
+  local cold=Main.new(coldFake,{layout={},colorization=assert(Preferences.load(home,api))})
+  assert(cold:start()); eq(cold.colorizer:status().skills,false); eq(coldFake.viewColorOptions.skills,false)
+  eq(coldFake.colorOptionsCallback("skills",true),true)
+  for _,id in ipairs({"skill_ready","skill_combat","skill_utility"}) do
+    eq(cold.colorizer.styles[id].foreground,"#C0C0C0"); eq(cold.colorizer.styles[id].background,false)
+  end
+  eq(assert(Preferences.load(home,api)).skills_enabled,true)
+  eq(files[path..".tmp"],nil); eq(files[path..".bak"],nil)
+  cold:shutdown()
+end)
+
 test("custom word highlights save, recolor immediately, survive restart, and delete safely",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start())
   local rule={phrase="hidden gate",foreground="#55CCAA",background="#112233",bold=true,underline=false,enabled=true}
