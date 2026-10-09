@@ -14,6 +14,7 @@ def migration_source_version():
     return match.group(1)
 MODULES.append('roundtime')
 MODULES.append('roundtime_check')
+MODULES.extend(('autoroller_audio','autoroller_alerts'))
 MODULES.append('skill_display')
 MODULES.append('skill_sort')
 MODULES.append('skill_settings_view')

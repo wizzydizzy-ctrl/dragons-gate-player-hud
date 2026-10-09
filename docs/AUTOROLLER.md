@@ -2,11 +2,36 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.95.
+Applies to DGHUD v0.3.96.
 
 The DGHUD autoroller watches the current Dragons Gate Character Creator, scores each complete set of 11 characteristics, and sends one `reroll` when the set does not meet your saved rules.
 
 The autoroller never sends `done`. When it finds a result to keep, the creator prompt remains waiting for you.
+
+## Completion sounds and reminders
+
+Open **OPTIONS → Autoroller** and scroll down to **ALERTS** inside the same settings window. It is a scrollable section, not a separate tab or submenu.
+
+1. Leave **ALERT SOUND: ON**, or switch it off if you only want the visual notice.
+2. Choose **Three-Tone**, **Chime**, **Alarm**, or **Horn**. For your own sound, click **CHOOSE WAV FILE…** and select a local `.wav` file; the **CUSTOM WAV** choice becomes available.
+3. Set **VOLUME (1–100)** to a whole number from 1 to 100, using the field or the −/+ buttons.
+4. Click **PREVIEW** to hear the draft choice and **STOP PREVIEW** to stop it. Preview works even with alerts OFF and does not start the roller or accept a result.
+5. If wanted, switch **REPEAT ALERT** on.
+6. Click the existing **SAVE** button to keep your choices. Closing without saving leaves the previous preferences in place, and cancelling the file picker leaves the draft unchanged.
+
+Defaults are **ALERT SOUND: ON**, **Three-Tone**, **volume 75**, and **REPEAT ALERT: OFF**. The 1–100 setting is relative to Mudlet's media volume and your computer's volume; the HUD never overrides mute. If Preview is quiet, check Mudlet's **Mute all media**, its media volume, and your computer's output device and volume.
+
+A confirmed qualifying roll opens a persistent **AUTOROLLER TARGET HIT** notice and, if alert sound is ON, plays your selected sound. The notice still appears with sound OFF. In **LET ME PLACE**, review and place the held pool yourself before accepting it. Automatic stat placement must be confirmed before its completion alert sounds. Errors, disconnects, and reaching your maximum-roll limit are not announced as successful rolls. Repeated redraws of the same held result do not create another success alert.
+
+Turn **REPEAT ALERT** on if one alert is easy to miss. Reminders run approximately every ten seconds, waiting for longer sounds between plays, for up to five minutes from the original result. At that limit, repeating alert audio stops but the visual notice remains. **DISMISS / SILENCE** stops alert audio and closes the notice without accepting or discarding your roll. Starting a new rolling session, manually rerolling or continuing character creation, stopping the roller, disconnecting or changing characters, and shutting down, reloading, or updating the HUD clear old alerts and cancel their reminders. Saved sound preferences are retained.
+
+These alerts do not prevent the game's idle timeout and send no anti-idle commands. Return to the game, review the result, and finish character creation yourself.
+
+Your chosen WAV is validated and copied into private profile storage under `DGHUDData/autoroller-sounds-v1`, outside the files replaced during updates. Moving the original afterward will not break the saved sound. The original source path is not saved in your preferences, and WAV contents are not included in shared maps, feedback, diagnostics, or releases. Nothing is uploaded by choosing or playing a sound. As with other local profile files, someone with access to your computer or a copied profile may be able to read them.
+
+Choose a normal PCM or IEEE-float WAV of at most **10 MiB** and **60 seconds**. Compressed or unsupported WAV formats and damaged files are rejected with a helpful message; convert the audio to a standard WAV first if necessary. If a saved custom sound becomes unavailable or cannot be played, the HUD tries its built-in Three-Tone sound and tells you to choose the file again. Playback still depends on Mudlet's audio support and mute settings.
+
+Alert settings stay with the Mudlet profile across character changes, restarts, and HUD updates. **RESET SOUND TO DEFAULTS** changes only the sound options in the draft, not rolling targets or minimums; click **SAVE** to apply the reset.
 
 ## Rare latent psion alert
 
@@ -71,7 +96,7 @@ If it does not qualify, DGHUD sends one `reroll`. If it qualifies, DGHUD stops a
 
 The game provides a pool of 11 labels that you can place into characteristics. DGHUD scores the pool before placement.
 
-Choose what should happen to a qualifying pool at the top of **OPTIONS → AUTOROLLER**:
+Choose what should happen to a qualifying pool in **OPTIONS → AUTOROLLER**. Scroll past **ALERTS** and **SESSION BEST** to the arranged-pool choices:
 
 - **LET ME PLACE** — DGHUD stops and leaves all values for you. When enabled, it also verifies that your configured minimums can be satisfied by the pool.
 - **GAME AUTO** — DGHUD sends `auto` and waits for the game to finish placing the pool. Per-characteristic minimums cannot promise final positions in this mode, so qualification uses total and optional pool-count rules.
@@ -375,7 +400,7 @@ Roll and arrange:
 
 ### See which minimums you have actually rolled
 
-Open **Options → Autoroller** while rolling. **SESSION BEST** at the top updates automatically, showing each characteristic's **Target**, **Best seen**, and the first roll that reached that high. A roll contributes only after its matching rolling decision prompt is confirmed, not from an incomplete table or assignment-method screen. You can leave this window open while the roller continues; updates to this display do not overwrite settings you are editing. The **SESSION BEST** button, or `rr stats`, prints the same breakdown in the main console.
+Open **Options → Autoroller** while rolling and scroll past **ALERTS** to the live **SESSION BEST** table. It updates automatically, showing each characteristic's **Target**, **Best seen**, and the first roll that reached that high. A roll contributes only after its matching rolling decision prompt is confirmed, not from an incomplete table or assignment-method screen. You can leave this window open while the roller continues; updates to this display do not overwrite settings you are editing. The **SESSION BEST** button, or `rr stats`, prints the same breakdown in the main console.
 
 For example, after 425 rolls you might see **STR — Target: Great — Best seen: Good**. Unreached minimums are highlighted. After every 100 complete named-stat rolls, the roller also prints a reminder about any saved minimum it has never observed. This can help you investigate a race or profession restriction, but **the highest observed roll is not a confirmed limit**: a rarer higher result might still be possible. DGHUD does not lower your minimums or stop rolling because of this reminder. Review your settings yourself if the target appears unrealistic.
 

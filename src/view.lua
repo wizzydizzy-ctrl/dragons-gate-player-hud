@@ -5,6 +5,7 @@ local ColorStyles=require("color_styles")
 local ColorPreferences=require("color_preferences")
 local MAX_CUSTOM_RULES=ColorPreferences.MAX_CUSTOM_RULES
 local Sounds=require("chat_sounds")
+local RollerAudio=require("autoroller_audio")
 local SkillSort=require("skill_sort")
 local SkillSettingsView=require("skill_settings_view")
 local View={}; View.__index=View
@@ -348,7 +349,7 @@ function View:positionInventoryTabs()
   -- taking away the last full-height item row or hiding either section.
   self.inventory_scroll_header_height=visible and not inHeader and height+4 or 0
   local theme=self.settings.theme
-  local overlayOpen=self.color_menu_visible or self.color_settings_visible or self.chat_settings_visible or self.keybindings_visible or self.skill_settings_visible or self.help_visible or self.feedback_visible or self.support_visible or self.roller_settings_visible or self.latent_alert_visible or self.map_settings_visible or self.map_library_visible
+  local overlayOpen=self.color_menu_visible or self.color_settings_visible or self.chat_settings_visible or self.keybindings_visible or self.skill_settings_visible or self.help_visible or self.feedback_visible or self.support_visible or self.roller_settings_visible or self.roller_result_alert_visible or self.latent_alert_visible or self.map_settings_visible or self.map_library_visible
   for index,key in ipairs({"equipped","carried"}) do
     for _,target in ipairs({{self.inventory_tabs,inHeader},{self.inventory_scroll_tabs,visible and not inHeader}}) do
       local button=target[1][key]
@@ -723,6 +724,7 @@ function View.new(settings)
   for _,key in ipairs(self.roller_action_order) do local button=label("DGHUD.RollerSettings.Action."..key,self.roller_content); button.option_text=rollerActionLabels[key]; button:setClickCallback(function() if self.options_action_callback then return self.options_action_callback(key) end; return nil,"autoroller action is unavailable" end); self.roller_action_buttons[key]=button end
   self.roller_save:setClickCallback(function() return self:saveRollerSettings() end); self.roller_cancel:setClickCallback(function() return self:hideRollerSettings() end); self.roller_overlay:setClickCallback(function() return self:hideRollerSettings() end)
   self.roller_settings_visible=false
+  self:createRollerAlertControls()
   self.latent_alert_overlay=label("DGHUD.LatentPsion.Overlay",self.root,"background:rgba(0,0,0,0.78);")
   self.latent_alert_panel=Geyser.Container:new({name="DGHUD.LatentPsion.Panel",x=0,y=0,width=620,height=230},self.root)
   self.latent_alert_bg=label("DGHUD.LatentPsion.Background",self.latent_alert_panel,"background:#24100f;border:3px solid #ffb347;border-radius:10px;")
@@ -1314,6 +1316,7 @@ function View:applyLayout(layout)
   self:layoutLatentPsionAlert(layout)
   self:layoutMapSettings(layout)
   self:layoutMapLibrary(layout)
+  self:layoutRollerResultAlert(layout)
 end
 function View:layoutLatentPsionAlert(layout)
   local widgets={self.latent_alert_overlay,self.latent_alert_panel,self.latent_alert_bg,self.latent_alert_title,self.latent_alert_text,self.latent_alert_close}
@@ -2362,9 +2365,244 @@ function View:setRollerSession(summary)
   end
   return true
 end
+local rollerAlertControlNames={"heading","enabled","sound_caption","custom","choose","preview","stop_preview","volume_caption","volume","volume_down","volume_up","repeat_enabled","reset","warning","status"}
+local rollerResultControlNames={"overlay","panel","bg","scroll","title","text","dismiss"}
+function View:rollerAlertSettingsWidgets()
+  local widgets={}
+  for _,key in ipairs(rollerAlertControlNames) do widgets[#widgets+1]=self.roller_alert_controls[key] end
+  for _,entry in ipairs(RollerAudio.catalog) do widgets[#widgets+1]=self.roller_alert_sounds[entry.id] end
+  return widgets
+end
+function View:rollerResultAlertWidgets()
+  local widgets={}
+  for _,key in ipairs(rollerResultControlNames) do widgets[#widgets+1]=self["roller_result_"..key] end
+  return widgets
+end
+function View:createRollerAlertControls()
+  local t=self.settings.theme
+  self.roller_alert_controls={}; self.roller_alert_sounds={}
+  for _,key in ipairs(rollerAlertControlNames) do
+    self.roller_alert_controls[key]=key=="volume" and input("DGHUD.RollerSettings.Alerts.Volume",self.roller_content,self.geyser) or
+      label("DGHUD.RollerSettings.Alerts."..key,self.roller_content,"background:transparent;color:"..t.text..";",self.geyser)
+  end
+  for _,entry in ipairs(RollerAudio.catalog) do
+    local id=entry.id
+    local button=label("DGHUD.RollerSettings.Alerts.Sound."..id,self.roller_content,nil,self.geyser)
+    button:setClickCallback(function() return self:editRollerAlert("sound",id) end)
+    self.roller_alert_sounds[id]=button
+  end
+  local c=self.roller_alert_controls
+  for _,key in ipairs({"enabled","repeat_enabled","custom","reset","volume_down","volume_up"}) do
+    local action=key
+    c[key]:setClickCallback(function() return self:editRollerAlert(action) end)
+  end
+  for _,key in ipairs({"choose","preview","stop_preview"}) do
+    local action=key
+    c[key]:setClickCallback(function() return self:performRollerAlertAction(action) end)
+  end
+  self.roller_result_overlay=label("DGHUD.RollerResult.Overlay",self.root,"background:rgba(0,0,0,0.65);",self.geyser)
+  self.roller_result_panel=self.geyser.Container:new({name="DGHUD.RollerResult.Panel",x=0,y=0,width=600,height=280},self.root)
+  self.roller_result_bg=label("DGHUD.RollerResult.Background",self.roller_result_panel,"background:"..t.panel..";border:2px solid "..t.jade..";border-radius:8px;",self.geyser)
+  self.roller_result_scroll=self.geyser.ScrollBox:new({name="DGHUD.RollerResult.Scroll",x=12,y=44,width=576,height=180},self.roller_result_panel)
+  self.roller_result_title=label("DGHUD.RollerResult.Title",self.roller_result_scroll,"background:transparent;color:"..t.jade..";",self.geyser)
+  self.roller_result_text=label("DGHUD.RollerResult.Text",self.roller_result_scroll,"background:transparent;color:"..t.text..";",self.geyser)
+  self.roller_result_dismiss=label("DGHUD.RollerResult.Dismiss",self.roller_result_panel,"background:#193024;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";",self.geyser)
+  self.roller_result_dismiss:setClickCallback(function()
+    if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+    if not self.roller_result_alert_visible then return nil,"Autoroller result alert is no longer visible." end
+    local called,ok,err=true,true,nil
+    if self.roller_alert_action_callback then called,ok,err=pcall(self.roller_alert_action_callback,"silence") end
+    self:hideRollerResultAlert()
+    if not called then return nil,tostring(ok) end
+    return ok,err
+  end)
+  self.roller_result_alert_visible=false
+  for _,widgets in ipairs({self:rollerAlertSettingsWidgets(),self:rollerResultAlertWidgets()}) do
+    for _,widget in ipairs(widgets) do widget:hide() end
+  end
+end
+function View:setRollerAlertActionCallback(callback)
+  self.roller_alert_action_callback=type(callback)=="function" and callback or nil
+  return true
+end
+function View:rollerAlertValues()
+  local values=viewCopy(self.roller_draft and self.roller_draft.alerts or RollerAudio.defaults())
+  local inputWidget=self.roller_alert_controls.volume
+  local text=inputWidget.getText and inputWidget:getText() or values.volume
+  values.volume=tonumber(text) or text
+  return RollerAudio.validate(values)
+end
+function View:setRollerAlertStatus(message)
+  self.roller_alert_status=tostring(message or "")
+  if self.layout and self.roller_settings_visible then self:layoutRollerSettings(self.layout) else self:renderRollerAlertSettings(false) end
+end
+function View:editRollerAlert(action,value)
+  if self.disposed or not self.root or not self.roller_settings_visible or not self.roller_draft then return nil,"Autoroller settings are unavailable." end
+  local alerts=self.roller_draft.alerts
+  if action=="enabled" or action=="repeat_enabled" then alerts[action]=not alerts[action]
+  elseif action=="sound" then
+    local found=false; for _,entry in ipairs(RollerAudio.catalog) do if entry.id==value then found=true end end
+    if not found then return nil,"Choose a bundled alert sound." end
+    alerts.sound=value
+  elseif action=="custom" then
+    if not alerts.custom_file then self:setRollerAlertStatus("Choose a WAV file first."); return nil,"Choose a WAV file first." end
+    alerts.sound="custom"
+  elseif action=="reset" then
+    self:stopRollerAlertPreview()
+    self.roller_draft.alerts=RollerAudio.defaults()
+    self.roller_alert_controls.volume:print(tostring(self.roller_draft.alerts.volume))
+  elseif action=="volume_down" or action=="volume_up" then
+    local current,err=self:rollerAlertValues()
+    if not current then self:setRollerAlertStatus(err); return nil,err end
+    alerts.volume=math.max(1,math.min(100,current.volume+(action=="volume_up" and 5 or -5)))
+    self.roller_alert_controls.volume:print(tostring(alerts.volume))
+  else return nil,"Unknown alert setting." end
+  self:setRollerAlertStatus("Draft updated. Use SAVE to keep these settings.")
+  return true
+end
+function View:stopRollerAlertPreview()
+  local shouldStop=self.roller_alert_preview_active or self.roller_settings_visible
+  self.roller_alert_preview_active=false
+  if shouldStop and self.roller_alert_action_callback then
+    local alerts=viewCopy(self.roller_draft and self.roller_draft.alerts or RollerAudio.defaults())
+    if self.roller_draft and self.roller_alert_controls then
+      local volume=self.roller_alert_controls.volume:getText(); alerts.volume=tonumber(volume) or volume
+    end
+    local called,ok,err=pcall(self.roller_alert_action_callback,"stop_preview",alerts)
+    if not called then return nil,tostring(ok) end
+    return ok,err
+  end
+  return true
+end
+function View:performRollerAlertAction(action)
+  if self.disposed or not self.root or not self.roller_settings_visible or not self.roller_draft then return nil,"Autoroller settings are unavailable." end
+  if action=="stop_preview" then
+    local ok,err=self:stopRollerAlertPreview(); self:setRollerAlertStatus(err or "Preview stopped."); return ok,err
+  end
+  if action~="choose" and action~="preview" then return nil,"Unknown alert action." end
+  if not self.roller_alert_action_callback then self:setRollerAlertStatus("Alert audio is unavailable."); return nil,self.roller_alert_status end
+  local alerts,err=self:rollerAlertValues()
+  if not alerts then self:setRollerAlertStatus(err); return nil,err end
+  -- Callbacks receive a detached validated snapshot, never the live draft.
+  local called,result,why=pcall(self.roller_alert_action_callback,action,viewCopy(alerts))
+  if not called then why=tostring(result); result=nil end
+  if not result then
+    local message=action=="choose" and (why==nil or why=="cancelled") and "File selection cancelled. Draft unchanged." or (why or "Could not preview alert.")
+    self:setRollerAlertStatus(message); return nil,why
+  end
+  if action=="choose" then
+    if type(result)~="table" then self:setRollerAlertStatus("Invalid WAV selection."); return nil,self.roller_alert_status end
+    local chosen=viewCopy(alerts)
+    chosen.custom_file=result.custom_file or result.file
+    chosen.custom_name=result.custom_name or result.name
+    if not chosen.custom_file or not chosen.custom_name then self:setRollerAlertStatus("Invalid WAV selection."); return nil,self.roller_alert_status end
+    chosen.sound="custom"
+    local validated,validationError=RollerAudio.validate(chosen)
+    if not validated then self:setRollerAlertStatus(validationError); return nil,validationError end
+    self.roller_draft.alerts=validated
+    self:setRollerAlertStatus("WAV selected for this draft. Use SAVE to keep it.")
+  else
+    self.roller_alert_preview_active=true
+    self:setRollerAlertStatus(why or "Preview playing. Client and system mute still apply.")
+  end
+  return result
+end
+function View:renderRollerAlertSettings(populate)
+  if not self.roller_draft or not self.roller_alert_controls then return true end
+  local alerts=self.roller_draft.alerts; local c=self.roller_alert_controls; local t=self.settings.theme
+  local font=self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-3)) or 11
+  local function button(widget,text,selected)
+    widget:setStyleSheet("background:"..(selected and "#193024" or "#111512")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.text)..";")
+    widget:echo(View.withFont("<center><b>"..safeText(text).."</b></center>",font))
+  end
+  c.heading:echo(View.withFont("<b>ALERTS</b> · TARGET HIT",font+2))
+  button(c.enabled,"ALERT SOUND: "..(alerts.enabled and "ON" or "OFF"),alerts.enabled)
+  c.sound_caption:echo(View.withFont("<b>SOUND CHOICES</b>",font))
+  for _,entry in ipairs(RollerAudio.catalog) do button(self.roller_alert_sounds[entry.id],entry.label,alerts.sound==entry.id) end
+  button(c.custom,"CUSTOM WAV"..(alerts.custom_file and " · READY" or " · CHOOSE FILE"),alerts.sound=="custom")
+  for key,text in pairs({choose="CHOOSE WAV FILE…",preview="PREVIEW",stop_preview="STOP PREVIEW",reset="RESET SOUND TO DEFAULTS",volume_down="−",volume_up="+"}) do button(c[key],text,false) end
+  button(c.repeat_enabled,"REPEAT ALERT: "..(alerts.repeat_enabled and "ON" or "OFF"),alerts.repeat_enabled)
+  c.volume_caption:echo(View.withFont("<b>VOLUME (1–100)</b>",font))
+  if populate then c.volume:print(tostring(alerts.volume)) end
+  c.volume:setStyleSheet("background:#080b0a;border:1px solid "..t.border..";color:"..t.text..";font-size:"..font.."px;")
+  local warning="Repeat plays every 10 seconds, capped at 5 minutes. Client/system mute is respected. No anti-idle commands. Preview works while alerts are OFF."
+  if alerts.custom_file then warning=warning.."\nCustom WAV: "..tostring(alerts.custom_name or "Selected WAV") end
+  c.warning:echo(View.withFont(safeText(warning),font))
+  c.status:echo(View.withFont(safeText(self.roller_alert_status or "Changes are saved with the existing SAVE button."),font))
+  return true
+end
+function View:layoutRollerAlertSettings(top,width,font,compact)
+  local c=self.roller_alert_controls; local gap=6; local row=math.max(30,font+20); local y=top
+  local function full(widget,height) place(widget,0,y,width,height or row); y=y+(height or row)+gap end
+  full(c.heading,math.max(26,rollerTextHeight("ALERTS · TARGET HIT",width,font+2)))
+  full(c.enabled,math.max(row,rollerTextHeight("ALERT SOUND: OFF",width,font)+4))
+  full(c.sound_caption,math.max(22,rollerTextHeight("SOUND CHOICES",width,font)))
+  local columns=not compact and width>=420 and 2 or 1; local cw=(width-gap*(columns-1))/columns
+  local choices={}; for _,entry in ipairs(RollerAudio.catalog) do choices[#choices+1]=self.roller_alert_sounds[entry.id] end; choices[#choices+1]=c.custom
+  for index,widget in ipairs(choices) do place(widget,((index-1)%columns)*(cw+gap),y+math.floor((index-1)/columns)*(row+gap),cw,row) end
+  y=y+math.ceil(#choices/columns)*(row+gap)
+  full(c.choose,math.max(row,rollerTextHeight("CHOOSE WAV FILE…",width,font)+4))
+  if width>=300 then
+    place(c.preview,0,y,(width-gap)/2,row); place(c.stop_preview,(width+gap)/2,y,(width-gap)/2,row); y=y+row+gap
+  else full(c.preview); full(c.stop_preview) end
+  full(c.volume_caption,math.max(22,rollerTextHeight("VOLUME (1–100)",width,font)))
+  local step=math.min(40,width*.22)
+  place(c.volume_down,0,y,step,row); place(c.volume,step+gap,y,math.max(1,width-step*2-gap*2),row); place(c.volume_up,width-step,y,step,row); y=y+row+gap
+  full(c.repeat_enabled,math.max(row,rollerTextHeight("REPEAT ALERT: OFF",width,font)+4))
+  full(c.reset,math.max(row,rollerTextHeight("RESET SOUND TO DEFAULTS",width,font)+4))
+  local warning="Repeat plays every 10 seconds, capped at 5 minutes. Client/system mute is respected. No anti-idle commands. Preview works while alerts are OFF."
+  local alerts=self.roller_draft.alerts
+  if alerts.custom_file then warning=warning.." Custom WAV: "..tostring(alerts.custom_name or "Selected WAV") end
+  full(c.warning,rollerTextHeight(warning,width,font)+10)
+  full(c.status,math.max(rollerTextHeight(string.rep("M",180),width,font),rollerTextHeight(self.roller_alert_status or "",width,font))+6)
+  return y
+end
+function View:showRollerResultAlert(event)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  self:stopRollerAlertPreview()
+  event=type(event)=="table" and event or {}
+  local roll=type(event.roll)=="table" and event.roll or {}
+  local protocol=event.protocol or roll.protocol
+  local command=event.acceptance_command or event.accept_command or ((protocol=="creator" or protocol=="arrange") and "done" or "y")
+  local instruction="Result held at the game prompt. Review it and manually type "..tostring(command).." to accept, or reroll yourself."
+  if protocol=="arrange" and event.placement=="manual" then
+    instruction="Result held at the game prompt. Review the pool. Place the pool values yourself first, then manually type "..tostring(command).." to accept, or reroll yourself."
+  end
+  self.roller_result_lines={"Reason: "..tostring(event.reason or "Target reached"),
+    "Score: "..tostring(event.score or event.total or roll.total or "—").." / "..tostring(event.maximum or roll.maximum or 77),
+    "Confirmed rolls: "..tostring(event.roll_count or event.rolls or event.count or roll.roll or "—"),
+    instruction,
+    "DGHUD never accepts the result for you. Dismiss / Silence only acknowledges this alert."}
+  self.roller_result_alert_visible=true
+  self:layoutRollerResultAlert(self.layout or {window_width=1200,window_height=800})
+  return true
+end
+function View:hideRollerResultAlert()
+  self.roller_result_alert_visible=false; self.roller_result_lines=nil
+  for _,widget in ipairs(self:rollerResultAlertWidgets()) do widget:hide() end
+  return true
+end
+function View:layoutRollerResultAlert(layout)
+  local widgets=self:rollerResultAlertWidgets()
+  if not self.roller_result_alert_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
+  local width=math.max(1,tonumber(layout.window_width) or 1200); local height=math.max(1,tonumber(layout.window_height) or 800)
+  local margin=math.min(12,math.floor(math.min(width,height)*.025)); local pw=math.min(620,width-margin*2); local ph=math.min(340,height-margin*2)
+  local pad=math.min(12,math.floor(pw*.04)); local font=math.max(10,math.min(14,(layout.body_font or 14)-2)); local inner=math.max(1,pw-pad*2)
+  local buttonHeight=math.min(34,ph*.24); local buttonY=ph-pad-buttonHeight
+  place(self.roller_result_overlay,0,0,"100%","100%"); place(self.roller_result_panel,math.floor((width-pw)/2),math.floor((height-ph)/2),pw,ph); place(self.roller_result_bg,0,0,"100%","100%")
+  place(self.roller_result_scroll,pad,pad,inner,math.max(1,buttonY-pad-6))
+  local html={}; local textHeight=8; local textWidth=math.max(1,inner-16)
+  local titleHeight=rollerTextHeight("AUTOROLLER TARGET HIT",textWidth,font+3)+6
+  place(self.roller_result_title,0,0,textWidth,titleHeight); self.roller_result_title:echo(View.withFont("<b>AUTOROLLER TARGET HIT</b>",font+3))
+  for _,line in ipairs(self.roller_result_lines or {}) do html[#html+1]=safeText(line); textHeight=textHeight+rollerTextHeight(line,textWidth,font)+math.ceil(font*1.6) end
+  place(self.roller_result_text,0,titleHeight+6,textWidth,textHeight); self.roller_result_text:echo(View.withFont(table.concat(html,"<br><br>"),font)); self.roller_result_scroll.content_height=titleHeight+6+textHeight
+  place(self.roller_result_dismiss,pad,buttonY,inner,buttonHeight); self.roller_result_dismiss:echo(View.withFont("<center><b>DISMISS / SILENCE</b></center>",font))
+  View.raiseCards(widgets); return true
+end
 function View:layoutRollerSettings(layout)
   local widgets={self.roller_overlay,self.roller_panel,self.roller_bg,self.roller_content,self.roller_title,self.roller_status,self.roller_save,self.roller_cancel,self.roller_arrange_caption}; for _,button in pairs(self.roller_arrange_buttons or {}) do widgets[#widgets+1]=button end; for _,entry in pairs(self.roller_fields or {}) do widgets[#widgets+1]=entry.caption; widgets[#widgets+1]=entry.input end; for _,button in pairs(self.roller_toggles or {}) do widgets[#widgets+1]=button end; for _,button in pairs(self.roller_action_buttons or {}) do widgets[#widgets+1]=button end
   widgets[#widgets+1]=self.roller_session_best
+  for _,widget in ipairs(self:rollerAlertSettingsWidgets()) do widgets[#widgets+1]=widget end
   if not self.roller_settings_visible then for _,widget in ipairs(widgets) do widget:hide() end; return true end
   local width=math.max(1,tonumber(layout.window_width) or 1200); local height=math.max(1,tonumber(layout.window_height) or 800); local margin=math.min(18,math.max(6,math.floor(math.min(width,height)*.025)))
   local panelWidth=math.min(820,math.max(1,width-margin*2)); local panelHeight=math.min(650,math.max(1,height-margin*2)); local x=math.floor((width-panelWidth)/2); local y=math.floor((height-panelHeight)/2)
@@ -2375,7 +2613,7 @@ function View:layoutRollerSettings(layout)
   place(self.roller_content,14,contentTop,contentWidth,viewportHeight)
   local actionGap=6; local actionWidth=(contentWidth-actionGap*2)/3; local actionHeight=math.max(30,font+20)
   for index,key in ipairs({"roller_start","roller_stop","roller_stats"}) do place(self.roller_action_buttons[key],(index-1)*(actionWidth+actionGap),0,actionWidth,actionHeight) end
-  local sessionTop=actionHeight+8
+  local sessionTop=self:layoutRollerAlertSettings(actionHeight+8,math.max(1,contentWidth-16),font,compact)+8
   local sessionHeight=math.max(self.roller_session_height or 0,self:renderRollerSession())
   self.roller_session_height=sessionHeight
   place(self.roller_session_best,0,sessionTop,contentWidth,sessionHeight)
@@ -2690,9 +2928,14 @@ function View:renderColorOptions()
   return true
 end
 function View:showRollerSettings(config)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  self:stopRollerAlertPreview()
+  config=type(config)=="table" and config or {}
+  local alerts,alertError=RollerAudio.validate(config.alerts)
+  if not alerts then return nil,alertError end
   self:hideSkillSettings()
   self.roller_session_height=nil
-  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config or {}); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
+  self:hideHelp(); self:hideMapSettings(); self:hideMapLibrary(); self:hideChatSettings(); if self.feedback_visible then self:hideFeedback() end; if self.color_settings_visible then self:hideColorSettings() end; if self.support_visible then self:hideSupport() end; self.roller_draft=viewCopy(config); self.roller_draft.alerts=viewCopy(alerts); self.roller_draft.min_stats=viewCopy(self.roller_draft.min_stats or {}); if not ({manual=true,game_auto=true,minimums=true})[self.roller_draft.arrange_mode] then self.roller_draft.arrange_mode="manual" end; self.roller_settings_visible=true; self:setColorMenuVisible(false); self.roller_error=nil; self.roller_alert_status=nil; self:renderRollerSettings(true); if self.layout then self:layoutRollerSettings(self.layout) end; return true
 end
 function View:showMapSettings(config)
   self:hideSkillSettings()
@@ -2725,10 +2968,16 @@ function View:saveMapSettings()
   end
   local called,ok,err,config=pcall(self.map_settings_callback,self:mapSettingsValues()); if not called then err="Could not save mapper settings: "..tostring(ok); ok=nil end; if not ok then self.map_settings_error=err; self:renderMapSettings(false); return nil,err end; self:hideMapSettings(); return true,config
 end
-function View:hideRollerSettings() self.roller_settings_visible=false; self.roller_draft=nil; self.roller_error=nil; if self.layout then self:layoutRollerSettings(self.layout) end; return true end
+function View:hideRollerSettings()
+  self:stopRollerAlertPreview()
+  self.roller_settings_visible=false; self.roller_draft=nil; self.roller_error=nil; self.roller_alert_status=nil
+  if self.layout then self:layoutRollerSettings(self.layout) end
+  return true
+end
 function View:renderRollerSettings(populate)
   self:renderRollerSession()
   if not self.roller_draft then return true end; local t=self.settings.theme; local font=self.layout and math.max(10,(self.layout.body_font or 14)-3) or 11
+  self:renderRollerAlertSettings(populate)
   for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=key:match("^[A-Z]+$") and (self.roller_draft.min_stats or {})[key] or self.roller_draft[key]; if value==nil then value="off" end; field.caption:echo(View.withFont(field.label,font)); if populate and field.input.print then field.input:print(tostring(value)) end end
   for _,key in ipairs(self.roller_toggle_order) do local enabled=self.roller_draft[key]==true; local button=self.roller_toggles[key]; button:setStyleSheet("background:"..(enabled and "#193024" or "#111512")..";border:1px solid "..(enabled and t.jade or t.border)..";border-radius:4px;color:"..(enabled and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font)) end
   local mode=self.roller_draft.arrange_mode or "manual"; self.roller_arrange_caption:echo(View.withFont("<b>WHEN A ROLL-AND-ARRANGE POOL QUALIFIES</b> &nbsp; (DGHUD never sends done)",font)); for _,key in ipairs(self.roller_arrange_order) do local selected=key==mode; local button=self.roller_arrange_buttons[key]; button:setStyleSheet("background:"..(selected and "#193024" or "#111512")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.muted)..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text.."</b></center>",font)) end
@@ -2741,12 +2990,17 @@ function View:renderRollerSettings(populate)
   return true
 end
 function View:rollerSettingsValues()
-  local values={min_stats={},arrange_mode=self.roller_draft.arrange_mode or "manual"}; for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=field.input.getText and field.input:getText() or ""; if key:match("^[A-Z]+$") then values.min_stats[key]=value else values[key]=value end end
+  local alerts,err=self:rollerAlertValues(); if not alerts then return nil,err end
+  local values={alerts=viewCopy(alerts),min_stats={},arrange_mode=self.roller_draft.arrange_mode or "manual"}; for _,key in ipairs(self.roller_field_order) do local field=self.roller_fields[key]; local value=field.input.getText and field.input:getText() or ""; if key:match("^[A-Z]+$") then values.min_stats[key]=value else values[key]=value end end
   for _,key in ipairs(self.roller_toggle_order) do values[key]=self.roller_draft[key]==true end; return values
 end
 function View:saveRollerSettings()
+  if self.disposed or not self.root or not self.roller_settings_visible or not self.roller_draft then return nil,"Autoroller settings are unavailable." end
   if not self.roller_settings_callback then self.roller_error="Save callback is unavailable"; self:renderRollerSettings(false); return nil,self.roller_error end
-  local values=self:rollerSettingsValues(); local ok,err,config=self.roller_settings_callback(values)
+  local values,validationError=self:rollerSettingsValues()
+  if not values then self.roller_error=validationError; self:setRollerAlertStatus(validationError); return nil,validationError end
+  local called,ok,err,config=pcall(self.roller_settings_callback,values)
+  if not called then err=tostring(ok); ok=nil end
   if not ok then self.roller_error=err or "Could not save settings"; self:renderRollerSettings(false); return nil,self.roller_error end
   self:hideRollerSettings(); return true,config
 end
@@ -3086,6 +3340,22 @@ function View.validateReusable(candidate,settings)
   local rollerRequired={"target_total","hard_stop","max_rolls","reroll_delay","minimum_greats","minimum_good_plus","log_folder","master_file","STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
   for _,name in ipairs(rollerRequired) do local field=type(candidate.roller_fields)=="table" and candidate.roller_fields[name] or nil; if type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD autoroller view is incomplete" end end
   if candidate.roller_session_best.container~=candidate.roller_content then return nil,"preserved HUD autoroller session parent is invalid" end
+  if type(candidate.roller_alert_controls)~="table" or type(candidate.roller_alert_sounds)~="table" then return nil,"preserved HUD autoroller alert controls are incomplete" end
+  for _,key in ipairs(rollerAlertControlNames) do
+    local widget=candidate.roller_alert_controls[key]
+    if not (key=="volume" and reusableInput(widget) or key~="volume" and reusableLabel(widget)) or widget.container~=candidate.roller_content then return nil,"preserved HUD autoroller alert control is incomplete" end
+  end
+  for _,entry in ipairs(RollerAudio.catalog) do
+    local widget=candidate.roller_alert_sounds[entry.id]
+    if not reusableLabel(widget) or widget.container~=candidate.roller_content or type(widget.setClickCallback)~="function" then return nil,"preserved HUD autoroller sound choice is incomplete" end
+  end
+  for _,key in ipairs(rollerResultControlNames) do
+    local widget=candidate["roller_result_"..key]
+    local plain=key=="panel" or key=="scroll"
+    local parent=(key=="overlay" or key=="panel") and candidate.root or ((key=="text" or key=="title") and candidate.roller_result_scroll or candidate.roller_result_panel)
+    if not (plain and reusableWidget(widget) or not plain and reusableLabel(widget)) or widget.container~=parent then return nil,"preserved HUD autoroller result control is incomplete" end
+  end
+  if type(candidate.roller_result_dismiss.setClickCallback)~="function" then return nil,"preserved HUD autoroller acknowledgement is incomplete" end
   local mapSettingsRequired={"minimum_height","height_percent","maximum_height","zoom_step","zoom_min","zoom_max","walk_timeout","special_timeout"}
   if type(candidate.map_settings_field_order)~="table" or type(candidate.map_settings_fields)~="table" then return nil,"preserved HUD mapper settings are incomplete" end
   for index,name in ipairs(mapSettingsRequired) do local field=candidate.map_settings_fields[name]; if candidate.map_settings_field_order[index]~=name or type(field)~="table" or not reusableLabel(field.caption) or not reusableInput(field.input) then return nil,"preserved HUD mapper settings are incomplete" end end
@@ -3093,6 +3363,8 @@ function View.validateReusable(candidate,settings)
 end
 function View:prepareForReuse(settings)
   local valid,why=View.validateReusable(self,settings); if not valid then return nil,why end
+  self:hideRollerSettings(); self:hideRollerResultAlert()
+  self.roller_alert_action_callback=nil
   self.settings=settings or self.settings
   self:ensureInventoryTabs()
   self:hideSkillSettings()
@@ -3134,6 +3406,9 @@ function View:delete()
   -- Native deletion may deliver callbacks before it returns. Retire this view
   -- first so retained closures cannot save preferences or repaint old labels.
   self.disposed=true; self.chat_settings_visible=false
+  pcall(self.stopRollerAlertPreview,self)
+  pcall(self.hideRollerResultAlert,self)
+  self.roller_settings_visible=false; self.roller_draft=nil; self.roller_alert_status=nil
   pcall(self.hideSkillSettings,self)
   self.skill_settings_visible=false; self.skill_settings_draft=nil
   self.skill_settings_saving=false; self.skill_settings_pending_snapshot=nil

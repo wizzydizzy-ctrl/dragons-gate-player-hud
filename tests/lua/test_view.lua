@@ -1,5 +1,6 @@
 local View=require("view")
 local ColorPreferences=require("color_preferences")
+local RollerAudio=require("autoroller_audio")
 local VIEW_CONTRACT=string.rep("a",64)
 local SETTINGS_CONTRACT=string.rep("b",64)
 test("rich text receives an explicit responsive font size",function()
@@ -2070,6 +2071,280 @@ test("help and autoroller settings overlays are mutually exclusive",function()
   local view=chatView(); view:applyLayout(require("layout").compute(800,650)); view:showHelp(); eq(view.help_panel.visible,true)
   view:showRollerSettings({target_total=53,reroll_command="n",min_stats={}}); eq(view.help_visible,false); eq(view.help_panel.visible,false); eq(view.roller_panel.visible,true)
   view:showHelp(); eq(view.roller_settings_visible,false); eq(view.roller_panel.visible,false); eq(view.help_panel.visible,true)
+end)
+
+local function rollerAlertView(config,width,height)
+  local view=chatView()
+  view:applyLayout(require("layout").compute(width or 1200,height or 800))
+  assert(view:showRollerSettings(config or {}))
+  return view
+end
+local function rollerAlertText(view)
+  local parts={}
+  for _,widget in ipairs(view:rollerAlertSettingsWidgets()) do parts[#parts+1]=widget.message or "" end
+  return table.concat(parts,"\n")
+end
+test("autoroller alerts default from Audio and edits remain a draft until the existing SAVE",function()
+  local config={target_total=53,alerts=RollerAudio.defaults()}
+  local view=rollerAlertView(config); local c=view.roller_alert_controls; local saved,calls
+  calls=0; view:setRollerSettingsCallback(function(values) calls=calls+1; saved=values; return true end)
+  eq(view.roller_draft.alerts.enabled,true); eq(view.roller_draft.alerts.sound,"three_tone")
+  eq(view.roller_draft.alerts.volume,75); eq(view.roller_draft.alerts.repeat_enabled,false)
+  assert(c.heading.message:find("ALERTS",1,true)); eq(c.heading.y<view.roller_session_best.y,true)
+  eq(c.heading.y<view.roller_content.height,true)
+  c.enabled.click(); c.repeat_enabled.click(); c.volume:print("37"); view.roller_alert_sounds.chime.click()
+  view.roller_fields.STR.input:print("6"); view.roller_fields.target_total.input:print("63")
+  eq(calls,0); eq(config.alerts.enabled,true); eq(config.alerts.sound,"three_tone"); eq(config.alerts.volume,75)
+  view:applyLayout(require("layout").compute(420,280))
+  eq(c.volume:getText(),"37"); eq(view.roller_fields.STR.input:getText(),"6")
+  view.roller_save.click(); eq(calls,1); eq(saved.alerts.enabled,false); eq(saved.alerts.repeat_enabled,true)
+  eq(saved.alerts.volume,37); eq(saved.alerts.sound,"chime"); eq(saved.min_stats.STR,"6"); eq(saved.target_total,"63")
+  eq(view.roller_settings_visible,false); eq(view.roller_draft,nil)
+  view:showRollerSettings(config); eq(c.volume:getText(),"75"); eq(view.roller_draft.alerts.sound,"three_tone")
+end)
+test("autoroller WAV choice merges only its validated record and preview works with alerts OFF",function()
+  local config={alerts=RollerAudio.defaults()}; local view=rollerAlertView(config); local c=view.roller_alert_controls
+  local actions={}; local hash=string.rep("a",64)..".wav"; local saves=0
+  view:setRollerSettingsCallback(function() saves=saves+1; return true end)
+  view:setRollerAlertActionCallback(function(action,alerts)
+    actions[#actions+1]={action=action,enabled=alerts.enabled,volume=alerts.volume,sound=alerts.sound,custom_file=alerts.custom_file}
+    alerts.enabled=true; alerts.sound="horn"
+    if action=="choose" then return {custom_file=hash,custom_name="my alert.wav",ignored="not a preference"} end
+    return true
+  end)
+  c.enabled.click(); c.volume:print("42"); view.roller_fields.STR.input:print("unsaved 7")
+  assert(c.preview.click()); eq(actions[1].action,"preview"); eq(actions[1].enabled,false); eq(actions[1].volume,42)
+  eq(view.roller_draft.alerts.enabled,false); eq(view.roller_draft.alerts.sound,"three_tone")
+  assert(c.choose.click()); eq(actions[2].action,"choose"); eq(actions[2].volume,42)
+  eq(view.roller_draft.alerts.sound,"custom"); eq(view.roller_draft.alerts.custom_file,hash)
+  eq(view.roller_draft.alerts.custom_name,"my alert.wav"); eq(view.roller_draft.alerts.volume,42)
+  eq(view.roller_draft.alerts.ignored,nil); eq(view.roller_draft.alerts.enabled,false)
+  eq(view.roller_fields.STR.input:getText(),"unsaved 7"); eq(saves,0); eq(config.alerts.custom_file,nil)
+  assert(c.stop_preview.click()); eq(actions[3].action,"stop_preview"); eq(actions[3].custom_file,hash)
+  eq(view.roller_alert_preview_active,false)
+  view.roller_cancel.click(); eq(actions[#actions].action,"stop_preview"); eq(saves,0)
+  eq(config.alerts.sound,"three_tone"); eq(config.alerts.enabled,true)
+end)
+test("autoroller cancelled failed and invalid file choices leave the complete draft untouched",function()
+  local view=rollerAlertView(); local c=view.roller_alert_controls; local draft=view.roller_draft; local alerts=draft.alerts
+  c.repeat_enabled.click(); c.volume:print("61"); view.roller_fields.target_total.input:print("69")
+  local failures={
+    function() return nil,"cancelled" end,
+    function() return nil,"<bad&file>" end,
+    function() error("<chooser&failed>") end,
+    function() return {} end,
+    function() return {custom_file="../../escape.wav",custom_name="file.wav"} end,
+  }
+  for index,callback in ipairs(failures) do
+    view:setRollerAlertActionCallback(callback); eq(c.choose.click(),nil)
+    if index==1 then assert(c.status.message:find("File selection cancelled. Draft unchanged.",1,true)) end
+    eq(view.roller_draft,draft); eq(draft.alerts,alerts); eq(alerts.sound,"three_tone")
+    eq(alerts.custom_file,nil); eq(alerts.volume,75); eq(alerts.repeat_enabled,true)
+    eq(c.volume:getText(),"61"); eq(view.roller_fields.target_total.input:getText(),"69")
+    eq(c.status.message:find("<bad",1,true),nil); eq(c.status.message:find("<chooser",1,true),nil)
+  end
+  view:setRollerAlertActionCallback(function() return nil,"<preview&failed>" end)
+  eq(c.preview.click(),nil); assert(c.status.message:find("&lt;preview&amp;failed&gt;",1,true))
+  eq(view.roller_alert_preview_active,false)
+end)
+test("autoroller sound catalog choices custom reuse and reset change only the form draft",function()
+  local config={target_total=64,alerts={enabled=false,sound="custom",volume=21,repeat_enabled=true,custom_file=string.rep("c",64)..".wav",custom_name="custom.wav"}}
+  local view=rollerAlertView(config); local c=view.roller_alert_controls; local stops=0; local saved
+  view:setRollerAlertActionCallback(function(action) eq(action,"stop_preview"); stops=stops+1; return true end)
+  view:setRollerSettingsCallback(function(values) saved=values; return true end)
+  for _,entry in ipairs(RollerAudio.catalog) do
+    local button=view.roller_alert_sounds[entry.id]; assert(button.message:find(entry.label,1,true)); assert(button.click())
+    eq(view.roller_draft.alerts.sound,entry.id)
+  end
+  assert(c.custom.click()); eq(view.roller_draft.alerts.sound,"custom")
+  assert(view:saveRollerSettings()); eq(saved.alerts.sound,"custom"); eq(saved.alerts.custom_file,config.alerts.custom_file)
+  eq(saved.alerts.custom_name,"custom.wav"); eq(saved.alerts.volume,21)
+  view:showRollerSettings(config); view.roller_fields.target_total.input:print("70")
+  assert(c.reset.click()); eq(stops>=1,true); eq(c.volume:getText(),"75")
+  for key,value in pairs(RollerAudio.defaults()) do eq(view.roller_draft.alerts[key],value) end
+  eq(view.roller_draft.alerts.custom_file,nil); eq(view.roller_draft.alerts.custom_name,nil)
+  eq(view.roller_fields.target_total.input:getText(),"70"); eq(config.alerts.sound,"custom"); eq(config.alerts.volume,21)
+  eq(c.custom.click(),nil); eq(view.roller_draft.alerts.sound,"three_tone")
+end)
+test("autoroller volume rejects invalid drafts before preview or SAVE and accepts both limits",function()
+  local view=rollerAlertView(); local c=view.roller_alert_controls; local saves,previews=0,0
+  view:setRollerAlertActionCallback(function(action,alerts) if action=="preview" then previews=previews+1; eq(alerts.volume>=1 and alerts.volume<=100,true) end; return true end)
+  view:setRollerSettingsCallback(function() saves=saves+1; return true end)
+  for _,value in ipairs({"0","101","-1","1.5","nan","inf","","invalid"}) do
+    c.volume:print(value); eq(c.preview.click(),nil); eq(view.roller_save.click(),nil)
+    eq(view.roller_settings_visible,true); eq(c.volume:getText(),value)
+  end
+  eq(saves,0); eq(previews,0)
+  c.volume:print("1"); assert(c.volume_down.click()); eq(c.volume:getText(),"1"); assert(c.preview.click())
+  c.volume:print("100"); assert(c.volume_up.click()); eq(c.volume:getText(),"100"); assert(c.preview.click())
+  assert(view:saveRollerSettings()); eq(saves,1); eq(previews,2)
+end)
+test("autoroller failed SAVE keeps alert edits and custom WAV available for retry",function()
+  local view=rollerAlertView(); local c=view.roller_alert_controls; local saved
+  view:setRollerAlertActionCallback(function(action) if action=="choose" then return {custom_file=string.rep("b",64)..".wav",custom_name="chosen.wav"} end; return true end)
+  assert(c.choose.click()); c.volume:print("34"); c.repeat_enabled.click()
+  view:setRollerSettingsCallback(function(values) saved=values; return nil,"<save&failed>" end)
+  eq(view:saveRollerSettings(),nil); eq(view.roller_settings_visible,true); eq(saved.alerts.volume,34)
+  eq(view.roller_draft.alerts.custom_name,"chosen.wav"); eq(view.roller_draft.alerts.repeat_enabled,true)
+  assert(view.roller_status.message:find("&lt;save&amp;failed&gt;",1,true)); eq(c.volume:getText(),"34")
+  view:setRollerSettingsCallback(function() error("save failed") end); eq(view:saveRollerSettings(),nil); eq(c.volume:getText(),"34")
+  view:setRollerSettingsCallback(function(values) saved=values; return true end); assert(view:saveRollerSettings())
+  eq(saved.alerts.custom_name,"chosen.wav"); eq(saved.alerts.volume,34); eq(saved.alerts.repeat_enabled,true)
+end)
+test("autoroller alerts remain scroll accessible and separate from the footer in compact and normal views",function()
+  local view=rollerAlertView(); local c=view.roller_alert_controls
+  for _,size in ipairs({{160,100},{240,180},{320,260},{420,280},{420,500},{760,700},{1200,800},{1920,1080}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local content,panel=view.roller_content,view.roller_panel
+    eq(panel.x>=0 and panel.y>=0,true); eq(panel.x+panel.width<=size[1],true); eq(panel.y+panel.height<=size[2],true)
+    eq(content.width>0 and content.height>0,true); eq(content.y+content.height<=view.roller_save.y,true)
+    eq(view.roller_save.y+view.roller_save.height<=panel.height,true)
+    if size[2]>=260 then eq(c.heading.y<content.height,true) end
+    eq(c.status.y+c.status.height<view.roller_session_best.y,true)
+    local controls=view:rollerAlertSettingsWidgets()
+    for _,widget in ipairs(controls) do
+      eq(widget.container,content); eq(widget.visible,true)
+      eq(widget.x>=0 and widget.y>=0 and widget.width>0 and widget.height>0,true)
+      eq(widget.x+widget.width<=content.width-16,true)
+      eq(widget.y+widget.height<=content.content_height,true)
+    end
+    for i=1,#controls do for j=i+1,#controls do
+      local a,b=controls[i],controls[j]
+      eq(a.x<b.x+b.width and b.x<a.x+a.width and a.y<b.y+b.height and b.y<a.y+a.height,false)
+    end end
+    if size[2]<500 then eq(content.content_height>content.height,true) end
+  end
+  local text=rollerAlertText(view)
+  for _,phrase in ipairs({"10 seconds","5 minutes","mute","No anti-idle","OFF","SAVE"}) do assert(text:find(phrase,1,true),phrase) end
+end)
+test("autoroller live summary growth moves form controls below it and leaves ALERTS above it",function()
+  local view=rollerAlertView({},420,280); local c=view.roller_alert_controls
+  local headingY,statusY,sessionY=c.heading.y,c.status.y,view.roller_session_best.y
+  local fieldY,oldHeight=view.roller_fields.STR.input.y,view.roller_content.content_height
+  local summary=rollerSessionFixture(); summary.stat_rolls=100; summary.warning=string.rep("Long warning ",80)
+  c.volume:print("45"); view.roller_fields.STR.input:print("pending 7"); view.roller_content.currentScroll=600
+  view:setRollerSession(summary)
+  local delta=view.roller_content.content_height-oldHeight; eq(delta>0,true)
+  eq(view.roller_fields.STR.input.y,fieldY+delta); eq(c.heading.y,headingY); eq(c.status.y,statusY)
+  eq(view.roller_session_best.y,sessionY); eq(c.volume:getText(),"45")
+  eq(view.roller_fields.STR.input:getText(),"pending 7"); eq(view.roller_content.currentScroll,600)
+end)
+test("autoroller result popup shows escaped reason score count and manual acceptance until acknowledged",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280)); local actions={}; local sent=0
+  local oldSend=send; send=function() sent=sent+1 end
+  view:setRollerAlertActionCallback(function(action) actions[#actions+1]=action; eq(view.roller_result_alert_visible,true); return true end)
+  local event={kind="target_hit",reason="<Great&target>",roll={total=68,maximum=77,roll=123},rolls=123,protocol="creator",placement="manual"}
+  assert(view:showRollerResultAlert(event)); eq(view.roller_result_alert_visible,true)
+  assert(view.roller_result_title.message:find("AUTOROLLER TARGET HIT",1,true))
+  local text=view.roller_result_text.message
+  for _,phrase in ipairs({"&lt;Great&amp;target&gt;","68 / 77","Confirmed rolls: 123","held","manually type done","never accepts"}) do assert(text:find(phrase,1,true),phrase) end
+  eq(text:find("<Great",1,true),nil); eq(#actions,0)
+  event.reason="changed externally"; view:applyLayout(require("layout").compute(320,260))
+  assert(view.roller_result_text.message:find("&lt;Great&amp;target&gt;",1,true)); eq(view.roller_result_alert_visible,true)
+  assert(view.roller_result_dismiss.click()); eq(actions[1],"silence"); eq(view.roller_result_alert_visible,false)
+  for _,widget in ipairs(view:rollerResultAlertWidgets()) do eq(widget.visible,false) end
+  assert(view:showRollerResultAlert({reason="Legacy target",score=70,roll_count=9,protocol="legacy"}))
+  assert(view.roller_result_text.message:find("manually type y",1,true)); eq(sent,0)
+  assert(view:hideRollerResultAlert()); eq(#actions,1); send=oldSend
+end)
+test("autoroller full popup headline wraps and result content scrolls above acknowledgement at small sizes",function()
+  local view=chatView(); view:showRollerResultAlert({reason=string.rep("long reason ",100),score=77,rolls=1000,protocol="arrange"})
+  for _,size in ipairs({{160,100},{240,180},{320,260},{420,280},{760,700},{1200,800}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2]))
+    local panel,scroll,button=view.roller_result_panel,view.roller_result_scroll,view.roller_result_dismiss
+    eq(panel.x>=0 and panel.y>=0,true); eq(panel.x+panel.width<=size[1],true); eq(panel.y+panel.height<=size[2],true)
+    eq(scroll.width>0 and scroll.height>0,true); eq(scroll.y+scroll.height<=button.y,true)
+    eq(button.x>=0 and button.y>=0,true); eq(button.x+button.width<=panel.width,true); eq(button.y+button.height<=panel.height,true)
+    eq(view.roller_result_title.container,scroll); eq(view.roller_result_text.container,scroll)
+    eq(view.roller_result_title.width<=scroll.width-16,true)
+    eq(view.roller_result_text.y>view.roller_result_title.y+view.roller_result_title.height,true)
+    eq(scroll.content_height>=view.roller_result_text.y+view.roller_result_text.height,true)
+    eq(scroll.content_height>scroll.height,true); eq(view.roller_result_alert_visible,true)
+    if size[1]<=240 then eq(view.roller_result_title.height>=2*20,true) end
+  end
+end)
+test("autoroller held manual pool asks for placement before manual done",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(420,280))
+  view:showRollerResultAlert({protocol="arrange",placement="manual",reason="Qualifying pool",roll={total=72,maximum=84},rolls=7})
+  local text=view.roller_result_text.message
+  assert(text:find("Review the pool.",1,true))
+  assert(text:find("Place the pool values yourself first, then manually type done",1,true))
+  assert(text:find("72 / 84",1,true)); assert(text:find("Confirmed rolls: 7",1,true))
+  for _,placement in ipairs({"game_auto","minimums"}) do
+    view:showRollerResultAlert({protocol="arrange",placement=placement})
+    eq(view.roller_result_text.message:find("Place the pool values yourself first",1,true),nil)
+    assert(view.roller_result_text.message:find("manually type done",1,true))
+  end
+end)
+test("autoroller alert callbacks fail safely and escape labels and metadata",function()
+  local view=rollerAlertView(); local c=view.roller_alert_controls
+  eq(c.preview.click(),nil); assert(c.status.message:find("unavailable",1,true))
+  local entry=RollerAudio.catalog[1]; local original=entry.label; entry.label="<tone&label>"
+  view.roller_draft.alerts.custom_file=string.rep("a",64)..".wav"; view.roller_draft.alerts.custom_name="<wav&name>"
+  view:renderRollerAlertSettings(false); local message=view.roller_alert_sounds[entry.id].message; entry.label=original
+  assert(message:find("&lt;tone&amp;label&gt;",1,true)); assert(c.warning.message:find("&lt;wav&amp;name&gt;",1,true))
+  view:showRollerResultAlert({reason="<reason&>",score="<score&>",rolls="<count&>",acceptance_command="<accept&>"})
+  local text=view.roller_result_text.message
+  for _,name in ipairs({"reason","score","count","accept"}) do assert(text:find("&lt;"..name.."&amp;&gt;",1,true)); eq(text:find("<"..name,1,true),nil) end
+  view:setRollerAlertActionCallback(function() error("silence failed") end)
+  eq(view.roller_result_dismiss.click(),nil); eq(view.roller_result_alert_visible,false)
+end)
+test("autoroller cancel hide reuse and disposal stop previews and retire result callbacks",function()
+  for _,operation in ipairs({"cancel","hide","reuse","delete"}) do
+    local view=rollerAlertView(); local c=view.roller_alert_controls; local actions={}
+    view:setRollerAlertActionCallback(function(action) actions[#actions+1]=action; return true end)
+    assert(c.preview.click()); eq(actions[1],"preview")
+    if operation=="cancel" then view.roller_cancel.click()
+    elseif operation=="hide" then view:hideRollerSettings()
+    else
+      view:showRollerResultAlert({reason="target",protocol="creator"}); assert(c.preview.click())
+      if operation=="reuse" then assert(view:prepareForReuse(view.settings)) else assert(view:delete()) end
+    end
+    eq(actions[#actions],"stop_preview"); eq(view.roller_alert_preview_active,false); eq(view.roller_settings_visible,false)
+    eq(view.roller_draft,nil); eq(c.preview.click(),nil); eq(c.choose.click(),nil)
+    for _,action in ipairs(actions) do eq(action=="preview" or action=="stop_preview",true) end
+    if operation=="reuse" or operation=="delete" then
+      eq(view.roller_result_alert_visible,false); eq(view.roller_alert_action_callback,nil)
+      for _,widget in ipairs(view:rollerResultAlertWidgets()) do eq(widget.visible,false) end
+      local before=#actions; view.roller_result_dismiss.click(); eq(#actions,before)
+    end
+    if operation=="delete" then
+      eq(view:showRollerResultAlert({}),nil); eq(view:showRollerSettings({}),nil); assert(view:delete())
+    end
+  end
+end)
+test("autoroller reusable views validate alert and acknowledgement controls and containment",function()
+  local view=chatView(); eq(View.validateReusable(view,view.settings),true)
+  local c=view.roller_alert_controls; local volume=c.volume; c.volume=nil
+  local ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("autoroller alert control",1,true)); c.volume=volume
+  local parent=c.choose.container; c.choose.container=view.root
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("autoroller alert control",1,true)); c.choose.container=parent
+  local choice=view.roller_alert_sounds.chime; view.roller_alert_sounds.chime=nil
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("autoroller sound choice",1,true)); view.roller_alert_sounds.chime=choice
+  parent=view.roller_result_title.container; view.roller_result_title.container=view.roller_panel
+  ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("autoroller result control",1,true)); view.roller_result_title.container=parent
+  eq(View.validateReusable(view,view.settings),true)
+end)
+test("autoroller alert drafts previews and acknowledgements stay local to each view",function()
+  local first=rollerAlertView({},420,280); local second=rollerAlertView({},1200,800)
+  local firstActions,secondActions={},{}
+  first:setRollerAlertActionCallback(function(action,alerts)
+    firstActions[#firstActions+1]=action
+    if action=="preview" then eq(alerts.volume,27); return true,"<client&muted>" end
+    return true
+  end)
+  second:setRollerAlertActionCallback(function(action) secondActions[#secondActions+1]=action; return true end)
+  first.roller_alert_controls.volume:print("27"); first.roller_alert_controls.enabled.click()
+  assert(first.roller_alert_controls.preview.click())
+  assert(first.roller_alert_controls.status.message:find("&lt;client&amp;muted&gt;",1,true))
+  eq(second.roller_alert_controls.volume:getText(),"75"); eq(second.roller_draft.alerts.enabled,true); eq(#secondActions,0)
+  first:showRollerResultAlert({reason="first target",protocol="creator"})
+  second:showRollerResultAlert({reason="second target",protocol="arrange"})
+  assert(first.roller_result_dismiss.click()); eq(first.roller_result_alert_visible,false); eq(second.roller_result_alert_visible,true)
+  eq(firstActions[#firstActions],"silence"); eq(secondActions[#secondActions],"stop_preview")
+  second.roller_alert_controls.volume:print("bad input"); second:hideRollerSettings()
+  eq(secondActions[#secondActions],"stop_preview"); eq(second.roller_alert_preview_active,false)
+  eq(second.roller_result_alert_visible,true)
 end)
 
 test("help overlay distinguishes commands descriptions and warnings",function()

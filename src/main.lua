@@ -4,6 +4,8 @@ local Main={}; Main.__index=Main
 local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
+local RollerAudio=require("autoroller_audio")
+local RollerAlerts=require("autoroller_alerts")
 local SkillDisplay=require("skill_display")
 local SkillSort=require("skill_sort")
 local Roundtime=require("roundtime")
@@ -659,6 +661,8 @@ function Main:onCharacterEntry(name)
 end
 function Main:onCharacterExit(reason)
   self.character_entry_started=false; self.character_entry_name=nil; self.roundtime_character=nil
+  if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end
+  if self.roller_alerts then self.roller_alerts:clear() end
   if self.roundtime_check then self.roundtime_check:reset() end
   if self.walker then self.walker:stop(reason or "character exit"); self.walker:onRoundtime(0) end
   if self.roundtime then self.roundtime:reset() end
@@ -1378,15 +1382,27 @@ function Main:start()
   self:presentMapCollections()
   self.posture=PostureTracker.new(self.adapter,function() if self.started then self:refresh() end end)
   self.needs=NeedsTracker.new(self.adapter,function() if self.started then self:refresh() end end)
+  local audioBase=self.adapter.dataBase and self.adapter.dataBase() or nil
+  self.roller_alerts=RollerAlerts.new(self.adapter,RollerAudio.new({base=audioBase}),self.view,function()
+    return (self.settings.roller or {}).alerts
+  end)
   self.roller=Autoroller.new(self.adapter,self.settings.roller,function(config)
     if self.adapter.saveRollerSettings then local saved,err=self.adapter:saveRollerSettings(config); if not saved then return nil,"Could not save settings: "..tostring(err) end end
-    self.settings.roller=config; local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.roller=self.adapter.rollerSettingsSnapshot and self.adapter.rollerSettingsSnapshot(config) or config end; return true
+    self.settings.roller=config; local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.roller=self.adapter.rollerSettingsSnapshot and self.adapter.rollerSettingsSnapshot(config) or config end
+    if self.roller_alerts then self.roller_alerts:settingsChanged() end; return true
   end,function(message)
     if self.adapter.alertLatentPsion then pcall(self.adapter.alertLatentPsion,self.adapter) end
     if self.view and self.view.showLatentPsionAlert then pcall(self.view.showLatentPsionAlert,self.view,message) end
   end,function(summary)
     if self.view and self.view.setRollerSession then self.view:setRollerSession(summary) end
+  end,function(event)
+    if self.roller_alerts then self.roller_alerts:result(event) end
+  end,function()
+    if self.roller_alerts then self.roller_alerts:clear() end
   end)
+  if self.view.setRollerAlertActionCallback then self.view:setRollerAlertActionCallback(function(action,config)
+    return self.roller_alerts:action(action,config)
+  end) end
   self.keybindings=Keybindings.new(self.adapter,self.settings.keybindings); self.keybindings:start()
   if self.view.setColorToggleCallback then self.view:setColorToggleCallback(function(wanted) local enabled,err=self:setColorizerEnabled(type(wanted)=="boolean" and wanted or not self.colorizer_enabled); if enabled==nil then return nil,err end; if self.adapter.reportColorizerStatus then self.adapter:reportColorizerStatus(self.colorizer:status()) end; return enabled end) end
   if self.view.setColorOptionsCallback then self.view:setColorOptionsCallback(function(name,wanted)
@@ -1589,7 +1605,6 @@ function Main:start()
   end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(Events.mapper.disconnect,function()
     self:onCharacterExit("disconnected")
-    if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end
     self:callSpecialTransition("cancel","disconnect"); self.automapper:onDisconnect(); self:refresh()
   end)
   self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent("sysWindowResizeEvent",function() self:applyResponsiveLayout() end)
@@ -1722,6 +1737,7 @@ function Main:shutdown()
   local chat=self.chat; self.chat=nil; if chat then chat:shutdown() end
   local colorizer=self.colorizer; self.colorizer=nil; if colorizer then colorizer:shutdown() end
   local roller=self.roller; self.roller=nil; if roller then roller:shutdown() end
+  local alerts=self.roller_alerts; self.roller_alerts=nil; if alerts then alerts:shutdown() end
   local keybindings=self.keybindings; self.keybindings=nil
   if keybindings then
     local stopped,stopErrors=keybindings:stop()

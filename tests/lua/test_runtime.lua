@@ -68,6 +68,9 @@ local function fake()
     setMapLibraryCatalog=function(self,entries,status) f.mapLibraryCatalog=entries; f.mapLibraryCatalogStatus=status; return true end,
     setMapLibraryImportPending=function(self,pending) self.map_library_import_pending=pending==true; return true end,
     setRollerSettingsCallback=function(self,callback) f.rollerSettingsCallback=callback end,
+    setRollerAlertActionCallback=function(self,callback) f.rollerAlertAction=callback end,
+    showRollerResultAlert=function(self,event) f.rollerResult=event; f.resultShows=(f.resultShows or 0)+1 end,
+    hideRollerResultAlert=function(self) f.rollerResult=nil end,
     setRollerSession=function(self,summary) f.rollerSession=require("settings").merge({},summary); f.rollerSessionUpdates=(f.rollerSessionUpdates or 0)+1; return true end,
     setMapCenterCallback=function(self,callback) f.mapCenterCallback=callback end,
     setMapZoomCallback=function(self,callback) f.mapZoomCallback=callback; f.mapZoomCallbackSets=(f.mapZoomCallbackSets or 0)+1 end,
@@ -1484,6 +1487,59 @@ test("runtime observes a player's reroll without transmitting a duplicate",funct
   f.callbacks["sysDataSendRequest"](nil,"reroll")
   eq(f.sentCommands,nil); eq(hud.roller.state.active,true); eq(hud.roller.state.awaiting_new_roll,true); eq(hud.roller.state.phase,"waiting_new_roll")
   assert(hud.roller:onLine("> reroll")); eq(f.sentCommands,nil); hud:shutdown()
+end)
+
+test("runtime connects a confirmed roller target to alerts and manual continuation silences it",function()
+  local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=53,hard_stop=62,auto_start_on_name=false,use_min_stats=false,min_stats={}}})
+  assert(hud:start()); local played,stopped=0,0
+  hud.roller_alerts.audio={play=function(_,config) played=played+1; eq(config.volume,75); return true,nil,1 end,stop=function() stopped=stopped+1; return true end}
+  assert(hud.roller:start()); local stats={}; local names={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
+  for _,name in ipairs(names) do stats[name]=6 end
+  hud.roller:record(stats,"creator",names); hud.roller:onLine("reroll  done  ? help")
+  eq(played,1); eq(f.resultShows,1); eq(f.rollerResult.roll.total,66); eq(hud.roller.state.result_held,true)
+  hud.roller:onLine("reroll  done  ? help"); eq(played,1); eq(f.resultShows,1)
+  assert(f.rollerAlertAction("silence")); eq(f.rollerResult,nil); eq(hud.roller.state.result_held,true); eq(f.sentCommands,nil)
+  f.callbacks["sysDataSendRequest"](nil,"done"); eq(hud.roller.state.result_held,false); eq(f.sentCommands,nil)
+  hud:shutdown(); assert(stopped>0); eq(hud.roller_alerts,nil)
+end)
+
+test("runtime persists autoroller sound choices without resetting unrelated preferences",function()
+  local old=DGHUD; local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=53,use_min_stats=false,min_stats={}}})
+  assert(hud:start()); DGHUD={user_settings={}}
+  local ok,err=pcall(function()
+    assert(f.rollerSettingsCallback({alerts={enabled=false,sound="horn",volume=90,repeat_enabled=true}}))
+    eq(f.savedRollerSettings.alerts.enabled,false); eq(f.savedRollerSettings.alerts.sound,"horn")
+    eq(DGHUD.user_settings.roller.alerts.volume,90); eq(hud.roller.cfg.target_total,53)
+    assert(hud.roller:configure({target_total=60})); eq(hud.roller.cfg.alerts.enabled,false)
+    eq(hud.roller.cfg.alerts.sound,"horn"); eq(hud.settings.roller.alerts.repeat_enabled,true)
+    eq(f.rollerSettingsCallback({alerts={volume=101}}),nil); eq(hud.roller.cfg.alerts.volume,90)
+  end)
+  hud:shutdown(); DGHUD=old; assert(ok,err)
+end)
+test("character exit cancels queued autoroller commands and completion reminders",function()
+  local f=fake(); local hud=Main.new(f,{layout={},roller={target_total=77,auto_start_on_name=false,reroll_delay=1,use_min_stats=false,min_stats={},alerts={repeat_enabled=true}}})
+  assert(hud:start()); hud.roller_alerts.audio={play=function() return true,nil,1 end,stop=function() return true end}
+  assert(hud.roller:start()); assert(hud.roller:reroll("creator"))
+  local timer=hud.roller.state.timer; local callback=assert(f.timers[timer]); local sent=#(f.sentCommands or {})
+  hud:onCharacterExit("character menu"); callback()
+  eq(f.timers[timer],nil); eq(hud.roller.state.active,false); eq(#(f.sentCommands or {}),sent)
+  assert(hud.roller:start()); assert(hud.roller:configure({target_total=53}))
+  local stats={}; local names=require("autoroller").order; for _,name in ipairs(names) do stats[name]=6 end
+  hud.roller:record(stats,"creator",names); hud.roller:onLine("reroll  done  ? help")
+  assert(f.rollerResult); local reminders=hud.roller_alerts
+  local reminder=assert(f.timers[reminders.timer.id]); local expiry=assert(f.timers[reminders.expiry.id])
+  hud.character_entry_started=true; hud.character_entry_name="Old Character"
+  assert(hud:onCharacterEntry("New Character")); reminder(); expiry()
+  eq(f.rollerResult,nil); eq(reminders.event,nil); eq(reminders.timer,nil); eq(reminders.expiry,nil)
+  eq(hud.roller.state.result_held,false); eq(hud.roller.state.active,false)
+  hud:shutdown()
+end)
+test("character exit also clears a preview without a held autoroller result",function()
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local stopped=0
+  hud.roller_alerts.audio={play=function() return true,nil,1 end,stop=function() stopped=stopped+1; return true end}
+  assert(f.rollerAlertAction("preview",{})); eq(hud.roller_alerts.preview_active,true)
+  hud:onCharacterExit("character menu"); eq(hud.roller_alerts.preview_active,false); assert(stopped>0)
+  hud:shutdown()
 end)
 
 test("mapper toggle hides and pauses mapping without deleting saved rooms",function()

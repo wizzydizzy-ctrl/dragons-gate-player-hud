@@ -920,26 +920,33 @@ function Adapter:closeRollerLog(log) if log.session_handle then log.session_hand
 local function rollerSettingsPath() return Adapter.dataBase().."/roller-settings.lua" end
 function Adapter.rollerSettingsSnapshot(config)
   config=type(config)=="table" and config or {}; local optional={target_total=true,hard_stop=true,max_rolls=true,minimum_greats=true,minimum_good_plus=true}
+  local alerts,alertErr=require("autoroller_audio").validate(config.alerts)
+  if not alerts then return nil,alertErr end
   local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","arrange_mode","minimum_greats","minimum_good_plus","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
-  local result={schema=4,min_stats={}}
+  local result={schema=4,min_stats={},alerts=alerts}
   for _,key in ipairs(fields) do local value=config[key]; if optional[key] and value==nil then value=false end; result[key]=value end
   if result.arrange_mode==nil then result.arrange_mode="manual" end
   for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK","VOI","APP","MP"}) do local value=(config.min_stats or {})[key]; if value==nil then value=false end; result.min_stats[key]=value end
   return result
 end
 function Adapter.rollerSettingsSource(config)
-  local snapshot=Adapter.rollerSettingsSnapshot(config)
+  local snapshot,snapshotErr=Adapter.rollerSettingsSnapshot(config); if not snapshot then return nil,snapshotErr end
   local fields={"target_total","hard_stop","max_rolls","reroll_delay","reroll_command","arrange_mode","minimum_greats","minimum_good_plus","auto_start_on_name","use_min_stats","require_min_stats_to_stop","show_every_roll","logging_enabled","log_folder","master_file"}
   local function literal(value) if type(value)=="string" then return string.format("%q",value) elseif value==nil then return "nil" else return tostring(value) end end
   local lines={"return {","  schema="..snapshot.schema..","}
   for _,key in ipairs(fields) do lines[#lines+1]="  "..key.."="..literal(snapshot[key]).."," end
   lines[#lines+1]="  min_stats={"
   for _,key in ipairs({"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK","VOI","APP","MP"}) do lines[#lines+1]="    "..key.."="..literal(snapshot.min_stats[key]).."," end
+  lines[#lines+1]="  },"; lines[#lines+1]="  alerts={"
+  for _,key in ipairs({"enabled","sound","volume","repeat_enabled","custom_file","custom_name"}) do
+    lines[#lines+1]="    "..key.."="..literal(snapshot.alerts[key])..","
+  end
   lines[#lines+1]="  },"; lines[#lines+1]="}"; return table.concat(lines,"\n")
 end
 function Adapter:saveRollerSettings(config)
+  local source,sourceErr=Adapter.rollerSettingsSource(config); if not source then return nil,sourceErr end
   local base=Adapter.dataBase(); lfs.mkdir(base); local temp=rollerSettingsPath()..".tmp"
-  local file,err=io.open(temp,"wb"); if not file then return nil,err end; local wrote,writeErr=file:write(Adapter.rollerSettingsSource(config)); if not wrote then file:close(); os.remove(temp); return nil,writeErr end; local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
+  local file,err=io.open(temp,"wb"); if not file then return nil,err end; local wrote,writeErr=file:write(source); if not wrote then file:close(); os.remove(temp); return nil,writeErr end; local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local destination=rollerSettingsPath(); local backup=destination..".bak"; os.remove(backup)
   local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
@@ -965,7 +972,8 @@ function Adapter.loadRollerSettings()
     if value.min_stats.PRE==nil and value.min_stats.VOI~=nil then value.min_stats.PRE=value.min_stats.VOI end
     if value.min_stats.LUK==nil and value.min_stats.APP~=nil then value.min_stats.LUK=value.min_stats.APP end
   end
-  value.schema=4; return value
+  local alerts=require("autoroller_audio").validate(value.alerts); if not alerts then return nil end
+  value.alerts=alerts; value.schema=4; return value
 end
 local function mapperSettingsPath() return Adapter.dataBase().."/mapper-settings.lua" end
 function Adapter:saveMapperSettings(config)

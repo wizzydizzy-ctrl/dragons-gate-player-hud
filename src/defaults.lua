@@ -6,7 +6,7 @@ return {
   view_contract = "__DGHUD_VIEW_CONTRACT__",
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.3.95",
+  version = "0.3.96",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   display = { side_text_scale = 1.0, auto_wrap = true, align_input = false, main_skills = true, skill_filter = true,
     main_skill_sort = {primary="level",direction="desc",secondary="uses",secondary_direction="asc"},
@@ -62,6 +62,7 @@ return {
     arrange_mode="manual", minimum_greats=nil, minimum_good_plus=nil,
     auto_start_on_name=true, use_min_stats=true, require_min_stats_to_stop=true,
     show_every_roll=true, logging_enabled=true, log_folder="og_dg_roller", master_file="og_dg_rolls_master.txt",
+    alerts=require("autoroller_audio").defaults(),
     min_stats={STR=5,INT=5,WIS=5,DEX=5,AGI=5,CON=5,CHA=5,WIL=5,PRE=5,PER=5,LUK=5},
   },
   mapper = {

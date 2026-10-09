@@ -1196,3 +1196,562 @@ test("full legacy redraw while reroll is pending confirms once until the timer s
   eq(first.rolls,1); eq(first.stat_rolls,1)
   for _,command in ipairs(f.sent) do assert(command~="y" and command~="done") end
 end)
+
+local function repeatedRank(label,count)
+  local values={}; for index=1,count do values[index]=label end; return table.concat(values," ")
+end
+local function resultFixture(settings)
+  local f=fake(); local results,cleared,atResult={},{},{}
+  local r
+  r=Roller.new(f,settings or {target_total=66,auto_start_on_name=false},nil,nil,nil,
+    function(result)
+      results[#results+1]=result
+      atResult[#atResult+1]={active=r.state.active,held=r.state.result_held,phase=r.state.phase,
+        protocol=r.state.held_protocol,timer=r.state.timer,arrangement=r.state.arrangement}
+    end,
+    function() cleared[#cleared+1]=true end)
+  return r,f,results,cleared,atResult
+end
+local function noAcceptance(f)
+  for _,command in ipairs(f.sent) do assert(command~="done" and command~="y","result callbacks must never accept a character") end
+end
+local function defensiveResult(actual,expected)
+  if type(expected)~="table" then eq(actual,expected); return end
+  eq(type(actual),"table"); assert(actual~=expected,"callback roll must be a defensive copy")
+  for key,value in pairs(expected) do defensiveResult(actual[key],value) end
+  for key in pairs(actual) do assert(expected[key]~=nil,"unexpected copied roll field: "..tostring(key)) end
+end
+local function checkResult(r,result,placement,protocol,rolls)
+  local allowed={kind=true,reason=true,roll=true,rolls=true,protocol=true,placement=true}
+  for key in pairs(result) do assert(allowed[key],"unexpected result field: "..tostring(key)) end
+  eq(result.kind,"target_hit"); eq(type(result.reason),"string"); assert(#result.reason>0)
+  eq(result.rolls,rolls or r.state.rolls); eq(result.protocol,protocol); eq(result.placement,placement)
+  defensiveResult(result.roll,r.state.last)
+  eq(r.state.active,false); eq(r.state.result_held,true); eq(r.state.held_protocol,protocol)
+  eq(r.state.phase,"held"); eq(r.state.timer,nil); eq(r.state.arrangement,nil)
+end
+local function resultBoard(r,count,label)
+  assert(r:onLine(firstHeader)); assert(r:onLine(repeatedRank(label or "Good",6)))
+  assert(r:onLine(count==12 and secondHeader or updatedSecondHeader))
+  assert(r:onLine(repeatedRank(label or "Good",count==12 and 6 or 5)))
+end
+local function resultCapture(r,route,label)
+  label=label or "Good"
+  if route=="legacy" then
+    assert(r:onLine(legacyHeader)); assert(r:onLine(repeatedRank(label,11)))
+  elseif route=="old" then newRoll(r,repeatedRank(label,6),repeatedRank(label,6))
+  elseif route=="current" then currentRoll(r,repeatedRank(label,6),repeatedRank(label,5))
+  else updatedRoll(r,repeatedRank(label,6),repeatedRank(label,5)) end
+end
+
+test("all full stat formats emit one success only at holding with existing callbacks intact",function()
+  for _,route in ipairs({"updated","current","old","legacy"}) do
+    for _,autoStart in ipairs({false,true}) do
+      local r,f,results,cleared,atResult=resultFixture({target_total=66,auto_start_on_name=autoStart})
+      eq(#cleared,1)
+      if not autoStart then assert(r:start()) elseif route=="legacy" then assert(r:onLine("Name : Test Tester Race : Human")) end
+      resultCapture(r,route); eq(#results,0)
+      local prompt=route=="legacy" and legacyPrompt or creatorPrompt
+      assert(r:onLine(prompt)); eq(#results,1)
+      local protocol=route=="legacy" and "legacy" or "creator"
+      checkResult(r,results[1],"manual",protocol,1); eq(results[1].reason,"target 66")
+      eq(results[1].roll.total,route=="old" and 72 or 66)
+      eq(atResult[1].active,false); eq(atResult[1].held,true); eq(atResult[1].phase,"held")
+      eq(atResult[1].protocol,protocol); eq(atResult[1].timer,nil); eq(atResult[1].arrangement,nil)
+      local before=#cleared
+      for index=1,5 do eq(r:onLine(prompt),false); r:onLine("Fit for a Fighter: Great"); r:onLine(firstHeader) end
+      eq(#results,1); eq(#cleared,before); eq(#f.sent,0); noAcceptance(f)
+    end
+  end
+end)
+
+test("manual arranged success immediately holds both eleven and twelve value pools",function()
+  for _,count in ipairs({11,12}) do
+    for _,autoStart in ipairs({false,true}) do
+      local r,f,results,cleared=resultFixture({target_total=66,auto_start_on_name=autoStart,arrange_mode="manual"})
+      if not autoStart then assert(r:start()) end
+      local offered="Pool: "..repeatedRank("Good",count)
+      assert(r:onLine(offered)); eq(#results,0)
+      assert(r:onLine(count==11 and arrangeResetPrompt or arrangePrompt)); eq(#results,1)
+      checkResult(r,results[1],"manual","arrange",1); eq(results[1].roll.total,count*6)
+      local before=#cleared
+      for _,line in ipairs({"> clear","> reset",offered,arrangePrompt,arrangeResetPrompt}) do r:onLine(line) end
+      eq(#results,1); eq(#cleared,before); eq(r.state.rolls,1); eq(#f.sent,0); noAcceptance(f)
+    end
+  end
+end)
+
+test("game auto emits success only after a complete board empty pool and confirming prompt",function()
+  for _,count in ipairs({11,12}) do
+    for _,poolFirst in ipairs({false,true}) do
+      local r,f,results,cleared=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="game_auto"})
+      assert(r:onLine("Pool: "..repeatedRank("Good",count))); assert(r:onLine(arrangePrompt))
+      eq(#results,0); eq(r.state.phase,"assigning"); eq(f.sent[1],"auto")
+      assert(f.messages[#f.messages]:find("TARGET HIT",1,true))
+      assert(r:onLine("> auto")); eq(#results,0)
+      if poolFirst then assert(r:onLine("Pool: (empty)")) end
+      resultBoard(r,count); eq(#results,0)
+      if not poolFirst then assert(r:onLine("Pool: (empty)")) end
+      eq(#results,0); assert(r:onLine(arrangeResetPrompt)); eq(#results,1)
+      checkResult(r,results[1],"complete","arrange",1)
+      local before=#cleared
+      r:onLine(arrangePrompt); r:onLine("Pool: (empty)"); r:onLine("Pool: "..repeatedRank("Good",count))
+      eq(#results,1); eq(#cleared,before); eq(#f.sent,1); noAcceptance(f)
+    end
+  end
+end)
+
+test("minimums plus auto announce success only after the final game confirmation",function()
+  local r,f,results=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="minimums",use_min_stats=true,min_stats={INT=6,WIL=6}})
+  assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+  eq(f.sent[1],"int good"); eq(#results,0)
+  assert(r:onLine("INT placed: Good.")); assert(r:onLine("Pool: "..repeatedRank("Good",10)))
+  assert(r:onLine(arrangePrompt)); eq(f.sent[2],"wil good"); eq(#results,0)
+  assert(r:onLine("WIL placed: Good.")); assert(r:onLine("Pool: "..repeatedRank("Good",9)))
+  assert(r:onLine(arrangePrompt)); eq(f.sent[3],"auto"); eq(#results,0)
+  resultBoard(r,11); assert(r:onLine("Pool: (empty)")); eq(#results,0)
+  assert(r:onLine(arrangePrompt)); eq(#results,1); checkResult(r,results[1],"complete","arrange")
+  r:onLine(arrangePrompt); eq(#results,1); eq(#f.sent,3); noAcceptance(f)
+end)
+
+test("minimum placement of every stat succeeds once with no auto or acceptance command",function()
+  local mins={}; for _,name in ipairs(sessionNames) do mins[name]=6 end
+  local r,f,results=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="minimums",use_min_stats=true,min_stats=mins})
+  assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+  for index,name in ipairs(sessionNames) do
+    eq(f.sent[index],name:lower().." good"); eq(#results,0)
+    assert(r:onLine(name.." placed: Good."))
+    assert(r:onLine(index==11 and "Pool: (empty)" or "Pool: "..repeatedRank("Good",11-index)))
+    eq(#results,0); assert(r:onLine(arrangePrompt))
+  end
+  eq(#results,1); checkResult(r,results[1],"complete","arrange")
+  eq(#f.sent,11); noAcceptance(f)
+end)
+
+test("hard stop full legacy and manual pool successes bypass normal filters",function()
+  for _,route in ipairs({"updated","legacy","pool"}) do
+    local r,f,results=resultFixture({target_total=77,hard_stop=55,auto_start_on_name=false,
+      arrange_mode="manual",use_min_stats=true,min_stats={STR=7},minimum_greats=11})
+    assert(r:start())
+    if route=="pool" then assert(r:onLine("Pool: "..repeatedRank("Fair",11))) else resultCapture(r,route,"Fair") end
+    assert(r:onLine(route=="legacy" and legacyPrompt or route=="pool" and arrangePrompt or creatorPrompt))
+    eq(#results,1); eq(results[1].reason,"hard stop 55"); eq(results[1].roll.total,55)
+    checkResult(r,results[1],"manual",route=="legacy" and "legacy" or route=="pool" and "arrange" or "creator")
+    eq(#f.sent,0); noAcceptance(f)
+  end
+end)
+
+test("hard stop automatic pool success still requires complete placement",function()
+  local r,f,results=resultFixture({target_total=77,hard_stop=66,auto_start_on_name=true,arrange_mode="game_auto",minimum_greats=11})
+  assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt)); eq(#results,0)
+  resultBoard(r,11); assert(r:onLine("Pool: (empty)")); eq(#results,0)
+  assert(r:onLine(arrangePrompt)); eq(#results,1); checkResult(r,results[1],"complete","arrange"); noAcceptance(f)
+end)
+
+test("incomplete automatic placement never emits success despite the TARGET HIT echo",function()
+  for _,confirmation in ipairs({"neither","empty_only","board_only","partial_board","nonempty_pool"}) do
+    local r,f,results=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="game_auto"})
+    assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+    assert(f.messages[#f.messages]:find("TARGET HIT",1,true)); eq(#results,0)
+    if confirmation=="empty_only" then assert(r:onLine("Pool: (empty)"))
+    elseif confirmation=="board_only" then resultBoard(r,11)
+    elseif confirmation=="partial_board" then
+      r:onLine(firstHeader); r:onLine(repeatedRank("Good",6)); r:onLine(updatedSecondHeader); r:onLine("Good Good -- Good Good"); r:onLine("Pool: (empty)")
+    elseif confirmation=="nonempty_pool" then resultBoard(r,11); r:onLine("Pool: Good") end
+    assert(r:onLine(arrangePrompt)); eq(#results,0); eq(r.state.result_held,true); eq(r.state.active,false)
+    r:onLine(arrangePrompt); eq(#results,0); eq(#f.sent,1); noAcceptance(f)
+  end
+end)
+
+test("missing mismatched or incomplete minimum confirmation never emits success",function()
+  for _,confirmation in ipairs({"neither","placement_only","pool_only","wrong_stat","wrong_rank","wrong_pool"}) do
+    local r,f,results=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="minimums",use_min_stats=true,min_stats={INT=6,WIL=6}})
+    assert(r:onLine("Pool: Great "..repeatedRank("Good",10))); assert(r:onLine(arrangePrompt)); eq(f.sent[1],"int great")
+    if confirmation=="placement_only" or confirmation=="wrong_pool" then r:onLine("INT placed: Great.")
+    elseif confirmation=="wrong_stat" then r:onLine("WIL placed: Great.")
+    elseif confirmation=="wrong_rank" then r:onLine("INT placed: Good.") end
+    if confirmation=="pool_only" or confirmation=="wrong_stat" or confirmation=="wrong_rank" then r:onLine("Pool: "..repeatedRank("Good",10))
+    elseif confirmation=="wrong_pool" then r:onLine("Pool: Great "..repeatedRank("Good",9)) end
+    assert(r:onLine(arrangePrompt)); eq(#results,0); eq(r.state.result_held,true); eq(#f.sent,1); noAcceptance(f)
+  end
+end)
+
+test("hard stop with an impossible minimum plan holds safely without a success event",function()
+  local r,f,results=resultFixture({target_total=77,hard_stop=66,auto_start_on_name=true,
+    arrange_mode="minimums",use_min_stats=true,min_stats={INT=7,WIL=7}})
+  assert(r:onLine("Pool: Great "..repeatedRank("Good",10))); assert(r:onLine(arrangePrompt))
+  eq(#results,0); eq(r.state.result_held,true); eq(r.state.active,false); eq(#f.sent,0)
+  assert(f.messages[#f.messages-1]:find("cannot be placed",1,true)); noAcceptance(f)
+end)
+
+test("a stale minimum placement plan never emits a successful result",function()
+  local r,f,results=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="minimums",use_min_stats=true,min_stats={INT=6}})
+  function r:assignmentPlan() return {{stat="INT",value=7,label="Great"}},{} end
+  assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+  eq(#results,0); eq(r.state.result_held,true); eq(#f.sent,0)
+  assert(f.messages[#f.messages-1]:find("no longer matches",1,true)); noAcceptance(f)
+end)
+
+test("a max roll cap takes priority over full legacy and pool success",function()
+  for _,route in ipairs({"updated","legacy","pool"}) do
+    local r,f,results=resultFixture({target_total=66,hard_stop=66,max_rolls=1,auto_start_on_name=false,arrange_mode="game_auto"})
+    assert(r:start())
+    if route=="pool" then assert(r:onLine("Pool: "..repeatedRank("Good",11))) else resultCapture(r,route) end
+    assert(r:onLine(route=="legacy" and legacyPrompt or route=="pool" and arrangePrompt or creatorPrompt))
+    eq(#results,0); eq(r.state.active,false); eq(r.state.result_held,false); eq(#f.sent,0); noAcceptance(f)
+  end
+end)
+
+test("malformed passive captures quoted prompts and console text are never success events",function()
+  for _,lines in ipairs({
+    {firstHeader,"Good Good Good",updatedSecondHeader,repeatedRank("Good",5),creatorPrompt},
+    {firstHeader,"Good Good Good Good Good Mystery",updatedSecondHeader,repeatedRank("Good",5),creatorPrompt},
+    {"Pool: Good Mystery Good",arrangePrompt},
+    {"Pool: Good Good Good",arrangePrompt},
+    {"Pool: (empty)",arrangePrompt},
+    {"TARGET HIT — prompt left waiting for manual done.",creatorPrompt},
+    {"Fit for a Fighter: Great",creatorPrompt},
+  }) do
+    local r,f,results=resultFixture({target_total=1,auto_start_on_name=true})
+    for _,line in ipairs(lines) do r:onLine(line) end
+    eq(#results,0); eq(#f.sent,0); noAcceptance(f)
+  end
+  local r,f,results=resultFixture({target_total=66,auto_start_on_name=true})
+  resultCapture(r,"updated"); eq(r:onLine([[A guide says, "reroll done ? help"]]),false)
+  r:onLine("raise <stat> lower <stat> reset done ? help"); eq(#results,0); eq(r.state.active,false)
+  for index=1,9 do r:onLine("unrelated line "..index) end
+  eq(r:onLine(creatorPrompt),false); eq(#results,0); eq(#f.sent,0)
+end)
+
+test("manual stop disconnect and shutdown before the decision prompt cannot announce success",function()
+  for _,action in ipairs({"stop","disconnect","shutdown"}) do
+    local r,f,results,cleared=resultFixture()
+    assert(r:start()); resultCapture(r,"updated"); eq(#results,0)
+    local before=#cleared
+    if action=="stop" then assert(r:command("stop")) elseif action=="disconnect" then assert(r:onDisconnect()) else assert(r:shutdown()) end
+    eq(#cleared,before+1); r:onLine(creatorPrompt); eq(#results,0); eq(r.state.active,false); eq(#f.sent,0); noAcceptance(f)
+  end
+end)
+
+test("placement takeover send failure and timer failure are not successful results",function()
+  for _,failure in ipairs({"outgoing","incoming","send_throw","send_false","send_nil"}) do
+    local r,f,results=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="game_auto"})
+    if failure=="send_throw" then function f:sendCommand() error("synthetic send failure") end
+    elseif failure=="send_false" then function f:sendCommand() return false,"synthetic send failure" end
+    elseif failure=="send_nil" then function f:sendCommand() return nil,"synthetic send failure" end end
+    assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+    if failure=="outgoing" then assert(r:onOutgoing("int good"))
+    elseif failure=="incoming" then assert(r:onLine("> clear")) end
+    eq(#results,0); eq(r.state.active,false); eq(r.state.result_held,true); noAcceptance(f)
+  end
+  local r,f,results=resultFixture({target_total=77,auto_start_on_name=false})
+  function f:schedule() error("synthetic timer failure") end
+  assert(r:start()); resultCapture(r,"updated"); eq(r:onLine(creatorPrompt),nil)
+  eq(#results,0); eq(r.state.active,false); noAcceptance(f)
+end)
+
+test("generic held stops never imply successful qualification",function()
+  local r,f,results=resultFixture()
+  assert(r:start()); resultCapture(r,"updated")
+  assert(r:stop("Player took control",true)); eq(#results,0); eq(r.state.result_held,true)
+  eq(r:onLine(creatorPrompt),false); eq(#results,0); noAcceptance(f)
+end)
+
+test("success payload mutations cannot rewrite held named stats pool order or history",function()
+  for _,pool in ipairs({false,true}) do
+    local f=fake(); local result
+    local r=Roller.new(f,{target_total=66,auto_start_on_name=false,arrange_mode="manual"},nil,nil,nil,function(value)
+      result=value; value.roll.total=0; value.roll.roll=999; value.roll.order[1]="INJECTED"
+      if value.roll.pool then value.roll.pool[1]=1 else value.roll.stats.STR=1 end
+      value.kind="changed"; value.rolls=999; value.protocol="changed"
+    end)
+    assert(r:start())
+    if pool then assert(r:onLine("Pool: "..repeatedRank("Good",11))) else resultCapture(r,"updated") end
+    assert(r:onLine(pool and arrangePrompt or creatorPrompt)); assert(result)
+    eq(r.state.last.total,66); eq(r.state.last.roll,1); eq(r.state.last.order[1],"STR")
+    eq(r.state.best.total,66); eq(r.state.worst.total,66); eq(r.state.observed_best.total,66)
+    eq(r.state.last.protocol,pool and "arrange" or "creator"); eq(r.state.result_held,true)
+    if pool then eq(r.state.last.pool[1],6) else eq(r.state.last.stats.STR,6) end
+    eq(#f.sent,0); noAcceptance(f)
+  end
+end)
+
+test("throwing result callbacks cannot break any successful holding route or repeat success",function()
+  for _,route in ipairs({"updated","legacy","manual","auto","minimums"}) do
+    local f=fake(); local calls=0
+    local r=Roller.new(f,{target_total=66,auto_start_on_name=false,
+      arrange_mode=route=="auto" and "game_auto" or route=="minimums" and "minimums" or "manual"},nil,nil,nil,function()
+      calls=calls+1; error("synthetic audio failure")
+    end)
+    assert(r:start())
+    local arranged=route=="manual" or route=="auto" or route=="minimums"
+    if arranged then assert(r:onLine("Pool: "..repeatedRank("Good",11))) else resultCapture(r,route) end
+    local prompt=route=="legacy" and legacyPrompt or arranged and arrangePrompt or creatorPrompt
+    assert(r:onLine(prompt))
+    if route=="auto" or route=="minimums" then eq(calls,0); resultBoard(r,11); assert(r:onLine("Pool: (empty)")); assert(r:onLine(prompt)) end
+    eq(calls,1); eq(r.state.active,false); eq(r.state.result_held,true); eq(r.state.last.total,66)
+    eq(r:onLine(prompt),false); eq(calls,1); noAcceptance(f)
+    assert(r:onOutgoing(route=="legacy" and "n" or "reroll")); eq(r.state.active,true)
+    eq(r.state.result_held,false); eq(calls,1); noAcceptance(f)
+  end
+end)
+
+test("reset start stop disconnect shutdown and Step seven clear a held result once",function()
+  for _,action in ipairs({"reset","start","stop","disconnect","shutdown","step7"}) do
+    local r,f,results,cleared=resultFixture()
+    assert(r:start()); resultCapture(r,"updated"); assert(r:onLine(creatorPrompt)); eq(#results,1)
+    local before=#cleared
+    if action=="reset" then assert(r:command("reset")) elseif action=="start" then assert(r:start())
+    elseif action=="stop" then assert(r:command("stop")) elseif action=="disconnect" then assert(r:onDisconnect())
+    elseif action=="shutdown" then assert(r:shutdown()) else eq(r:onLine("Step 7 of 10 - Characteristics"),false) end
+    eq(#cleared,before+1); eq(#results,1); eq(r.state.active,action=="start"); noAcceptance(f)
+  end
+end)
+
+test("manual modern and legacy rerolls clear once despite outgoing and echoed duplicates",function()
+  for _,route in ipairs({"updated","legacy","pool"}) do
+    for _,outgoing in ipairs({false,true}) do
+      local r,f,results,cleared=resultFixture({target_total=66,auto_start_on_name=false,arrange_mode="manual"})
+      assert(r:start())
+      local function capture()
+        if route=="pool" then assert(r:onLine("Pool: "..repeatedRank("Good",11))) else resultCapture(r,route) end
+        assert(r:onLine(route=="legacy" and legacyPrompt or route=="pool" and arrangePrompt or creatorPrompt))
+      end
+      capture(); eq(#results,1)
+      local command=route=="legacy" and "n" or "reroll"; local before=#cleared
+      if outgoing then assert(r:onOutgoing(command)) else assert(r:onLine("> "..command)) end
+      eq(#cleared,before+1); eq(r.state.active,true); eq(r.state.result_held,false)
+      assert(r:onLine("> "..command)); assert(r:onLine(command)); eq(#cleared,before+1)
+      capture(); eq(#results,2); eq(results[1].rolls,1); eq(results[2].rolls,2)
+      checkResult(r,results[2],"manual",route=="legacy" and "legacy" or route=="pool" and "arrange" or "creator",2)
+      eq(#f.sent,0); noAcceptance(f)
+    end
+  end
+end)
+
+test("creation continued clears once for manual done y and navigation commands",function()
+  for _,command in ipairs({"done","y","<","back","q","quit"}) do
+    for _,outgoing in ipairs({false,true}) do
+      local r,f,results,cleared=resultFixture()
+      assert(r:start()); resultCapture(r,"updated"); assert(r:onLine(creatorPrompt))
+      local before=#cleared
+      if outgoing then assert(r:onOutgoing(command)) else assert(r:onLine("> "..command)) end
+      eq(#cleared,before+1); eq(r.state.result_held,false); eq(r.state.active,false)
+      eq(r:onLine("> "..command),false); r:onLine(creatorPrompt); eq(#cleared,before+1)
+      eq(#results,1); eq(#f.sent,0); noAcceptance(f)
+    end
+  end
+end)
+
+test("Steps eight and nine clear held active legacy and passive creator results",function()
+  for _,step in ipairs({8,9}) do
+    for _,phase in ipairs({"held","active","legacy","passive","assigning"}) do
+      local r,f,results,cleared=resultFixture({target_total=66,auto_start_on_name=phase=="passive",arrange_mode="game_auto"})
+      if phase~="passive" then assert(r:start()) end
+      if phase=="assigning" then assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+      else resultCapture(r,phase=="legacy" and "legacy" or "updated") end
+      if phase=="held" then assert(r:onLine(creatorPrompt)) end
+      local before=#cleared; assert(r:onLine("Step "..step.." of 10 - Profession"))
+      eq(#cleared,before+1); eq(r.state.active,false); eq(r.state.result_held,false); eq(r.state.arrangement,nil)
+      eq(r.state.pending_stats,nil); eq(r.state.protocol,nil)
+      r:onLine("Step "..step.." of 10 - Profession"); r:onLine(creatorPrompt); r:onLine(arrangePrompt)
+      eq(#cleared,before+1); eq(#results,phase=="held" and 1 or 0); noAcceptance(f)
+    end
+  end
+end)
+
+test("throwing clear callbacks cannot prevent capture cancellation reroll or cleanup",function()
+  local f=fake(); local clears,results=0,0
+  local r=Roller.new(f,{target_total=77,auto_start_on_name=false,reroll_delay=1},nil,nil,nil,
+    function() results=results+1 end,function() clears=clears+1; error("synthetic clear failure") end)
+  eq(clears,1); assert(r:start()); eq(clears,2)
+  resultCapture(r,"updated"); assert(r:onLine(creatorPrompt)); local stale=f.timers[r.state.timer].fn
+  assert(r:command("stop")); stale(); eq(#f.sent,0); eq(r.state.active,false); eq(r.state.partial,nil)
+  assert(r:start()); resultCapture(r,"updated","Great"); assert(r:onLine(creatorPrompt)); eq(results,1)
+  assert(r:onOutgoing("reroll")); resultCapture(r,"updated","Great"); assert(r:onLine(creatorPrompt)); eq(results,2)
+  assert(r:onDisconnect()); eq(r.state.result_held,false); assert(r:reset()); assert(r:shutdown()); noAcceptance(f)
+end)
+
+test("nonfunction result callbacks are ignored without changing old callback positions",function()
+  local saves,alerts,sessions=0,0,0; local f=fake()
+  local r=Roller.new(f,{target_total=66,auto_start_on_name=false},function() saves=saves+1; return true end,
+    function() alerts=alerts+1 end,function() sessions=sessions+1 end,true,{})
+  assert(r:start()); resultCapture(r,"updated"); assert(r:onLine(creatorPrompt))
+  eq(r.state.result_held,true); assert(r:configure({show_every_roll=false})); eq(saves,1); assert(sessions>0); eq(alerts,0)
+  assert(r:onLine("Something stirs behind your eyes. You have a latent psionic gift.")); eq(alerts,1)
+  assert(r:onDisconnect()); noAcceptance(f)
+end)
+
+test("rare latent psion alert clears prior target success without announcing a second success",function()
+  local r,f,results,cleared=resultFixture()
+  assert(r:start()); resultCapture(r,"updated"); assert(r:onLine(creatorPrompt)); eq(#results,1)
+  local before=#cleared
+  assert(r:onLine("Something stirs behind your eyes. You have a latent psionic gift."))
+  eq(#cleared,before+1); eq(#results,1); eq(r.state.latent_psion,true); eq(r.state.result_held,false)
+  r:onLine("Something stirs behind your eyes. You have a latent psionic gift."); eq(#cleared,before+1); noAcceptance(f)
+end)
+
+test("constructor normalizes absent old alert settings to ON 75 and repeat OFF without schema migration",function()
+  for _,settings in ipairs({{},{schema=4,target_total=53,min_stats={STR=5}},{schema=3,target_total=65,hard_stop=70}}) do
+    local r=Roller.new(fake(),settings)
+    eq(r.cfg.alerts.enabled,true); eq(r.cfg.alerts.volume,75); eq(r.cfg.alerts.repeat_enabled,false)
+    eq(r.cfg.alerts.sound,"three_tone"); eq(r.cfg.schema,settings.schema)
+    eq(r.cfg.target_total,settings.target_total); eq(r.cfg.hard_stop,settings.hard_stop); eq(settings.alerts,nil)
+    assert(r.cfg.alerts~=Roller.new(fake(),settings).cfg.alerts)
+  end
+end)
+
+test("constructor validates saved alerts preserves OFF and owns its normalized settings",function()
+  local settings={schema=4,target_total=53,min_stats={STR=5},alerts={enabled=false,sound="custom",volume=100,
+    repeat_enabled=true,custom_file=string.rep("a",64)..".wav",custom_name="roll_alert.wav"}}
+  local r=Roller.new(fake(),settings); eq(r.cfg.schema,4)
+  defensiveResult(r.cfg.alerts,settings.alerts)
+  settings.alerts.enabled=true; settings.alerts.volume=1; settings.alerts.custom_file="changed.wav"
+  eq(r.cfg.alerts.enabled,false); eq(r.cfg.alerts.volume,100)
+  eq(r.cfg.alerts.custom_file,string.rep("a",64)..".wav"); eq(r.cfg.alerts.repeat_enabled,true)
+  local partial=Roller.new(fake(),{alerts={enabled=false}})
+  eq(partial.cfg.alerts.enabled,false); eq(partial.cfg.alerts.volume,75); eq(partial.cfg.alerts.repeat_enabled,false)
+end)
+
+local invalidResultAlerts={
+  false,"on",1,{enabled="yes"},{repeat_enabled=1},{sound="unknown"},
+  {sound="https://invalid.example/tone.wav"},{volume=0},{volume=101},{volume=75.5},{volume="75"},
+  {volume=math.huge},{volume=-math.huge},{volume=0/0},
+  {custom_file="../outside.wav"},{custom_file="/tmp/other.wav"},{custom_file="$(command).wav"},
+  {custom_name="../outside.wav"},{custom_name="/tmp/other.wav"},{custom_name=""},
+}
+test("constructor falls back to safe defaults for invalid saved alert settings",function()
+  for _,alerts in ipairs(invalidResultAlerts) do
+    local r=Roller.new(fake(),{schema=4,target_total=66,alerts=alerts})
+    eq(r.cfg.alerts.enabled,true); eq(r.cfg.alerts.sound,"three_tone"); eq(r.cfg.alerts.volume,75)
+    eq(r.cfg.alerts.repeat_enabled,false); eq(r.cfg.alerts.custom_file,nil); eq(r.cfg.alerts.custom_name,nil)
+    eq(r.cfg.target_total,66); eq(r.cfg.schema,4)
+  end
+end)
+
+test("configure validates alert settings before onConfig and saves a defensive schema four candidate",function()
+  local f=fake(); local saved,saves,sessions=nil,0,0
+  local r=Roller.new(f,{schema=4,target_total=53,min_stats={STR=5}},function(value)
+    saves=saves+1; saved=value; return true
+  end,nil,function() sessions=sessions+1 end)
+  local alerts={enabled=false,sound="horn",volume=40,repeat_enabled=true}
+  assert(r:configure({target_total=65,alerts=alerts},true)); eq(saves,1)
+  eq(saved.schema,4); eq(saved.target_total,65); eq(saved.alerts.enabled,false)
+  eq(saved.alerts.sound,"horn"); eq(saved.alerts.volume,40); eq(saved.alerts.repeat_enabled,true)
+  defensiveResult(r.cfg.alerts,alerts); defensiveResult(saved.alerts,r.cfg.alerts)
+  alerts.volume=1; saved.alerts.volume=2; eq(r.cfg.alerts.volume,40)
+  local before=sessions; local config=r.cfg
+  for _,invalid in ipairs(invalidResultAlerts) do
+    local ok,err=r:configure({target_total=70,alerts=invalid},true)
+    eq(ok,nil); eq(type(err),"string"); assert(#err>0)
+    eq(saves,1); eq(r.cfg,config); eq(r.cfg.target_total,65); eq(r.cfg.alerts.volume,40); eq(sessions,before)
+  end
+  eq(#f.sent,0); noAcceptance(f)
+end)
+
+test("unrelated rr set and configure preserve the complete saved alert selection",function()
+  local alerts={enabled=false,sound="custom",volume=95,repeat_enabled=true,
+    custom_file=string.rep("b",64)..".wav",custom_name="held_roll.wav"}
+  local saved,saves=nil,0
+  local r=Roller.new(fake(),{schema=4,target_total=53,alerts=alerts,min_stats={}},function(value) saved=value; saves=saves+1; return true end)
+  for _,action in ipairs({"set total 65","set delay .25","set INT 6","set arrange minimums","set greats 2"}) do
+    assert(r:command(action)); defensiveResult(r.cfg.alerts,alerts); defensiveResult(saved.alerts,r.cfg.alerts)
+    eq(r.cfg.schema,4); eq(saved.schema,4)
+  end
+  assert(r:configure({show_every_roll=false,logging_enabled=false})); defensiveResult(r.cfg.alerts,alerts)
+  eq(saves,6); eq(r.cfg.target_total,65); eq(r.cfg.min_stats.INT,6)
+end)
+
+test("a failed persistence callback leaves alert settings and other config unchanged",function()
+  local saves=0; local r=Roller.new(fake(),{schema=4,target_total=53,alerts={enabled=false,sound="horn",volume=40}},function(value)
+    saves=saves+1; eq(value.alerts.enabled,true); eq(value.alerts.volume,90); return nil,"synthetic save failure"
+  end)
+  local config=r.cfg; local alerts=r.cfg.alerts
+  local ok,err=r:configure({target_total=65,alerts={enabled=true,sound="alarm",volume=90}})
+  eq(ok,nil); eq(err,"synthetic save failure"); eq(saves,1); eq(r.cfg,config); eq(r.cfg.alerts,alerts)
+  eq(r.cfg.alerts.enabled,false); eq(r.cfg.alerts.sound,"horn"); eq(r.cfg.alerts.volume,40); eq(r.cfg.target_total,53)
+end)
+
+test("alert configuration during a held result cannot emit or clear a result event",function()
+  local f=fake(); local results,clears=0,0
+  local r=Roller.new(f,{schema=4,target_total=66,auto_start_on_name=false},function() return true end,nil,nil,
+    function() results=results+1 end,function() clears=clears+1 end)
+  assert(r:start()); resultCapture(r,"updated"); assert(r:onLine(creatorPrompt))
+  eq(results,1); local before=clears
+  assert(r:configure({alerts={enabled=false,volume=10,repeat_enabled=true,sound="alarm"}}))
+  eq(results,1); eq(clears,before); eq(r.state.result_held,true); eq(r.state.last.total,66)
+  eq(r:onLine(creatorPrompt),false); eq(results,1); eq(clears,before); eq(#f.sent,0); noAcceptance(f)
+end)
+
+test("held arranged placement dismisses completion once while preserving hold suppression and roll",function()
+  for _,command in ipairs({"auto","str great","INT Good","pre fair","luk poor","voi great","app aver","mp superb"}) do
+    for _,outgoing in ipairs({false,true}) do
+      local r,f,results,cleared=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="manual"})
+      local offered="Pool: "..repeatedRank("Good",11)
+      assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(#results,1)
+      local before=#cleared; local roll=r.state.last; r.state.auto_suppressed=true
+      if outgoing then assert(r:onOutgoing(command)) else assert(r:onLine("> "..command)) end
+      eq(#cleared,before+1); eq(r.state.result_held,true); eq(r.state.held_protocol,"arrange")
+      eq(r.state.active,false); eq(r.state.auto_suppressed,true); eq(r.state.phase,"held"); eq(r.state.last,roll)
+      eq(r:onLine("> "..command),false); eq(r:onOutgoing(command),false)
+      r:onLine(firstHeader); r:onLine(repeatedRank("Good",6)); r:onLine(updatedSecondHeader); r:onLine(repeatedRank("Good",5))
+      r:onLine(offered); r:onLine(arrangePrompt); eq(#cleared,before+1); eq(#results,1)
+      eq(r.state.rolls,1); eq(#f.sent,0); noAcceptance(f)
+    end
+  end
+end)
+
+test("held creator clear reset and malformed placement commands preserve the completion alert",function()
+  local r,f,results,cleared=resultFixture({target_total=66,auto_start_on_name=true,arrange_mode="manual"})
+  assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+  local before=#cleared
+  for _,command in ipairs({"clear","reset","int mystery","unknown great","auto now","rr status","dghud options"}) do
+    eq(r:onOutgoing(command),false); eq(r:onLine("> "..command),false)
+  end
+  r:onLine("INT placed: Good."); r:onLine("Pool: "..repeatedRank("Good",10)); r:onLine(arrangePrompt)
+  eq(#cleared,before); eq(#results,1); eq(r.state.result_held,true); eq(r.state.rolls,1); eq(#f.sent,0)
+  local full,fullFake,fullResults,fullCleared=resultFixture()
+  assert(full:start()); resultCapture(full,"updated"); assert(full:onLine(creatorPrompt)); before=#fullCleared
+  eq(full:onOutgoing("auto"),false); eq(full:onLine("> str great"),false)
+  eq(#fullCleared,before); eq(#fullResults,1); eq(full.state.result_held,true); noAcceptance(fullFake)
+end)
+
+local function controllerResultFixture(settings)
+  local Alerts=require("autoroller_alerts")
+  local f=fake(); f.shown={}; f.played={}; f.stops={}; f.hidden=0
+  function f:chatSoundTime() return 100 end
+  local audio={play=function(_,config) f.played[#f.played+1]=config; return true,nil,1 end,
+    stop=function(_,preview) f.stops[#f.stops+1]=preview; return true end}
+  local view={showRollerResultAlert=function(_,event) f.shown[#f.shown+1]=event end,
+    hideRollerResultAlert=function() f.hidden=f.hidden+1 end}
+  local r; local alerts=Alerts.new(f,audio,view,function() return r.cfg.alerts end)
+  r=Roller.new(f,settings,nil,nil,nil,function(event) alerts:result(event) end,function() alerts:clear() end)
+  return r,f,alerts
+end
+
+test("real alert controller keeps OFF visual notice through held redraws until placement or reroll",function()
+  local r,f,alerts=controllerResultFixture({target_total=66,auto_start_on_name=true,arrange_mode="manual",alerts={enabled=false}})
+  local offered="Pool: "..repeatedRank("Good",11)
+  assert(r:onLine(offered)); assert(r:onLine(arrangePrompt)); eq(#f.shown,1); eq(#f.played,0)
+  local event=alerts.event; assert(event); local stops=#f.stops; local hidden=f.hidden
+  for _,command in ipairs({"clear","reset"}) do eq(r:onOutgoing(command),false); eq(r:onLine("> "..command),false) end
+  r:onLine(firstHeader); r:onLine(repeatedRank("Good",6)); r:onLine(updatedSecondHeader); r:onLine(repeatedRank("Good",5))
+  r:onLine(offered); r:onLine(arrangePrompt); eq(alerts.event,event)
+  eq(#f.shown,1); eq(#f.played,0); eq(#f.stops,stops); eq(f.hidden,hidden)
+  assert(r:onOutgoing("int good")); eq(alerts.event,nil); eq(f.hidden,hidden+1)
+  eq(r.state.result_held,true); eq(r.state.active,false); eq(#f.sent,0)
+  r:onLine("> int good"); r:onLine(arrangePrompt); eq(#f.shown,1); eq(f.hidden,hidden+1)
+  assert(r:onOutgoing("reroll")); assert(r:onLine(offered)); assert(r:onLine(arrangePrompt))
+  eq(#f.shown,2); eq(#f.played,0); assert(alerts.event~=event); eq(alerts.event.rolls,2); noAcceptance(f)
+end)
+
+test("real alert controller receives automatic success only on final placement confirmation",function()
+  local r,f,alerts=controllerResultFixture({target_total=66,auto_start_on_name=true,arrange_mode="game_auto"})
+  assert(r:onLine("Pool: "..repeatedRank("Good",11))); assert(r:onLine(arrangePrompt))
+  eq(#f.shown,0); eq(#f.played,0); eq(alerts.event,nil); eq(f.sent[1],"auto")
+  resultBoard(r,11); assert(r:onLine("Pool: (empty)")); eq(#f.shown,0); eq(#f.played,0)
+  assert(r:onLine(arrangePrompt)); eq(#f.shown,1); eq(#f.played,1); eq(alerts.event.placement,"complete")
+  eq(f.played[1].enabled,true); eq(f.played[1].volume,75); eq(f.played[1].repeat_enabled,false)
+  r:onLine(arrangePrompt); eq(#f.shown,1); eq(#f.played,1)
+  assert(r:onOutgoing("done")); eq(alerts.event,nil); eq(r.state.result_held,false); eq(#f.sent,1); noAcceptance(f)
+end)

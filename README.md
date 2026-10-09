@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.95**.
+Documentation covers **DGHUD v0.3.96**.
 
 ## Quick start
 
@@ -43,7 +43,18 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.95
+## Latest changes — v0.3.96
+
+- Choose a personal WAV or a built-in **Three-Tone**, **Chime**, **Alarm**, or **Horn** for a qualifying autoroller result.
+- Open **OPTIONS → Autoroller**, then scroll to **ALERTS** in the same settings window. Use **CHOOSE WAV FILE…**, **PREVIEW**, **STOP PREVIEW**, and volume **1–100**, then click **SAVE**.
+- Completion sounds default to **ON**, **Three-Tone**, volume **75**; repeating alerts default to **OFF**. Optional reminders repeat about every ten seconds, wait for longer sounds between plays, and stop after five minutes.
+- A persistent **AUTOROLLER TARGET HIT** notice appears even with sound off. **DISMISS / SILENCE** acknowledges the alert without accepting or discarding the result; final acceptance stays manual.
+- Automatic placement must be confirmed before a success alert. Errors, disconnects, and the maximum-roll limit are not reported as successful rolls.
+- Validated custom WAVs and saved alert preferences remain private with the profile and survive restarts, character changes, and updates. New rolling sessions, character exit, and HUD shutdown clear old reminders rather than carrying them into another character.
+
+[Read the Autoroller alert guide](docs/AUTOROLLER.md#completion-sounds-and-reminders) or the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.96).
+
+## Previous changes — v0.3.95
 
 - Fixed a Windows color-settings save failure that prevented category buttons and text styles from saving.
 - Skill results no longer inherit an unintended red background or other formatting from previous highlighted output.
@@ -123,7 +134,9 @@ Skill rows with **0 uses remaining are green**, combat skills are **blue**, and 
 
 Printed roundtime penalties accumulate instead of replacing one another, including double attacks and fumbles. Text and GMCP are reconciled within a 0.5-second window to reduce duplicate counting; without game-provided delay event IDs, perfectly identifying each delay is not possible. After printed delay bursts, the HUD can send a quiet, throttled `delay` check to replace the countdown with the game's reported remaining time. It hides only a proven HUD-requested, isolated reply; manually entered `delay` results remain visible and also correct the countdown. Overlapping manual requests or uncertain ownership leave replies visible, and failed/timed-out checks pause automatic requests rather than continuously polling. Checks do not run during character-data collection, autorolling, or updates. Stale unchanged snapshots do not restart the countdown, and character exits/disconnects clear it. STAT combat fields and confirmed attack-strategy messages update immediately, including **Frenzied**, even if another command interrupts STAT.
 
-## Autoroller session highs
+## Autoroller alerts and session highs
+
+**Autoroller completion alerts:** Open **OPTIONS → Autoroller** and scroll to **ALERTS** in the same window; it is not a separate tab. Choose Three-Tone, Chime, Alarm, Horn, or a personal WAV; preview it, set volume from 1–100, and click **SAVE**. Defaults are sound ON, Three-Tone, volume 75, and repeat OFF. Optional reminders repeat about every ten seconds, wait for longer sounds between plays, and stop after five minutes. The persistent target-hit notice leaves acceptance manual, and mute is respected. WAVs must be normal PCM or IEEE-float, at most 10 MiB and 60 seconds. Sound files and choices stay private with the profile and survive updates; shutdown and character exit clear old alerts. See [completion sounds and reminders](docs/AUTOROLLER.md#completion-sounds-and-reminders).
 
 **Autoroller session breakdown:** Options → Autoroller shows a live **SESSION BEST** table comparing each characteristic's target with its highest observed rank. Unreached minimums are highlighted, with a reminder every 100 named-stat rolls. These are observations, not proven race/class caps; minimums never change automatically. Use the SESSION BEST button or `rr stats` for a console copy. Arranged pools are tracked separately and never attributed to named stats.
 

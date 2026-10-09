@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.95**.
+Applies to DGHUD **v0.3.96**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -172,6 +172,12 @@ See [Automapper and Map Library](AUTOMAPPER_AND_MAP_LIBRARY.md).
 ## Autoroller
 
 **AUTOROLLER** opens all roller settings and controls in one place. You can set score targets, per-characteristic minimums, arranged-pool rules, safety limits, delay, output, and logging without editing a script. Use **WHAT IS IT WAITING FOR?** if rolling appears paused, and **SHOW SAVED SETTINGS** to verify the active configuration.
+
+Open **OPTIONS → Autoroller** for rolling targets, minimums, arranged-pool behavior, and the live session breakdown. Scroll within that same window to **ALERTS**; there is no separate Alerts tab.
+
+Choose **Three-Tone**, **Chime**, **Alarm**, **Horn**, or **CHOOSE WAV FILE…** for a personal sound. Use **PREVIEW**, **STOP PREVIEW**, and **VOLUME (1–100)** before clicking **SAVE**. Defaults are sound ON, Three-Tone, volume 75, and repeating alerts OFF. **REPEAT ALERT** gives reminders about every ten seconds, waits for longer sounds between plays, and stops after five minutes. Mudlet and system mute still apply.
+
+The target-hit notice remains visual even when sound is off. **DISMISS / SILENCE** does not accept or discard the roll; you finish character creation manually. Custom sounds stay local, must be normal PCM or IEEE-float WAVs of at most 10 MiB and 60 seconds, and are copied outside the replaceable package. Preferences survive character changes, restarts, and updates; old notices and reminders are cleared on character exit and HUD shutdown. See [the Autoroller Guide](AUTOROLLER.md#completion-sounds-and-reminders).
 
 Read [Autoroller](AUTOROLLER.md) before using it during character creation.
 

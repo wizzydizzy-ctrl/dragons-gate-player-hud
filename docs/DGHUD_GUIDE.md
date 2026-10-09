@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.95**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.96**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,18 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.95
+## What's new in v0.3.96
+
+- Choose a personal WAV or a built-in **Three-Tone**, **Chime**, **Alarm**, or **Horn** for a qualifying autoroller result.
+- Open **OPTIONS → Autoroller**, then scroll to **ALERTS** in the same settings window. Use **CHOOSE WAV FILE…**, **PREVIEW**, **STOP PREVIEW**, and volume **1–100**, then click **SAVE**.
+- Completion sounds default to **ON**, **Three-Tone**, volume **75**; repeating alerts default to **OFF**. Optional reminders repeat about every ten seconds, wait for longer sounds between plays, and stop after five minutes.
+- A persistent **AUTOROLLER TARGET HIT** notice appears even with sound off. **DISMISS / SILENCE** acknowledges the alert without accepting or discarding the result; final acceptance stays manual.
+- Automatic placement must be confirmed before a success alert. Errors, disconnects, and the maximum-roll limit are not reported as successful rolls.
+- Validated custom WAVs and saved alert preferences remain private with the Mudlet profile and survive restarts, character changes, and updates. New rolling sessions, character exit, and HUD shutdown clear old reminders rather than carrying them into another character.
+
+Custom files must be normal PCM or IEEE-float WAVs, at most **10 MiB** and **60 seconds**. Mudlet's media mute and your computer's volume still apply. See [completion sounds and reminders](AUTOROLLER.md#completion-sounds-and-reminders) for setup and troubleshooting, or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.96).
+
+## Previous changes in v0.3.95
 
 - Fixed a Windows color-settings save failure that prevented category buttons and text styles from saving.
 - Skill results no longer inherit an unintended red background or other formatting from previous highlighted output.
@@ -56,7 +67,7 @@ With **SKILL FILTERS ON**, filtering remains independent of custom or disabled c
 | [Chatbox](CHATBOX.md) | Tabs, Show in ALL, hiding chat, sound alerts, profile-wide history, and custom capture triggers. |
 | [Color Highlighting](COLOR_HIGHLIGHTING.md) | Built-in highlights, color choices, and how to add your own words or phrases. |
 | [Automapper and Map Library](AUTOMAPPER_AND_MAP_LIBRARY.md) | Automatic mapping, special submaps, walking, cleanup, named map collections, sharing, downloading, and combining maps. |
-| [Autoroller](AUTOROLLER.md) | Both character-creation rolling methods, every setting, recommended setups, commands, and troubleshooting. |
+| [Autoroller](AUTOROLLER.md) | Both rolling methods, targets, session highs, custom completion sounds, reminders, commands, and troubleshooting. |
 | [Updates and Emergency Recovery](UPDATES_AND_RECOVERY.md) | Safe manual updates, optional automatic updates, preserved data, and `dghud recover`. |
 | [Command Reference](COMMAND_REFERENCE.md) | One searchable list of every normal DGHUD and autoroller command. |
 | [Troubleshooting](TROUBLESHOOTING.md) | Fast fixes for missing panels, stale data, mapper problems, update failures, and roller problems. |

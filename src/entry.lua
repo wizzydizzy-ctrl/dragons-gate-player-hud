@@ -69,6 +69,7 @@ moduleNames[#moduleNames+1]="color_styles"; moduleNames[#moduleNames+1]="color_p
 moduleNames[#moduleNames+1]="skill_display"
 moduleNames[#moduleNames+1]="skill_sort"; moduleNames[#moduleNames+1]="skill_settings_view"
 moduleNames[#moduleNames+1]="roundtime_check"
+moduleNames[#moduleNames+1]="autoroller_audio"; moduleNames[#moduleNames+1]="autoroller_alerts"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")

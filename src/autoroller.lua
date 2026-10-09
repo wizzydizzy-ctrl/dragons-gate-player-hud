@@ -1,3 +1,4 @@
+local Audio=require("autoroller_audio")
 local Roller={}; Roller.__index=Roller
 local order={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK"}
 local legacyOrder={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP"}
@@ -91,6 +92,13 @@ local function promptProtocol(line)
 end
 local function rerollCommand(protocol) return (protocol=="creator" or protocol=="arrange") and "reroll" or "n" end
 local function acceptanceCommand(protocol) return (protocol=="creator" or protocol=="arrange") and "done" or "y" end
+local function placementCommand(command)
+  if command=="auto" then return true end
+  local stat,label=command:match("^([a-z]+)%s+([a-z]+)$")
+  if not stat or not ranks[label] then return false end
+  for _,name in ipairs(supportedStats) do if stat==name:lower() then return true end end
+  return false
+end
 local function onOff(value,defaultEnabled)
   local enabled=value
   if enabled==nil then enabled=defaultEnabled==true end
@@ -124,8 +132,9 @@ local function arrangeModeText(mode)
   return ({manual="LET ME PLACE (manual)",game_auto="GAME AUTO (game_auto)",minimums="MY MINIMUMS + AUTO (minimums)"})[mode] or "LET ME PLACE (manual)"
 end
 
-function Roller.new(adapter,settings,onConfig,onAlert,onSession)
+function Roller.new(adapter,settings,onConfig,onAlert,onSession,onResult,onResultCleared)
   local config=copy(settings or {})
+  config.alerts=Audio.validate(config.alerts) or Audio.defaults()
   -- Older DGHUD releases persisted "n" for the retired body prompt. The new
   -- creator uses a named command; normalize the old value without losing any
   -- of the player's score or logging preferences.
@@ -136,7 +145,7 @@ function Roller.new(adapter,settings,onConfig,onAlert,onSession)
   if config.min_stats.PRE==nil and config.min_stats.VOI~=nil then config.min_stats.PRE=config.min_stats.VOI end
   if config.min_stats.LUK==nil and config.min_stats.APP~=nil then config.min_stats.LUK=config.min_stats.APP end
   for _,key in ipairs(supportedStats) do if config.min_stats[key]==false then config.min_stats[key]=nil end end
-  local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert,onSession=onSession},Roller); self:reset(); return self
+  local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert,onSession=onSession,onResult=onResult,onResultCleared=onResultCleared},Roller); self:reset(); return self
 end
 function Roller:echo(message) if self.adapter.reportRoller then self.adapter:reportRoller(message) end end
 function Roller:cancelReroll()
@@ -149,11 +158,16 @@ function Roller:clearCapture()
   local s=self.state; if not s then return true end
   s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.passive_lines=0; s.capture_lines=0; s.protocol=nil; s.characteristic_order=nil; s.fresh_roll=false; s.awaiting_new_roll=false; s.expected_echo=nil; s.owned_outgoing=nil; return true
 end
+function Roller:clearResult()
+  if self.state then self.state.result_notified=false end
+  if type(self.onResultCleared)=="function" then pcall(self.onResultCleared) end
+  return true
+end
 function Roller:reset()
   local timerGeneration=0
   if self.state then self:cancelReroll(); timerGeneration=tonumber(self.state.timer_generation) or 0 end
   if self.state and self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log) end
-  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,observed_rolls=0,observed_sum=0,observed_best=nil,observed_worst=nil,observed_last=nil,observed_capture=nil,observation_transaction=0,observed_transaction=nil,stat_rolls=0,pool_rolls=0,stat_highs={},pool_highs={},stat_order=nil,pool_size=nil,warning_roll_checkpoint=0,expected=nil,partial=nil,pending_stats=nil,pending_pool=nil,arrangement=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil,result_held=false,held_protocol=nil,awaiting_new_roll=false,phase="idle",expected_echo=nil,owned_outgoing=nil,latent_psion=false}; self:notifySession(); return true
+  self.state={active=false,rolls=0,sum=0,last=nil,best=nil,worst=nil,observed_rolls=0,observed_sum=0,observed_best=nil,observed_worst=nil,observed_last=nil,observed_capture=nil,observation_transaction=0,observed_transaction=nil,stat_rolls=0,pool_rolls=0,stat_highs={},pool_highs={},stat_order=nil,pool_size=nil,warning_roll_checkpoint=0,expected=nil,partial=nil,pending_stats=nil,pending_pool=nil,arrangement=nil,passive_lines=0,capture_lines=0,protocol=nil,fresh_roll=false,timer=nil,timer_generation=timerGeneration,auto_suppressed=false,log=nil,result_held=false,held_protocol=nil,awaiting_new_roll=false,phase="idle",expected_echo=nil,owned_outgoing=nil,latent_psion=false}; self:clearResult(); self:notifySession(); return true
 end
 -- A fixed number of scalar maxima, not an ever-growing list of rolls. These
 -- observations never claim a racial/profession cap or change minimum settings.
@@ -278,7 +292,19 @@ function Roller:stop(reason,holdResult)
   self.state.active=false; self:cancelReroll(); self:clearCapture(); self.state.result_held=holdResult==true; self.state.held_protocol=holdResult==true and heldProtocol or nil; self.state.phase=holdResult==true and "held" or "idle"
   self:report(reason or "Stopped"); self:log(reason or "Stopped")
   if not holdResult and self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end
+  if not holdResult then self:clearResult() end
   self:notifySession(); return true
+end
+function Roller:holdTargetResult(reason,placement)
+  local s=self.state
+  if not s.last or s.result_notified then return false end
+  -- Only verified success routes call this helper. A cancellation can also
+  -- hold the prompt, so result_held alone must never announce a target hit.
+  local result={kind="target_hit",reason=reason,roll=copy(s.last),rolls=s.rolls,protocol=s.protocol or s.last.protocol,placement=placement}
+  s.result_notified=true
+  self:stop(reason,true)
+  if type(self.onResult)=="function" then pcall(self.onResult,result) end
+  return true
 end
 function Roller:rollText(roll)
   if roll.pool then local labels={}; for _,value in ipairs(roll.pool) do labels[#labels+1]=rankLabels[value] end; return "Roll #"..roll.roll.."  Total="..roll.total.."/"..roll.maximum.."  Pool: "..table.concat(labels," ") end
@@ -325,6 +351,7 @@ function Roller:onLatentPsion()
   if s.latent_psion then return true end
   self:cancelReroll(); self:clearCapture()
   s.active=false; s.auto_suppressed=true; s.result_held=false; s.held_protocol=nil; s.latent_psion=true; s.phase="latent_psion"
+  self:clearResult()
   self:log("Latent psion detected; automatic input stopped")
   if s.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,s.log); s.log=nil end
   self:echo(latentPsionAlert)
@@ -429,7 +456,7 @@ function Roller:captureExpected(line)
 end
 function Roller:prepareForReroll(protocol)
   self.state.observation_transaction=self.state.observation_transaction+1
-  local s=self.state; self:cancelReroll(); s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.characteristic_order=nil; s.capture_lines=0; s.passive_lines=0; s.fresh_roll=false; s.result_held=false; s.held_protocol=nil; s.protocol=protocol or s.protocol; s.awaiting_new_roll=true; s.phase="waiting_new_roll"; self:notifySession(); return true
+  local s=self.state; self:cancelReroll(); s.expected=nil; s.partial=nil; s.pending_stats=nil; s.pending_pool=nil; s.arrangement=nil; s.characteristic_order=nil; s.capture_lines=0; s.passive_lines=0; s.fresh_roll=false; s.result_held=false; s.held_protocol=nil; s.protocol=protocol or s.protocol; s.awaiting_new_roll=true; s.phase="waiting_new_roll"; self:clearResult(); self:notifySession(); return true
 end
 function Roller:rearmForManualReroll(protocol)
   local s=self.state; local controlled=s.active or s.result_held or s.held_protocol~=nil
@@ -466,6 +493,7 @@ function Roller:onOutgoing(command)
     if normalized=="2" or normalized=="3" then return false end
     if normalized=="1" then return self:stop("Assign method selected") end
   end
+  if s.result_held and s.held_protocol=="arrange" and s.result_notified and placementCommand(normalized) then return self:clearResult() end
   if s.result_held and (normalized=="done" or normalized=="y" or normalized=="<" or normalized=="back" or normalized=="q" or normalized=="quit") then return self:stop("Character creation continued") end
   if s.active or s.timer or s.arrangement then return self:stop("Player command cancelled automatic rolling",true) end
   return false
@@ -473,7 +501,7 @@ end
 function Roller:onDisconnect()
   if self.state.latent_psion then return self:reset() end
   if self.state.active or self.state.result_held or self.state.log then return self:stop("Disconnected") end
-  self:cancelReroll(); self:clearCapture(); self.state.result_held=false; self.state.held_protocol=nil; self.state.phase="idle"; return true
+  self:cancelReroll(); self:clearCapture(); self.state.result_held=false; self.state.held_protocol=nil; self.state.phase="idle"; self:clearResult(); return true
 end
 function Roller:reroll(protocol)
   if self.state.timer then return true end
@@ -505,17 +533,17 @@ function Roller:advanceArrangement()
   if awaiting then
     if awaiting.auto then
       if not (awaiting.pool_empty and sequence.auto_board_complete) then return self:stop("Automatic placement was not fully confirmed — prompt left waiting for you",true) end
-      return self:stop("Arrangement complete — prompt left waiting for manual done",true)
+      return self:holdTargetResult("Arrangement complete — prompt left waiting for manual done","complete")
     end
     if not (awaiting.confirmed and awaiting.pool_confirmed) then return self:stop("Placement was not fully confirmed — prompt left waiting for you",true) end
   end
   sequence.index=sequence.index+1; local entry=sequence.commands[sequence.index]
-  if not entry then return self:stop("Minimum placements complete — prompt left waiting for manual done",true) end
+  if not entry then return self:holdTargetResult("Minimum placements complete — prompt left waiting for manual done","complete") end
   return self:sendArrangementCommand(entry)
 end
 function Roller:beginArrangement(roll,reason)
   local mode=self.cfg.arrange_mode or "manual"
-  if mode=="manual" then self:echo("TARGET HIT — pool left waiting for your placements and manual done.\n"..self:rollText(roll)); return self:stop(reason,true) end
+  if mode=="manual" then self:echo("TARGET HIT — pool left waiting for your placements and manual done.\n"..self:rollText(roll)); return self:holdTargetResult(reason,"manual") end
   local commands={}
   if mode=="minimums" then
     local plan,remaining=self:assignmentPlan(roll.pool,roll.order)
@@ -561,13 +589,20 @@ function Roller:onLine(line)
     end
     return false
   end
+  if lower:match("step%s+[89]%s+of%s+10") then
+    if s.active or s.result_held or s.protocol or s.pending_stats or s.pending_pool or s.log then return self:stop("Character creation continued") end
+    return false
+  end
   if s.expected_echo and bare==s.expected_echo then s.expected_echo=nil; return true end
   if bare=="reroll" and s.awaiting_new_roll then return true end
   if bare=="reroll" and (s.active or s.result_held or s.held_protocol~=nil) then return self:rearmForManualReroll() end
+  if bare=="n" and (s.protocol=="legacy" or s.held_protocol=="legacy") then
+    if s.awaiting_new_roll then return true end
+    return self:rearmForManualReroll("legacy")
+  end
   if s.active then
     local protocol=s.protocol
-    if ((protocol=="creator" or protocol=="arrange") and (bare=="done" or lower:match("step%s+[89]%s+of%s+10"))) or (protocol=="legacy" and bare=="y") then return self:stop("Character creation continued") end
-    if protocol=="legacy" and bare=="n" then return self:rearmForManualReroll("legacy") end
+    if ((protocol=="creator" or protocol=="arrange") and bare=="done") or (protocol=="legacy" and bare=="y") then return self:stop("Character creation continued") end
     local stat,label=bare:match("^([a-z]+)%s+([a-z]+)$"); local assignment=false
     if stat and ranks[label] then for _,name in ipairs(order) do if stat==name:lower() then assignment=true; break end end end
     if protocol=="arrange" and (bare=="auto" or bare=="clear" or bare=="reset" or bare=="?" or bare=="help" or bare=="<" or bare=="back" or bare=="q" or bare=="quit" or assignment) then return self:stop("Player took control of roll placement",true) end
@@ -600,7 +635,8 @@ function Roller:onLine(line)
     if promptProtocol(line)=="arrange" then return self:advanceArrangement() end
     return false
   end
-  if s.result_held and (bare=="done" or bare=="y" or bare=="<" or bare=="back" or bare=="q" or bare=="quit" or lower:match("step%s+[89]%s+of%s+10")) then return self:stop("Character creation continued") end
+  if s.result_held and (bare=="done" or bare=="y" or bare=="<" or bare=="back" or bare=="q" or bare=="quit") then return self:stop("Character creation continued") end
+  if s.result_held and s.held_protocol=="arrange" and s.result_notified and placementCommand(bare) then return self:clearResult() end
   if s.result_held then return false end
   if line:match("Name%s*:%s*.-%s+Race%s*:%s*%S+") then if autoStartEnabled(self.cfg) and not self.state.auto_suppressed and not self.state.active then return self:start() end; return self.state.active end
 
@@ -669,7 +705,7 @@ function Roller:onLine(line)
     local target,hard=limit(self.cfg.target_total),limit(self.cfg.hard_stop)
     if not cap and not ((target and target<=roll.maximum) or (hard and hard<=roll.maximum)) then return self:stop("Configured total cannot be reached by this "..roll.maximum.."-point roll format") end
     local ok,reason=self:qualified(roll); if ok and protocol=="arrange" then return self:beginArrangement(roll,reason) end
-    if ok then self:echo("TARGET HIT — prompt left waiting for manual "..acceptanceCommand(protocol)..".\n"..self:rollText(roll)); return self:stop(reason,true) end
+    if ok then self:echo("TARGET HIT — prompt left waiting for manual "..acceptanceCommand(protocol)..".\n"..self:rollText(roll)); return self:holdTargetResult(reason,"manual") end
     return self:reroll(protocol)
   end
   return false
@@ -703,6 +739,7 @@ function Roller:set(key,value)
 end
 function Roller:configure(values,silent)
   values=type(values)=="table" and values or {}; local candidate=copy(self.cfg); candidate.reroll_command="reroll"
+  if values.alerts~=nil then local alerts,err=Audio.validate(values.alerts); if not alerts then return nil,err end; candidate.alerts=alerts end
   local numeric={{"target_total",1,maximumTotal,true},{"hard_stop",1,maximumTotal,true},{"max_rolls",1,nil,true},{"reroll_delay",0,nil,false},{"minimum_greats",1,#legacyOrder,true},{"minimum_good_plus",1,#legacyOrder,true}}
   for _,spec in ipairs(numeric) do
     local key,min,max,optional=spec[1],spec[2],spec[3],spec[4]; local raw=values[key]
@@ -729,6 +766,6 @@ function Roller:command(action)
   local key,value=action:match("^[Ss][Ee][Tt]%s+(%S+)%s+(%S+)%s*$"); if key then local ok,err=self:set(key,value); if not ok then self:echo(err) end; return ok,err end
   self:echo("Commands: rr start|stop|status|show|stats|last|reset|help; rr set total|hard|max|delay|greats|goodplus|arrange|STAT <value>. Use rr status to see what the roller is waiting for and rr show to display every saved setting. Roll-and-arrange modes: manual, game_auto, minimums. The HUD never sends done."); return true
 end
-function Roller:shutdown() self:cancelReroll(); self.state.active=false; self:clearCapture(); if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end; return true end
+function Roller:shutdown() self:cancelReroll(); self.state.active=false; self:clearCapture(); if self.state.log and self.adapter.closeRollerLog then pcall(self.adapter.closeRollerLog,self.adapter,self.state.log); self.state.log=nil end; self:clearResult(); return true end
 Roller.order=order; Roller.ranks=ranks; Roller.maximumTotal=maximumTotal; Roller.observationWarningInterval=observationWarningInterval
 return Roller

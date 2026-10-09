@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.95.
+Applies to DGHUD v0.3.96.
 
 ## Feedback and feature requests
 
@@ -58,6 +58,12 @@ General failure reports are bounded in size and sanitize or remove:
 They include only a short recent list of DGHUD failure events and approved technical context such as operation, stage, scope, counts, schema, HTTP status, and Mudlet version.
 
 Mapper diagnostics explicitly exclude credentials, chat, room descriptions, character names, IP addresses, and command history.
+
+## Autoroller sound privacy
+
+Autoroller completion sounds are local-only. Personal WAV files are validated and copied into the profile's `DGHUDData/autoroller-sounds-v1` folder and selected by a checksum-based filename. Saved preferences contain that identifier and a short display filename, not the original source path. WAV contents are not included in shared maps, feedback, debug reports, or package releases. Sound files and preferences stay outside the replaceable package and survive updates, restarts, and character changes. Old active alerts are cleared on character exit and HUD shutdown; this does not delete the saved preferences or WAV files.
+
+These files are local profile data, not encrypted private storage: anyone with access to the computer account, backups, or a copied profile may be able to read them. See [completion sounds and reminders](AUTOROLLER.md#completion-sounds-and-reminders).
 
 ## Chat privacy
 
