@@ -189,6 +189,7 @@ function Layout.compute(width,height,chatSettings,mapperSettings,vitals,displayS
   result.window_width=width
   result.window_height=height
   result.narrow_rails=result.mode~="compact" and rail<205
+  result.combine_skills_runes=not (type(displaySettings)=="table" and displaySettings.combine_skills_runes==false)
   result.right_lists_mode=result.mode=="compact" and "compact-tabs" or ((result.narrow_rails or height<760) and "tabbed" or "stacked")
   return result
 end

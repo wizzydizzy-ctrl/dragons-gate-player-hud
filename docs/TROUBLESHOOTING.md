@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.96**.
+Applies to DGHUD **v0.3.97**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -69,19 +69,19 @@ DGHUD refreshes skills after character login; it does not send `skill` every min
 1. Run `dghud check` and update if your installed version is older than **0.3.89**.
 2. Wait for the current startup/refresh sequence or skill request to finish, then enter `skill bite`, `skill weapons`, or another filter once.
 3. Use `skill` or `skill all` for the complete list again. The sidebar always keeps every captured skill.
-4. If a gap remains on v0.3.96, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
+4. If a gap remains on v0.3.97, send a report with the command, filter and formatting toggles, whether you were reading scrollback, and a screenshot of the window.
 
 The fix refreshes hidden-row edits locally. You should not need to send Enter or another game command just to make the blank area disappear.
 
 ## Skills, inventory, or runes do not scroll
 
-- Put the mouse over the list itself, not its title or surrounding card.
+- In the [combined layout](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar), select **Skills** or **Runes** below Inventory, then put the mouse over the list itself, not its title or surrounding card. Both lists keep updating while hidden; switching tabs sends no request.
 - Use the vertical bar on the right for more rows.
 - Use the horizontal bar at the bottom for long names or hidden columns.
 - Try **OPTIONS → HUD TEXT: Small** if the window is narrow.
-- On a compact window, use the **INV**, **RUN**, and **SKL** tabs above the chatbox. If the window is exceptionally short, enlarge it vertically to restore the optional list strip; the game console is kept visible first.
+- The existing **INV**, **RUN**, and **SKL** compact tabs are a fallback only when a short or narrow window needs them for readable space. At compact widths they appear above the chatbox. Inventory's Equipped / Carried sections remain available. If the window is exceptionally short, enlarge it vertically to restore the optional list strip; the game console is kept visible first.
 
-The lists retain all parsed rows even when only part of the list fits.
+The lists retain all parsed rows even when only part of the list fits. In the combined layout, **OPTIONS → COMBINED SKILLS / RUNES OFF** restores separate Skills and Runes boxes without changing fonts, sorting, colors, column alignment, or scrollbars. The preference and selected combined-card tab are remembered per profile through updates, restarts, and character changes.
 
 ## Text wraps differently after resizing
 

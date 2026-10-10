@@ -350,7 +350,14 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   return geyser
 end
 
-local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds,display)
+local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds,display,keepDisplayDefaults)
+  -- Legacy fixtures keep testing the separate-list layout. Combined fixtures
+  -- opt into the real defaults without changing older geometry assertions.
+  if not keepDisplayDefaults then
+    local separate={combine_skills_runes=false}
+    for key,value in pairs(display or {}) do separate[key]=value end
+    display=separate
+  end
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible,sounds=chatSounds},display=display})
   Geyser=original
@@ -1104,7 +1111,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,notice=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,15); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+  eq(#view.option_action_order,16); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -1121,7 +1128,7 @@ test("main input alignment defaults off immediately after automatic main wrap",f
   local view=chatView(); local button=view.option_action_buttons.align_main_input
   eq(view.main_input_aligned,false); eq(button.option_text,"ALIGN INPUT: OFF")
   eq(button.tooltip,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
-  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,auto_main_wrap,align_main_input,main_skills,skill_settings,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
+  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,combine_skills_runes,auto_main_wrap,align_main_input,main_skills,skill_settings,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(button.visible,true); assert(button.message:find("ALIGN INPUT: OFF",1,true))
   local wrap=view.option_action_buttons.auto_main_wrap
@@ -4483,4 +4490,457 @@ test("Skills Settings reuse validates new controls hides drafts and drops retire
   view:delete(); eq(view.root,nil); eq(view.skill_settings_draft,nil)
   eq(oldClick(),nil); eq(view.skill_settings_format.click(),nil); eq(view:showSkillSettings(snapshot),nil)
   eq(filter.click(),nil)
+end)
+
+-- Combined rail fixtures deliberately leave display unset when testing cold
+-- defaults, unlike chatView's explicit legacy separate-list fixtures.
+local function combinedSkillsRunesView(display,glyphWidth)
+  return chatView(glyphWidth or 8,nil,false,true,nil,display,true)
+end
+local function combinedSkillsRunesState(count)
+  local s=inventoryTabsState(1,1)
+  s.skills={items={}}; s.runes={items={}}
+  for index=1,(count or 40) do
+    s.skills.items[index]={name=index==1 and "Identify Armor Quality" or "Skill "..index,
+      level=60-index,remain=index*17}
+    s.runes.items[index]={name=index==1 and "Translocation" or "Rune "..index,remaining=index==1 and 100 or index}
+  end
+  return s
+end
+local function combinedWidgetVisible(widget)
+  local seen={}
+  while type(widget)=="table" and not seen[widget] do
+    if widget.visible==false or widget.hidden or widget.auto_hidden then return false end
+    seen[widget]=true; widget=widget.container or widget.parent
+  end
+  return true
+end
+local function assertCombinedSkillsRunesGeometry(view,layout,selected)
+  eq(view.right_lists_presentation,"combined"); eq(view.skills_runes_active,selected or "skills")
+  eq(view.inventory.visible,true); eq(view.inventory_output.visible,true)
+  eq(view.inventory_content.visible,true); eq(view.inventory_footer.visible,true)
+  local active=view.skills_runes_active; local inactive=active=="skills" and "runes" or "skills"
+  for _,key in ipairs({"skills","runes"}) do
+    eq(view[key].visible,key==active); eq(view[key.."_output"].visible,key==active)
+    eq(combinedWidgetVisible(view[key.."_content"]),key==active)
+  end
+  for _,key in ipairs({"inventory","runes","skills"}) do eq(view.right_list_tabs[key].visible,false) end
+  local card,output=view[active],view[active.."_output"]
+  eq(view.details.y+view.details.height<=view.inventory.y,true)
+  eq(view.inventory.y+view.inventory.height<card.y,true)
+  eq(card.y+card.height<=layout.window_height-12,true)
+  eq(output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+  eq(output.y+output.height<=card.y+card.height,true)
+  eq(view.inventory_output.y+view.inventory_output.height<=view.inventory_footer.y,true)
+  eq(view.inventory_footer.y+view.inventory_footer.height<=view.inventory.y+view.inventory.height,true)
+  local first,second=view.skills_runes_tabs.skills,view.skills_runes_tabs.runes
+  for _,button in ipairs({first,second}) do
+    eq(button.visible,true); eq(button.parent,view.root); eq(button.width>0,true)
+    eq(button.y>=card.y,true); eq(button.y+button.height<=output.y,true)
+    eq(button.height>=layout.list_font,true)
+  end
+  eq(first.x+first.width<=second.x,true); eq(second.x+second.width<=layout.window_width-layout.panel_padding,true)
+  eq(view[inactive.."_output"].visible,false)
+end
+
+test("cold views default to combined Skills and Runes with Skills selected",function()
+  local defaults=require("defaults")
+  eq(defaults.display.combine_skills_runes,true); eq(defaults.display.skills_runes_tab,"skills")
+  for _,display in ipairs({{}, {side_text_scale=1}, {combine_skills_runes=true,skills_runes_tab="invalid"}}) do
+    local view=combinedSkillsRunesView(display)
+    eq(view.skills_runes_active,"skills")
+    eq(view.option_action_buttons.combine_skills_runes.option_text,"COMBINED SKILLS / RUNES: ON")
+    view:applyLayout(require("layout").compute(1920,1080)); view:update(combinedSkillsRunesState())
+    assertCombinedSkillsRunesGeometry(view,view.layout,"skills")
+  end
+  local view=combinedSkillsRunesView()
+  eq(view.skills_runes_active,"skills")
+  view:applyLayout(require("layout").compute(1920,1080))
+  assertCombinedSkillsRunesGeometry(view,view.layout,"skills")
+end)
+test("combined rail keeps inventory separate on tall narrow and moderate-height windows",function()
+  for _,size in ipairs({{1920,1080},{1366,768},{1920,700},{960,1000},{800,1000},{3840,2160}}) do
+    local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState()
+    local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals)
+    view:applyLayout(layout); view:update(state)
+    assertCombinedSkillsRunesGeometry(view,layout,"skills")
+    eq(view.skills_runes_tabs.runes.click(),"runes")
+    assertCombinedSkillsRunesGeometry(view,view.layout,"runes")
+    if size[1]<1100 then eq(layout.right_lists_mode,"tabbed") end
+  end
+end)
+test("shared lower list receives the former Runes and Skills space without taking inventory space",function()
+  local combined,separate=combinedSkillsRunesView(),chatView()
+  local state=combinedSkillsRunesState()
+  combined:applyLayout(require("layout").compute(1920,1080)); combined:update(state)
+  separate:applyLayout(require("layout").compute(1920,1080)); separate:update(state)
+  assertCombinedSkillsRunesGeometry(combined,combined.layout)
+  eq(math.abs(combined.inventory.height-separate.inventory.height)<=1,true)
+  eq(math.abs(combined.skills.height-(separate.runes.height+separate.skills.height+8))<=2,true)
+  eq(combined.skills_output.height>separate.skills_output.height,true)
+  eq(combined.inventory_output.fontSize,separate.inventory_output.fontSize)
+  eq(combined.skills_content.fontSize,separate.skills_content.fontSize)
+  eq(combined.runes_content.fontSize,separate.runes_content.fontSize)
+end)
+test("combined pair buttons preserve the numerical Skill heading and scrolling data columns",function()
+  local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  eq(view.skills_title.visible,true)
+  local header=view.skills_title.message:gsub("&nbsp;"," "):gsub("<[^>]+>","")
+  eq(header,View.skillHeader(view.skill_name_width,view.skill_column_gaps,view.skill_level_width,view.skill_use_width))
+  assert(header:find("LVL",1,true)); assert(header:find("USES",1,true))
+  eq(view.skills_title.y>=view.skills_runes_tabs.skills.y+view.skills_runes_tabs.skills.height,true)
+  eq(view.skills_title.y+view.skills_title.height<=view.skills_output.y,true)
+  eq(view.skills_content.parent,view.skills_output); eq(view.runes_content.parent,view.runes_output)
+  eq(view.skills_output.kind,"scrollbox"); eq(view.runes_output.kind,"scrollbox")
+  eq(view.skills_content.font,view.list_font_family); eq(view.runes_content.font,view.list_font_family)
+  eq(view.skills_content.fontSize,view.layout.list_font); eq(view.runes_content.fontSize,view.layout.list_font)
+  eq(view.skills_content.height>view.skills_output.height,true)
+  eq(view.skills_content.width>=#header*view.list_character_width,true)
+  assert(view.skills_content.message:find("Skill&nbsp;40",1,true))
+  eq(view.skills_content.y,0); eq(view.skills_content.x,0)
+  view.skills_runes_tabs.runes.click()
+  eq(view.runes_content.width>=33*view.list_character_width,true)
+  eq(view.runes_content.height>view.runes_output.height,true)
+  assert(view.runes_content.message:find("Rune 40",1,true))
+end)
+test("combined tabs update hidden Runes and Skills without surfacing either inactive list",function()
+  local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState(2)
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  local skillSnapshot=view.skills_content.message
+  state.runes.items={{name="Healing",remaining=2},{name="Force",remaining=90}}
+  view:update(state)
+  assert(view.runes_content.message:find("Healing",1,true)); assert(view.runes_content.message:find("2 weaves remain",1,true))
+  eq(view.skills_content.message,skillSnapshot); eq(combinedWidgetVisible(view.runes_content),false)
+  eq(view.skills_runes_tabs.runes.click(),"runes")
+  eq(combinedWidgetVisible(view.runes_content),true); eq(combinedWidgetVisible(view.skills_content),false)
+  state.skills.items={{name="Clawing",level=31,remain=0},{name="Biting",level=4,remain=105}}
+  view:update(state)
+  assert(view.skills_content.message:find("Clawing",1,true)); eq(combinedWidgetVisible(view.skills_content),false)
+  eq(view.runes_content.visible,true)
+  view.skills_runes_tabs.skills.click()
+  assert(view.skills_content.message:find("Clawing",1,true)); eq(combinedWidgetVisible(view.runes_content),false)
+  eq(state.skills.items[1].name,"Clawing"); eq(state.runes.items[1].name,"Healing")
+end)
+test("direct list rendering obeys combined visibility including empty hidden snapshots",function()
+  local view=combinedSkillsRunesView()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(combinedSkillsRunesState(1))
+  view:renderRunes({runes={items={}}})
+  eq(combinedWidgetVisible(view.runes_content),false); eq(view.runes_content.message:find("Translocation",1,true),nil)
+  view.skills_runes_tabs.runes.click()
+  view:renderSkills({skills={items={}}})
+  eq(combinedWidgetVisible(view.skills_content),false); eq(view.skills_content.message:find("Identify",1,true),nil)
+  eq(view.runes_output.visible,true)
+end)
+test("saved combined tab is shown before first refresh and selection is independent of inventory sections",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  eq(view.skills_runes_active,"runes")
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(combinedSkillsRunesState())
+  assertCombinedSkillsRunesGeometry(view,view.layout,"runes")
+  view.inventory_tabs.equipped.click(); eq(view.inventory_active,"equipped")
+  view.skills_runes_tabs.skills.click(); eq(view.inventory_active,"equipped")
+  view.inventory_tabs.carried.click(); eq(view.skills_runes_active,"skills")
+  assert(view.inventory_content.message:find("Carried item 1",1,true))
+end)
+test("combined tabs delegate selection to the controller exactly once",function()
+  local view=combinedSkillsRunesView(); view:applyLayout(require("layout").compute(1920,1080))
+  local calls={}
+  view:setOptionsActionCallback(function(action,key)
+    calls[#calls+1]={action,key}; eq(action,"skills_runes_tab")
+    return view:setSkillsRunesTab(key)
+  end)
+  eq(view.skills_runes_tabs.runes.click(),"runes"); eq(#calls,1); eq(calls[1][2],"runes")
+  eq(view.skills_runes_active,"runes")
+  view:setSkillsRunesTab("skills"); view:setCombinedSkillsRunes(false)
+  view:setCombinedSkillsRunes(true); eq(#calls,1); eq(view.skills_runes_active,"skills")
+end)
+test("failed controller tab selection never replaces a saved or synchronized selection",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  view:applyLayout(require("layout").compute(1920,1080))
+  local count=0
+  view:setOptionsActionCallback(function(action,key)
+    count=count+1; eq(action,"skills_runes_tab"); eq(key,"skills")
+    return nil,"Could not save tab"
+  end)
+  eq(view.skills_runes_tabs.skills.click(),nil); eq(count,1); eq(view.skills_runes_active,"runes")
+  assertCombinedSkillsRunesGeometry(view,view.layout,"runes")
+  view:setOptionsActionCallback(function()
+    view:setSkillsRunesTab("runes"); return nil,"Could not save tab"
+  end)
+  eq(view.skills_runes_tabs.skills.click(),nil); eq(view.skills_runes_active,"runes")
+end)
+test("combine Options control follows controller state including a successfully saved false",function()
+  local view=combinedSkillsRunesView(); view:applyLayout(require("layout").compute(1920,1080))
+  local button=view.option_action_buttons.combine_skills_runes; local calls=0
+  local index
+  for i,key in ipairs(view.option_action_order) do if key=="text_size" then index=i end end
+  eq(view.option_action_order[index+1],"combine_skills_runes")
+  view:setOptionsActionCallback(function(action)
+    calls=calls+1; eq(action,"combine_skills_runes")
+    return view:setCombinedSkillsRunes(false)
+  end)
+  view.color_toggle.click(); eq(button.visible,true)
+  eq(button.click(),false); eq(calls,1)
+  eq(button.option_text,"COMBINED SKILLS / RUNES: OFF"); eq(view.right_lists_presentation,"stacked")
+  view:setCombinedSkillsRunes(true); eq(calls,1)
+  eq(button.option_text,"COMBINED SKILLS / RUNES: ON"); eq(view.right_lists_presentation,"combined")
+  view:setOptionsActionCallback(function() return nil,"Could not save preference" end)
+  eq(button.click(),nil); eq(button.option_text,"COMBINED SKILLS / RUNES: ON")
+  eq(view.right_lists_presentation,"combined")
+  view:setOptionsActionCallback(function()
+    view:setCombinedSkillsRunes(false); return nil,"Could not save preference"
+  end)
+  eq(button.click(),nil); eq(button.option_text,"COMBINED SKILLS / RUNES: OFF")
+  eq(view.right_lists_presentation,"stacked")
+end)
+test("combined tab local switching and sync setters never send game commands",function()
+  local oldSend,oldSendAll,oldExpand=send,sendAll,expandAlias; local calls=0
+  local function forbidden() calls=calls+1; error("tab controls must not send a command") end
+  send=forbidden; sendAll=forbidden; expandAlias=forbidden
+  local ok,err=pcall(function()
+    local view=combinedSkillsRunesView(); view:applyLayout(require("layout").compute(1920,1080))
+    view:update(combinedSkillsRunesState())
+    for _,key in ipairs({"runes","skills","runes"}) do eq(view.skills_runes_tabs[key].click(),key) end
+    eq(view:setCombinedSkillsRunes(false),false); eq(view:setCombinedSkillsRunes(true),true)
+    eq(view:setSkillsRunesTab("skills"),"skills")
+    eq(calls,0)
+  end)
+  send=oldSend; sendAll=oldSendAll; expandAlias=oldExpand
+  assert(ok,err); eq(calls,0)
+end)
+test("short and compact fallback retains combined preference and restores the saved pair tab on growth",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  local state=combinedSkillsRunesState()
+  for _,size in ipairs({{1920,1080},{800,408},{760,700},{320,260},{960,1000},{1920,1080}}) do
+    local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals)
+    view:applyLayout(layout); view:update(state)
+    eq(view.skills_runes_active,"runes")
+    if size[1]>=800 and size[2]>=1000 then
+      assertCombinedSkillsRunesGeometry(view,layout,"runes")
+    else
+      eq(view.right_lists_presentation,size[1]<800 and "compact-tabs" or "tabbed")
+      for _,button in pairs(view.skills_runes_tabs) do eq(button.visible,false) end
+      for _,key in ipairs({"skills","runes","inventory"}) do
+        view.right_list_tabs[key].click()
+        eq(view[key].visible,true); eq(view[key.."_output"].visible,true)
+        eq(view[key.."_output"].height>=layout.list_row_height,true)
+        eq(view.skills_runes_active,key=="inventory" and "runes" or key)
+      end
+    end
+  end
+  eq(view.settings.display.combine_skills_runes,true); eq(view.settings.display.skills_runes_tab,"runes")
+end)
+test("impossibly short rails hide both tab sets and report actual hidden presentation",function()
+  local view=combinedSkillsRunesView()
+  view:applyLayout(require("layout").compute(960,260)); view:update(combinedSkillsRunesState())
+  eq(view.right_lists_presentation,"hidden")
+  for _,key in ipairs({"inventory","skills","runes"}) do
+    eq(view[key].visible,false); eq(view[key.."_output"].visible,false); eq(combinedWidgetVisible(view[key.."_content"]),false)
+    eq(view.right_list_tabs[key].visible,false)
+  end
+  for _,button in pairs(view.skills_runes_tabs) do eq(button.visible,false) end
+  view:applyLayout(require("layout").compute(1920,1080))
+  assertCombinedSkillsRunesGeometry(view,view.layout,"skills")
+end)
+test("switching combined mode restores all separate cards and the selected tab without changing state",function()
+  local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  view.skills_runes_tabs.runes.click(); local tabs=view.skills_runes_tabs
+  for cycle=1,5 do
+    eq(view:setCombinedSkillsRunes(false),false); eq(view.right_lists_presentation,"stacked")
+    for _,key in ipairs({"inventory","skills","runes"}) do
+      eq(view[key].visible,true); eq(view[key.."_output"].visible,true); eq(view[key.."_content"].visible,true)
+    end
+    eq(view.skills_runes_tabs.skills.visible,false); eq(view.skills_runes_tabs.runes.visible,false)
+    eq(view:setCombinedSkillsRunes(true),true); eq(view.skills_runes_tabs,tabs)
+    assertCombinedSkillsRunesGeometry(view,view.layout,"runes")
+    eq(view.last_state,state)
+  end
+end)
+test("combined native visibility never relies on a synthetic visible field",function()
+  local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  for _,key in ipairs({"inventory","skills","runes"}) do
+    for _,suffix in ipairs({"","_title","_output","_content"}) do nativeInventoryVisibility(view[key..suffix]) end
+  end
+  nativeInventoryVisibility(view.inventory_footer)
+  for _,button in pairs(view.skills_runes_tabs) do nativeInventoryVisibility(button) end
+  for _,button in pairs(view.right_list_tabs) do nativeInventoryVisibility(button) end
+  for _,selected in ipairs({"runes","skills","runes"}) do
+    view.skills_runes_tabs[selected].click(); view:update(state)
+    eq(view.skills_runes_active,selected); eq(view.right_lists_presentation,"combined")
+    for _,key in ipairs({"skills","runes"}) do
+      eq(nativeInventoryVisible(view[key]),key==selected)
+      eq(nativeInventoryVisible(view[key.."_output"]),key==selected)
+      eq(view[key.."_content"].visible,nil); eq(combinedWidgetVisible(view[key.."_content"]),key==selected)
+    end
+    eq(nativeInventoryVisible(view.inventory_output),true)
+    for _,button in pairs(view.skills_runes_tabs) do eq(nativeInventoryVisible(button),true); eq(button.raised,true) end
+    for _,button in pairs(view.skills_runes_tabs) do button.raised=nil end
+    view:applyLayout(require("layout").compute(800,408))
+    eq(view.right_lists_presentation,"tabbed")
+    for _,button in pairs(view.skills_runes_tabs) do eq(nativeInventoryVisible(button),false); eq(button.raised,nil) end
+    view:applyLayout(require("layout").compute(1920,1080))
+    for _,button in pairs(view.skills_runes_tabs) do eq(nativeInventoryVisible(button),true); eq(button.raised,true) end
+  end
+end)
+test("repeated combined resizes preserve widget ownership fonts sorting and full scroll extents",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="skills",
+    sidebar_skill_sort={primary="uses",direction="desc",secondary="level",secondary_direction="asc"}})
+  local state=combinedSkillsRunesState(); local tabs=view.skills_runes_tabs
+  for cycle=1,3 do
+    for _,size in ipairs({{1920,1080},{960,1000},{1366,768},{800,408},{760,700},{1920,1080}}) do
+      local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals)
+      view:applyLayout(layout); view:update(state); eq(view.skills_runes_tabs,tabs)
+      eq(view.skills_content.fontSize,layout.list_font); eq(view.runes_content.fontSize,layout.list_font)
+      eq(view.skills_content.parent,view.skills_output); eq(view.runes_content.parent,view.runes_output)
+      eq(view.settings.display.sidebar_skill_sort.primary,"uses")
+      assert(view.skills_content.message:find("Skill&nbsp;40",1,true)<view.skills_content.message:find("Skill&nbsp;2",1,true))
+      eq(view.skills_content.height>=40*layout.list_row_height,true)
+      eq(view.runes_content.height>=40*layout.list_row_height,true)
+      if view.right_lists_presentation=="combined" then assertCombinedSkillsRunesGeometry(view,layout,"skills") end
+    end
+  end
+  eq(state.skills.items[1].name,"Identify Armor Quality"); eq(#state.skills.items,40)
+end)
+test("combined horizontal overflow stays scrollable without reducing fonts in narrow rails",function()
+  for _,glyph in ipairs({8,12}) do
+    for _,size in ipairs({{800,1000},{960,1000},{1920,1080}}) do
+      local view=combinedSkillsRunesView(nil,glyph); local state=combinedSkillsRunesState()
+      view.list_scrollbar_width=32
+      local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals)
+      view:applyLayout(layout); view:update(state)
+      for _,key in ipairs({"skills","runes"}) do
+        view.skills_runes_tabs[key].click()
+        eq(view[key.."_content"].fontSize,layout.list_font)
+        eq(view[key.."_content"].width>=view.list_viewport_width,true)
+        eq(view[key.."_content"].height>view[key.."_output"].height,true)
+        eq(view[key.."_output"].height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+        if size[1]<1000 then
+          eq(view[key.."_content"].width>view[key.."_output"].width,true)
+          eq(view[key.."_horizontal_overflow"],true)
+        end
+      end
+    end
+  end
+end)
+test("independent combined profiles keep selections data and controller callbacks isolated",function()
+  local first,second=combinedSkillsRunesView(),combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  local firstState,secondState=combinedSkillsRunesState(2),combinedSkillsRunesState(2)
+  firstState.skills.items[1].name="First Clawing"; secondState.runes.items[1].name="Second Healing"
+  first:applyLayout(require("layout").compute(1920,1080)); first:update(firstState)
+  second:applyLayout(require("layout").compute(960,1000)); second:update(secondState)
+  local calls=0; first:setOptionsActionCallback(function(action,key) calls=calls+1; return first:setSkillsRunesTab(key) end)
+  first.skills_runes_tabs.runes.click(); eq(calls,1); eq(second.skills_runes_active,"runes")
+  second.skills_runes_tabs.skills.click(); eq(first.skills_runes_active,"runes"); eq(calls,1)
+  assert(first.skills_runes_tabs~=second.skills_runes_tabs)
+  assert(first.skills_content.message:find("First&nbsp;Clawing",1,true))
+  eq(second.skills_content.message:find("First",1,true),nil)
+  assert(second.runes_content.message:find("Second Healing",1,true))
+  eq(first.runes_content.message:find("Second",1,true),nil)
+  eq(first.last_state,firstState); eq(second.last_state,secondState)
+end)
+test("view reuse retains combined selection rebinds pair callbacks and invalidates list caches",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  local state=combinedSkillsRunesState(); view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  local root,tabs=view.root,view.skills_runes_tabs
+  view:setOptionsActionCallback(function() error("retired controller callback") end)
+  for _,button in pairs(tabs) do button:setClickCallback(function() error("retired pair callback") end) end
+  eq(View.validateReusable(view,view.settings),true)
+  eq(view:prepareForReuse(view.settings),true)
+  eq(view.root,root); eq(root.deleted,nil); eq(view.skills_runes_tabs,tabs)
+  eq(view.options_action_callback,nil); eq(view.skills_runes_active,"runes")
+  eq(view.runes_signature,nil); eq(view.skills_signature,nil)
+  view:update(state); eq(tabs.skills.click(),"skills"); eq(tabs.runes.click(),"runes")
+  assertCombinedSkillsRunesGeometry(view,view.layout,"runes")
+end)
+test("view reuse rejects missing malformed or foreign-parent combined controls",function()
+  for _,damage in ipairs({"table","button","echo","callback","parent","active"}) do
+    local view=combinedSkillsRunesView()
+    if damage=="table" then view.skills_runes_tabs=nil
+    elseif damage=="button" then view.skills_runes_tabs.skills=nil
+    elseif damage=="echo" then view.skills_runes_tabs.runes.echo=nil
+    elseif damage=="callback" then view.skills_runes_tabs.skills.setClickCallback=nil
+    elseif damage=="parent" then view.skills_runes_tabs.runes.container=view.inventory_output; view.skills_runes_tabs.runes.parent=view.inventory_output
+    else view.skills_runes_active="inventory" end
+    local ok,err=View.validateReusable(view,view.settings)
+    eq(ok,nil); assert(type(err)=="string" and #err>0)
+  end
+end)
+
+test("native combined tab labels are raised after their root-sibling card and content",function()
+  local view=combinedSkillsRunesView(); local events={}
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(combinedSkillsRunesState())
+  for _,key in ipairs({"skills","runes"}) do
+    local button=view.skills_runes_tabs[key]; nativeInventoryVisibility(button)
+    local raise=button.raise
+    function button:raise() events[#events+1]="tab:"..key; return raise(self) end
+    for _,suffix in ipairs({"","_title","_output","_content"}) do
+      local widget=view[key..suffix]; local originalRaise=widget.raise
+      function widget:raise() events[#events+1]="card:"..key; return originalRaise(self) end
+    end
+  end
+  for _,selected in ipairs({"skills","runes"}) do
+    events={}; view.skills_runes_tabs[selected].click()
+    local lastCard=0; local firstTab=#events+1
+    for index,event in ipairs(events) do
+      if event:match("^card:") then lastCard=index end
+      if event:match("^tab:") then firstTab=math.min(firstTab,index) end
+    end
+    eq(lastCard>0,true); eq(firstTab>lastCard,true)
+    for _,button in pairs(view.skills_runes_tabs) do
+      eq(button.visible,nil); eq(button.hidden,false); eq(button.raised,true)
+    end
+  end
+end)
+test("combined cards reserve a complete row and scrollbar through larger measured fonts",function()
+  for _,width in ipairs({960,1920}) do
+    for _,height in ipairs({600,768,1080}) do
+      for _,scale in ipairs({.8,1.2}) do
+        for _,rowHeight in ipairs({20,32}) do
+          local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="skills",side_text_scale=scale})
+          local state=combinedSkillsRunesState()
+          view.list_measure.getSizeHint=function() return 80,rowHeight*5 end
+          local layout=require("layout").compute(width,height,nil,nil,state.vitals,view.settings.display)
+          view:applyLayout(layout); view:update(state)
+          eq(layout.list_row_height,rowHeight)
+          if view.right_lists_presentation=="combined" then
+            assertCombinedSkillsRunesGeometry(view,layout,"skills")
+            view.skills_runes_tabs.runes.click(); assertCombinedSkillsRunesGeometry(view,layout,"runes")
+          else
+            eq(view.right_lists_presentation,"tabbed")
+            for _,button in pairs(view.skills_runes_tabs) do eq(button.visible,false) end
+          end
+          eq(view.skills_content.fontSize,layout.list_font); eq(view.runes_content.fontSize,layout.list_font)
+        end
+      end
+    end
+  end
+end)
+test("invalid shared tab keys leave selection saved settings and presentation unchanged",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  view:applyLayout(require("layout").compute(1920,1080)); local calls=0
+  view:setOptionsActionCallback(function() calls=calls+1; error("must reject before delegating") end)
+  for _,key in ipairs({"inventory","missing","RUNES",false,{}}) do
+    eq(view:setSkillsRunesTab(key),nil); eq(view:selectSkillsRunesTab(key),nil)
+    eq(view.skills_runes_active,"runes"); eq(view.settings.display.skills_runes_tab,"runes")
+    eq(view.right_lists_presentation,"combined"); eq(calls,0)
+  end
+  eq(view:setSkillsRunesTab(nil),nil); eq(view:selectSkillsRunesTab(nil),nil)
+end)
+test("retired shared and fallback clicks cannot save or repaint after disposal",function()
+  local view=combinedSkillsRunesView(); view:applyLayout(require("layout").compute(1920,1080))
+  local pair=view.skills_runes_tabs.runes.click; local outer=view.right_list_tabs.skills.click
+  local calls=0; view:setOptionsActionCallback(function() calls=calls+1; error("retired save callback") end)
+  assert(view:delete()); eq(view.root,nil); eq(view.disposed,true)
+  eq(pair(),nil); eq(outer(),nil); eq(calls,0)
+end)
+test("view reuse rejects a removed or damaged combined-list Options control",function()
+  for _,damage in ipairs({"missing","echo"}) do
+    local view=combinedSkillsRunesView()
+    if damage=="missing" then view.option_action_buttons.combine_skills_runes=nil
+    else view.option_action_buttons.combine_skills_runes.echo=nil end
+    local ok,err=View.validateReusable(view,view.settings)
+    eq(ok,nil); assert(type(err)=="string" and #err>0)
+  end
 end)

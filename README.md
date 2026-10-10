@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.96**.
+Documentation covers **DGHUD v0.3.97**.
 
 ## Quick start
 
@@ -43,7 +43,17 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.96
+## Latest changes — v0.3.97
+
+- **OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**, with a taller tabbed card below the separate Inventory card and its existing **Equipped** / **Carried** tabs. Combat stays at the top, sized to its contents.
+- **Skills** is selected initially. The layout choice and selected **Skills** / **Runes** tab are saved per profile through updates, restarts, and character changes.
+- Both lists update behind the tabs; switching tabs displays saved data and sends no extra game commands.
+- Existing fonts, sorting, colors, aligned columns, and horizontal/vertical scrollbars are preserved.
+- Turn the option **OFF** for separate Runes and Skills boxes. The existing three-way Inventory / Runes / Skills compact tabs remain a fallback for short or narrow windows.
+
+[Read the sidebar guide](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) or the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.97).
+
+## Previous changes — v0.3.96
 
 - Choose a personal WAV or a built-in **Three-Tone**, **Chime**, **Alarm**, or **Horn** for a qualifying autoroller result.
 - Open **OPTIONS → Autoroller**, then scroll to **ALERTS** in the same settings window. Use **CHOOSE WAV FILE…**, **PREVIEW**, **STOP PREVIEW**, and volume **1–100**, then click **SAVE**.
@@ -77,6 +87,16 @@ dghud update
 
 ## Feature overview
 
+### Combined Skills / Runes sidebar
+
+The normal layout keeps **Combat** at the top, sized to its contents, and **Inventory** below it with its existing **Equipped** / **Carried** tabs. Beneath Inventory, a taller combined **Skills / Runes** card uses the space previously shared by the two separate cards. Its tabs are **Skills** and **Runes**, with Skills selected initially.
+
+**OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. Turn it **OFF** to return to separate Runes and Skills boxes. The preference and selected combined-card tab are saved per profile through updates, restarts, and character changes. Both lists continue updating in the background; switching tabs only shows saved information and sends no game command. Existing fonts, sorting, colors, aligned columns, and horizontal/vertical scrollbars remain unchanged.
+
+The existing three-way Inventory / Runes / Skills compact tabs remain a fallback only when a short or narrow window needs them to protect readable space. See [the sidebar guide](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) and [the layout option](docs/OPTIONS_AND_DISPLAY.md#combined-skills--runes).
+
+### Other features
+
 The header shows the player's local computer time and a synchronized Dragons Gate clock. Game time advances at the configurable 2× default, labels 6:00 AM–5:59 PM as `Daytime` and 6:00 PM–5:59 AM as `Night`, and resynchronizes from startup or manually entered `time` output.
 
 The compact `OPTIONS ▾` control includes Automatic Updates, a **MUDLET UI** toggle, persistent `HUD TEXT`, and **AUTO MAIN WRAP** toggles, plus Help & Commands, Color Settings, Map Settings, Autoroller, and Support. Automatic updates are off by default. Mudlet's optional starter dock (its extra map/chat/vitals panel) is hidden by default when the HUD first encounters it; turn **MUDLET UI** on if you want that dock, and Mudlet remembers your choice across sessions and HUD updates. This does not hide game text or the command line. Automatic main-window wrapping is on by default; turn it off to keep full manual control of Mudlet's profile wrap preference. `HUD TEXT` cycles through Small, Normal, and Large for the side cards without changing the main game-console font. Each section opens its own responsive settings box, so the top menu stays short and every related change can be made in one place. Every highlight is on by default and can be toggled independently in Color Settings: room titles, exits/directions, currency, travel objects, attacks aimed at you, damage received, danger/movement blocks, recovery, ongoing costs, spell threats, and discoveries/loot. Normal room prose and chat remain unchanged. Preferences survive HUD reloads and updates without changing personal Mudlet triggers or colors.
@@ -104,7 +124,7 @@ Run `dghud help` to open the scrollable, color-coded command guide. Everyday com
 
 Choose **OPTIONS → Refresh Character Data** or run `dghud refresh` whenever inventory, combat values, character details, religion, runes, skills, or time look stale. This reruns only the normal character-data commands; it does not download or reinstall the HUD. `dghud text small`, `dghud text normal`, and `dghud text large` provide the same persistent side-panel sizing as the OPTIONS control, while `dghud text status` reports the current choice.
 
-The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained, sorted by lowest remaining weaves first, and shown in a scrollable Runes card above Skills. The list height adapts to available space; shorter layouts share Inventory, Runes, and Skills through tabs. Trigger scripts can read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
+The HUD runs `info magic` during character startup and whenever that command is entered manually. The shorter `info mag` remains supported for compatibility. All elemental runes are retained and sorted by lowest remaining weaves first. In the combined layout, view them on the **Runes** tab below Inventory; turning **COMBINED SKILLS / RUNES OFF** restores the separate Runes card above Skills. List height adapts to available space, with the existing shared compact tabs used only when needed. Trigger scripts can still read `DGHUD.runes.items`, `DGHUD.runes.by_name["force"].remaining`, `DGHUD.runes.remaining.force`, `DGHUD.runes.get("force")`, or `DGHUD.runes.getRemaining("force")`.
 
 ## Skills and combat updates
 

@@ -540,10 +540,13 @@ function View.new(settings)
   local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",base_ui_toggle="MUDLET UI: UNAVAILABLE",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   actionLabels.main_skills="MAIN SKILLS: ON"
   actionLabels.skill_settings="SKILL SETTINGS…"
+  actionLabels.combine_skills_runes="COMBINED SKILLS / RUNES: ON"
+  for index,key in ipairs(self.option_action_order) do if key=="text_size" then table.insert(self.option_action_order,index+1,"combine_skills_runes"); break end end
   for index,key in ipairs(self.option_action_order) do if key=="main_skills" then table.insert(self.option_action_order,index+1,"skill_settings"); break end end
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self:setMainSkillsEnabled(not (self.settings.display and self.settings.display.main_skills==false))
+  self:setCombinedSkillsRunes(not (self.settings.display and self.settings.display.combine_skills_runes==false))
   self:createSkillSettings()
   self:setSkillSortPreferences(self.settings.display)
   local skillsButton=self.option_action_buttons.main_skills
@@ -654,9 +657,24 @@ function View.new(settings)
   local rightTabLabels={inventory="INVENTORY",runes="RUNES",skills="SKILLS"}
   for _,key in ipairs(self.right_list_tab_order) do
     local button=label("DGHUD.RightLists.Tab."..key,self.root,"background:#111713;border:1px solid "..t.border..";border-radius:4px;color:"..t.muted..";font-weight:700;")
-    button.option_text=rightTabLabels[key]; button:setClickCallback(function() self.right_list_active=key; if self.layout then self:applyLayout(self.layout) end; return key end); button:hide(); self.right_list_tabs[key]=button
+    button.option_text=rightTabLabels[key]; button:setClickCallback(function()
+      if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+      if key~="inventory" and self.combine_skills_runes~=false then
+        local selected,err=self:selectSkillsRunesTab(key); if not selected then return nil,err end
+      end
+      self.right_list_active=key; if self.layout then self:applyLayout(self.layout) end; return key
+    end); button:hide(); self.right_list_tabs[key]=button
   end
   self.list_measure=label("DGHUD.List.Measure",self.root,"background:transparent;color:transparent;")
+  self.skills_runes_active=self.settings.display and self.settings.display.skills_runes_tab=="runes" and "runes" or "skills"
+  self.skills_runes_tabs={}
+  for _,key in ipairs({"skills","runes"}) do
+    local button=label("DGHUD.SkillsRunes.Tab."..key,self.root,"background:#111713;border:1px solid "..t.border..";border-radius:4px;color:"..t.muted..";font-weight:700;")
+    button.option_text=key:upper()
+    button:setClickCallback(function() return self:selectSkillsRunesTab(key) end)
+    button:hide(); self.skills_runes_tabs[key]=button
+  end
+  self:bindSkillsRunesCallbacks()
   self.list_measure:move(-1000,-1000); self.list_measure:hide()
   self.right=Geyser.Container:new({name="DGHUD.RightRail",x=0,y=0,width=300,height=500},self.root)
   self.right_bg=label("DGHUD.RightBackground",self.right,"background:"..t.panel..";border-right:1px solid "..t.border..";")
@@ -984,6 +1002,7 @@ function View:renderChatTabs(categories,activeFilter)
   end
 end
 function View:layoutCompactLists(layout,top)
+  self.right_lists_presentation="compact-tabs"
   local t=self.settings.theme; local width=math.max(1,tonumber(layout.window_width) or 760); local band_top=tonumber(layout.compact_band_top) or 62; local band_height=math.max(0,top-band_top)
   local listWidgets={inventory={self.inventory,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer},runes={self.runes,self.runes_title,self.runes_output,self.runes_content},skills={self.skills,self.skills_title,self.skills_output,self.skills_content}}
   for _,widgets in pairs(listWidgets) do for _,widget in ipairs(widgets) do widget:hide() end end
@@ -1033,6 +1052,8 @@ end
 function View:applyLayout(layout)
   self.layout=layout; local top,bottom=layout.header_height or layout.top,0; local t=self.settings.theme; local p=layout.panel_padding; local lp=layout.lower_panel_padding
   local was_inventory_footer_scrolling=self.inventory_footer_scrolling
+  self.right_lists_presentation="hidden"
+  for _,button in pairs(self.skills_runes_tabs or {}) do button:hide(); if button.setFontSize then button:setFontSize(layout.list_font) end end
   self.inventory_footer_scrolling=false
   local side_bottom=layout.command_line_clearance or 0
   local header_top_padding=math.max(10,(layout.color_toggle_height or 20)+8)
@@ -1161,14 +1182,50 @@ function View:applyLayout(layout)
     local minimum_runes=rp*2+title_h+layout.list_row_height+runes_scroll_h+4
     local minimum_skills=rp*2+title_h+layout.list_row_height+skills_scroll_h+4
     local stackedFits=remaining>=minimum_inventory+gap+minimum_runes+gap+minimum_skills
-    local tabbed=layout.right_lists_mode=="tabbed" or not stackedFits
+    local combinedEnabled=self.combine_skills_runes~=false
+    local shared_tab_h=math.max(22,layout.list_font+12)
+    local minimum_shared=math.max(minimum_runes,minimum_skills)+shared_tab_h+3
+    local combinedFits=remaining>=minimum_inventory+gap+minimum_shared
+    local tabbed=combinedEnabled and not combinedFits or (not combinedEnabled and (layout.right_lists_mode=="tabbed" or not stackedFits))
     local listWidgets={
       inventory={self.inventory,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer},
       runes={self.runes,self.runes_title,self.runes_output,self.runes_content},
       skills={self.skills,self.skills_title,self.skills_output,self.skills_content},
     }
     local function hideList(key) for _,widget in ipairs(listWidgets[key]) do widget:hide() end end
-    if not tabbed then
+    if combinedEnabled and combinedFits then
+      self.right_lists_presentation="combined"
+      for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
+      -- Inventory retains its old one-third share; the shared list gets the
+      -- space formerly occupied by both Runes and Skills, minus its tab header.
+      local usable=remaining-gap
+      local inventory_h=math.max(minimum_inventory,math.min(math.floor((remaining-gap*2)/3),usable-minimum_shared))
+      local shared_h=usable-inventory_h; local shared_y=inventory_y+inventory_h+gap
+      local inventory_view_h=inventory_h-rp*2-title_h-footer_h-4
+      place(self.inventory,card_x,inventory_y,card_w,inventory_h); place(self.inventory_title,list_x,inventory_y+rp,list_w,title_h)
+      place(self.inventory_output,list_x,inventory_y+rp+title_h,list_w,inventory_view_h)
+      place(self.inventory_footer,list_x,inventory_y+inventory_h-rp-footer_h,list_w,footer_h)
+      self.inventory_content:resize(self.inventory_content_width,math.max(inventory_view_h,inventory_rows*layout.list_row_height))
+      self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
+      local active=self.skills_runes_active=="runes" and "runes" or "skills"
+      hideList(active=="skills" and "runes" or "skills")
+      local tab_gap=3; local tab_width=(list_w-tab_gap)/2
+      local tab_left=(layout.window_width or 800)-layout.right+p+rp
+      for index,key in ipairs({"skills","runes"}) do
+        local button=self.skills_runes_tabs[key]; local selected=key==active
+        place(button,tab_left+(index-1)*(tab_width+tab_gap),shared_y+rp,tab_width,shared_tab_h)
+        button:setStyleSheet("background:"..(selected and "#193024" or "#111713")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:4px;color:"..(selected and t.jade or t.muted)..";font-weight:700;")
+        button:echo(View.withFont("<center><b>"..key:upper().."</b></center>",layout.list_font))
+      end
+      local title_y=shared_y+rp+shared_tab_h+3
+      local viewport_h=shared_h-rp*2-shared_tab_h-3-title_h-4
+      local widgets=listWidgets[active]
+      place(widgets[1],card_x,shared_y,card_w,shared_h); place(widgets[2],list_x,title_y,list_w,title_h)
+      place(widgets[3],list_x,title_y+title_h,list_w,viewport_h)
+      widgets[4]:resize(active=="skills" and self.skills_content_width or self.runes_content_width,math.max(viewport_h,(active=="skills" and skill_rows or rune_rows)*layout.list_row_height))
+      widgets[4]:show()
+    elseif not tabbed then
+      self.right_lists_presentation="stacked"
       for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
       local usable=remaining-gap*2; local equal=math.floor(usable/3); local inventory_h,runes_h,skills_h
       if equal>=math.max(minimum_inventory,minimum_runes,minimum_skills) then
@@ -1189,6 +1246,7 @@ function View:applyLayout(layout)
       self.skills_content:resize(self.skills_content_width,math.max(skills_view_h,skill_rows*layout.list_row_height))
       self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
     elseif remaining>=math.max(72,title_h+layout.list_row_height+28) then
+      self.right_lists_presentation="tabbed"
       local tab_h=math.max(22,layout.list_font+12); local tab_gap=3; local tab_left=(layout.window_width or 800)-layout.right+p; local tab_width=(card_w-tab_gap*2)/3
       local short=card_w<245; local tabLabels=short and {inventory="INV",runes="RUN",skills="SKL"} or {inventory="INVENTORY",runes="RUNES",skills="SKILLS"}
       for index,key in ipairs(self.right_list_tab_order) do
@@ -1241,6 +1299,10 @@ function View:applyLayout(layout)
     if self.runes_output.visible then self.runes_content:show() end
     if self.skills_output.visible then self.skills_content:show() end
     local raised={self.equipment,self.inventory,self.details,self.runes,self.skills,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes_title,self.runes_output,self.runes_content,self.skills_title,self.skills_output,self.skills_content}; for _,button in pairs(self.right_list_tabs or {}) do raised[#raised+1]=button end; View.raiseCards(raised)
+    -- Native Geyser uses hidden/auto_hidden rather than a .visible field.
+    -- Raise the selected card's tabs after its frame and content so the
+    -- sibling labels remain clickable instead of ending up behind the card.
+    if self.right_lists_presentation=="combined" then for _,button in pairs(self.skills_runes_tabs or {}) do button:raise() end end
   else
     self.left_bg:hide(); self.identity:hide(); self.details:hide(); self.left:hide(); self.equipment:hide(); self.mapper_frame:hide(); self.mapper:hide(); self.map_zoom_out:hide(); self.map_center:hide(); self.map_zoom_in:hide(); self.map_clear_all:hide(); self.roundtime_bar:hide(); self.right:hide(); self.attribute_strip:hide(); self:layoutCompactLists(layout,top)
   end
@@ -2771,6 +2833,45 @@ function View:setMainSkillsEnabled(enabled)
   if self.color_menu_visible then self:renderColorOptions() end
   return self.main_skills_enabled
 end
+function View:setCombinedSkillsRunes(enabled)
+  self.combine_skills_runes=enabled~=false
+  self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}
+  self.settings.display.combine_skills_runes=self.combine_skills_runes
+  local button=self.option_action_buttons and self.option_action_buttons.combine_skills_runes
+  if button then
+    button.option_text="COMBINED SKILLS / RUNES: "..(self.combine_skills_runes and "ON" or "OFF")
+    if button.setToolTip then pcall(button.setToolTip,button,"Share a taller box with Skills and Runes tabs. OFF keeps separate boxes when space allows. Both lists keep updating; switching tabs sends no game command.") end
+  end
+  if self.layout then self:applyLayout(self.layout) end
+  if self.color_menu_visible then self:renderColorOptions() end
+  return self.combine_skills_runes
+end
+function View:bindSkillsRunesCallbacks()
+  for _,key in ipairs({"skills","runes"}) do
+    local button=self.skills_runes_tabs and self.skills_runes_tabs[key]
+    if button then button:setClickCallback(function() return self:selectSkillsRunesTab(key) end) end
+  end
+  return true
+end
+function View:setSkillsRunesTab(tab)
+  if tab~="skills" and tab~="runes" then return nil,"Choose Skills or Runes." end
+  self.skills_runes_active=tab
+  self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}
+  self.settings.display.skills_runes_tab=tab
+  if self.combine_skills_runes~=false and (self.right_lists_presentation=="tabbed" or self.right_lists_presentation=="compact-tabs") then self.right_list_active=tab end
+  if self.layout then self:applyLayout(self.layout) end
+  return tab
+end
+function View:selectSkillsRunesTab(tab)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  if tab~="skills" and tab~="runes" then return nil,"Choose Skills or Runes." end
+  if self.options_action_callback then
+    -- The controller saves first. Never change the active tab on a failed save.
+    local saved,err=self.options_action_callback("skills_runes_tab",tab)
+    if saved~=tab then return nil,err or "Could not save the selected tab. Try again." end
+  end
+  return self:setSkillsRunesTab(tab)
+end
 function View:setMainInputAligned(enabled)
   self.main_input_aligned=enabled==true
   local button=self.option_action_buttons and self.option_action_buttons.align_main_input
@@ -3090,7 +3191,8 @@ function View:renderRunes(s)
     local name=esc(rune.name or rune.rune or rune.label or "—"); local amount=rune.remaining or rune.remain or rune.weaves or rune.count
     lines[#lines+1]=name..(amount~=nil and " <span style='color:"..self.settings.theme.muted.."'>- "..esc(amount).." weaves remain</span>" or "")
   end
-  self.runes_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.runes_content:move(0,0); self.runes_content:resize(self.runes_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height)); self.runes_content:show()
+  self.runes_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.runes_content:move(0,0); self.runes_content:resize(self.runes_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height))
+  if self.combine_skills_runes~=false and not widgetVisible(self.runes_output) then self.runes_content:hide() else self.runes_content:show() end
 end
 function View:renderSkills(s)
   local layout=self.layout; if not layout then return end
@@ -3105,7 +3207,8 @@ function View:renderSkills(s)
   local function fixed(value) return (esc(value):gsub(" ","&nbsp;")) end
   self.skills_title:echo("<b>"..fixed(View.skillHeader(nameWidth,self.skill_column_gaps,self.skill_level_width,self.skill_use_width)).."</b>")
   local lines={}; for _,skill in ipairs(items) do lines[#lines+1]=fixed(View.skillLine(skill,nameWidth,self.skill_column_gaps,self.skill_level_width,self.skill_use_width)) end
-  self.skills_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.skills_content:move(0,0); self.skills_content:resize(self.skills_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height)); self.skills_content:show()
+  self.skills_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.skills_content:move(0,0); self.skills_content:resize(self.skills_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height))
+  if self.combine_skills_runes~=false and not widgetVisible(self.skills_output) then self.skills_content:hide() else self.skills_content:show() end
 end
 function View:chatDisplayMatches(entries,categories,activeFilter)
   entries=type(entries)=="table" and entries or {}; categories=type(categories)=="table" and categories or {}
@@ -3308,6 +3411,13 @@ function View.validateReusable(candidate,settings)
   if type(candidate.right_list_tab_order)~="table" or type(candidate.right_list_tabs)~="table" then return nil,"preserved HUD list tabs are incomplete" end
   for index,name in ipairs({"inventory","runes","skills"}) do if candidate.right_list_tab_order[index]~=name or not reusableLabel(candidate.right_list_tabs[name]) then return nil,"preserved HUD list tabs are incomplete" end end
   if candidate.right_list_active~=nil and not candidate.right_list_tabs[candidate.right_list_active] then return nil,"preserved HUD active list tab is invalid" end
+  if type(candidate.skills_runes_tabs)~="table" or type(candidate.combine_skills_runes)~="boolean" then return nil,"preserved HUD skills/runes tabs are incomplete" end
+  for _,name in ipairs({"skills","runes"}) do
+    local button=candidate.skills_runes_tabs[name]
+    if not reusableLabel(button) or button.container~=candidate.root or type(button.setClickCallback)~="function" then return nil,"preserved HUD skills/runes tabs are incomplete" end
+  end
+  if candidate.skills_runes_active~="skills" and candidate.skills_runes_active~="runes" then return nil,"preserved HUD active skills/runes tab is invalid" end
+  if not reusableLabel(candidate.option_action_buttons and candidate.option_action_buttons.combine_skills_runes) then return nil,"preserved HUD combined-list option is missing" end
   if type(candidate.chat_sounds)~="table" or not Sounds.validate(candidate.chat_sounds) or type(candidate.chat_sound_order)~="table" or type(candidate.chat_sound_rows)~="table" then return nil,"preserved HUD sound controls are incomplete" end
   for index,key in ipairs(Sounds.tabOrder) do if candidate.chat_sound_order[index]~=key then return nil,"preserved HUD sound tabs are incomplete" end end
   for _,key in ipairs(candidate.chat_sound_order) do
@@ -3372,6 +3482,9 @@ function View:prepareForReuse(settings)
   self:bindSkillSettingsCallbacks()
   self:setSkillSortPreferences(self.settings.display)
   self:ensureVersionLabel(); self:renderVersion()
+  self:setCombinedSkillsRunes(not (self.settings.display and self.settings.display.combine_skills_runes==false))
+  self:setSkillsRunesTab(self.settings.display and self.settings.display.skills_runes_tab=="runes" and "runes" or "skills")
+  self:bindSkillsRunesCallbacks()
   self.chat_filter_callback=nil; self.chat_order_callback=nil; self.chat_drag=nil; self.map_center_callback=nil; self.color_toggle_callback=nil; self.color_options_callback=nil
   self.color_style_callback=nil; self.color_style_pending_config=nil; self.color_style_saving=false
   self.custom_highlight_save_callback=nil; self.custom_highlight_delete_callback=nil; self.custom_highlight_pending_config=nil; self.custom_highlight_saving=false

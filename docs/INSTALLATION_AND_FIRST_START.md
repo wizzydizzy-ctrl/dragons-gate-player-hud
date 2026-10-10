@@ -1,6 +1,6 @@
 # DGHUD Installation and First Start
 
-Applies to DGHUD **v0.3.96**.
+Applies to DGHUD **v0.3.97**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -95,6 +95,7 @@ Open **OPTIONS** and check these items:
 
 - Leave **Automatic Updates** off until you decide you want login-time updates.
 - Choose **HUD Text: Small, Normal, or Large** for your screen.
+- For the [combined sidebar](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar), leave **COMBINED SKILLS / RUNES ON** for Skills / Runes tabs below the separate Inventory card, or turn it OFF for separate boxes. Skills is selected initially; the preference and chosen tab are remembered per profile.
 - Open **Color Settings** and disable any highlight you do not want.
 - Open **Map Settings** and decide which special travel types should begin submaps; separate submaps start off by default.
 - Open **Skill Settings** to choose main-display and sidebar sorting independently. **SKILL FILTERS** defaults ON: try `skill weapons` or `skill id` to narrow the main results while keeping the complete sidebar. For native arguments such as `skill Rath`, choose **SKILL FILTERS OFF → Save**; this choice survives reloads and updates, separately from **MAIN SKILLS** formatting.

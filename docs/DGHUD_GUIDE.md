@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.96**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.97**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,17 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.96
+## What's new in v0.3.97
+
+- **OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**, with a taller tabbed card below the separate Inventory card and its existing **Equipped** / **Carried** tabs. Combat stays at the top, sized to its contents.
+- **Skills** is selected initially. The layout choice and selected **Skills** / **Runes** tab are saved per profile through updates, restarts, and character changes.
+- Both lists update behind the tabs; switching tabs displays saved data and sends no extra game commands.
+- Existing fonts, sorting, colors, aligned columns, and horizontal/vertical scrollbars are preserved.
+- Turn the option **OFF** for separate Runes and Skills boxes. The existing three-way Inventory / Runes / Skills compact tabs remain a fallback for short or narrow windows.
+
+See [Right sidebar](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) and [Combined Skills / Runes](OPTIONS_AND_DISPLAY.md#combined-skills--runes), or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.97).
+
+## Previous changes in v0.3.96
 
 - Choose a personal WAV or a built-in **Three-Tone**, **Chime**, **Alarm**, or **Horn** for a qualifying autoroller result.
 - Open **OPTIONS → Autoroller**, then scroll to **ALERTS** in the same settings window. Use **CHOOSE WAV FILE…**, **PREVIEW**, **STOP PREVIEW**, and volume **1–100**, then click **SAVE**.
@@ -80,9 +90,11 @@ With **SKILL FILTERS ON**, filtering remains independent of custom or disabled c
 - **Center:** The normal Dragons Gate game display.
 - **Bottom-center:** Resource bars without covering the command line.
 - **Identity and navigation side:** Name, race, profession or dragon stage, physical details, faith, favors, alignment, hunger, thirst, equipment readiness, location, mapper, compass, travel buttons, and the roundtime bar.
-- **Information side:** Combat, inventory and money, runes, and skills. Lists gain scrollbars when their contents do not fit.
+- **Information side:** In the [combined layout](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar), Combat is content-sized at the top, Inventory stays separate with Equipped / Carried tabs, and a taller Skills / Runes card sits below it with Skills selected initially. Both lists update in the background; switching tabs sends no command. Existing fonts, sorting, colors, columns, and scrollbars remain.
 
-DGHUD responds to window resizing. At smaller sizes, optional sections may hide so the game display and command line remain usable. This does not erase their data.
+**OPTIONS → COMBINED SKILLS / RUNES** defaults to ON; OFF restores separate boxes. The preference and selected Skills / Runes tab persist per profile through updates, restarts, and character changes.
+
+DGHUD responds to window resizing. The existing three-way Inventory / Runes / Skills compact tabs remain a fallback only when needed to protect readable space. At smaller sizes, optional sections may hide so the game display and command line remain usable. This does not erase their data.
 
 ## What happens after character login
 

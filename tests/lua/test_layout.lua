@@ -325,3 +325,47 @@ test("active roundtime reserves only left navigation rail space",function()
     eq(ready.roundtime_visible,false); eq(ready.utility_y+ready.utility_height,ready.panel_height-layout.lower_panel_padding)
   end
 end)
+
+test("combined Skills and Runes layout flag defaults on without changing legacy modes",function()
+  for _,case in ipairs({
+    {1920,1080,"stacked"},{1366,768,"stacked"},{960,1000,"tabbed"},
+    {1920,600,"tabbed"},{760,700,"compact-tabs"},{320,260,"compact-tabs"},
+  }) do
+    local r=Layout.compute(case[1],case[2])
+    eq(r.combine_skills_runes,true); eq(type(r.combine_skills_runes),"boolean")
+    eq(r.right_lists_mode,case[3])
+  end
+end)
+test("combined layout preference normalizes missing values and only explicit false disables it",function()
+  for _,display in ipairs({{}, {combine_skills_runes=true}, {combine_skills_runes=0}, {combine_skills_runes="false"}}) do
+    local r=Layout.compute(1200,800,nil,nil,nil,display)
+    eq(r.combine_skills_runes,true); eq(r.right_lists_mode,"tabbed")
+  end
+  local display={combine_skills_runes=false,skills_runes_tab="runes"}
+  local r=Layout.compute(1200,800,nil,nil,nil,display)
+  eq(r.combine_skills_runes,false); eq(r.right_lists_mode,"tabbed")
+  eq(display.combine_skills_runes,false); eq(display.skills_runes_tab,"runes")
+end)
+test("combining lists does not change the console vitals fonts or legacy size metrics",function()
+  for _,size in ipairs({{320,260},{760,700},{960,1000},{1366,768},{1920,1080},{3840,2160}}) do
+    for _,scale in ipairs({.8,1,1.2}) do
+      local on=Layout.compute(size[1],size[2],nil,nil,nil,{combine_skills_runes=true,side_text_scale=scale})
+      local off=Layout.compute(size[1],size[2],nil,nil,nil,{combine_skills_runes=false,side_text_scale=scale})
+      eq(on.combine_skills_runes,true); eq(off.combine_skills_runes,false)
+      for _,key in ipairs({"mode","right_lists_mode","console_left","console_width","console_right",
+        "console_top","console_remainder","header_height","chat_height","bottom","vitals_strip_height",
+        "list_font","list_title_font","list_row_height","list_horizontal_scrollbar_height","combat_font"}) do
+        eq(on[key],off[key])
+      end
+    end
+  end
+end)
+test("combined preference survives short compact narrow and normal geometry computations",function()
+  local display={combine_skills_runes=true,skills_runes_tab="runes"}
+  for _,size in ipairs({{1920,1080},{960,1000},{800,408},{320,260},{760,700},{1920,1080}}) do
+    local r=Layout.compute(size[1],size[2],nil,nil,nil,display)
+    eq(r.combine_skills_runes,true); eq(display.combine_skills_runes,true)
+    eq(display.skills_runes_tab,"runes")
+    eq(r.console_top+r.console_remainder+r.bottom,size[2])
+  end
+end)

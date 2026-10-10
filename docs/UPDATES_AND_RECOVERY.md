@@ -1,6 +1,6 @@
 # DGHUD Updates and Emergency Recovery
 
-Applies to DGHUD **v0.3.96**.
+Applies to DGHUD **v0.3.97**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -68,6 +68,8 @@ An update is scoped to the DGHUD package. It is designed to preserve:
 - saved Skill Settings, including **SKILL FILTERS**, **MAIN SKILLS** formatting, and independent main-display/sidebar sorting;
 - automatic-update preference; and
 - local diagnostics.
+
+Updates preserve **COMBINED SKILLS / RUNES** and the selected **Skills** / **Runes** tab per profile, just as restarts and character changes do. See [Right sidebar](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) for the v0.3.97 combined layout.
 
 Mutable DGHUD data is stored under the profile's `DGHUDData` directory, outside the replaceable package directory.
 

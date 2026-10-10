@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.96.
+Applies to DGHUD v0.3.97.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -29,7 +29,21 @@ Your normal native command input remains available with the same draft, command 
 
 Input alignment is independent of **AUTO MAIN WRAP**, which controls line wrapping in the main display.
 
-On shorter windows, Inventory, Runes, and Skills share a tabbed area on the right. Click **INVENTORY**, **RUNES**, or **SKILLS** to see the corresponding list; narrower layouts shorten these labels to **INV**, **RUN**, and **SKL**. If there is too little height even for the tabs, enlarge the window. See [Options and Display](OPTIONS_AND_DISPLAY.md) for text-size presets and responsive layout controls.
+## Right sidebar
+
+DGHUD v0.3.97 combines Skills and Runes into one tabbed card by default.
+
+In the normal layout, the right side runs from top to bottom:
+
+- **Combat**, sized to the number of lines it contains.
+- **Inventory**, kept separate with its existing **Equipped** / **Carried** tabs, money, and carry totals.
+- A taller **Skills / Runes** card with **Skills** and **Runes** tabs, using the space of the former separate cards. **Skills** is selected initially.
+
+Both Skills and Runes keep receiving background data updates while their tab is hidden. Switching tabs immediately shows the saved list; it does not request information from the game. Existing fonts, sorting, colors, aligned columns, and horizontal/vertical scrollbars remain unchanged.
+
+**OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. Turn it **OFF** to restore separate Runes and Skills boxes below Inventory. The layout preference and selected combined-card tab stay with the Mudlet profile through updates, restarts, and character changes.
+
+Only when a short or narrow window needs more readable space does the existing compact fallback share Inventory, Runes, and Skills through three tabs. Click **INVENTORY**, **RUNES**, or **SKILLS**; narrower layouts shorten these to **INV**, **RUN**, and **SKL**. Inventory still retains its own Equipped / Carried sections within that fallback. If there is too little height even for the tabs, enlarge the window. See [Options and Display](OPTIONS_AND_DISPLAY.md#combined-skills--runes) for the combined layout option and responsive controls.
 
 ## Identity
 
@@ -81,7 +95,7 @@ The embedded map and map collection name appear above the compass. See [Automapp
 
 ## Combat
 
-The Combat section can show:
+Combat stays at the top of the right sidebar and sizes to its contents in the normal layout. It can show:
 
 - armor percentage;
 - stance and OR on the same row;
@@ -97,7 +111,7 @@ After printed delays, DGHUD requests a quiet `delay` check once the output burst
 
 ## Inventory, money, and carrying capacity
 
-Inventory has **Equipped** and **Carried** tabs. Both lists are retained from the same inventory response; switching tabs immediately shows the saved list without sending another command. **Carried** is selected initially, and your selected tab stays selected during refreshes and window resizing. Long names and large inventories use horizontal and vertical scrollbars rather than shrinking the text indefinitely.
+Inventory stays below Combat as a separate card in the normal layout. It has **Equipped** and **Carried** tabs. Both lists are retained from the same inventory response; switching tabs immediately shows the saved list without sending another command. **Carried** is selected initially, and your selected tab stays selected during refreshes and window resizing. Long names and large inventories use horizontal and vertical scrollbars rather than shrinking the text indefinitely.
 
 Below the list, DGHUD shows:
 
@@ -109,6 +123,8 @@ Items and total carried weight come from `inventory`. Both **Items equipped** an
 
 ## Runes
 
+In the combined layout, click **Runes** in the taller Skills / Runes card below Inventory. With **COMBINED SKILLS / RUNES OFF**, the same list appears in its separate card. Background capture continues in either layout; selecting the tab sends no request.
+
 Long rune names such as **Translocation** expand the scrollable content to fit the full name and weave count. In narrow windows, use the horizontal scrollbar rather than shrinking the text.
 
 `info magic` fills the Runes list. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
@@ -116,6 +132,8 @@ Long rune names such as **Translocation** expand the scrollable content to fit t
 This puts the runes closest to needing renewal at the top.
 
 ## Skills
+
+**Skills** is the initial tab in the combined card below Inventory. Choose **Runes** to see the rune list and **Skills** to return without rerunning either source command. The selected tab is remembered per profile; existing sidebar skill sorting, columns, colors, fonts, and scrollbars are unchanged. Turn **COMBINED SKILLS / RUNES OFF** for the separate Skills box.
 
 **OPTIONS → Skill Settings → SKILL FILTERS** defaults **ON** for HUD name/group filtering. Save it **OFF** to use native staff commands such as `skill Rath`: every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, passes unchanged to the game exactly once with the original casing and spacing, without a queued local filter or busy/display-unavailable rejection. Bare `skill` still fills the complete sidebar and follows the independent **MAIN SKILLS** formatting setting.
 

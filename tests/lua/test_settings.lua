@@ -1,6 +1,37 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("combined skills and runes defaults migrate without changing unrelated preferences",function()
+  eq(defaults.display.combine_skills_runes,true); eq(defaults.display.skills_runes_tab,"skills")
+  for _,schema in ipairs({0,1}) do
+    local user={schema=schema,display={auto_wrap=false,personal="keep"},update={auto_apply=true}}
+    local resolved,migrated=Settings.resolve(defaults,user)
+    eq(resolved.display.combine_skills_runes,true); eq(resolved.display.skills_runes_tab,"skills")
+    eq(resolved.display.auto_wrap,false); eq(resolved.display.personal,"keep")
+    eq(user.display.combine_skills_runes,nil); eq(user.display.skills_runes_tab,nil)
+    eq(Settings.resolve(defaults,migrated).display.skills_runes_tab,"skills")
+    if schema==1 then eq(resolved.update.auto_apply,true) end
+  end
+end)
+
+test("combined panel explicit choices survive resolution and invalid new fields cannot erase old choices",function()
+  for _,enabled in ipairs({false,true}) do
+    for _,tab in ipairs({"skills","runes"}) do
+      local user={schema=1,display={combine_skills_runes=enabled,skills_runes_tab=tab,skill_filter=false,personal="keep"},update={auto_apply=true}}
+      local resolved,migrated=Settings.resolve(defaults,user)
+      eq(resolved.display.combine_skills_runes,enabled); eq(resolved.display.skills_runes_tab,tab)
+      eq(Settings.resolve(defaults,migrated).display.combine_skills_runes,enabled); eq(Settings.resolve(defaults,migrated).display.skills_runes_tab,tab)
+      eq(user.display.skills_runes_tab,tab); eq(resolved.display.skill_filter,false); eq(resolved.display.personal,"keep"); eq(resolved.update.auto_apply,true)
+    end
+  end
+  for _,invalid in ipairs({"invalid",0,{},function() end}) do
+    local resolved=Settings.resolve(defaults,{schema=1,display={combine_skills_runes=invalid,skills_runes_tab=invalid,auto_wrap=false},update={auto_apply=true}})
+    eq(resolved.display.combine_skills_runes,true); eq(resolved.display.skills_runes_tab,"skills"); eq(resolved.display.auto_wrap,false); eq(resolved.update.auto_apply,true)
+  end
+  eq(Settings.resolve(defaults,{display=false}).display.combine_skills_runes,true)
+  eq(defaults.display.combine_skills_runes,true); eq(defaults.display.skills_runes_tab,"skills")
+end)
+
 test("skill filters default on and explicit choices survive migration and cold resolution",function()
   eq(defaults.display.skill_filter,true)
   for _,schema in ipairs({0,1}) do

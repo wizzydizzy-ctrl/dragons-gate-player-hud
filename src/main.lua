@@ -356,6 +356,7 @@ function Main:displayPreferences(overrides)
   local result={side_text_scale=tonumber(display.side_text_scale) or 1,
     auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),
     main_skills=self:mainSkillsEnabled(),skill_filter=self:skillFilterEnabled(),
+    combine_skills_runes=self:combinedSkillsRunesEnabled(),skills_runes_tab=self:skillsRunesTab(),
     main_skill_sort=SkillSort.normalize(display.main_skill_sort),
     sidebar_skill_sort=SkillSort.normalize(display.sidebar_skill_sort)}
   for key,value in pairs(overrides or {}) do result[key]=value end
@@ -364,6 +365,43 @@ end
 function Main:skillSettings()
   local display=self:displayPreferences()
   return {main_skills=display.main_skills,skill_filter=display.skill_filter,main_skill_sort=display.main_skill_sort,sidebar_skill_sort=display.sidebar_skill_sort}
+end
+function Main:combinedSkillsRunesEnabled()
+  return not (type(self.settings.display)=="table" and self.settings.display.combine_skills_runes==false)
+end
+function Main:skillsRunesTab()
+  return type(self.settings.display)=="table" and self.settings.display.skills_runes_tab=="runes" and "runes" or "skills"
+end
+local function saveSkillsRunesPreference(self,key,value,viewMethod)
+  local function failed()
+    local message="Could not save Skills / Runes settings. Try again."
+    if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,message) end
+    return nil,message
+  end
+  if type(self.adapter.saveDisplaySettings)~="function" then return failed() end
+  local candidate=self:displayPreferences({[key]=value})
+  -- Persist before changing active, user, or view state. A failed write must
+  -- leave the visible selection and all other display preferences intact.
+  local called,saved=pcall(self.adapter.saveDisplaySettings,self.adapter,candidate)
+  if not called or not saved then return failed() end
+  self.settings.display=type(self.settings.display)=="table" and self.settings.display or {}
+  self.settings.display[key]=value
+  local root=rawget(_G,"DGHUD")
+  if root then
+    root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}
+    root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}
+    root.user_settings.display[key]=value
+  end
+  if self.view and type(self.view[viewMethod])=="function" then self.view[viewMethod](self.view,value) end
+  return value
+end
+function Main:setCombinedSkillsRunes(enabled)
+  if type(enabled)~="boolean" then return nil,"Choose ON or OFF for Combined Skills / Runes." end
+  return saveSkillsRunesPreference(self,"combine_skills_runes",enabled,"setCombinedSkillsRunes")
+end
+function Main:setSkillsRunesTab(tab)
+  if tab~="skills" and tab~="runes" then return nil,"Choose the Skills or Runes tab." end
+  return saveSkillsRunesPreference(self,"skills_runes_tab",tab,"setSkillsRunesTab")
 end
 function Main:setSkillSettings(config)
   if type(config)~="table" or type(config.main_skills)~="boolean" then return nil,"Choose whether main skill formatting is on or off." end
@@ -1425,6 +1463,8 @@ function Main:start()
   if self.view.setHelpCloseCallback then self.view:setHelpCloseCallback(function() return true end) end
   if self.view.setFeedbackCallback then self.view:setFeedbackCallback(function(payload,done) return self.adapter:submitFeedback(payload,done) end) end
   if self.view.setOptionsActionCallback then self.view:setOptionsActionCallback(function(action,key,wanted)
+    if action=="combine_skills_runes" then return self:setCombinedSkillsRunes(not self:combinedSkillsRunesEnabled()) end
+    if action=="skills_runes_tab" then return self:setSkillsRunesTab(key) end
     if action=="skill_settings" then return self:skillSettings() end
     if action=="skill_settings_save" then return self:setSkillSettings(key) end
     if action=="send_debug" then return self.failure_reports:submitReport(nil,function(result,sendErr) local message=sendErr and ("Could not send report: "..tostring(sendErr)) or ("Report sent anonymously. Reference: "..tostring(result.report_id or result.number or "received")); if self.view.setSupportStatus then self.view:setSupportStatus(message) end; self:reportMapTransfer(message,sendErr~=nil) end) end
@@ -1471,6 +1511,8 @@ function Main:start()
   if self.view.setMainConsoleAutoWrap then self.view:setMainConsoleAutoWrap(self:mainConsoleAutoWrapEnabled()) end
   if self.view.setMainInputAligned then self.view:setMainInputAligned(self:mainInputAligned()) end
   if self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(self:mainSkillsEnabled()) end
+  if self.view.setCombinedSkillsRunes then self.view:setCombinedSkillsRunes(self:combinedSkillsRunesEnabled()) end
+  if self.view.setSkillsRunesTab then self.view:setSkillsRunesTab(self:skillsRunesTab()) end
   if self.view.setSkillSortPreferences then self.view:setSkillSortPreferences(self:skillSettings()) end
   if self.view.setMapLibraryActionCallback then self.view:setMapLibraryActionCallback(function(action,suppliedEntry)
     if action=="merge_current" then return self:mergeLibraryIntoCurrent(suppliedEntry or self.view:selectedMapLibraryEntry()) end
