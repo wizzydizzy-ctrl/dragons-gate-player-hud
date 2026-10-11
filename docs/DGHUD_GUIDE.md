@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.98**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.99**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,17 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.98
+## What's new in v0.3.99
+
+- Runes use aligned **Runes / Weaves Remain** columns, with all counts in a right-aligned numeric column.
+- `shoprenew` checks fresh runes and renews those below 20 weaves; `shoprenewall` renews every captured rune.
+- `trainall` checks fresh skills and raises known skills with 0 uses by their game IDs.
+- Each shortcut sends one command per second. Independent saved ON/OFF switches are under **OPTIONS → Skills & Runes**. Use `shoprenewstop` or `trainallstop` to cancel.
+- Rune variables refresh cleanly, the name box no longer shows the balance/alignment row, and staff referrals are captured even when wrapped.
+
+See [renewal and training commands](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts) before using the resource-spending shortcuts.
+
+## Previous changes in v0.3.98
 
 - In the normal combined layout, **Inventory** and the combined **Skills / Runes** card now have the same height and width, evenly splitting the available space below content-sized **Combat** across window sizes and Mudlet MultiView panes.
 - Existing fonts, aligned columns, sorting, tab choices, and horizontal/vertical scrollbars are unchanged. **COMBINED SKILLS / RUNES OFF** keeps the separate-box sizing unchanged.

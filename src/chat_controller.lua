@@ -97,7 +97,26 @@ end
 local function bufferedStaffEntry(entry)
   if type(entry)~="table" or entry.category~="STAFF" then return false end
   local message=tostring(entry.message or "")
-  return message:match("^submits an idea:")~=nil or message:match("^reports a bug in room %d+:")~=nil or message:match("^resolved report #%d+:")~=nil
+  return entry.staff_referral~=nil or message:match("^submits an idea:")~=nil or message:match("^reports a bug in room %d+:")~=nil or message:match("^resolved report #%d+:")~=nil
+end
+
+local function completeStaffReferral(entry)
+  if entry.staff_referral=="detail" then return entry.message:match("'%s*>$")~=nil end
+  if entry.staff_referral=="list" then
+    local message=entry.message:gsub("%s+"," ")
+    return message:match("'%s+%[[^%[%]%c]+ago%.%]$")~=nil
+  end
+  return false
+end
+
+local function referralTerminatorContinuation(entry,line)
+  if not entry.message:match("'$") then return false end
+  line=cleanLine(line)
+  if entry.staff_referral=="detail" then return line==">" end
+  if entry.staff_referral~="list" then return false end
+  -- An age may start on its own wrapped line. Do not mistake a numeric
+  -- game prompt (which contains a closing bracket) for that continuation.
+  return line:match("^%[%d[%d%s%a,%.]*$")~=nil or line:match("^%[%d[%d%s%a,%.]*ago%.%]$")~=nil
 end
 
 local function staffMessageBoundary(line,parsed)
@@ -107,6 +126,7 @@ local function staffMessageBoundary(line,parsed)
 end
 
 function Controller:cancelStaffMessageTimer()
+  self.staffMessageGeneration=(self.staffMessageGeneration or 0)+1
   local timer=self.staffMessageTimer; self.staffMessageTimer=nil
   if timer then call(self.adapter,"cancelTimer",timer) end
 end
@@ -115,12 +135,15 @@ function Controller:flushStaffMessage(suppressAlert)
   self:cancelStaffMessageTimer()
   local entry=self.pendingStaffMessage; self.pendingStaffMessage=nil; self.pendingStaffMessageLines=nil
   if not entry then return false end
+  entry.staff_referral=nil
   return self:accept(entry,suppressAlert)
 end
 
 function Controller:scheduleStaffMessageFlush()
   self:cancelStaffMessageTimer()
+  local generation=self.staffMessageGeneration
   local timer=call(self.adapter,"schedule",STAFF_MESSAGE_FLUSH_DELAY,function()
+    if self.staffMessageGeneration~=generation then return end
     self.staffMessageTimer=nil
     if self.started then self:flushStaffMessage() end
   end)
@@ -130,7 +153,10 @@ function Controller:scheduleStaffMessageFlush()
 end
 
 function Controller:beginStaffMessage(entry)
+  entry.message=entry.message:sub(1,STAFF_MESSAGE_MAX_CHARS)
+  entry.line=entry.line:sub(1,STAFF_MESSAGE_MAX_CHARS)
   self.pendingStaffMessage=entry; self.pendingStaffMessageLines=1
+  if completeStaffReferral(entry) or #entry.message>=STAFF_MESSAGE_MAX_CHARS then return self:flushStaffMessage() end
   return self:scheduleStaffMessageFlush()
 end
 
@@ -141,7 +167,7 @@ function Controller:appendStaffMessage(line)
   entry.message=(entry.message.." "..text):sub(1,STAFF_MESSAGE_MAX_CHARS)
   entry.line=(entry.line.." "..text):sub(1,STAFF_MESSAGE_MAX_CHARS)
   self.pendingStaffMessageLines=(self.pendingStaffMessageLines or 1)+1
-  if self.pendingStaffMessageLines>=STAFF_MESSAGE_MAX_LINES or #entry.message>=STAFF_MESSAGE_MAX_CHARS then return self:flushStaffMessage() end
+  if completeStaffReferral(entry) or self.pendingStaffMessageLines>=STAFF_MESSAGE_MAX_LINES or #entry.message>=STAFF_MESSAGE_MAX_CHARS then return self:flushStaffMessage() end
   return self:scheduleStaffMessageFlush()
 end
 
@@ -213,7 +239,7 @@ function Controller:onLine(line)
   if not self.started then return nil,"chatbox is not running" end
   local entry=self.parser.parse(line,self:character(),call(self.adapter,"timestamp"))
   if self.pendingStaffMessage then
-    if staffMessageBoundary(line,entry) then
+    if staffMessageBoundary(line,entry) and not referralTerminatorContinuation(self.pendingStaffMessage,line) then
       self:flushStaffMessage()
       if entry then return self:acceptParsed(entry) end
       return false
@@ -255,6 +281,10 @@ function Controller:clearSavedHistory(confirmed)
     self:reportStorageError(message)
     return nil,message
   end
+  -- A pending wrapped message predates the deletion. Neither it nor a stale
+  -- timer may put that private text back into the freshly cleared history.
+  self:cancelStaffMessageTimer()
+  self.pendingStaffMessage=nil; self.pendingStaffMessageLines=nil
   self.history:clearVisible()
   self.currentCharacterKey="profile"
   self.historiesByCharacter={profile=self.history}

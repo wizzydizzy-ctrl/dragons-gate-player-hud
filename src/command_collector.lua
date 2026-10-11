@@ -8,11 +8,17 @@ local RECOVERY_WAIT={inventory=2.5,stat=2,info=2.5,["info religion"]=2,["info ma
 function Collector.new(adapter,parser,onChange,onRoundtime,onCharacterEntry,onCharacterExit)
   return setmetatable({adapter=adapter,parser=parser,onChange=onChange,onRoundtime=onRoundtime,onCharacterEntry=onCharacterEntry,onCharacterExit=onCharacterExit,snapshot={},sequence={"inventory","stat","info","info religion","info magic","skill","time"},runtime={triggers={},events={}},started=false,refreshed=false,prompt_nudge_delay=.15,drain_delay=.5},Collector)
 end
-function Collector:cancelActive()
+local function completeRequest(active,result,err)
+  local done=active and active.onComplete
+  if done then active.onComplete=nil; done(result,err) end
+end
+function Collector:cancelActive(reason)
+  local active=self.active
   self:cancelSkillBoundary()
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
   if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
   self.active=nil; self.sequence_index=nil; self.retry_startup=false
+  completeRequest(active,nil,reason or "Request cancelled; no actions were sent.")
 end
 function Collector:cancelSkillBoundary()
   if self.skill_boundary then self.adapter:cancelTimer(self.skill_boundary); self.skill_boundary=nil end
@@ -61,9 +67,27 @@ function Collector:begin(command,startup)
   if self.active then return false end
   self.active={command=command,lines={},startup=startup==true,timeout_stage="initial"}
   local active=self.active
+  if self.onCaptureBegin then self.onCaptureBegin(command) end
   self:scheduleTimeout(active,RESPONSE_WAIT[command] or 2.5,function() self:startRecovery(active) end)
   if startup then self.sending_startup_command=command; self.adapter:sendCommand(command); self.sending_startup_command=nil end
   self:schedulePromptNudge(command)
+  return true
+end
+function Collector:request(command,done)
+  if type(command)~="string" or type(done)~="function" then return nil,"Invalid data request." end
+  local canonical=command:match("^%s*(.-)%s*$"):lower()
+  if canonical=="info mag" then canonical="info magic" end
+  if not SPECS[canonical] then return nil,"Unsupported data request." end
+  if self.active or self.sequence_index then return nil,"Character data is still refreshing. Wait, then try again." end
+  if not self:begin(canonical,false) then return nil,"Another data request is running." end
+  local active=self.active; active.onComplete=done
+  self.sending_requested_command=canonical
+  local called,sent,err=pcall(self.adapter.sendCommand,self.adapter,command)
+  self.sending_requested_command=nil
+  if not called or sent==false or (sent==nil and err~=nil) then
+    if self.active==active then self:cancelActive("Could not request fresh data. Try again.") end
+    return nil,"Could not request fresh data. Try again."
+  end
   return true
 end
 function Collector:refresh()
@@ -98,6 +122,12 @@ function Collector:finish(lines,tableBoundary)
   if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
   self:cancelSkillBoundary()
   self.active=nil
+  local completed,requestError
+  if lines and active.onComplete and (active.command=="skill" or active.command=="info magic") then
+    local called,valid,err,vetted=pcall(self.parser.validateActionResponse,active.command,lines)
+    if called and valid then lines=vetted or lines
+    else lines=nil; requestError=called and err or "The game response could not be confirmed. Try again; no actions were sent." end
+  end
   if lines then
     local spec=SPECS[active.command]; local fn=spec and self.parser[spec.parser]
     local ok,result=pcall(fn,lines,active.command=="skill" and tableBoundary==true)
@@ -119,8 +149,11 @@ function Collector:finish(lines,tableBoundary)
         result=previous
       end
       self.snapshot[spec.snapshot]=result; self.onChange(self.snapshot,spec.snapshot,parsed)
+      completed=parsed
     end
   end
+  if not completed and not requestError then requestError="The game response was incomplete. Try again; no actions were sent." end
+  completeRequest(active,completed,requestError)
   if self.retry_startup and self.sequence_index then
     self.retry_startup=false; self:begin(self.sequence[self.sequence_index],true)
   elseif active.startup or self.sequence_index then
@@ -193,9 +226,9 @@ function Collector:onOutgoing(command)
   end
   if command=="inv" then command="inventory" end
   if command=="info mag" then command="info magic" end
-  if not SPECS[command] or self.sending_startup_command==command then return end
+  if not SPECS[command] or self.sending_startup_command==command or self.sending_requested_command==command then return end
   if self.active then
-    if self.active.command=="skill" and self.skill_boundary then
+    if self.active.command=="skill" and self.skill_boundary and not self.active.onComplete then
       -- Another tracked command can start before the zero-delay boundary fires.
       -- Retain its already-complete table before transferring capture ownership;
       -- do not send or advance startup commands from this interruption path.
@@ -206,7 +239,8 @@ function Collector:onOutgoing(command)
     if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
     if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
     self:cancelSkillBoundary()
-    self.active=nil
+    local interrupted=self.active; self.active=nil
+    completeRequest(interrupted,nil,"Data request interrupted. Try again; no actions were sent.")
   end
   self:begin(command,false)
 end

@@ -1022,6 +1022,12 @@ function Adapter.displaySettingsSnapshot(config)
   local skillsRunesTab=config.skills_runes_tab
   if skillsRunesTab==nil then skillsRunesTab="skills" elseif skillsRunesTab~="skills" and skillsRunesTab~="runes" then return nil,"Choose the Skills or Runes tab" end
   local sorts={}
+  local quick={}
+  for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    local enabled=config[key]
+    if enabled==nil then enabled=true elseif type(enabled)~="boolean" then return nil,key.." must be ON or OFF" end
+    quick[key]=enabled
+  end
   for _,key in ipairs({"main_skill_sort","sidebar_skill_sort"}) do
     local selected=config[key]; if selected==nil then selected=SkillSort.normalize() end
     local value,err=SkillSort.validate(selected)
@@ -1029,6 +1035,7 @@ function Adapter.displaySettingsSnapshot(config)
     sorts[key]=value
   end
   return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput,main_skills=mainSkills,skill_filter=skillFilter,
+    shoprenew=quick.shoprenew,shoprenewall=quick.shoprenewall,trainall=quick.trainall,
     combine_skills_runes=combineSkillsRunes,skills_runes_tab=skillsRunesTab,
     main_skill_sort=sorts.main_skill_sort,sidebar_skill_sort=sorts.sidebar_skill_sort}
 end
@@ -1041,7 +1048,7 @@ function Adapter:saveDisplaySettings(config)
     return string.format("{primary=%q,direction=%q,secondary=%q,secondary_direction=%q}",
       value.primary,value.direction,value.secondary,value.secondary_direction)
   end
-  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s, skill_filter=%s, combine_skills_runes=%s, skills_runes_tab=%q, main_skill_sort=%s, sidebar_skill_sort=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills),tostring(snapshot.skill_filter),tostring(snapshot.combine_skills_runes),snapshot.skills_runes_tab,sortSource(snapshot.main_skill_sort),sortSource(snapshot.sidebar_skill_sort))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s, skill_filter=%s, shoprenew=%s, shoprenewall=%s, trainall=%s, combine_skills_runes=%s, skills_runes_tab=%q, main_skill_sort=%s, sidebar_skill_sort=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills),tostring(snapshot.skill_filter),tostring(snapshot.shoprenew),tostring(snapshot.shoprenewall),tostring(snapshot.trainall),tostring(snapshot.combine_skills_runes),snapshot.skills_runes_tab,sortSource(snapshot.main_skill_sort),sortSource(snapshot.sidebar_skill_sort))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
@@ -1224,6 +1231,10 @@ function Adapter:removeKeyBinding(id,api) api=api or _G; if type(api.killKey)~="
 function Adapter:schedule(seconds,fn) return tempTimer(seconds,fn) end
 function Adapter:cancelTimer(id) return killTimer(id) end
 function Adapter:sendCommand(command) return send(command) end
+function Adapter:reportQuickAction(message)
+  cecho("\n<gold>[DGHUD Quick Commands]<reset> "..tostring(message).."\n")
+  return true
+end
 function Adapter:sendRoundtimeCheck(api)
   api=api or _G
   if type(api.send)~="function" then return nil,"Mudlet send API is unavailable" end

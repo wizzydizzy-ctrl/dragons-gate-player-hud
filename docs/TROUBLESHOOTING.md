@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.98**.
+Applies to DGHUD **v0.3.99**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -244,7 +244,7 @@ The **Waiting** line from `rr status` explains the immediate pause, and `rr show
 
 ## A normal command behaves differently with DGHUD
 
-DGHUD handles the documented `dghud ...`, `rr ...`, walking, and local `skill` filtering commands. With **SKILL FILTERS ON**, skill filters request the normal game table. To send native arguments such as `skill Rath` unchanged, choose **OPTIONS → Skill Settings → SKILL FILTERS OFF → Save**. Bare `skill` still refreshes your complete sidebar; **MAIN SKILLS** controls formatting separately. The filter choice survives reloads and updates. DGHUD does not intentionally create broad aliases for unrelated game commands.
+DGHUD handles the documented `dghud ...`, `rr ...`, walking, and local `skill` filtering commands. With **SKILL FILTERS ON**, skill filters request the normal game table. To send native arguments such as `skill Rath` unchanged, choose **OPTIONS → Skills & Runes → SKILL FILTERS OFF → Save**. Bare `skill` still refreshes your complete sidebar; **MAIN SKILLS** controls formatting separately. The filter choice survives reloads and updates. DGHUD does not intentionally create broad aliases for unrelated game commands.
 
 If a command such as `lay hands` works only with different capitalization, inspect personal Mudlet aliases and triggers first. Disable them one at a time in an isolated profile before attributing the behavior to DGHUD.
 

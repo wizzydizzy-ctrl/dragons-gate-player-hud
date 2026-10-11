@@ -1,6 +1,18 @@
 local Adapter=require("mudlet_adapter")
 local Settings=require("settings")
 
+test("quick command snapshots default ON and preserve independent explicit OFF values",function()
+  local legacy=assert(Adapter.displaySettingsSnapshot({side_text_scale=1}))
+  for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    eq(legacy[key],true)
+    local config={side_text_scale=1,[key]=false}; local snapshot=assert(Adapter.displaySettingsSnapshot(config))
+    eq(snapshot[key],false)
+    for _,invalid in ipairs({"false",0,1,{},function() end}) do
+      config[key]=invalid; eq(Adapter.displaySettingsSnapshot(config),nil)
+    end
+  end
+end)
+
 test("combined display snapshot defaults legacy fields and validates exact enum types",function()
   local legacy=assert(Adapter.displaySettingsSnapshot({side_text_scale=1}))
   eq(legacy.combine_skills_runes,true); eq(legacy.skills_runes_tab,"skills")
@@ -40,12 +52,13 @@ test("combined settings serialize privately per profile and retain saved choices
     lfs={mkdir=function(base) eq(base,home.."/DGHUDData"); return true end}
     getMudletHomeDir=function() return home end
     loadfile=function(name) if not files[name] then return nil,"missing" end; return loadstring(files[name]) end
-    local config={side_text_scale=.9,combine_skills_runes=false,skills_runes_tab="runes",auto_wrap=false,align_input=true,main_skills=false,skill_filter=false}
+    local config={side_text_scale=.9,combine_skills_runes=false,skills_runes_tab="runes",auto_wrap=false,align_input=true,main_skills=false,skill_filter=false,shoprenew=false,shoprenewall=true,trainall=false}
     for _,enabled in ipairs({false,true}) do
       for _,tab in ipairs({"skills","runes"}) do
         config.combine_skills_runes=enabled; config.skills_runes_tab=tab; assert(Adapter.new():saveDisplaySettings(config))
         local loaded=assert(Adapter.loadDisplaySettings()); eq(loaded.combine_skills_runes,enabled); eq(loaded.skills_runes_tab,tab)
         eq(loaded.auto_wrap,false); eq(loaded.align_input,true); eq(loaded.main_skills,false); eq(loaded.skill_filter,false)
+        eq(loaded.shoprenew,false); eq(loaded.shoprenewall,true); eq(loaded.trainall,false)
         local resolved=Settings.resolve(require("defaults"),{schema=1,display=loaded,update={auto_apply=true}})
         eq(resolved.display.skills_runes_tab,tab); eq(resolved.display.combine_skills_runes,enabled); eq(resolved.update.auto_apply,true)
       end
@@ -58,12 +71,14 @@ test("combined settings serialize privately per profile and retain saved choices
     for _,stage in ipairs({"open","write","close","backup","replace"}) do
       failure=stage; local result=Adapter.new():saveDisplaySettings(config); eq(result,nil); eq(files[destination()],first)
       local loaded=assert(Adapter.loadDisplaySettings()); eq(loaded.combine_skills_runes,false); eq(loaded.skills_runes_tab,"runes")
+      eq(loaded.shoprenew,false); eq(loaded.shoprenewall,true); eq(loaded.trainall,false)
     end
     failure=nil; local before=writes
     config.skills_runes_tab="runes; error('injection')"; eq(Adapter.new():saveDisplaySettings(config),nil); eq(writes,before); eq(files[destination()],first)
     config.skills_runes_tab="skills"; config.combine_skills_runes="false"; eq(Adapter.new():saveDisplaySettings(config),nil); eq(writes,before)
     files[destination()]="return {side_text_scale=.9,auto_wrap=false,align_input=true,main_skills=false,skill_filter=false,combine_skills_runes='invalid',skills_runes_tab='INVALID'}"
     local legacy=assert(Adapter.loadDisplaySettings())
+    eq(legacy.shoprenew,true); eq(legacy.shoprenewall,true); eq(legacy.trainall,true)
     eq(legacy.combine_skills_runes,true); eq(legacy.skills_runes_tab,"skills"); eq(legacy.auto_wrap,false); eq(legacy.align_input,true); eq(legacy.main_skills,false); eq(legacy.skill_filter,false)
     files[destination()]="return {side_text_scale=1,auto_wrap=false}"
     eq(assert(Adapter.loadDisplaySettings()).combine_skills_runes,true); eq(assert(Adapter.loadDisplaySettings()).skills_runes_tab,"skills")

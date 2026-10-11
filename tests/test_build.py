@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 EXPECTED_EDITION='player'
 EXPECTED_REPOSITORY='dragons-gate-player-hud'
+EXPECTED_VERSION='0.3.99'
 class BuildTest(unittest.TestCase):
     def run_lua(self, source, cwd):
         completed=subprocess.run(['lua','-'],input=source,text=True,cwd=cwd,capture_output=True)
@@ -13,6 +14,7 @@ class BuildTest(unittest.TestCase):
     def test_build_emits_verified_owned_package(self):
         with tempfile.TemporaryDirectory() as td:
             defaults=(ROOT/'src/defaults.lua').read_text()
+            self.assertEqual(re.search(r'version\s*=\s*"([^"]+)"',defaults).group(1),EXPECTED_VERSION)
             self.assertEqual(re.search(r'edition\s*=\s*"([^"]+)"',defaults).group(1),EXPECTED_EDITION)
             owner=re.search(r'github\s*=\s*\{\s*owner="([^"]+)"',defaults).group(1)
             repository=re.search(r'github\s*=\s*\{[^}]*repository="([^"]+)"',defaults).group(1)

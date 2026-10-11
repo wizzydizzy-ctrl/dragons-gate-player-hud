@@ -29,6 +29,32 @@ local function fake()
   return f
 end
 
+test("owned fresh requests publish parsed data once and suppress their outgoing echo",function()
+  local f=fake(); local changes=0; local c=Collector.new(f,Parser,function() changes=changes+1 end)
+  c:start()
+  local originalSend=f.sendCommand
+  function f:sendCommand(command) originalSend(self,command); self:outgoing(command); return true end
+  local begun,done,result=0,0,nil
+  c.onCaptureBegin=function(command) eq(command,"info magic"); begun=begun+1 end
+  assert(c:request("info mag",function(value,err) done=done+1; result=value; eq(err,nil) end))
+  eq(f.sent[1],"info mag"); eq(c.active.command,"info magic"); eq(begun,1)
+  eq(c:request("skill",function() error("must not run") end),nil)
+  f:lines(runes); eq(done,1); eq(changes,1); eq(result.items[1].name,"Healing")
+  c:cancelActive(); c:shutdown(); eq(done,1)
+end)
+test("owned requests report cancellation interruption incomplete output and send failure",function()
+  for _,mode in ipairs({"cancel","interrupt","incomplete","send"}) do
+    local f=fake(); local c=Collector.new(f,Parser,function() end); c:start(); local calls,result,err=0
+    if mode=="send" then function f:sendCommand() return nil,"failed" end end
+    local ok=c:request("info mag",function(value,why) calls=calls+1; result=value; err=why end)
+    if mode=="cancel" then c:cancelActive()
+    elseif mode=="interrupt" then f:outgoing("skill")
+    elseif mode=="incomplete" then c:finish(nil)
+    else eq(ok,nil) end
+    eq(calls,1); eq(result,nil); assert(type(err)=="string")
+    c:shutdown(); eq(calls,1)
+  end
+end)
 test("tracked commands send one delayed blank prompt nudge",function()
   local f=fake(); local c=Collector.new(f,Parser,function() end); c:start(); f:outgoing("inventory")
   eq(#f.sent,0); eq(f:fireDelay(.15),true); eq(#f.sent,1); eq(f.sent[1],""); eq(f:fireDelay(.15),false)
@@ -601,4 +627,147 @@ test("returning to the account menu ends character activity and cancels collecti
   local f=fake(); local exits=0; local c=Collector.new(f,Parser,function() end,nil,function() end,function() exits=exits+1 end); c:start()
   f:line("Welcome to Dragon's Gate, Test!"); eq(c.active_character,"Test"); assert(c:refresh()); eq(c.active.command,"inventory")
   f:line("    Dragon's Gate Menu"); eq(c.active_character,nil); eq(c.active,nil); eq(c.refreshed,false); eq(exits,1)
+end)
+local ownedActionRuneHeader="You have the following elemental runes available to you..."
+local ownedActionBadRuneRows={
+  {name="malformed second column",rows={"force - 3 weaves remain   healing - ??? weaves remain"}},
+  {name="malformed separate row",rows={"force - 3 weaves remain","healing - ??? weaves remain"}},
+  {name="trailing garbage",rows={"force - 3 weaves remain trailing garbage"}},
+  {name="second column suffix",rows={"force - 3 weaves remain   healing - 4 weaves remain trailing garbage"}},
+  {name="unsafe semicolon name",rows={"force - 3 weaves remain","healing;quit - 4 weaves remain"}},
+  {name="unsafe digit name",rows={"force - 3 weaves remain","healing2 - 4 weaves remain"}},
+  {name="unsafe underscore name",rows={"force - 3 weaves remain","life_force - 4 weaves remain"}},
+  {name="unsafe hyphen name",rows={"force - 3 weaves remain","life-force - 4 weaves remain"}},
+  {name="unsafe quoted name",rows={"force - 3 weaves remain",'"healing" - 4 weaves remain'}},
+}
+local function ownedActionLines(header,rows,ending)
+  local lines={header}
+  for _,row in ipairs(rows) do lines[#lines+1]=row end
+  lines[#lines+1]=ending or ">"
+  return lines
+end
+local function ownedActionFixture(command)
+  local f=fake(); local changes,calls=0,0; local result,responseError
+  local key=command=="skill" and "skills" or "runes"
+  local prior={items={{name="Previously Saved",remaining=77,remain=99,level=4}}}
+  local unrelated={marker="keep"}
+  local c=Collector.new(f,Parser,function(snapshot,changed)
+    changes=changes+1; eq(changed,key); eq(snapshot[key]~=prior,true)
+  end)
+  c.snapshot[key]=prior; c.snapshot.info=unrelated; assert(c:start())
+  assert(c:request(command,function(value,err) calls=calls+1; result=value; responseError=err end))
+  return f,c,prior,function(valid,count)
+    eq(calls,1); eq(c.snapshot.info,unrelated)
+    if valid then
+      eq(responseError,nil); eq(type(result),"table"); eq(changes,1)
+      eq(c.snapshot[key],result); eq(#result.items,count)
+    else
+      eq(result,nil); eq(type(responseError),"string"); assert(#responseError>0)
+      eq(changes,0); eq(c.snapshot[key],prior)
+      eq(prior.items[1].name,"Previously Saved"); eq(prior.items[1].remaining,77)
+      eq(prior.items[1].remain,99); eq(prior.items[1].level,4)
+    end
+    eq(c.active,nil); eq(#f.sent,1); eq(f.sent[1],command)
+    assert(c:shutdown()); eq(calls,1); eq(f:owned(),0)
+  end
+end
+for _,case in ipairs(ownedActionBadRuneRows) do
+  test("owned rune request rejects "..case.name.." before callback and snapshot publication",function()
+    for _,command in ipairs({"info mag","info magic"}) do
+      local f,c,prior,check=ownedActionFixture(command)
+      f:lines(ownedActionLines(ownedActionRuneHeader,case.rows))
+      check(false)
+    end
+  end)
+end
+test("owned skill requests reject malformed rows and suffixes at prompts and blank boundaries",function()
+  for _,row in ipairs({"Dodging ??? 2","Dodging 0 ???","Dodging 0 2 trailing garbage","Dodging 0 2;quit"}) do
+    for _,ending in ipairs({">",""}) do
+      local f,c,prior,check=ownedActionFixture("skill")
+      f:lines(ownedActionLines("Skill Remain Level",{"Brawling 0 4",row},ending))
+      if ending=="" then assert(f:fireDelay(0),"Expected a deferred skill boundary") end
+      check(false)
+    end
+  end
+end)
+test("owned rune requests publish complete two-column ANSI tables with player and staff prompts",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local f,c,prior,check=ownedActionFixture(command)
+      f:lines({"\27[33m"..ownedActionRuneHeader.."\27[0m","",
+        "\27[32mforce - 3 weaves remain   healing - 20 weaves remain\27[0m",
+        "life force - 0 weaves remain   light - 1 weave remain","\27[0m"..prompt.."\27[0m"})
+      check(true,4)
+    end
+  end
+end)
+test("owned rune requests accept confirmed empty tables and replace previous snapshots",function()
+  for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+    local f,c,prior,check=ownedActionFixture("info mag")
+    f:lines({ownedActionRuneHeader,"",prompt}); check(true,0)
+  end
+end)
+test("owned skill requests retain unknown valid names and complete once at deferred blank boundaries",function()
+  for _,ending in ipairs({">","[199] 301/301 hp, 173/173 ftg >",""}) do
+    local f,c,prior,check=ownedActionFixture("skill")
+    f:lines({"\27[33mSkill Remain Level\27[0m","*Psionics 0 50",
+      "\27[32mFuture Unknown Skill 0 3\27[0m","Swimming 10 2",ending})
+    if ending=="" then
+      eq(c.snapshot.skills,prior); assert(f:fireDelay(0)); eq(f:fireDelay(0),false)
+    end
+    eq(c.snapshot.skills.items[1].name,"Psionics")
+    eq(c.snapshot.skills.items[2].name,"Future Unknown Skill")
+    check(true,3)
+  end
+end)
+test("owned action requests ignore recognized interleaved chat and training announcements",function()
+  local notices={'Aerin (ELDER): "healing - 0 weaves remain"','Tester (ESP): "force - 0 weaves remain"',
+    "[GM] Aerin: Future Skill 0 999",'Aerin says, "life force - 0 weaves remain"',
+    "You now feel more skilled in Brawling."}
+  for _,command in ipairs({"info magic","skill"}) do
+    local f,c,prior,check=ownedActionFixture(command)
+    f:line(command=="skill" and "Skill Remain Level" or ownedActionRuneHeader)
+    f:line(command=="skill" and "Brawling 0 4" or "force - 3 weaves remain")
+    f:lines(notices)
+    f:line(command=="skill" and "Future Unknown Skill 10 2" or "healing - 20 weaves remain")
+    f:line(">"); check(true,2)
+    local parsed=c.snapshot[command=="skill" and "skills" or "runes"]
+    eq(parsed.items[1].name,command=="skill" and "Brawling" or "Force")
+    eq(command=="skill" and parsed.items[1].remain or parsed.items[1].remaining,command=="skill" and 0 or 3)
+  end
+end)
+test("owned incomplete rune and skill responses leave retained snapshots unchanged",function()
+  for _,command in ipairs({"info mag","skill"}) do
+    local f,c,prior,check=ownedActionFixture(command)
+    f:line(command=="skill" and "Skill Remain Level" or ownedActionRuneHeader)
+    f:line(command=="skill" and "Brawling 0 4" or "force - 3 weaves remain")
+    assert(c.active); c:finish(nil); check(false)
+  end
+end)
+test("interrupted owned malformed skill boundary never publishes a permissively parsed subset",function()
+  local f=fake(); local changed=0; local calls=0; local result,responseError
+  local prior={items={{name="Previous Skill",remain=99,level=2}}}
+  local c=Collector.new(f,Parser,function() changed=changed+1 end)
+  c.snapshot.skills=prior; assert(c:start())
+  assert(c:request("skill",function(value,err) calls=calls+1; result=value; responseError=err end))
+  f:lines({"Skill Remain Level","Brawling 0 4","Dodging ??? 2",""})
+  assert(c.skill_boundary); local stale=f.timers[c.skill_boundary]
+  f:outgoing("info")
+  eq(calls,1); eq(result,nil); eq(type(responseError),"string"); assert(#responseError>0)
+  eq(changed,0); eq(c.snapshot.skills,prior); eq(prior.items[1].remain,99)
+  eq(c.active.command,"info"); eq(c.skill_boundary,nil)
+  stale(); eq(changed,0); eq(c.snapshot.skills,prior); eq(calls,1)
+  assert(c:shutdown()); eq(calls,1); eq(f:owned(),0)
+end)
+test("manual rune and skill collection remains permissive without an owned request callback",function()
+  for _,command in ipairs({"info magic","skill"}) do
+    local f=fake(); local changes=0
+    local c=Collector.new(f,Parser,function() changes=changes+1 end); assert(c:start()); f:outgoing(command)
+    f:lines(command=="skill" and {"Skill Remain Level","Brawling 0 4","Dodging ??? 2",">"}
+      or {ownedActionRuneHeader,"force - 3 weaves remain","healing - ??? weaves remain",">"})
+    local parsed=c.snapshot[command=="skill" and "skills" or "runes"]
+    eq(changes,1); eq(#parsed.items,1)
+    eq(parsed.items[1].name,command=="skill" and "Brawling" or "Force")
+    assert(c:shutdown()); eq(f:owned(),0)
+  end
 end)

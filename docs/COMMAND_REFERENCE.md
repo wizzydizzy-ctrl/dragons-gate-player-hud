@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.98.
+Applies to DGHUD v0.3.99.
 
 Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
@@ -31,9 +31,25 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 
 For setup and repair steps, see [Installation and First Start](INSTALLATION_AND_FIRST_START.md) and [Updates and Recovery](UPDATES_AND_RECOVERY.md). For text sizing and display controls, see [Options and Display](OPTIONS_AND_DISPLAY.md).
 
+## Rune renewal and training shortcuts
+
+These shortcuts start **ON**. Change each independently under **OPTIONS → Skills & Runes**, then click **Save**. They work independently of **SKILL FILTERS**.
+
+| Command | What it does |
+| --- | --- |
+| `shoprenew` | Request fresh `info mag`, then send `shop renew <rune>` for each rune with **fewer than 20** weaves. A rune at exactly 20 is not renewed. |
+| `shoprenewall` | Request fresh `info mag`, then renew every rune in that response. |
+| `trainall` | Request fresh `skill`, then send `train raise <skill number>` for each known skill with **0 uses**. |
+| `shoprenewstop` | Stop the current renewal or training queue. |
+| `trainallstop` | Also stop the current renewal or training queue. |
+
+Go to a suitable shop or trainer first. These commands perform real game actions and may spend currency or training resources; they do not move you there or bypass requirements. Commands are sent one at a time, **one second apart**. Only one queue runs at a time. If character information is still refreshing, wait and try again.
+
+An incomplete response sends no renewal or training commands. Disconnecting, changing characters, reloading/updating the HUD, disabling the active shortcut, or sending an unrelated manual command stops the queue. Commands already sent cannot be undone. Training uses the game's skill IDs, not display positions; an unknown skill is never guessed.
+
 ## Skills commands
 
-**OPTIONS → Skill Settings → SKILL FILTERS** defaults **ON**. The argument commands below describe HUD filtering while ON. To use a native staff command such as `skill Rath`, choose **OFF** and **Save**. Every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, then passes unchanged to the game exactly once with its original casing and spacing, without a queued local filter or a busy/display-unavailable rejection. Bare `skill` still refreshes the sidebar and uses your **MAIN SKILLS** formatting choice.
+**OPTIONS → Skills & Runes → SKILL FILTERS** defaults **ON**. The argument commands below describe HUD filtering while ON. To use a native staff command such as `skill Rath`, choose **OFF** and **Save**. Every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, then passes unchanged to the game exactly once with its original casing and spacing, without a queued local filter or a busy/display-unavailable rejection. Bare `skill` still refreshes the sidebar and uses your **MAIN SKILLS** formatting choice.
 
 **MAIN SKILLS** controls formatting separately; turning it off does not disable enabled filters. Save commits the draft; Cancel or dismissing the panel discards it. Reset restores filters ON only after Save. Failed saves keep active settings unchanged, and saving OFF cancels pending local filters. The saved choice survives other display changes, reloads, updates, and restarts.
 

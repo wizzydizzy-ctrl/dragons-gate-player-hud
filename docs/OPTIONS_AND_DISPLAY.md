@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.98**.
+Applies to DGHUD **v0.3.99**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -108,7 +108,11 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 ## Skill Settings
 
-**SKILL FILTERS: ON/OFF** is the first control in **OPTIONS → Skill Settings**. It defaults **ON** when no choice is saved (the boolean `display.skill_filter`). ON enables the HUD's group and name-prefix searches. Turn it **OFF** and click **Save** to send native staff commands such as `skill Rath` to the game.
+Open **OPTIONS → SKILLS & RUNES** for skill display/filter/sort choices and the **Quick Commands** switches. `shoprenew`, `shoprenewall`, and `trainall` each default **ON** and can be turned off independently. **Save** keeps your choices across restarts and updates; **Cancel** discards this draft. Disabling a running shortcut stops its remaining queue only after Save.
+
+`shoprenew` checks fresh runes and renews those below 20 weaves; `shoprenewall` renews them all. `trainall` checks fresh skills and sends `train raise <game ID>` for zero-use skills. Each sends one command per second. Be at the appropriate shop/trainer, with the required currency/resources. `shoprenewstop` or `trainallstop` stops the active queue. [Full command details](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
+
+**SKILL FILTERS: ON/OFF** is a control in **OPTIONS → Skills & Runes**. It defaults **ON** when no choice is saved (the boolean `display.skill_filter`). ON enables the HUD's group and name-prefix searches. Turn it **OFF** and click **Save** to send native staff commands such as `skill Rath` to the game.
 
 With filters OFF, every `skill` command with an argument—including `all`, `weapons`, `combat`, `utility`, and `train`—is sent unchanged exactly once, retaining casing and spacing. DGHUD queues no local search and does not reject these commands because a skill refresh is busy or the local display is unavailable. Bare `skill` still captures the complete sidebar list and follows **MAIN SKILLS** formatting. Filtering and formatting are independent: turning MAIN SKILLS off alone keeps enabled filters active.
 

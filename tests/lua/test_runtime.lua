@@ -541,7 +541,7 @@ test("cleanup reconciliation requires a valid fresh current room after mutation"
 end)
 
 test("shutdown removes all cleanup and transfer map aliases",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+29)
+  local f=fake(); local hud=Main.new(f,{layout={}}); assert(hud:start()); local before=f:count(f.aliases); eq(before,#Events.aliases+34)
   local owned={}; for id,alias in pairs(f.aliases) do if alias.pattern:match("%^dghud map ") then owned[id]=true end end; eq(f:count(owned),17)
   assert(hud:shutdown()); for id in pairs(owned) do eq(f.killed[id],true) end; eq(f:count(f.aliases),0)
 end)
@@ -2632,7 +2632,7 @@ end
 
 test("skill prefix alias uses scoped case insensitive capture and owns exactly one registration across reload",function()
   withSkillPrefix(true,function(f,hud)
-    eq(f:count(f.aliases),#Events.aliases+29)
+    eq(f:count(f.aliases),#Events.aliases+34)
     local callback=assert(aliasCallback(f,skillPrefixPattern))
     eq(aliasCallback(f,"^skill$"),nil); eq(aliasCallback(f,"^(?i:skill)$"),nil)
     local seen={}; hud.requestSkills=function(_,query) seen[#seen+1]=query; return true end
@@ -2641,8 +2641,8 @@ test("skill prefix alias uses scoped case insensitive capture and owns exactly o
     _G.matches={"sKiLl Sh","Sh"}; local ok,err=pcall(callback); _G.matches=previous; assert(ok,err)
     eq(#seen,3); for _,query in ipairs(seen) do eq(query,"Sh") end
     local owned; for id,alias in pairs(f.aliases) do if alias.pattern==skillPrefixPattern then owned=id end end
-    assert(hud:start()); eq(f:count(f.aliases),#Events.aliases+29)
-    assert(hud:reload()); eq(f.killed[owned],true); eq(f:count(f.aliases),#Events.aliases+29)
+    assert(hud:start()); eq(f:count(f.aliases),#Events.aliases+34)
+    assert(hud:reload()); eq(f.killed[owned],true); eq(f:count(f.aliases),#Events.aliases+34)
     local count=0; for _,alias in pairs(f.aliases) do if alias.pattern==skillPrefixPattern then count=count+1 end end; eq(count,1)
   end)
 end)

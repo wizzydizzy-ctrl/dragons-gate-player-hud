@@ -426,4 +426,97 @@ test("parses named game months from Dragon's Gate 4.0.9.4",function()
   eq(Parser.parseTime({namedTime[1],namedTime[2],namedTime[3]}),nil); eq(Parser.isComplete("time",namedTime),true)
 end)
 
+local actionRuneHeader="You have the following elemental runes available to you..."
+local invalidActionRuneRows={
+  {name="malformed second column",rows={"  force - 3 weaves remain   healing - ??? weaves remain"}},
+  {name="malformed separate row",rows={"  force - 3 weaves remain","  healing - ??? weaves remain"}},
+  {name="trailing garbage",rows={"  force - 3 weaves remain trailing garbage"}},
+  {name="second column suffix",rows={"  force - 3 weaves remain   healing - 4 weaves remain trailing garbage"}},
+  {name="unsafe semicolon name",rows={"  force - 3 weaves remain","  healing;quit - 4 weaves remain"}},
+  {name="unsafe digit name",rows={"  force - 3 weaves remain","  healing2 - 4 weaves remain"}},
+  {name="unsafe underscore name",rows={"  force - 3 weaves remain","  life_force - 4 weaves remain"}},
+  {name="unsafe hyphen name",rows={"  force - 3 weaves remain","  life-force - 4 weaves remain"}},
+  {name="unsafe quoted name",rows={"  force - 3 weaves remain",'  "healing" - 4 weaves remain'}},
+}
+local function actionLines(header,rows,ending)
+  local lines={header}
+  for _,row in ipairs(rows) do lines[#lines+1]=row end
+  lines[#lines+1]=ending or ">"
+  return lines
+end
+for _,case in ipairs(invalidActionRuneRows) do
+  test("action response validator rejects rune "..case.name.." rather than accepting a parsed subset",function()
+    for _,command in ipairs({"info mag","info magic"}) do
+      local valid,err=Parser.validateActionResponse(command,actionLines(actionRuneHeader,case.rows))
+      eq(valid,nil); eq(type(err),"string"); assert(#err>0)
+    end
+  end)
+end
+test("action response validator rejects malformed skill rows and unconsumed suffixes",function()
+  for _,row in ipairs({"Dodging ??? 2","Dodging 0 ???","Dodging 0 2 trailing garbage","Dodging 0 2;quit"}) do
+    for _,ending in ipairs({">",""}) do
+      local valid,err=Parser.validateActionResponse("skill",actionLines("Skill Remain Level",{"Brawling 0 4",row},ending))
+      eq(valid,nil); eq(type(err),"string"); assert(#err>0)
+    end
+  end
+end)
+test("action response validator accepts complete two-column rune tables with ANSI and staff prompts",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local lines={"\27[33m"..actionRuneHeader.."\27[0m","",
+        "\27[32m  force - 3 weaves remain   healing - 20 weaves remain\27[0m",
+        "  life force - 0 weaves remain   light - 1 weave remain","\27[0m"..prompt.."\27[0m"}
+      local valid,err=Parser.validateActionResponse(command,lines); eq(valid,true); eq(err,nil)
+      local parsed=assert(Parser.parseRunes(lines)); eq(#parsed.items,4); eq(parsed.items[1].name,"Life force")
+      eq(parsed.items[1].remaining,0); eq(parsed.items[4].name,"Healing")
+    end
+  end
+end)
+test("action response validator accepts confirmed empty rune tables but rejects a missing header",function()
+  for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+    local lines={actionRuneHeader,"",prompt}
+    local valid,err=Parser.validateActionResponse("info magic",lines); eq(valid,true); eq(err,nil)
+    eq(#assert(Parser.parseRunes(lines)).items,0)
+  end
+  local valid,err=Parser.validateActionResponse("info magic",{"force - 3 weaves remain",">"})
+  eq(valid,nil); eq(type(err),"string"); assert(#err>0)
+end)
+test("action response validator accepts unknown valid skill names readiness markers and blank boundaries",function()
+  for _,ending in ipairs({">","[199] 301/301 hp, 173/173 ftg >",""}) do
+    local lines={"\27[33mSkill Remain Level\27[0m","*Psionics 0 50",
+      "\27[32mFuture Unknown Skill 0 3\27[0m","Swimming 10 2",ending}
+    local valid,err=Parser.validateActionResponse("skill",lines); eq(valid,true); eq(err,nil)
+    local parsed=assert(Parser.parseSkills(lines,ending=="")); eq(#parsed.items,3)
+    eq(parsed.items[1].name,"Psionics"); eq(parsed.items[2].name,"Future Unknown Skill")
+  end
+end)
+test("action response validator ignores recognized interleaved chat and training announcements",function()
+  local notices={'Aerin (ELDER): "healing - 0 weaves remain"','Tester (ESP): "force - 0 weaves remain"',
+    "[GM] Aerin: Future Skill 0 999",'Aerin says, "life force - 0 weaves remain"',
+    "You now feel more skilled in Brawling."}
+  for _,command in ipairs({"info magic","skill"}) do
+    local lines={command=="skill" and "Skill Remain Level" or actionRuneHeader,
+      command=="skill" and "Brawling 0 4" or "force - 3 weaves remain"}
+    for _,notice in ipairs(notices) do lines[#lines+1]=notice end
+    lines[#lines+1]=command=="skill" and "Future Unknown Skill 10 2" or "healing - 20 weaves remain"
+    lines[#lines+1]=">"
+    local original={}; for index,line in ipairs(lines) do original[index]=line end
+    local valid,err,vetted=Parser.validateActionResponse(command,lines); eq(valid,true); eq(err,nil)
+    eq(type(vetted),"table"); eq(#vetted,4)
+    for index,line in ipairs(original) do eq(lines[index],line) end
+    eq(#lines,#original)
+    for _,line in ipairs(vetted) do for _,notice in ipairs(notices) do eq(line==notice,false) end end
+    local parsed=assert(command=="skill" and Parser.parseSkills(vetted) or Parser.parseRunes(vetted))
+    eq(#parsed.items,2)
+    eq(parsed.items[1].name,command=="skill" and "Brawling" or "Force")
+    eq(command=="skill" and parsed.items[1].remain or parsed.items[1].remaining,command=="skill" and 0 or 3)
+  end
+end)
+test("manual rune and skill parsers retain permissive display behavior for malformed rows",function()
+  local runeLines=actionLines(actionRuneHeader,{"force - 3 weaves remain","healing - ??? weaves remain"})
+  local parsed=assert(Parser.parseRunes(runeLines)); eq(#parsed.items,1); eq(parsed.items[1].name,"Force")
+  parsed=assert(Parser.parseSkills(actionLines("Skill Remain Level",{"Brawling 0 4","Dodging ??? 2"})))
+  eq(#parsed.items,1); eq(parsed.items[1].name,"Brawling")
+end)
+
 return {inventory=inventory,stat=stat,info=info,religion=religion,skills=skills,time=time}

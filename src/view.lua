@@ -25,11 +25,6 @@ local function groupedNumber(value)
   repeat text,changed=text:gsub("^(-?%d+)(%d%d%d)","%1,%2") until changed==0
   return text
 end
-local function alignmentLabel(value)
-  local raw=tostring(value or ""); local key=raw:lower()
-  if key=="order" then return "Orderly" elseif key=="entropy" then return "Entropic" elseif key=="chaos" then return "Chaotic" end
-  return raw
-end
 local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62",WORLD="#9eafc6"}
 local CHAT_DISPLAY_LIMIT=1000
 local CHAT_NATIVE_LINES=100000
@@ -117,8 +112,6 @@ function View.identityContent(character,t,layout,needs)
   if character.religion and character.religion~="" then faithValues[#faithValues+1]=esc(character.religion) end
   if character.favors~=nil then faithValues[#faithValues+1]=groupedNumber(character.favors) end
   local faith=#faithValues>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(faithValues," · ").."</span>" or ""
-  local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
-  local standingLine=#standing>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(standing," · ").."</span>" or ""
   needs=type(needs)=="table" and needs or {}; local hunger=needs.hunger or {}; local thirst=needs.thirst or {}
   local hungerText={unknown="—",ok="Ok",satiated="Satiated",full="Full",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",ok="Ok",quenched="Quenched",sloshing="Sloshing",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched",dehydrated="Dehydrated"}
   local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,full=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,sloshing="#d6a84b",thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42",dehydrated="#d34a42"}
@@ -128,7 +121,7 @@ function View.identityContent(character,t,layout,needs)
     local ordinal=tostring(physical.life_stage or ""):lower():match("^(%d+[a-z][a-z])%s+stage$")
     if ordinal then role=ordinal.." Stage" end
   end
-  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..standingLine..needsLine,layout.body_font)
+  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..needsLine,layout.body_font)
 end
 function View.headerContent(layout,t,fullName)
   local detail=layout.mode=="compact" and " &nbsp; <span style='color:"..t.text.."'><b>"..esc(fullName).."</b></span>" or ""
@@ -253,15 +246,29 @@ function View.inventoryRequiredColumns(items)
   end
   return columns
 end
-function View.runesRequiredColumns(items)
-  local columns=28
+local RUNE_NAME_HEADER="Runes"
+local RUNE_COUNT_HEADER="Weaves Remain"
+local function runeFields(rune)
+  local name=tostring(rune.name or rune.rune or rune.label or "—"):gsub("%c"," ")
+  local amount=rune.remaining or rune.remain or rune.weaves or rune.count
+  return name,(tostring(amount~=nil and amount or ""):gsub("%c"," "))
+end
+local function runeTextColumns(text)
+  -- UTF-8 continuation bytes do not occupy extra monospace columns.
+  local _,continuations=text:gsub("[\128-\191]","")
+  return #text-continuations
+end
+local function runeColumnWidths(items)
+  local nameWidth,countWidth=#RUNE_NAME_HEADER,#RUNE_COUNT_HEADER
   for _,rune in ipairs(type(items)=="table" and items or {}) do
-    local name=tostring(rune.name or rune.rune or rune.label or "—")
-    local amount=rune.remaining or rune.remain or rune.weaves or rune.count
-    local text=name..(amount~=nil and " - "..tostring(amount).." weaves remain" or "")
-    columns=math.max(columns,math.min(160,#text))
+    local name,amount=runeFields(rune)
+    nameWidth=math.max(nameWidth,runeTextColumns(name)); countWidth=math.max(countWidth,runeTextColumns(amount))
   end
-  return columns
+  return nameWidth,countWidth
+end
+function View.runesRequiredColumns(items)
+  local nameWidth,countWidth=runeColumnWidths(items)
+  return nameWidth+2+countWidth
 end
 function View.inventoryFooterLines(vitals,t,capacity)
   vitals=type(vitals)=="table" and vitals or {}; t=type(t)=="table" and t or {}
@@ -402,7 +409,12 @@ local help_entries={
   {command="skill combat",description="Show all combat skills, including ready-to-train skills. Zero-use rows stay green."},
   {command="skill utility",description="Show all utility skills, including ready-to-train skills. Zero-use rows stay green."},
   {command="skill train",description="Show green skills with 0 uses left, ready for training. Only displays the list; never sends a game train command."},
-  {command="skill <prefix>",description="With SKILL FILTERS on, show matching skills: skill claw, skill bite, skill c, skill id, or skill ste. Matching ignores case and supports shortened names. OPTIONS > Skill Settings > SKILL FILTERS: OFF sends arguments to the game instead, allowing staff skill Rath."},
+  {command="skill <prefix>",description="With SKILL FILTERS on, show matching skills: skill claw, skill bite, skill c, skill id, or skill ste. Matching ignores case and supports shortened names. OPTIONS > SKILLS & RUNES… > SKILL FILTERS: OFF sends arguments to the game instead, allowing staff skill Rath."},
+  {command="shoprenew",description="Renew runes with fewer than 20 weaves remaining (including 0)."},
+  {command="shoprenewall",description="Renew all possessed runes, regardless of weaves remaining."},
+  {command="trainall",description="Train skills with 0 uses remaining using train raise <authoritative skill ID> for each skill."},
+  {command="shoprenewstop",description="Cancel the current shoprenew or shoprenewall command sequence."},
+  {command="trainallstop",description="Cancel the current trainall command sequence."},
   {command="dghud colors [on|off|toggle|status]",description="Control all optional DGHUD output colors."},
   {command="dghud colors <feature> on|off|toggle|status",description="Toggle room, exits, currency, races, classes, travel, combat, spell, discovery, or illumination highlights."},
   {command="dghud check",description="Check GitHub for a newer HUD release."},
@@ -551,7 +563,7 @@ function View.new(settings)
   self.option_action_order={"command_help","refresh_data","auto_update","base_ui_toggle","text_size","auto_main_wrap","align_main_input","main_skills","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
   local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",base_ui_toggle="MUDLET UI: UNAVAILABLE",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   actionLabels.main_skills="MAIN SKILLS: ON"
-  actionLabels.skill_settings="SKILL SETTINGS…"
+  actionLabels.skill_settings="SKILLS & RUNES…"
   actionLabels.combine_skills_runes="COMBINED SKILLS / RUNES: ON"
   for index,key in ipairs(self.option_action_order) do if key=="text_size" then table.insert(self.option_action_order,index+1,"combine_skills_runes"); break end end
   for index,key in ipairs(self.option_action_order) do if key=="main_skills" then table.insert(self.option_action_order,index+1,"skill_settings"); break end end
@@ -1045,7 +1057,7 @@ function View:layoutCompactLists(layout,top)
   self.skill_character_capacity=math.max(1,math.floor(self.skills_content_width/self.list_character_width)); self.skill_level_width=self.skill_character_capacity>=8 and 3 or 2; self.skill_use_width=self.skill_character_capacity>=8 and 4 or 3
   local fixedColumns=self.skill_level_width+self.skill_use_width; self.skill_column_gaps=math.min(2,math.max(0,self.skill_character_capacity-fixedColumns-1)); self.skill_name_width=math.min(20,math.max(1,self.skill_character_capacity-fixedColumns-self.skill_column_gaps))
   for key,widgets in pairs(listWidgets) do if key~=active then for _,widget in ipairs(widgets) do widget:hide() end end end
-  local inventory_rows=#inventoryItems; local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0; local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
+  local inventory_rows=#inventoryItems; local rune_rows=1+(self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0); local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
   if active=="inventory" then
     local vitals=self.last_state and self.last_state.vitals or {}; local footer_capacity=math.max(4,math.floor(list_w/math.max(1,self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font))))); self.inventory_footer_capacity=footer_capacity
     local footer_lines=View.inventoryFooterLines(vitals,t,footer_capacity); local footer_h=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/math.max(1,layout.list_font)),math.ceil((layout.list_font+2)*1.3))*#footer_lines+3; local inner_h=math.max(1,card_h-rp*2)
@@ -1174,7 +1186,7 @@ function View:applyLayout(layout)
     self.skill_column_gaps=math.min(2,math.max(0,self.skill_character_capacity-fixedColumns-1))
     self.skill_name_width=math.min(20,math.max(1,self.skill_character_capacity-fixedColumns-self.skill_column_gaps))
     local inventory_rows=#inventoryItems
-    local rune_rows=self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0
+    local rune_rows=1+(self.last_state and self.last_state.runes and #(self.last_state.runes.items or {}) or 0)
     local skill_rows=self.last_state and self.last_state.skills and #(self.last_state.skills.items or {}) or 0
     self.inventory_content:resize(self.inventory_content_width,math.max(layout.list_row_height*5,inventory_rows*layout.list_row_height))
     self.runes_content:resize(self.runes_content_width,math.max(layout.list_row_height*5,rune_rows*layout.list_row_height))
@@ -3052,7 +3064,7 @@ function View:renderColorOptions()
     button:setStyleSheet("background:"..(enabled and "#17231c" or "#111512")..";border:1px solid "..(enabled and "#385044" or t.border)..";border-radius:4px;color:"..color..";font-weight:700;")
     button:echo(View.withFont("<center>"..button.option_text.." &nbsp; <b>"..(enabled and "ON" or "OFF").."</b></center>",font))
   end
-  for _,button in pairs(self.option_action_buttons or {}) do button:setStyleSheet("background:#151d18;border:1px solid "..t.border..";border-radius:4px;color:"..t.accent..";font-weight:700;"); button:echo(View.withFont("<center>"..button.option_text.."</center>",font)) end
+  for _,button in pairs(self.option_action_buttons or {}) do button:setStyleSheet("background:#151d18;border:1px solid "..t.border..";border-radius:4px;color:"..t.accent..";font-weight:700;"); button:echo(View.withFont("<center>"..esc(button.option_text).."</center>",font)) end
   return true
 end
 function View:showRollerSettings(config)
@@ -3213,10 +3225,19 @@ function View:renderRunes(s)
   signature=table.concat(signature,"\30"); if signature==self.runes_signature then return end; self.runes_signature=signature
   self.runes_content_width=math.max(self.list_viewport_width or self.list_outer_width or 1,View.runesRequiredColumns(items)*(self.list_character_width or layout.list_font))
   self.runes_horizontal_overflow=self.runes_content_width>(self.list_viewport_width or self.list_outer_width or 1)
-  self.runes_title:echo("<b>RUNES</b>")
-  local lines={}; for _,rune in ipairs(items) do
-    local name=esc(rune.name or rune.rune or rune.label or "—"); local amount=rune.remaining or rune.remain or rune.weaves or rune.count
-    lines[#lines+1]=name..(amount~=nil and " <span style='color:"..self.settings.theme.muted.."'>- "..esc(amount).." weaves remain</span>" or "")
+  -- Keep both headers inside the ScrollBox so the count column scrolls with
+  -- every row. Nonbreaking spaces preserve the measured monospace columns.
+  self.runes_title:echo("")
+  local nameWidth,countWidth=runeColumnWidths(items)
+  local function fixed(text) return (esc(text):gsub(" ","&nbsp;")) end
+  local function columns(name,amount)
+    return fixed(name..string.rep(" ",nameWidth-runeTextColumns(name)+2)),fixed(string.rep(" ",countWidth-runeTextColumns(amount))..amount)
+  end
+  local headingName,headingCount=columns(RUNE_NAME_HEADER,RUNE_COUNT_HEADER)
+  local lines={"<span style='color:"..self.settings.theme.accent.."'><b>"..headingName..headingCount.."</b></span>"}
+  for _,rune in ipairs(items) do
+    local name,amount=runeFields(rune); local left,right=columns(name,amount)
+    lines[#lines+1]=left.."<span style='color:"..self.settings.theme.muted.."'>"..right.."</span>"
   end
   self.runes_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.runes_content:move(0,0); self.runes_content:resize(self.runes_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height))
   if self.combine_skills_runes~=false and not widgetVisible(self.runes_output) then self.runes_content:hide() else self.runes_content:show() end

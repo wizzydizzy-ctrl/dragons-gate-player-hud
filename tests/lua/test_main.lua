@@ -62,6 +62,98 @@ local function withRoot(fn)
   if not ok then error(err,0) end
 end
 
+test("every quick alias registers exactly once and reload retires its old runtime",function()
+  local hud,f=runtime(); local owned={}
+  for _,name in ipairs({"shoprenew","shoprenewall","trainall","shoprenewstop","trainallstop"}) do
+    local count=0
+    for id,entry in pairs(f.aliases) do if entry.pattern=="^(?i:"..name..")$" then count=count+1; owned[#owned+1]=id end end
+    eq(count,1)
+  end
+  assert(hud:reload())
+  for _,id in ipairs(owned) do eq(f.aliases[id],nil) end
+  for _,name in ipairs({"shoprenew","shoprenewall","trainall","shoprenewstop","trainallstop"}) do
+    local count=0; for _,entry in pairs(f.aliases) do if entry.pattern=="^(?i:"..name..")$" then count=count+1 end end; eq(count,1)
+  end
+  assert(hud:shutdown()); eq(next(f.aliases),nil)
+end)
+test("quick command aliases refresh runes export counts and send renewals one second apart",function()
+  withRoot(function()
+    _G.DGHUD={}
+    local f=fake(); local delays={}
+    local originalSchedule=f.schedule
+    function f:schedule(delay,fn) local id=originalSchedule(self,delay,fn); delays[id]=delay; return id end
+    function f:fireQuickTimer()
+      local id,entry
+      for key,delay in pairs(delays) do if delay==1 and self.timers[key] then id=key; entry=self.timers[key]; break end end
+      assert(id,"Expected a one-second quick timer"); self.timers[id]=nil; delays[id]=nil; entry()
+    end
+    function f:sendCommand(command)
+      self.sent[#self.sent+1]=command
+      for _,event in pairs(self.events) do if event.name=="sysDataSendRequest" then event.fn(nil,command) end end
+      return true
+    end
+    local hud=runtime({display={skill_filter=false}},f); _G.DGHUD.controller=hud; Main.installRunesApi(_G.DGHUD)
+    local alias
+    for _,entry in pairs(f.aliases) do if entry.pattern=="^(?i:shoprenew)$" then alias=entry.fn end end
+    assert(alias); assert(alias()); eq(f.sent[1],"info mag"); eq(hud.collector.active.command,"info magic")
+    for _,line in ipairs({"You have the following elemental runes available to you...",
+        "  disruption - 3 weaves remain   force - 20 weaves remain","  light - 19 weaves remain",">"}) do hud.collector:onLine(line) end
+    eq(_G.DGHUD.runes.values.disruption,3); eq(_G.DGHUD.runes.disruption,3); eq(_G.disruption,3)
+    eq(_G.DGHUD.runes.getRemaining("force"),20); eq(#f.sent,1)
+    f:fireQuickTimer(); eq(f.sent[2],"shop renew disruption")
+    f:fireQuickTimer(); eq(f.sent[3],"shop renew light"); eq(hud.quick_actions:busy(),false)
+    assert(hud:runQuickAction("shoprenewall")); eq(f.sent[4],"info mag")
+    eq(_G.disruption,nil); eq(_G.DGHUD.runes.getRemaining("disruption"),nil); eq(_G.DGHUD.runes.values.disruption,nil)
+    hud.collector:onLine("You have the following elemental runes available to you...")
+    hud.collector:onLine("  force - 100 weaves remain"); hud.collector:onLine(">")
+    eq(_G.DGHUD.runes.getRemaining("force"),100); f:fireQuickTimer(); eq(f.sent[5],"shop renew force")
+    assert(hud:shutdown()); eq(_G.disruption,nil); eq(_G.force,nil)
+  end)
+end)
+test("trainall uses fresh authoritative game IDs independently of skill filters and stops on settings changes",function()
+  withRoot(function()
+    _G.DGHUD={}
+    local f=fake(); local delays={}
+    local originalSchedule=f.schedule
+    function f:schedule(delay,fn) local id=originalSchedule(self,delay,fn); delays[id]=delay; return id end
+    local hud=runtime({display={skill_filter=false}},f)
+    assert(hud:runQuickAction("trainall")); eq(f.sent[1],"skill")
+    for _,line in ipairs({"Skill Remain Level","Sharp Weapons 0 4","Pole Weapons 0 2",
+      "Identify Armor Quality 0 2","Swimming 10 2","Future Unknown Skill 0 1",">"}) do hud.collector:onLine(line) end
+    local function nextQuick()
+      for id,delay in pairs(delays) do if delay==1 and f.timers[id] then
+        local fn=f.timers[id]; f.timers[id]=nil; delays[id]=nil; return fn
+      end end
+      error("No queued quick timer")
+    end
+    nextQuick()(); eq(f.sent[2],"train raise 2")
+    local stale=nextQuick()
+    local config=hud:skillSettings(); config.trainall=false
+    assert(hud:setSkillSettings(config)); eq(f.saved.trainall,false); eq(f.saved.shoprenew,true)
+    stale(); eq(#f.sent,2); eq(hud.quick_actions:busy(),false)
+    local ok,err=hud:runQuickAction("trainall"); eq(ok,nil); assert(type(err)=="string"); eq(#f.sent,2)
+    assert(hud:shutdown())
+  end)
+end)
+test("quick settings retain explicit OFF through unrelated saves and request interruption cancels spending",function()
+  withRoot(function()
+    _G.DGHUD={user_settings={}}
+    local hud,f=runtime()
+    local config=hud:skillSettings(); config.shoprenew=false; config.shoprenewall=false; config.trainall=false
+    assert(hud:setSkillSettings(config)); eq(_G.DGHUD.user_settings.display.shoprenew,false)
+    eq(hud:setDisplayTextSize("small"),"small")
+    eq(f.saved.shoprenew,false); eq(f.saved.shoprenewall,false); eq(f.saved.trainall,false)
+    assert(hud:shutdown())
+    local restored,g=runtime({display=f.saved}); eq(restored:quickActionEnabled("shoprenew"),false)
+    eq(restored:runQuickAction("shoprenew"),nil); eq(#g.sent,0)
+    local enabled=restored:skillSettings(); enabled.shoprenew=true; assert(restored:setSkillSettings(enabled))
+    assert(restored:runQuickAction("shoprenew")); eq(g.sent[1],"info mag")
+    restored.collector:onOutgoing("skill")
+    eq(restored.quick_actions:busy(),false)
+    restored.collector:onLine("Skill Remain Level"); restored.collector:onLine("Sharp Weapons 0 2"); restored.collector:onLine(">")
+    eq(#g.sent,1); assert(restored:shutdown())
+  end)
+end)
 test("combined panel controller starts with defaults and syncs persisted tab without sending commands",function()
   local hud,f=runtime()
   eq(f.view.combined,true); eq(f.view.tab,"skills"); eq(f.saves,0); eq(#f.sent,0); assert(hud:shutdown())

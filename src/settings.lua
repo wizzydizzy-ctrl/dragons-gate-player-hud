@@ -40,6 +40,9 @@ function Settings.resolve(defaults,input)
   local migrated,changed=Settings.migrate(input)
   local resolved=Settings.merge(defaults,migrated)
   resolved.display=type(resolved.display)=="table" and resolved.display or {}
+  for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    if type(resolved.display[key])~="boolean" then resolved.display[key]=true end
+  end
   if type(resolved.display.combine_skills_runes)~="boolean" then resolved.display.combine_skills_runes=true end
   if resolved.display.skills_runes_tab~="skills" and resolved.display.skills_runes_tab~="runes" then resolved.display.skills_runes_tab="skills" end
   for _,key in ipairs({"main_skill_sort","sidebar_skill_sort"}) do

@@ -318,6 +318,67 @@ function Parser.parseSkills(lines,tableBoundary)
   return result
 end
 
+-- Automated renew/train requests must not act on a partially parsed table.
+-- Manual/startup parsing remains tolerant of unrelated output; owned actions
+-- validate every table row and parse only the vetted rows below.
+function Parser.validateActionResponse(command,lines)
+  if command~="skill" and command~="info mag" and command~="info magic" then return true,nil,lines end
+  if type(lines)~="table" or #lines>1024 then return nil,"The game response could not be confirmed. No actions were sent." end
+  local header=false; local vetted={}; local complete=false; local rows=0
+  local function chatter(line)
+    return line:match("^%[GM%]") or line:match("^%[GUIDE%]")
+      or line:match("^%*%* .- just arrived in the world%.$")
+      or line:match("^%*%* .- has left the world")
+      or line:match('^[%a][%a\' ]- says, "') or line:match('^[%a][%a\' ]- asks, "')
+      or line:match('^[%a][%a\' %-]- %([A-Z]+%):%s*"')
+      or line:match("^You now feel more skilled in .-%.$")
+      or line:match("^You now feel prepared to train further in .-%.$")
+      or line:match("^Your [%a ]+ has increased!$")
+      or line=="Due to your diligent training, you have gained additional fatigue!"
+  end
+  for _,raw in ipairs(lines) do
+    local line=trim(raw)
+    local isHeader=command=="skill" and line:match("^Skill%s+Remain%s+Level$")
+      or command~="skill" and line=="You have the following elemental runes available to you..."
+    if isHeader then
+      if header then return nil,"The game response changed while refreshing. Try again; no actions were sent." end
+      header=true; vetted[#vetted+1]=line
+    elseif header then
+      if isPrompt(line) then vetted[#vetted+1]=line; complete=true; break end
+      if line=="" then vetted[#vetted+1]=line
+      elseif chatter(line) then -- Never reinterpret interleaved chat as a data row.
+      else
+        local valid=true
+        if #line>4096 or line:find("%c") then valid=false
+        elseif command=="skill" then
+          local name= line:match("^(.-)%s+%d+%s+%d+$")
+          name=name and name:gsub("^%*","")
+          valid=name and #name<=2048 and name:match("^[A-Za-z][A-Za-z /'%-]*$")~=nil
+        else
+          local remaining=line; local count=0
+          while remaining~="" do
+            local _,finish,rune=remaining:find("^([A-Za-z][A-Za-z ]-)%s*%-%s*%d+%s+weaves?%s+remain")
+            local name=rune and rune:match("^%s*(.-)%s*$"); local last=finish
+            if not last or not name or #name>80 or name:find("  ",1,true) then valid=false; break end
+            count=count+1
+            remaining=remaining:sub(last+1)
+            -- Adjacent columns require whitespace, not an attached suffix.
+            if remaining~="" and not remaining:match("^%s+") then valid=false; break end
+            remaining=remaining:match("^%s*(.-)%s*$")
+            if count>256 then valid=false; break end
+          end
+        end
+        if not valid then return nil,"The game response contained an unreadable row. Refresh it and try again; no actions were sent." end
+        rows=rows+1
+        vetted[#vetted+1]=line
+      end
+    end
+  end
+  if command=="skill" and rows>0 and trim(lines[#lines])=="" then complete=true end
+  if not header or not complete then return nil,"The game response was incomplete. Try again; no actions were sent." end
+  return true,nil,vetted
+end
+
 function Parser.parseTime(lines)
   if not hasPrompt(lines) then return nil,"incomplete time response" end
   for _,raw in ipairs(lines or {}) do

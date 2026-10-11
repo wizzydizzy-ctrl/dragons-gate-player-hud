@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.98**.
+Documentation covers **DGHUD v0.3.99**.
 
 ## Quick start
 
@@ -43,7 +43,18 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.98
+## Latest changes — v0.3.99
+
+- Runes now use clear **Runes / Weaves Remain** columns with the counts aligned on the right.
+- `shoprenew` refreshes runes and renews those below 20 weaves; `shoprenewall` renews the whole fresh list.
+- `trainall` refreshes skills and raises known skills with 0 uses by their game skill numbers.
+- Renewal/training commands are spaced one second apart. Independent, saved, on-by-default switches are in **OPTIONS → Skills & Runes**; stop with `shoprenewstop` or `trainallstop`.
+- Fresh rune counts are available as Lua variables, without overwriting unrelated globals or removing the existing rune APIs.
+- Removed the balance/alignment row from the name box and added wrapped staff-referral messages to STAFF capture.
+
+[Read the commands and safety notes](docs/COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
+
+## Previous changes — v0.3.98
 
 - In the normal combined layout, **Inventory** and the combined **Skills / Runes** card now have the same height and width, evenly splitting the available space below content-sized **Combat** across window sizes and Mudlet MultiView panes.
 - Existing fonts, aligned columns, sorting, tab choices, and horizontal/vertical scrollbars are unchanged. **COMBINED SKILLS / RUNES OFF** keeps the separate-box sizing unchanged.
@@ -139,7 +150,7 @@ The HUD runs `info magic` during character startup and whenever that command is 
 
 ## Skills and combat updates
 
-**OPTIONS → Skill Settings → SKILL FILTERS** defaults **ON**, keeping the HUD's name and group filters. Set it **OFF** and click **Save** to use native staff commands such as `skill Rath`. Every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, then goes to the game unchanged exactly once, preserving casing and spacing. DGHUD queues no local filter and applies no skill-loading or display-availability check to these commands. Bare `skill` still refreshes the sidebar and follows the separate **MAIN SKILLS** formatting choice.
+**OPTIONS → Skills & Runes → SKILL FILTERS** defaults **ON**, keeping the HUD's name and group filters. Set it **OFF** and click **Save** to use native staff commands such as `skill Rath`. Every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, then goes to the game unchanged exactly once, preserving casing and spacing. DGHUD queues no local filter and applies no skill-loading or display-availability check to these commands. Bare `skill` still refreshes the sidebar and follows the separate **MAIN SKILLS** formatting choice.
 
 With **SKILL FILTERS ON**, use `skill` or `skill all` to show every possessed skill. Add a case-insensitive name prefix to narrow only the main output: `skill claw` or `skill clawing` shows Clawing; `skill bite` shows Biting; `skill c` shows all names beginning with C; `skill id` shows Identify skills; `skill ste` shows Stealth. Full names and shortened display names are supported. Each request refreshes the complete saved Skills list, so filtering does not remove anything from the right sidebar. A no-match result says so clearly. Prefix filtering also works with MAIN SKILLS formatting off.
 
@@ -153,11 +164,11 @@ The group filters are:
 
 These groups ignore case. Combat and utility membership uses skill category regardless of remaining uses; train membership uses zero remaining uses. Customizing or disabling colors does not change membership. Other arguments remain literal name prefixes, and `skill weapons` still includes matching zero-use skills. Every filter affects only one main-display response and keeps the full sidebar list. With **MAIN SKILLS** formatting off, all filters still narrow the raw game output while preserving its row format and order.
 
-**OPTIONS → Skill Settings** keeps the **MAIN SKILLS** formatting toggle (on by default) and separate sorting for **Main Display** and **Right Sidebar**. Each offers **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)** as a primary key, ascending or descending order, and an optional secondary key with its own direction. Both default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
+**OPTIONS → Skills & Runes** keeps the **MAIN SKILLS** formatting toggle (on by default) and separate sorting for **Main Display** and **Right Sidebar**. Each offers **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, or **Category (combat vs utility)** as a primary key, ascending or descending order, and an optional secondary key with its own direction. Both default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
 **Save** applies the filtering, formatting, and sorting draft together; **Cancel** or dismissing the panel discards it. **Reset to Defaults** restores filters ON in the draft and requires Save. A failed Save leaves active settings unchanged. Saving filters OFF cancels pending local filters, and other display changes preserve the saved choice.
 
-Saving sidebar ordering immediately reorders existing rows. Main ordering changes apply to the next complete `skill` output, leaving previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and updates. See [Skill Settings](docs/OPTIONS_AND_DISPLAY.md#skill-settings).
+Saving sidebar ordering immediately reorders existing rows. Main ordering changes apply to the next complete `skill` output, leaving previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and updates. See [Skills & Runes](docs/OPTIONS_AND_DISPLAY.md#skill-settings).
 
 Formatted output uses aligned **Number / Skill / LVL / USES** columns. The catalog number is the fixed training ID, not a display rank. Category and Ready to train sorting keep every captured skill visible. Completed blank-ended tables update on the next UI tick without waiting for a later prompt or sending an extra Enter.
 

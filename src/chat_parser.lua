@@ -110,6 +110,27 @@ local function parseAssistanceHandling(line,character,now)
   return builtIn("STAFF",message,{speaker=speaker,target=target},character,now,line)
 end
 
+local function parseReferralHandling(line,character,now)
+  local speaker,target,pending=line:match("^%[GM%] "..activeName.." is handling "..activeName.."'s referral%.%s+%((%d+) more pending%.%)$")
+  if not speaker then return nil end
+  return builtIn("STAFF","is handling "..target.."'s referral ("..pending.." more pending).",{speaker=speaker,target=target},character,now,line)
+end
+
+local function parseReferral(line,character,now)
+  -- Only the server's numbered list and angle-bracket detail formats qualify.
+  -- Ordinary speech or room prose mentioning referrals is not staff traffic.
+  local payload=line:match("^%d+%.%s+(.+)$")
+  local kind="list"
+  if not payload then payload=line:match("^<(.+)$"); kind="detail" end
+  if not payload then return nil end
+  local speaker,target,account,body=payload:match("^"..activeName.." refers "..activeName.." %(([%w_.%-]+)%):%s+'(.*)$")
+  if not speaker then return nil end
+  local result=builtIn("STAFF","refers "..target.." ("..account.."): '"..body,{speaker=speaker,target=target},character,now,line)
+  -- Internal, transient framing: the controller removes this before storage.
+  result.staff_referral=kind
+  return result
+end
+
 local combatKinds={attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true}
 local combatActions={attack="attacks",swing="swings",slash="slashes",stab="stabs",bite="bites",claw="claws",kick="kicks",punch="punches",strike="strikes",shoot="shoots",fire="fires",breathe="breathes",charge="charges",pounce="pounces",throw="throws"}
 local combatResultKinds={"blow","gouge","kick","punch","shot","slash"}
@@ -220,6 +241,10 @@ function Parser.parse(line,character,now)
   if cancellation then return cancellation end
   local handling=parseAssistanceHandling(line,character,now)
   if handling then return handling end
+  local referralHandling=parseReferralHandling(line,character,now)
+  if referralHandling then return referralHandling end
+  local referral=parseReferral(line,character,now)
+  if referral then return referral end
   local staffVoice=parseStaffVoice(line,character,now)
   if staffVoice then return staffVoice end
   for _,rule in ipairs(rules) do

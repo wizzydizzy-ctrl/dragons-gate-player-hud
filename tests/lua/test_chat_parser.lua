@@ -1,5 +1,111 @@
 local Parser=require("chat_parser")
 
+test("STAFF referrals parse numbered lists and details with full names and all account characters",function()
+  local now="2026-10-10T12:34:56-04:00"
+  for _,names in ipairs({
+    {"Corin","Aerin North"}, {"Corin O'Vale","Aerin D'North"},
+    {"Future Staff Name","Future Player Name"}, {"Warden-7 O'Vale","Traveler_42 North"},
+  }) do
+    for _,account in ipairs({"sample-user","Sample123","sample_user","sample.user","sample_9.user-2"}) do
+      local message="refers "..names[2].." ("..account.."): 'An item is misflagged.'"
+      for _,case in ipairs({
+        {kind="list",prefix="17. ",suffix=" [2 days, 4 secs ago.]"},
+        {kind="detail",prefix="<",suffix=">"},
+      }) do
+        local line=case.prefix..names[1].." "..message..case.suffix
+        local e=assert(Parser.parse(" \t\27[36m"..line.."\27[0m \r\n","Synthetic Keeper",now),line)
+        eq(e.schema,1); eq(e.category,"STAFF"); eq(e.source,"builtin")
+        eq(e.speaker,names[1]); eq(e.target,names[2]); eq(e.message,message..case.suffix)
+        eq(e.line,line); eq(e.character,"Synthetic Keeper"); eq(e.timestamp,now)
+        eq(e.language,nil); eq(e.staff_referral,case.kind)
+      end
+    end
+  end
+end)
+
+test("STAFF referral handling keeps handler referrer and normalized pending count",function()
+  for _,names in ipairs({{"Keeper","Corin"},{"Keeper O'Vale","Corin D'North"},{"Future Handler Name","Future Referrer Name"}}) do
+    for _,pending in ipairs({"0","3","123"}) do
+      local line="[GM] "..names[1].." is handling "..names[2].."'s referral.  ("..pending.." more pending.)"
+      local e=assert(Parser.parse("\27[35m"..line.."\27[0m","Synthetic Keeper","2026-10-10T12:34:56-04:00"),line)
+      eq(e.category,"STAFF"); eq(e.source,"builtin"); eq(e.speaker,names[1]); eq(e.target,names[2])
+      eq(e.message,"is handling "..names[2].."'s referral ("..pending.." more pending).")
+      eq(e.line,line); eq(e.staff_referral,nil); eq(e.language,nil)
+    end
+  end
+end)
+
+test("STAFF referral parser preserves quoted apostrophes multiline body and multiline age",function()
+  local payload="Corin O'Vale refers Aerin D'North (sample_9.user-2): 'The item's flag\nneeds a second look.'"
+  for _,case in ipairs({
+    {kind="list",prefix="4. ",suffix=" [2 days,\n4 secs ago.]"},
+    {kind="detail",prefix="<",suffix=">"},
+  }) do
+    local line=case.prefix..payload..case.suffix
+    local e=assert(Parser.parse("\27[36m"..line.."\27[0m","Synthetic Keeper"),line)
+    eq(e.category,"STAFF"); eq(e.speaker,"Corin O'Vale"); eq(e.target,"Aerin D'North")
+    eq(e.message,payload:sub(#"Corin O'Vale "+1)..case.suffix)
+    eq(e.line,line); eq(e.staff_referral,case.kind)
+  end
+end)
+
+test("STAFF referral starts retain framing for the controller while body and age are incomplete",function()
+  for _,body in ipairs({"","An item's flag needs","An item's flag needs review.' [2 days,"}) do
+    local payload="Corin refers Aerin North (sample-user): '"..body
+    for _,case in ipairs({{prefix="1. ",kind="list"},{prefix="<",kind="detail"}}) do
+      local line=case.prefix..payload
+      local e=assert(Parser.parse(line,"Synthetic Keeper"),line)
+      eq(e.category,"STAFF"); eq(e.speaker,"Corin"); eq(e.target,"Aerin North")
+      eq(e.message,payload:sub(#"Corin "+1)); eq(e.line,line); eq(e.staff_referral,case.kind)
+    end
+  end
+end)
+
+test("STAFF referrals reject malformed framing accounts handling and surrounding narration",function()
+  for _,line in ipairs({
+    "Corin refers Aerin North (sample-user): 'An item is misflagged.'",
+    "The sign reads: <Corin refers Aerin North (sample-user): 'An item is misflagged.'>",
+    "The sign reads: 1. Corin refers Aerin North (sample-user): 'An item is misflagged.' [2 secs ago.]",
+    "1) Corin refers Aerin North (sample-user): 'An item is misflagged.' [2 secs ago.]",
+    "<Corin refers Aerin North (sample-user) 'An item is misflagged.'>",
+    "1. refers Aerin North (sample-user): 'Missing referrer.' [2 secs ago.]",
+    "<Corin refers (sample-user): 'Missing player.'>",
+    "<Corin refers Aerin North (): 'Missing account.'>",
+    "<Corin refers Aerin North (sample user): 'Invalid account.'>",
+    "<Corin refers Aerin North (sample/user): 'Invalid account.'>",
+    "<Corin refers Aerin North (sample@user): 'Invalid account.'>",
+    "<Corin refers Aerin North (sample-user): Unquoted body.>",
+    "[GM] Keeper is handling Corin's referral. (three more pending.)",
+    "[GM] Keeper is handling Corin's referral. (-1 more pending.)",
+    "[GM] Keeper is handling Corin's referral (3 more pending.)",
+    "[GM] Keeper is handling Corin's referral. (3 more pending)",
+    "[GM] Keeper is handling Corin's referral. (3 more pending.) Extra prose.",
+    "Keeper is handling Corin's referral. (3 more pending.)",
+    "[2 days, 4 secs ago.]", "referrals", "No referrals pending.",
+  }) do
+    eq(Parser.parse(line,"Synthetic Keeper"),nil)
+  end
+end)
+
+test("quoted referral text keeps room own whisper and staff chat classification",function()
+  for _,message in ipairs({
+    "1. Corin refers Aerin North (sample-user): 'An item is misflagged.' [2 days, 4 secs ago.]",
+    "<Corin refers Aerin North (sample-user): 'An item is misflagged.'>",
+    "[GM] Keeper is handling Corin's referral.  (3 more pending.)",
+  }) do
+    for _,case in ipairs({
+      {line='Listener says, "'..message..'"',category="ROOM",speaker="Listener"},
+      {line='Synthetic Keeper says, "'..message..'"',category="OWN",speaker="Synthetic Keeper"},
+      {line='Listener whispers, "'..message..'"',category="WHISPER",speaker="Listener"},
+      {line="[GM] Listener: "..message,category="STAFF",speaker="Listener"},
+    }) do
+      local e=assert(Parser.parse(case.line,"Synthetic Keeper"),case.line)
+      eq(e.category,case.category); eq(e.speaker,case.speaker); eq(e.message,message)
+      eq(e.line,case.line); eq(e.staff_referral,nil)
+    end
+  end
+end)
+
 
 test("WORLD parses anchored arrival departure and unexpected departure notifications with full speaker names",function()
   local now="2026-10-04T12:34:56-04:00"

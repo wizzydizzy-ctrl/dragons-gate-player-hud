@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.98.
+Applies to DGHUD v0.3.99.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
@@ -33,7 +33,7 @@ A message can appear in more than one filter, but plays only one sound: its spec
 - **DRAGON** — Mental and Dragon link messages.
 - **SECIAN** — Secian link messages; this filter becomes available after a Secian message is captured. These messages also appear in PRIVATE.
 - **CONTACT** — Thoughts echoing through the area.
-- **STAFF** — Recognized Guide, GM, Elder, sends, and voice formats.
+- **STAFF** — Recognized Guide, GM, Elder, sends, voice, and referral list, handling, and detail formats.
 - **COMBAT** — Your attacks, incoming weapon attacks, hit/miss results, damage, movement blocks, spell threats, upkeep, and recovery. This tab keeps capturing and saving messages even when **SHOW IN ALL → COMBAT** is OFF.
 - **WORLD** — Character arrivals (green) and departures (red), including unexpected departures. It starts included in ALL. Turn **SHOW IN ALL → WORLD** OFF to keep these messages only in WORLD; capture and saved history continue. WORLD sound alerts start OFF. Customize the two colors independently in **Color Settings → Text Styles → World arrivals / World departures**.
 
@@ -70,6 +70,16 @@ Nythriss'a sends: check check
 You hear the voice of Wizzy say, "test"
 You hear the voice of Wizzy ask Tamalon, "ready?"
 ```
+
+Referral list entries, handling notices, and details also go to **STAFF**:
+
+```text
+1. Corin refers Aerin North (sample-user): 'Please check this sample quest.' [2 days ago.]
+[GM] Keeper is handling Corin's referral. (3 more pending.)
+<Corin refers Aerin North (sample-user): 'Please check this sample quest.'>
+```
+
+Wrapped referral lines are joined with spaces and saved as one **STAFF** message. The normal game display is unchanged. **SHOW IN ALL → STAFF** controls whether referrals also appear in **ALL**; STAFF capture and saved history continue when it is OFF. Completed referrals appear immediately; wrapped messages wait briefly for their final line.
 
 WORLD recognizes server notices with any character name, including full names:
 

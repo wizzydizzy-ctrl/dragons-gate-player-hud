@@ -18,20 +18,67 @@ test("identity and right rail content remain separate",function()
   local identity=View.identityContent(character,theme,layout)
   local equipment=View.equipmentContent({weapon_readied=true,shield_readied=false,gold=3,silver=9},theme,layout)
   eq(identity:find("Test Tester",1,true)~=nil,true); eq(identity:find("Monitanian",1,true)~=nil,true)
-  eq(identity:find("Fighter",1,true)~=nil,true); eq(identity:find("Entropic",1,true)~=nil,true)
+  eq(identity:find("Fighter",1,true)~=nil,true); eq(identity:find("Entropic",1,true),nil)
   eq(identity:find("EQUIPMENT",1,true)==nil,true); eq(equipment:find("Test Tester",1,true)==nil,true)
   eq(equipment:find("EQUIPMENT",1,true)~=nil,true); eq(equipment:find("WEALTH",1,true)==nil,true)
 end)
-test("identity places orderly beside religious balance",function()
+test("identity omits current and legacy religious standings without changing rows or character data",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
-  local identity=View.identityContent({full_name="Muthulas Vaelith",race="Leuian",class="Cleric",alignment="order",religious_balance="Balanced"},theme,layout)
-  eq(identity:find("Balanced · Orderly",1,true)~=nil,true); eq(identity:find(">order</span>",1,true),nil)
+  local needs={hunger={status="satiated"},thirst={status="quenched"}}
+  for _,role in ipairs({{"Human","Fighter","Fighter"},{"Dragon","None","3rd Stage"}}) do
+    for _,alignment in ipairs({"order","entropy","chaos","Orderly","Entropic","Chaotic"}) do
+      local character={full_name="Synthetic Tester",race=role[1],class=role[2],
+        physical={age=28,sex="Male",height="6'10\"",life_stage="3rd stage"},
+        deity="Unknown",religion="Novitiate",favors=57000,religious_balance="Balanced",
+        alignment=alignment,religious_alignment=alignment}
+      local saved,savedPhysical={},{}
+      for key,value in pairs(character) do saved[key]=value end
+      for key,value in pairs(character.physical) do savedPhysical[key]=value end
+      local identity=View.identityContent(character,theme,layout,needs)
+      local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
+      eq(visible,"Synthetic Tester\n"..role[1].." · "..role[3]..
+        "\n28 · Male · 6'10\"\nUnknown · Novitiate · 57,000\nFood: Satiated · Water: Quenched")
+      local _,breaks=identity:gsub("<br>",""); eq(breaks,4)
+      eq(identity:find("<br><br>",1,true),nil)
+      for key,value in pairs(saved) do eq(character[key],value) end
+      for key,value in pairs(character) do eq(value,saved[key]) end
+      for key,value in pairs(savedPhysical) do eq(character.physical[key],value) end
+      for key,value in pairs(character.physical) do eq(value,savedPhysical[key]) end
+    end
+  end
 end)
-test("identity displays normalized alignment names",function()
+test("identity omits partial unknown and missing standings without leaving an empty row",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
-  for raw,display in pairs({order="Orderly",entropy="Entropic",chaos="Chaotic"}) do
-    local identity=View.identityContent({full_name="Test",race="Human",class="Fighter",alignment=raw,religious_balance="Balanced"},theme,layout)
-    eq(identity:find("Balanced · "..display,1,true)~=nil,true)
+  for _,standing in ipairs({
+    {religious_balance="Balanced"},{alignment="order"},{alignment="entropy"},{alignment="chaos"},
+    {alignment="Orderly"},{alignment="Entropic"},{alignment="Chaotic"},{religious_alignment="Orderly"},
+    {religious_balance="Unknown",alignment="Unknown"},{religious_balance="Unrecognized",alignment="Unrecognized"},
+    {religious_balance="",alignment=""},{},
+  }) do
+    local character={full_name="Synthetic Tester",race="Human",class="Fighter",
+      religious_balance=standing.religious_balance,alignment=standing.alignment,religious_alignment=standing.religious_alignment}
+    local identity=View.identityContent(character,theme,layout)
+    local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
+    eq(visible,"Synthetic Tester\nHuman · Fighter\nFood: — · Water: —")
+    local _,breaks=identity:gsub("<br>",""); eq(breaks,2)
+    eq(identity:find("<br><br>",1,true),nil)
+    eq(character.religious_balance,standing.religious_balance); eq(character.alignment,standing.alignment)
+    eq(character.religious_alignment,standing.religious_alignment)
+  end
+end)
+test("identity preserves escaping of retained fields after removing religious standings",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  local character={full_name="<Name&Tester>",race="<Race&Human>",class="<Class&Fighter>",
+    physical={age="<Age&28>",sex="<Sex&Male>",height="<Height&6'10\">"},
+    deity="<Deity&Unknown>",religion="<Devotion&Novitiate>",favors=57000,
+    religious_balance="<Balance&Balanced>",alignment="<Alignment&Orderly>"}
+  local identity=View.identityContent(character,theme,layout,{hunger={status="ok"},thirst={status="quenched"}})
+  local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
+  eq(visible,"&lt;Name&amp;Tester&gt;\n&lt;Race&amp;Human&gt; · &lt;Class&amp;Fighter&gt;\n"..
+    "&lt;Age&amp;28&gt; · &lt;Sex&amp;Male&gt; · &lt;Height&amp;6'10\"&gt;\n"..
+    "&lt;Deity&amp;Unknown&gt; · &lt;Devotion&amp;Novitiate&gt; · 57,000\nFood: Ok · Water: Quenched")
+  for _,fields in ipairs({character,character.physical}) do
+    for _,value in pairs(fields) do if type(value)=="string" then eq(identity:find(value,1,true),nil) end end
   end
 end)
 test("identity displays food and water while vital bars remain resource-only",function()
@@ -207,7 +254,7 @@ test("identity includes compact religion information",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
   local identity=View.identityContent({full_name="Test Tester",race="Monitanian",class="Fighter",alignment="entropy",religion="Novitiate",deity="Unknown",favors=57000,religious_balance="Balanced"},theme,layout)
   eq(identity:find("Unknown · Novitiate · 57,000",1,true)~=nil,true); eq(identity:find("Novitiate · Unknown",1,true),nil)
-  eq(identity:lower():find("favors",1,true),nil); eq(identity:find("Balanced · Entropic",1,true)~=nil,true)
+  eq(identity:lower():find("favors",1,true),nil); eq(identity:find("Balanced",1,true),nil); eq(identity:find("Entropic",1,true),nil)
 end)
 test("identity keeps grouped favors including zero inline after deity and devotion",function()
   local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
@@ -217,7 +264,7 @@ test("identity keeps grouped favors including zero inline after deity and devoti
     local visible=identity:gsub("<br>","\n"):gsub("<[^>]+>","")
     eq(visible:find("\nUnknown · Novitiate · "..case[2].."\n",1,true)~=nil,true)
     eq(visible:lower():find("favors",1,true),nil)
-    local _,breaks=identity:gsub("<br>",""); eq(breaks,4)
+    local _,breaks=identity:gsub("<br>",""); eq(breaks,3)
     local _,counts=visible:gsub(case[2],""); eq(counts,1)
   end
 end)
@@ -348,6 +395,8 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
       local longest=0
       for line in (message.."<br>"):gmatch("(.-)<br>") do
         local rendered=line:gsub("<[^>]+>","")
+        rendered=rendered:gsub("&nbsp;"," "):gsub("&lt;","<"):gsub("&gt;",">"):gsub("&amp;","&")
+        rendered=rendered:gsub("[\128-\191]","")
         longest=math.max(longest,#rendered)
       end
       return math.ceil(longest*glyphWidth),math.ceil((self.fontSize or 8)*1.6)*(rows+1)
@@ -2417,6 +2466,26 @@ test("color grouped skill commands appear in visible and copyable help",function
   end
 end)
 
+test("Skills and Runes option and help expose renew train and cancellation commands",function()
+  local view=chatView(); view:applyLayout(require("layout").compute(1200,800))
+  local button=view.option_action_buttons.skill_settings
+  eq(button.option_text,"SKILLS & RUNES…"); eq(button.parent,view.options_scroll)
+  view.color_toggle.click(); assert(button.message:find("SKILLS &amp; RUNES…",1,true))
+  local entries={}; for _,entry in ipairs(View.defaultHelpEntries()) do entries[entry.command]=entry.description end
+  assert(entries.shoprenew:find("fewer than 20",1,true)); assert(entries.shoprenew:find("including 0",1,true))
+  assert(entries.shoprenewall:find("all possessed runes",1,true))
+  assert(entries.trainall:find("0 uses",1,true)); assert(entries.trainall:find("train raise <authoritative skill ID>",1,true))
+  assert(entries.shoprenewstop:find("Cancel",1,true)); assert(entries.shoprenewstop:find("shoprenewall",1,true))
+  assert(entries.trainallstop:find("Cancel",1,true)); assert(entries.trainallstop:find("trainall",1,true))
+  local copied; view:setCopyTextCallback(function(text) copied=text; return true end)
+  view:showHelp(); assert(view.help_copy.click())
+  for _,command in ipairs({"shoprenew","shoprenewall","trainall","shoprenewstop","trainallstop"}) do
+    assert(view.help_content.message:find("<b>"..command.."</b>",1,true))
+    assert(copied:find(command.." — "..entries[command],1,true))
+  end
+  assert(view.help_content.message:find("train raise &lt;authoritative skill ID&gt;",1,true))
+  assert(copied:find("SKILLS & RUNES…",1,true)); eq(copied:find("SKILL SETTINGS…",1,true),nil)
+end)
 test("help overlay remains bounded and readable at every layout mode",function()
   local view=chatView(); view:showHelp()
   for _,size in ipairs({{420,500},{760,700},{800,650},{1200,800},{1920,1080}}) do
@@ -2453,14 +2522,21 @@ test("inventory runes and skills evenly fill the available right rail",function(
   eq(math.abs(view.inventory.height-view.runes.height)<=1,true); eq(math.abs(view.runes.height-view.skills.height)<=1,true)
 end)
 
+local function runeContentLines(view)
+  local text=view.runes_content.message:gsub("<br>","\n"):gsub("<[^>]+>","")
+  text=text:gsub("&nbsp;"," "):gsub("&lt;","<"):gsub("&gt;",">"):gsub("&amp;","&")
+  local lines={}; for line in (text.."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end
+  return lines
+end
 test("runes retain supplied order and scroll beyond five visible rows",function()
   local view=chatView(); local layout=require("layout").compute(1920,1080); view:applyLayout(layout)
   local runes={}; for i=1,30 do runes[i]={name="Rune "..i,remaining=200-i} end
   local state={character={full_name="Test",physical={}},attributes={},combat={},equipment={items={}},inventory={items={}},runes={items=runes},skills={items={}},vitals={hp={current=1,maximum=1},fatigue={current=1,maximum=1},carry={current=1,maximum=1},psi={visible=false},web={visible=false},gold=0,silver=0,roundtime=0,position=0},room={name="R",players={},flags={},exits={}}}
   view:update(state)
-  eq(view.runes_content.message:find("Rune 1",1,true)<view.runes_content.message:find("Rune 12",1,true),true)
-  eq(view.runes_content.message:find("199 weaves remain",1,true)~=nil,true)
-  eq(view.runes_content.height,view.list_row_height*30); eq(view.runes_content.height>view.runes_output.height,true)
+  local lines=runeContentLines(view)
+  eq(lines[2]:sub(1,6),"Rune 1"); eq(lines[13]:sub(1,7),"Rune 12")
+  eq(lines[2]:sub(-3),"199"); eq(#lines,31)
+  eq(view.runes_content.height,view.list_row_height*31); eq(view.runes_content.height>view.runes_output.height,true)
 end)
 local function runeWidthState(items)
   return {character={full_name="SyntheticTester",physical={}},attributes={},combat={},equipment={items={}},
@@ -2470,56 +2546,115 @@ local function runeWidthState(items)
     room={name="Synthetic Room",players={},flags={},exits={}}}
 end
 
-test("rune width measures the complete 33-column Translocation row with bounded columns",function()
-  eq(#"Translocation - 100 weaves remain",33)
-  eq(View.runesRequiredColumns(nil),28); eq(View.runesRequiredColumns({}),28)
-  eq(View.runesRequiredColumns({{name="Force",remaining=100}}),28)
-  eq(View.runesRequiredColumns({{name="Translocation",remaining=100}}),33)
-  eq(View.runesRequiredColumns({{rune="Translocation",weaves=100}}),33)
-  eq(View.runesRequiredColumns({{label="Translocation",count=100}}),33)
-  eq(View.runesRequiredColumns({{name="Translocation",remain=100}}),33)
-  eq(View.runesRequiredColumns({{name="Translocation"}}),28)
-  eq(View.runesRequiredColumns({{name=string.rep("x",300),remaining=100}}),160)
+test("rune widths include both headers and independent longest names and counts without a cap",function()
+  eq(View.runesRequiredColumns(nil),20); eq(View.runesRequiredColumns({}),20)
+  eq(View.runesRequiredColumns({{name="Force",remaining=0}}),20)
+  for _,rune in ipairs({{name="Translocation",remaining=100},{rune="Translocation",weaves=100},
+    {label="Translocation",count=100},{name="Translocation",remain=100},{name="Translocation"}}) do
+    eq(View.runesRequiredColumns({rune}),28)
+  end
+  eq(View.runesRequiredColumns({{name=string.rep("x",300),remaining=100}}),315)
+  eq(View.runesRequiredColumns({{name="X",remaining=string.rep("9",22)}}),29)
+  eq(View.runesRequiredColumns({{name=string.rep("x",300),remaining=0},
+    {name="X",remaining=string.rep("9",22)}}),324)
+end)
+
+test("rune headers names and zero through large counts share one right aligned numeric column",function()
+  local view=chatView(8); view:applyLayout(require("layout").compute(1920,1080))
+  local huge=string.rep("9",22)
+  local items={{name="A",remaining=0},{rune="Ice  Prison",weaves=7},
+    {label="Minor Restoration",count=1200},{name="Force",remain=huge},{name="Unknown"}}
+  view:renderRunes({runes={items=items}})
+  local lines=runeContentLines(view); eq(#lines,6)
+  eq(lines[1],"Runes"..string.rep(" ",23).."Weaves Remain")
+  local names={"A","Ice  Prison","Minor Restoration","Force","Unknown"}
+  local amounts={"0","7","1200",huge,""}
+  for index,name in ipairs(names) do
+    local line=lines[index+1]; eq(#line,41)
+    eq(line:sub(1,#name),name)
+    eq(line:sub(#name+1,41-#amounts[index]),string.rep(" ",41-#name-#amounts[index]))
+    if amounts[index]~="" then eq(line:sub(-#amounts[index]),amounts[index]) end
+  end
+  eq(view.runes_title.message,""); eq(view.runes_content.message:find("weaves remain",1,true),nil)
+  eq(items[1].remaining,0); eq(items[2].rune,"Ice  Prison"); eq(items[4].remain,huge)
+end)
+
+test("Rune fallback and accented names occupy glyph columns rather than UTF-8 bytes",function()
+  local view=chatView(8); view:applyLayout(require("layout").compute(240,500))
+  local items={{remaining=0},{name="Éclair",remaining=8}}
+  view:renderRunes({runes={items=items}})
+  eq(View.runesRequiredColumns(items),21)
+  local lines=runeContentLines(view)
+  eq(lines[1],"Runes   Weaves Remain")
+  eq(lines[2],"—"..string.rep(" ",19).."0")
+  eq(lines[3],"Éclair"..string.rep(" ",14).."8")
+  local measured=view.runes_content:getSizeHint(); eq(measured,21*view.list_character_width)
+  eq(view.runes_content.width>=measured,true)
+end)
+test("empty runes retain one complete aligned header row",function()
+  local view=chatView(8); local layout=require("layout").compute(240,500)
+  view:applyLayout(layout); view.right_list_tabs.runes.click()
+  view:renderRunes({runes={items={}}})
+  local lines=runeContentLines(view); eq(#lines,1); eq(lines[1],"Runes  Weaves Remain")
+  eq(view.runes_content.width,math.max(view.list_viewport_width,20*view.list_character_width))
+  eq(view.runes_content.height>=layout.list_row_height,true)
+  eq(view.runes_content.parent,view.runes_output); eq(view.runes_content.fontSize,layout.list_font)
 end)
 
 test("long Rune rows overflow horizontally in narrow normal and compact layouts without shrinking fonts",function()
-  local Layout=require("layout")
+  local Layout=require("layout"); local name=string.rep("Long Rune ",30); local huge=string.rep("9",22)
   for _,size in ipairs({{900,700,"medium","tabbed"},{1400,1000,"wide","stacked"},{240,500,"compact","compact-tabs"}}) do
     local view=chatView(8); local layout=Layout.compute(size[1],size[2])
-    local state=runeWidthState({{name="Translocation",remaining=100}})
+    local state=runeWidthState({{name=name,remaining=0},{name="Force",remaining=huge}})
     view.last_state=state; view:applyLayout(layout); view:update(state); view.right_list_tabs.runes.click()
     eq(layout.mode,size[3]); eq(layout.right_lists_mode,size[4])
     eq(view.runes.visible,true); eq(view.runes_output.visible,true); eq(view.runes_content.visible,true)
     eq(view.runes_output.kind,"scrollbox"); eq(view.runes_content.parent,view.runes_output)
     eq(view.runes_content.fontSize,layout.list_font); eq(view.runes_content.font,view.list_font_family)
-    eq(view.runes_content.width,33*view.list_character_width)
+    eq(view.runes_content.width,324*view.list_character_width)
     eq(view.runes_content.width>view.runes_output.width,true); eq(view.runes_horizontal_overflow,true)
     eq(view.runes_content.x,0); eq(view.runes_content.y,0)
-    eq(view.runes_content.message:gsub("<[^>]+>",""),"Translocation - 100 weaves remain")
+    local lines=runeContentLines(view); eq(#lines,3)
+    eq(lines[2]:sub(1,#name),name); eq(lines[2]:sub(-1),"0"); eq(lines[3]:sub(-22),huge)
+    for _,line in ipairs(lines) do eq(#line,324) end
     assert(view.runes_content.message:find("white-space:nowrap",1,true))
+    assert(view.runes_content.message:find("&nbsp;",1,true))
     local measuredWidth=view.runes_content:getSizeHint()
     eq(view.runes_content.width>=measuredWidth,true)
     eq(view.runes_output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
   end
 end)
 
-test("renderRunes expands and contracts short long and empty rows without a layout refresh",function()
+test("renderRunes expands and contracts aligned short long and empty rows without a layout refresh",function()
   local Layout=require("layout")
   for _,size in ipairs({{900,700},{1400,1000},{240,500}}) do
     local view=chatView(8); local layout=Layout.compute(size[1],size[2]); view:applyLayout(layout)
     view.right_list_tabs.runes.click()
     local state={runes={items={{name="Force",remaining=100}}}}
     view:renderRunes(state)
-    local shortWidth=math.max(view.list_viewport_width,28*view.list_character_width)
+    local shortWidth=math.max(view.list_viewport_width,20*view.list_character_width)
     eq(view.runes_content.width,shortWidth)
     state.runes.items={{name="Translocation",remaining=100}}; view:renderRunes(state)
-    eq(view.runes_content.width,33*view.list_character_width); eq(view.runes_content.width>shortWidth,true)
-    eq(view.runes_content.message:gsub("<[^>]+>",""),"Translocation - 100 weaves remain")
+    eq(view.runes_content.width,28*view.list_character_width); eq(view.runes_content.width>shortWidth,true)
+    eq(runeContentLines(view)[2],"Translocation"..string.rep(" ",12).."100")
     state.runes.items={{name="Force",remaining=100}}; view:renderRunes(state)
     eq(view.runes_content.width,shortWidth); eq(view.runes_content.message:find("Translocation",1,true),nil)
     state.runes.items={}; view:renderRunes(state)
     eq(view.runes_content.width,shortWidth); eq(view.runes_content.fontSize,layout.list_font)
+    eq(runeContentLines(view)[1],"Runes  Weaves Remain")
   end
+end)
+
+test("count growth beyond the header expands every Rune row and shrinks after a count change",function()
+  local view=chatView(8); view:applyLayout(require("layout").compute(240,500))
+  view.right_list_tabs.runes.click()
+  local items={{name="Force",remaining=0},{name="Ice",remaining=9}}
+  view:renderRunes({runes={items=items}}); local shortWidth=view.runes_content.width
+  items[2].remaining=string.rep("9",22); view:renderRunes({runes={items=items}})
+  eq(view.runes_content.width,29*view.list_character_width); eq(view.runes_content.width>shortWidth,true)
+  for _,line in ipairs(runeContentLines(view)) do eq(#line,29) end
+  items[2].remaining=9; view:renderRunes({runes={items=items}})
+  eq(view.runes_content.width,shortWidth); eq(#runeContentLines(view)[2],20)
 end)
 
 test("short to long Rune updates retain full width and normal font through narrow and compact resize",function()
@@ -2530,26 +2665,47 @@ test("short to long Rune updates retain full width and normal font through narro
   for _,size in ipairs({{900,700},{240,500},{1400,1000},{1920,1080},{900,1000}}) do
     local layout=Layout.compute(size[1],size[2]); view:applyLayout(layout); view.right_list_tabs.runes.click()
     eq(view.last_state,state); eq(state.runes.items[1].name,"Translocation"); eq(state.runes.items[1].remaining,100)
-    eq(view.runes_content.width,math.max(view.list_viewport_width,33*view.list_character_width))
-    eq(view.runes_horizontal_overflow,33*view.list_character_width>view.list_viewport_width)
+    eq(view.runes_content.width,math.max(view.list_viewport_width,28*view.list_character_width))
+    eq(view.runes_horizontal_overflow,28*view.list_character_width>view.list_viewport_width)
     eq(view.runes_content.fontSize,layout.list_font); eq(view.runes_content.font,view.list_font_family)
-    eq(view.runes_content.message:gsub("<[^>]+>",""),"Translocation - 100 weaves remain")
+    eq(runeContentLines(view)[2],"Translocation"..string.rep(" ",12).."100")
   end
   state.runes.items={{name="Force",remaining=100}}; view:update(state)
-  eq(view.runes_content.width,math.max(view.list_viewport_width,28*view.list_character_width))
+  eq(view.runes_content.width,math.max(view.list_viewport_width,20*view.list_character_width))
   eq(view.runes_content.message:find("Translocation",1,true),nil)
 end)
 
-test("Rune width uses visible text while names and weave counts remain HTML escaped",function()
+test("Rune width uses visible text while names counts and control characters remain safe",function()
   local view=chatView(8); local layout=require("layout").compute(900,700); view:applyLayout(layout)
   local rune={name="Translocation<&>",remaining="100<&>"}; view:renderRunes({runes={items={rune}}})
-  eq(View.runesRequiredColumns({rune}),39)
-  eq(view.runes_content.width,math.max(view.list_viewport_width,39*view.list_character_width))
+  eq(View.runesRequiredColumns({rune}),31)
+  eq(view.runes_content.width,math.max(view.list_viewport_width,31*view.list_character_width))
   assert(view.runes_content.message:find("Translocation&lt;&amp;&gt;",1,true))
-  assert(view.runes_content.message:find("100&lt;&amp;&gt; weaves remain",1,true))
+  assert(view.runes_content.message:find("100&lt;&amp;&gt;",1,true))
   eq(view.runes_content.message:find("Translocation<&>",1,true),nil)
   eq(view.runes_content.message:find("100<&>",1,true),nil)
   eq(rune.name,"Translocation<&>"); eq(rune.remaining,"100<&>"); eq(view.runes_content.fontSize,layout.list_font)
+  eq(#runeContentLines(view)[2],31)
+  local controls={name="Ice\n\tPrison",remaining="0\r\n"}
+  view:renderRunes({runes={items={controls}}})
+  local lines=runeContentLines(view); eq(#lines,2); assert(lines[2]:find("Ice  Prison",1,true))
+  eq(view.runes_content.message:find("\n",1,true),nil); eq(view.runes_content.message:find("\r",1,true),nil)
+  eq(controls.name,"Ice\n\tPrison"); eq(controls.remaining,"0\r\n")
+end)
+
+test("Rune display preserves the parser's lowest first count and name sorting",function()
+  local runes=assert(require("command_parser").parseRunes({
+    "You have the following elemental runes available to you...",
+    "Force - 100 weaves remain","Healing - 0 weaves remain",
+    "Translocation - 7 weaves remain","Ice Prison - 7 weaves remain",">"}))
+  local view=chatView(8); view:applyLayout(require("layout").compute(1920,1080))
+  view:renderRunes({runes=runes})
+  local lines=runeContentLines(view)
+  for index,expected in ipairs({{"Healing",0},{"Ice Prison",7},{"Translocation",7},{"Force",100}}) do
+    eq(runes.items[index].name,expected[1]); eq(runes.items[index].remaining,expected[2])
+    eq(lines[index+1]:sub(1,#expected[1]),expected[1])
+    local count=tostring(expected[2]); eq(lines[index+1]:sub(-#count),count)
+  end
 end)
 
 test("scrollable list content uses resolved numeric widths",function()
@@ -4179,7 +4335,8 @@ end)
 
 local function skillSettingsFixture(mainEnabled,filterEnabled)
   local SkillSort=require("skill_sort")
-  return {main_skills=mainEnabled~=false,skill_filter=filterEnabled~=false,main_skill_sort=SkillSort.normalize(),sidebar_skill_sort=SkillSort.normalize()}
+  return {main_skills=mainEnabled~=false,skill_filter=filterEnabled~=false,shoprenew=true,shoprenewall=true,trainall=true,
+    main_skill_sort=SkillSort.normalize(),sidebar_skill_sort=SkillSort.normalize()}
 end
 local function skillSettingsView(display)
   local view=chatView(nil,nil,nil,nil,nil,display)
@@ -4229,7 +4386,7 @@ test("Skills Settings routes through Options and retains the main skills action"
   end)
   view.color_toggle.click()
   local button=view.option_action_buttons.skill_settings
-  eq(button.option_text,"SKILL SETTINGS…"); eq(button.visible,true); eq(button.parent,view.options_scroll)
+  eq(button.option_text,"SKILLS & RUNES…"); eq(button.visible,true); eq(button.parent,view.options_scroll)
   assert(button.click()); eq(calls[1],"skill_settings"); eq(view.color_menu_visible,false)
   eq(view.skill_settings_visible,true); eq(view.skill_settings_draft.main_skills,false)
   eq(view.skill_settings_draft.skill_filter,true); eq(view.skill_settings_filter.visible,true)
@@ -4487,7 +4644,8 @@ test("Skills Settings explains all grouped filters without covering tabs at smal
     assert(hint.message:find("skill Rath",1,true),"missing native staff command example")
     assert(hint.message:find("OFF",1,true),"missing filter OFF explanation")
     assert(view.skill_settings_filter.message:find("SKILL FILTERS: ON",1,true))
-    eq(view.skill_settings_filter.y,0); eq(view.skill_settings_filter.width,view.skill_settings_content.content_width)
+    eq(view.skill_settings_filter.y,view.skill_settings_trainall.y+view.skill_settings_trainall.height+6)
+    eq(view.skill_settings_filter.width,view.skill_settings_content.content_width)
     assert(hint.y>=view.skill_settings_filter.y+view.skill_settings_filter.height,"filter toggle overlaps skill hint")
     assert(view.skill_settings_tabs.main.y>=hint.y+hint.height,"skill hint overlaps tabs")
     assert(view.skill_settings_content.content_height>=view.skill_settings_save.y+view.skill_settings_save.height)
@@ -4839,9 +4997,40 @@ test("combined pair buttons preserve the numerical Skill heading and scrolling d
   assert(view.skills_content.message:find("Skill&nbsp;40",1,true))
   eq(view.skills_content.y,0); eq(view.skills_content.x,0)
   view.skills_runes_tabs.runes.click()
-  eq(view.runes_content.width>=33*view.list_character_width,true)
+  eq(view.runes_content.width>=28*view.list_character_width,true)
   eq(view.runes_content.height>view.runes_output.height,true)
-  assert(view.runes_content.message:find("Rune 40",1,true))
+  assert(runeContentLines(view)[41]:find("Rune 40",1,true))
+end)
+test("aligned Rune headers and full scroll extents survive combined outer tabs and compact resizing",function()
+  local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState()
+  state.runes.items[1]={name="Empty",remaining=0}
+  state.runes.items[2]={name=string.rep("Long Rune ",30),remaining=1}
+  state.runes.items[40]={name="Last",remaining=string.rep("9",22)}
+  local original=view.runes_content; local calls=0
+  local oldSend,oldSendAll,oldExpand=send,sendAll,expandAlias
+  local function forbidden() calls=calls+1; error("Rune display must not send game commands") end
+  send=forbidden; sendAll=forbidden; expandAlias=forbidden
+  local ok,err=pcall(function()
+    for _,size in ipairs({{1920,1080},{960,500},{240,500},{900,1000},{1920,1080}}) do
+      local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals,view.settings.display)
+      view:applyLayout(layout); view:update(state)
+      for _,key in ipairs({"runes","skills","runes"}) do
+        if view.right_lists_presentation=="combined" then view.skills_runes_tabs[key].click()
+        else view.right_list_tabs[key].click() end
+        eq(view.runes_content,original); eq(view.runes_content.parent,view.runes_output)
+        eq(view.runes_content.fontSize,layout.list_font); eq(view.runes_content.font,view.list_font_family)
+        local lines=runeContentLines(view); eq(#lines,41)
+        eq(lines[2]:sub(-1),"0"); eq(lines[41]:sub(-22),string.rep("9",22))
+        for _,line in ipairs(lines) do eq(#line,324) end
+        eq(view.runes_content.width,math.max(view.list_viewport_width,324*view.list_character_width))
+        eq(view.runes_content.height>=41*layout.list_row_height,true)
+        eq(combinedWidgetVisible(view.runes_content),key=="runes")
+      end
+    end
+  end)
+  send=oldSend; sendAll=oldSendAll; expandAlias=oldExpand
+  assert(ok,err); eq(calls,0)
+  eq(state.runes.items[1].remaining,0); eq(state.runes.items[40].name,"Last")
 end)
 test("combined tabs update hidden Runes and Skills without surfacing either inactive list",function()
   local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState(2)
@@ -4849,7 +5038,7 @@ test("combined tabs update hidden Runes and Skills without surfacing either inac
   local skillSnapshot=view.skills_content.message
   state.runes.items={{name="Healing",remaining=2},{name="Force",remaining=90}}
   view:update(state)
-  assert(view.runes_content.message:find("Healing",1,true)); assert(view.runes_content.message:find("2 weaves remain",1,true))
+  assert(view.runes_content.message:find("Healing",1,true)); eq(runeContentLines(view)[2]:sub(-1),"2")
   eq(view.skills_content.message,skillSnapshot); eq(combinedWidgetVisible(view.runes_content),false)
   eq(view.skills_runes_tabs.runes.click(),"runes")
   eq(combinedWidgetVisible(view.runes_content),true); eq(combinedWidgetVisible(view.skills_content),false)
@@ -5075,7 +5264,7 @@ test("independent combined profiles keep selections data and controller callback
   assert(first.skills_runes_tabs~=second.skills_runes_tabs)
   assert(first.skills_content.message:find("First&nbsp;Clawing",1,true))
   eq(second.skills_content.message:find("First",1,true),nil)
-  assert(second.runes_content.message:find("Second Healing",1,true))
+  assert(runeContentLines(second)[2]:find("Second Healing",1,true))
   eq(first.runes_content.message:find("Second",1,true),nil)
   eq(first.last_state,firstState); eq(second.last_state,secondState)
 end)

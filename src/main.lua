@@ -10,6 +10,8 @@ local SkillDisplay=require("skill_display")
 local SkillSort=require("skill_sort")
 local Roundtime=require("roundtime")
 local RoundtimeCheck=require("roundtime_check")
+local QuickActions=require("quick_actions")
+local RuneVariables=require("rune_variables")
 local colorFeatures={"room","exits","currency","races","classes","portal","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}
 local displayTextPresets={small=.9,normal=1,large=1.1}
 local function colorOptions(status)
@@ -356,6 +358,7 @@ function Main:displayPreferences(overrides)
   local result={side_text_scale=tonumber(display.side_text_scale) or 1,
     auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),
     main_skills=self:mainSkillsEnabled(),skill_filter=self:skillFilterEnabled(),
+    shoprenew=self:quickActionEnabled("shoprenew"),shoprenewall=self:quickActionEnabled("shoprenewall"),trainall=self:quickActionEnabled("trainall"),
     combine_skills_runes=self:combinedSkillsRunesEnabled(),skills_runes_tab=self:skillsRunesTab(),
     main_skill_sort=SkillSort.normalize(display.main_skill_sort),
     sidebar_skill_sort=SkillSort.normalize(display.sidebar_skill_sort)}
@@ -364,7 +367,17 @@ function Main:displayPreferences(overrides)
 end
 function Main:skillSettings()
   local display=self:displayPreferences()
-  return {main_skills=display.main_skills,skill_filter=display.skill_filter,main_skill_sort=display.main_skill_sort,sidebar_skill_sort=display.sidebar_skill_sort}
+  return {main_skills=display.main_skills,skill_filter=display.skill_filter,shoprenew=display.shoprenew,shoprenewall=display.shoprenewall,trainall=display.trainall,main_skill_sort=display.main_skill_sort,sidebar_skill_sort=display.sidebar_skill_sort}
+end
+function Main:quickActionEnabled(name)
+  return not (type(self.settings.display)=="table" and self.settings.display[name]==false)
+end
+function Main:runQuickAction(name)
+  if not self.started or not self.quick_actions then return nil,"Quick commands are unavailable. Run dghud reload." end
+  if self.quick_actions:busy() then return nil,"A shortcut is already running. Use shoprenewstop or trainallstop to stop it." end
+  if self.collector and self.collector.active then return nil,"Character data is still refreshing. Wait, then try again." end
+  if self.skill_display then self.skill_display:cancel() end
+  return self.quick_actions:start(name)
 end
 function Main:combinedSkillsRunesEnabled()
   return not (type(self.settings.display)=="table" and self.settings.display.combine_skills_runes==false)
@@ -413,6 +426,12 @@ function Main:setSkillSettings(config)
   local filterEnabled=config.skill_filter
   if filterEnabled==nil then filterEnabled=self:skillFilterEnabled() end
   local candidate=self:displayPreferences({main_skills=config.main_skills,skill_filter=filterEnabled,main_skill_sort=mainSort,sidebar_skill_sort=sidebarSort})
+  for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    if config[key]~=nil then
+      if type(config[key])~="boolean" then return nil,"Choose ON or OFF for "..key.."." end
+      candidate[key]=config[key]
+    end
+  end
   if self.adapter.saveDisplaySettings then
     local called,saved,err=pcall(self.adapter.saveDisplaySettings,self.adapter,candidate)
     if not called or not saved then return nil,"Could not save skill settings. Try again: "..tostring(called and err or saved) end
@@ -433,6 +452,7 @@ function Main:setSkillSettings(config)
     self.skill_display:setSort(mainSort)
   end
   if self.collector then self.collector.native_skill_arguments=not filterEnabled end
+  if self.quick_actions then self.quick_actions:settingsChanged() end
   if self.view and self.view.setMainSkillsEnabled then self.view:setMainSkillsEnabled(config.main_skills) end
   if self.view and self.view.setSkillSortPreferences then self.view:setSkillSortPreferences(self:skillSettings()) end
   return self:skillSettings()
@@ -698,6 +718,9 @@ function Main:onCharacterEntry(name)
   return ok,err
 end
 function Main:onCharacterExit(reason)
+  if self.quick_actions then self.quick_actions:cancel(reason or "Character changed.") end
+  if self.rune_variables then self.rune_variables:clear() end
+  if self.collector then self.collector.snapshot.runes={items={}} end
   self.character_entry_started=false; self.character_entry_name=nil; self.roundtime_character=nil
   if self.roller and self.roller.onDisconnect then self.roller:onDisconnect() end
   if self.roller_alerts then self.roller_alerts:clear() end
@@ -1596,11 +1619,22 @@ function Main:start()
   if self.view.setCopyTextCallback then self.view:setCopyTextCallback(function(text) return self.adapter:copyText(text) end) end
   self:applyResponsiveLayout()
   self.collector=Collector.new(self.adapter,Parser,function(snapshot,key,parsed)
+    if key=="runes" and self.rune_variables then self.rune_variables:save(parsed.items) end
     if key=="time" then self:onClockSync(snapshot.time); return end
     if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
     self:refresh()
   end,function(value,metadata) self:onRoundtime(value,metadata) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end)
   self.collector.native_skill_arguments=not self:skillFilterEnabled()
+  self.rune_variables=RuneVariables.new(rawget(_G,"DGHUD"))
+  self.collector.onCaptureBegin=function(command)
+    if command=="info magic" and self.rune_variables then
+      self.rune_variables:clear(); self.collector.snapshot.runes={items={}}; self:refresh()
+    end
+  end
+  self.quick_actions=QuickActions.new(self.adapter,self.collector,{
+    enabled=function(name) return self:quickActionEnabled(name) end,
+    notify=function(message) if self.adapter.reportQuickAction then self.adapter:reportQuickAction(message) end end,
+  })
   local collectorOk,collectorErr=self.collector:start(); if not collectorOk then error(collectorErr,0) end
   self.skill_display=SkillDisplay.new(self.adapter,self:mainSkillsEnabled(),self.settings.package_name,self:skillSettings().main_skill_sort)
   local skillsCalled,skillsOk=pcall(self.skill_display.start,self.skill_display)
@@ -1636,6 +1670,7 @@ function Main:start()
     -- A HUD-owned probe is not player movement or autoroller input. Keep its
     -- bookkeeping separate so it cannot steal an in-flight special exit.
     if self.roundtime_check and self.roundtime_check:onOutgoing(command)==true then return end
+    if self.quick_actions then self.quick_actions:onOutgoing(command) end
     if self.roller and self.roller.onOutgoing then self.roller:onOutgoing(command) end
     local canonical=MapperModel.direction(command); local generated=command==self.generated_command
     if generated then self.generated_command=nil end
@@ -1657,6 +1692,20 @@ function Main:start()
   local function aliasArgument(value) if type(value)=="table" then return value[2] end; return value or (type(_G.matches)=="table" and _G.matches[2]) end
   local commands={function() if self.updater then self.updater:check() end end,function() if self.updater then self.updater:update() end end,function() self:reload() end,function() if self.adapter.openSettings then self.adapter:openSettings() end end,function() if self.adapter.requestPurge then self.adapter:requestPurge() end end,function() return self:reportChatStatus() end,function(value) return self:walkTo(aliasArgument(value)) end,function() return self.walker:stop("requested") end,function() local room=self.automapper:currentRoom(); if not room then return nil,"current room is unavailable" end; return self.map:center(room) end}
   for i,pattern in ipairs(Events.aliases) do self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias(pattern,commands[i]) end
+  for _,name in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    local action=name
+    self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^(?i:"..action..")$",function()
+      local ok,err=self:runQuickAction(action)
+      if not ok and self.adapter.reportCommandError then self.adapter:reportCommandError(err) end
+      return ok,err
+    end)
+  end
+  for _,name in ipairs({"shoprenewstop","trainallstop"}) do
+    self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^(?i:"..name..")$",function()
+      if self.quick_actions then return self.quick_actions:cancel("Stopped by you.") end
+      return true
+    end)
+  end
   self.runtime.aliases[#self.runtime.aliases+1]=self.adapter:addAlias("^(?i:skill)\\s+(.+)$",function(value)
     local original=type(value)=="table" and value[1] or (type(_G.matches)=="table" and _G.matches[1])
     local ok,err=self:requestSkills(aliasArgument(value),original)
@@ -1753,6 +1802,8 @@ function Main:restoreMainInputAlignment()
   return restored,err
 end
 function Main:shutdown()
+  if self.quick_actions then self.quick_actions:shutdown(); self.quick_actions=nil end
+  if self.rune_variables then self.rune_variables:clear(); self.rune_variables=nil end
   local skillDisplay=self.skill_display; self.skill_display=nil; if skillDisplay then skillDisplay:shutdown() end
   -- Restore the existing native input, including its stylesheet and utility
   -- controls, even during replacement. Never replace its history or draft.

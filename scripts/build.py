@@ -18,6 +18,7 @@ MODULES.extend(('autoroller_audio','autoroller_alerts'))
 MODULES.append('skill_display')
 MODULES.append('skill_sort')
 MODULES.append('skill_settings_view')
+MODULES.extend(('quick_actions','rune_variables'))
 VIEW_CONTRACT_FILES=('view.lua','navigation.lua','skill_settings_view.lua')
 def view_contract():
     digest=hashlib.sha256()

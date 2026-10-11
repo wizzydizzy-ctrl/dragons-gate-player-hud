@@ -1,6 +1,60 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("quick commands default ON for fresh and legacy display settings without mutating input",function()
+  for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do eq(defaults.display[key],true) end
+  for _,schema in ipairs({0,1}) do
+    local user={schema=schema,display={main_skills=false,skill_filter=false,auto_wrap=false,personal="keep",
+      main_skill_sort={primary="uses",direction="asc",secondary="name",secondary_direction="desc"}}}
+    local resolved,migrated=Settings.resolve(defaults,user)
+    for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+      eq(resolved.display[key],true); eq(user.display[key],nil); eq(migrated.display[key],nil)
+      eq(Settings.resolve(defaults,migrated).display[key],true)
+    end
+    eq(resolved.display.main_skills,false); eq(resolved.display.skill_filter,false)
+    eq(resolved.display.auto_wrap,false); eq(resolved.display.personal,"keep")
+    eq(resolved.display.main_skill_sort.primary,"uses"); eq(resolved.display.main_skill_sort.secondary_direction,"desc")
+    eq(resolved.version,defaults.version)
+  end
+end)
+
+test("quick command booleans resolve independently and explicit false survives cold resolution",function()
+  for _,shoprenew in ipairs({false,true}) do
+    for _,shoprenewall in ipairs({false,true}) do
+      for _,trainall in ipairs({false,true}) do
+        local display={shoprenew=shoprenew,shoprenewall=shoprenewall,trainall=trainall,personal="keep"}
+        for _,schema in ipairs({0,1}) do
+          local user={schema=schema,display=display}
+          local resolved,migrated=Settings.resolve(defaults,user)
+          local cold=Settings.resolve(defaults,migrated)
+          for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+            eq(resolved.display[key],display[key]); eq(cold.display[key],display[key])
+            eq(migrated.display[key],display[key]); eq(defaults.display[key],true)
+          end
+          resolved.display.trainall=not trainall; eq(display.trainall,trainall)
+          eq(resolved.display.personal,"keep")
+        end
+      end
+    end
+  end
+end)
+
+test("invalid quick command values normalize to ON without erasing other saved choices",function()
+  for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    for _,invalid in ipairs({"false","true",0,1,{},function() end}) do
+      local display={shoprenew=false,shoprenewall=false,trainall=false,skill_filter=false,personal="keep"}
+      display[key]=invalid
+      local resolved=Settings.resolve(defaults,{schema=1,display=display})
+      for _,other in ipairs({"shoprenew","shoprenewall","trainall"}) do eq(resolved.display[other],other==key) end
+      eq(display[key],invalid); eq(resolved.display.skill_filter,false); eq(resolved.display.personal,"keep")
+    end
+  end
+  for _,invalid in ipairs({false,"invalid",1}) do
+    local resolved=Settings.resolve(defaults,{display=invalid})
+    for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do eq(resolved.display[key],true) end
+  end
+end)
+
 test("combined skills and runes defaults migrate without changing unrelated preferences",function()
   eq(defaults.display.combine_skills_runes,true); eq(defaults.display.skills_runes_tab,"skills")
   for _,schema in ipairs({0,1}) do

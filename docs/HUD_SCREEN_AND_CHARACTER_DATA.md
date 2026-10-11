@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.98.
+Applies to DGHUD v0.3.99.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -58,10 +58,9 @@ The Identity section may show:
 - a dragon's stage in place of a missing profession;
 - age, sex, and height;
 - deity, devotion level, and favor count together, such as **Unknown · Novitiate · 57,000**;
-- religious balance and alignment; and
 - Food and Water status.
 
-Alignment wording is made more readable in the HUD: order becomes **Orderly**, entropy becomes **Entropic**, and chaos becomes **Chaotic**.
+Religious balance and alignment are still tracked, but their combined line is not shown in the Identity section.
 
 Food and Water begin unknown. A confirmed complete character INFO description updates both: any reported hunger or thirst status is shown, while an omitted status shows **Ok** in green. Wrapped INFO lines are still supported whenever the complete description appears, including outside the startup command sequence. Incomplete INFO responses do not clear previous warnings.
 
@@ -144,25 +143,29 @@ In the normal combined layout, click **Runes** in the Skills / Runes card below 
 
 Long rune names such as **Translocation** expand the scrollable content to fit the full name and weave count. In narrow windows, use the horizontal scrollbar rather than shrinking the text.
 
-`info magic` fills the Runes list. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
+`info magic` (or `info mag`) fills the Runes list. The display has **Runes** and **Weaves Remain** columns: names on the left, all counts right-aligned in one column. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
 
 This puts the runes closest to needing renewal at the top.
+
+Each new rune request clears the old exported values before saving the complete fresh list. Scripts can read `DGHUD.runes.values.disruption`, `DGHUD.runes.remaining.disruption`, or `DGHUD.runes.getRemaining("disruption")`. Simple rune names also become individual Lua variables, such as `disruption = 3`, unless that name belongs to an existing unrelated global. Multiword names use underscores in the direct variables. Missing/unknown values are `nil`, not zero. The existing `items`, `by_name`, `get`, and `all` rune APIs remain supported. Rune values clear on disconnect/character exit and must be refreshed for the next character.
+
+Use `shoprenew` to renew only runes below 20 weaves, or `shoprenewall` for every rune, after a fresh `info mag` response. `trainall` likewise requests fresh skills and raises known zero-use skills by their game numbers. Commands run one second apart and can spend game resources. Turn each shortcut off or on in **OPTIONS → Skills & Runes → Quick Commands**, then **Save**. See [shortcut commands and stopping rules](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
 
 ## Skills
 
 **Skills** is the initial tab in the combined card below Inventory. Choose **Runes** to see the rune list and **Skills** to return without rerunning either source command. The selected tab is remembered per profile; existing sidebar skill sorting, columns, colors, fonts, and scrollbars are unchanged. Turn **COMBINED SKILLS / RUNES OFF** for the separate Skills box.
 
-**OPTIONS → Skill Settings → SKILL FILTERS** defaults **ON** for HUD name/group filtering. Save it **OFF** to use native staff commands such as `skill Rath`: every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, passes unchanged to the game exactly once with the original casing and spacing, without a queued local filter or busy/display-unavailable rejection. Bare `skill` still fills the complete sidebar and follows the independent **MAIN SKILLS** formatting setting.
+**OPTIONS → Skills & Runes → SKILL FILTERS** defaults **ON** for HUD name/group filtering. Save it **OFF** to use native staff commands such as `skill Rath`: every argument form, including `all`, `weapons`, `combat`, `utility`, and `train`, passes unchanged to the game exactly once with the original casing and spacing, without a queued local filter or busy/display-unavailable rejection. Bare `skill` still fills the complete sidebar and follows the independent **MAIN SKILLS** formatting setting.
 
 Save applies filtering, formatting, and sorting together; Cancel or dismissing the panel discards the draft. Reset restores filters ON in the draft until Save. Failed saves leave active settings unchanged, while saving OFF cancels pending local filters. The choice survives other display changes, character changes, reloads, restarts, and updates.
 
-`skill` fills the Skills list. **OPTIONS → Skill Settings** gives **Main Display** and **Right Sidebar** independent sorting choices. Each has a primary key, ascending or descending order, and an optional secondary key with its own direction. Available keys are **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, and **Category (combat vs utility)**. Both displays default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
+`skill` fills the Skills list. **OPTIONS → Skills & Runes** gives **Main Display** and **Right Sidebar** independent sorting choices. Each has a primary key, ascending or descending order, and an optional secondary key with its own direction. Available keys are **Level**, **Uses**, **Name**, **Number**, **Ready to train (0 uses)**, and **Category (combat vs utility)**. Both displays default to **Level descending**, then **Uses ascending**; choose **Level** primary and **Uses** secondary for “level then uses.”
 
 Saving sidebar sorting immediately reorders existing rows. Main sorting changes apply to the next complete `skill` output and leave previously printed tables as they are. Choices are saved for the whole profile and survive character changes, reloads, restarts, and HUD updates. Category and Ready to train sorting keep every captured skill visible.
 
 The sidebar shortens names for readability, such as `Identify` becoming `ID`, while the captured skill record remains available to the HUD. The formatted main table shortens weapon names to `Sharps`, `Blunts`, `Piercing`, `Thrown`, and `Missiles`. **Shield Use** keeps skill ID **7**. Older Pole Weapons, Throw Weapons, and Shield Parry output and filters remain compatible with the same IDs and combat categories. Columns stay aligned, and scrollbars appear when needed.
 
-The **MAIN SKILLS** toggle in **Skill Settings** is on by default. It formats complete `skill` responses in the main game console using the **Main Display** order, for example:
+The **MAIN SKILLS** toggle in **Skills & Runes** is on by default. It formats complete `skill` responses in the main game console using the **Main Display** order, for example:
 
 ```text
 Number  Skill   LVL  USES

@@ -79,6 +79,344 @@ end
 
 local playerStatNames={"strength","intelligence","wisdom","dexterity","agility","constitution","charisma","will","voice","perception","appearance","presence","luck"}
 
+local referralCases={
+  {line="1. Corin refers Aerin North (sample-user): 'An item is misflagged.' [2 days, 4 secs ago.]",
+    speaker="Corin",target="Aerin North",message="refers Aerin North (sample-user): 'An item is misflagged.' [2 days, 4 secs ago.]"},
+  {line="<Corin O'Vale refers Aerin D'North (sample_9.user-2): 'The item's flag needs review.'>",
+    speaker="Corin O'Vale",target="Aerin D'North",message="refers Aerin D'North (sample_9.user-2): 'The item's flag needs review.'>"},
+  {line="[GM] Keeper O'Vale is handling Corin O'Vale's referral.  (3 more pending.)",
+    speaker="Keeper O'Vale",target="Corin O'Vale",message="is handling Corin O'Vale's referral (3 more pending)."},
+}
+
+local function referralHarness(sources)
+  local f=fake(); f.character="Synthetic Keeper"; f.scheduledDelays={}; f.sideEffects=0
+  local append=f.storage.append
+  function f.storage:append(entry)
+    eq(entry.staff_referral,nil)
+    return append(self,entry)
+  end
+  local schedule=f.schedule
+  function f:schedule(delay,fn)
+    self.scheduledDelays[#self.scheduledDelays+1]=delay
+    return schedule(self,delay,fn)
+  end
+  local function sideEffect() f.sideEffects=f.sideEffects+1 end
+  f.send=sideEffect; f.sendCommand=sideEffect; f.gag=sideEffect; f.deleteLine=sideEffect
+  local accepted={}
+  local controller=makeController(f,nil,function(entry)
+    eq(entry.staff_referral,nil)
+    accepted[#accepted+1]=entry
+  end,sources)
+  assert(controller:start())
+  return f,controller,accepted
+end
+
+test("complete referrals immediately persist and alert once with STAFF hidden in ALL",function()
+  for _,case in ipairs(referralCases) do
+    local f,controller,accepted=referralHarness(allSources({STAFF=false}))
+    f:line(" \t\27[36m"..case.line.."\27[0m \r\n")
+    eq(#accepted,1); eq(f.storageAppends,1); eq(#controller:entries(),0)
+    local e=accepted[1]
+    eq(e.category,"STAFF"); eq(e.source,"builtin"); eq(e.schema,1)
+    eq(e.speaker,case.speaker); eq(e.target,case.target); eq(e.message,case.message); eq(e.line,case.line)
+    eq(e.character,"Synthetic Keeper"); eq(e.timestamp,f.timestampValue); eq(e.staff_referral,nil)
+    eq(controller.pendingStaffMessage,nil); eq(next(f.timers),nil)
+    f:line(case.line); f:line("A synthetic breeze passes through the room."); f:line(">")
+    eq(#accepted,1); eq(f.storageAppends,1); eq(e.line,case.line)
+    assert(controller:setFilter("STAFF")); sameEntries(controller:entries(),accepted)
+    assert(controller:setFilter("ALL")); eq(#controller:entries(),0)
+    assert(controller:setAllSources(allSources({STAFF=true}))); sameEntries(controller:entries(),accepted)
+    eq(f.sideEffects,0); assert(controller:shutdown()); eq(f:count(f.triggers),0)
+  end
+end)
+
+test("numbered referrals join wrapped body and age and flush at their closing age",function()
+  local f,controller,accepted=referralHarness(allSources({STAFF=false}))
+  local first="1. Corin O'Vale refers Aerin D'North (sample_9.user-2): 'The item's flag"
+  local second="needs review.' [2 days,"
+  local final="4 secs ago.]"
+  f:line("\27[36m"..first.."\27[0m"); f:line(second)
+  eq(#accepted,0); eq(f.storageAppends,0); eq(f:count(f.timers),1)
+  local _,lateTimer=next(f.timers)
+  local timestamp=f.timestampValue; f.timestampValue="2026-10-10T12:35:00-04:00"
+  f:line("\27[36m"..final.."\27[0m")
+  eq(#accepted,1); eq(f.storageAppends,1); eq(next(f.timers),nil)
+  local e=accepted[1]
+  eq(e.message,"refers Aerin D'North (sample_9.user-2): 'The item's flag needs review.' [2 days, 4 secs ago.]")
+  eq(e.line,first.." "..second.." "..final); eq(e.speaker,"Corin O'Vale"); eq(e.target,"Aerin D'North")
+  eq(e.timestamp,timestamp); eq(e.staff_referral,nil); eq(#controller:entries(),0)
+  f:line("An unrelated synthetic item lies here."); lateTimer(); f:fireTimer()
+  eq(#accepted,1); eq(f.storageAppends,1); eq(e.line,first.." "..second.." "..final)
+  assert(controller:setFilter("STAFF")); sameEntries(controller:entries(),accepted); assert(controller:shutdown())
+end)
+
+test("complete multiline referral payloads flush immediately and preserve their original line",function()
+  for _,case in ipairs({
+    {prefix="<",suffix=">"},
+    {prefix="5. ",suffix=" [2 days,\n4 secs ago.]"},
+  }) do
+    local f,controller,accepted=referralHarness()
+    local payload="Corin refers Aerin North (sample-user): 'An item\nis misflagged.'"
+    local line=case.prefix..payload..case.suffix
+    f:line("\27[36m"..line.."\27[0m")
+    eq(#accepted,1); eq(f.storageAppends,1); eq(next(f.timers),nil)
+    eq(accepted[1].line,line); eq(accepted[1].message,payload:sub(#"Corin "+1)..case.suffix)
+    eq(accepted[1].staff_referral,nil)
+    f:line("Unrelated synthetic output after a complete multiline entry.")
+    eq(#accepted,1); eq(accepted[1].line,line); assert(controller:shutdown())
+  end
+end)
+
+test("referral age beginning on its own bracketed line continues across age wraps",function()
+  for _,ageLines in ipairs({{"[2 days, 4 secs ago.]"},{"[2 days,","4 secs ago.]"}}) do
+    local f,controller,accepted=referralHarness()
+    local first="2. Corin refers Aerin North (sample-user): 'An item is misflagged.'"
+    f:line(first); eq(#accepted,0)
+    for index,line in ipairs(ageLines) do
+      f:line("\27[36m"..line.."\27[0m")
+      eq(#accepted,index==#ageLines and 1 or 0)
+    end
+    eq(accepted[1].line,first.." "..table.concat(ageLines," "))
+    eq(accepted[1].message,"refers Aerin North (sample-user): 'An item is misflagged.' [2 days, 4 secs ago.]")
+    eq(f.storageAppends,1); eq(next(f.timers),nil); eq(controller.pendingStaffMessage,nil)
+    f:line("Synthetic output after the age."); eq(f.storageAppends,1); assert(controller:shutdown())
+  end
+end)
+
+test("detail referrals retain internal apostrophes and angle text and flush only at the final quote angle",function()
+  local f,controller,accepted=referralHarness()
+  local first="<Corin refers Aerin North (sample-user): 'The item's label contains '> inside"
+  local second="the sample text, and [2 secs ago.] is quoted content."
+  local final="The final flag needs review.'>"
+  f:line(first); f:line(second); eq(#accepted,0); eq(f.storageAppends,0)
+  f:line(final); eq(#accepted,1); eq(f.storageAppends,1); eq(next(f.timers),nil)
+  eq(accepted[1].line,first.." "..second.." "..final)
+  eq(accepted[1].message,(first.." "..second.." "..final):sub(#"<Corin "+1))
+  eq(accepted[1].speaker,"Corin"); eq(accepted[1].target,"Aerin North"); eq(accepted[1].staff_referral,nil)
+  f:line("A synthetic room description follows."); eq(#accepted,1); assert(controller:shutdown())
+end)
+
+test("detail referral closing quote followed by a standalone angle terminator flushes immediately",function()
+  local f,controller,accepted=referralHarness()
+  local first="<Corin refers Aerin North (sample-user): 'An item is misflagged.'"
+  f:line(first); eq(#accepted,0); eq(f.storageAppends,0)
+  local _,lateTimer=next(f.timers)
+  f:line(" \t\27[36m>\27[0m ")
+  eq(#accepted,1); eq(f.storageAppends,1); eq(next(f.timers),nil); eq(controller.pendingStaffMessage,nil)
+  eq(accepted[1].line:gsub("'%s*>$","'>"),first..">")
+  eq(accepted[1].message:gsub("'%s*>$","'>"),first:sub(#"<Corin "+1)..">")
+  eq(accepted[1].staff_referral,nil)
+  f:line("Unrelated synthetic output after the standalone terminator."); lateTimer()
+  eq(#accepted,1); eq(f.storageAppends,1); assert(controller:shutdown())
+end)
+
+test("consecutive numbered referrals details and handling remain separate entries",function()
+  local f,controller,accepted=referralHarness()
+  local first="1. Corin refers Aerin North (sample-user): 'First synthetic line"
+  local finish="has a flag issue.' [4 secs ago.]"
+  f:line(first); f:line(finish); eq(#accepted,1)
+  local second="2. Future Referrer refers Future Player Name (sample.user-2): 'A second item needs review.' [1 day ago.]"
+  f:line(second); eq(#accepted,2); eq(accepted[2].speaker,"Future Referrer"); eq(accepted[2].target,"Future Player Name")
+  f:line(referralCases[2].line); eq(#accepted,3)
+  f:line(referralCases[3].line); eq(#accepted,4)
+  eq(accepted[1].line,first.." "..finish); eq(accepted[2].line,second)
+  eq(accepted[3].line,referralCases[2].line); eq(accepted[4].line,referralCases[3].line)
+  for _,entry in ipairs(accepted) do eq(entry.category,"STAFF"); eq(entry.staff_referral,nil) end
+  eq(f.storageAppends,4); eq(next(f.timers),nil); sameEntries(controller:entries(),accepted)
+  eq(f.sideEffects,0); assert(controller:shutdown())
+end)
+
+test("unfinished referrals stop at prompts blank lines and independently parsed chat boundaries",function()
+  for _,boundary in ipairs({
+    {line=">"},{line="[12] HP:100 >"},{line="[GUIDE] Unrecognized system output"},{line=""},
+    {line='Listener says, "A synthetic room message."',category="ROOM"},
+    {line="[GUIDE] Listener: A synthetic staff message.",category="STAFF"},
+    {line=referralCases[1].line,category="STAFF"},
+    {line=referralCases[2].line,category="STAFF"},
+    {line=referralCases[3].line,category="STAFF"},
+  }) do
+    for _,prefix in ipairs({"8. ","<"}) do
+      local f,controller,accepted=referralHarness()
+      local first=prefix.."Future Referrer refers Future Player Name (sample-user): 'Unfinished sample"
+      f:line(first); eq(#accepted,0)
+      f:line(boundary.line)
+      local count=boundary.category and 2 or 1
+      eq(#accepted,count); eq(f.storageAppends,count); eq(next(f.timers),nil)
+      eq(accepted[1].line,first); eq(accepted[1].staff_referral,nil)
+      eq(accepted[1].message,"refers Future Player Name (sample-user): 'Unfinished sample")
+      if boundary.category then eq(accepted[2].category,boundary.category); eq(accepted[2].line,boundary.line) end
+      f:line("Unrelated synthetic output after the boundary."); eq(#accepted,count)
+      assert(controller:shutdown())
+    end
+  end
+end)
+
+test("unfinished referrals use the existing 0.4 second idle fallback once",function()
+  for _,prefix in ipairs({"3. ","<"}) do
+    local f,controller,accepted=referralHarness()
+    local first=prefix.."Corin refers Aerin North (sample-user): 'A synthetic item"
+    f:line(first); f:line("needs further review")
+    eq(#accepted,0); eq(f.storageAppends,0); eq(f:count(f.timers),1)
+    for _,delay in ipairs(f.scheduledDelays) do eq(delay,.4) end
+    local _,lateTimer=next(f.timers)
+    f:fireTimer(); eq(#accepted,1); eq(f.storageAppends,1); eq(next(f.timers),nil)
+    eq(accepted[1].line,first.." needs further review"); eq(accepted[1].staff_referral,nil)
+    lateTimer(); f:line("Unrelated synthetic output after idle."); eq(#accepted,1); eq(f.storageAppends,1)
+    assert(controller:shutdown())
+  end
+end)
+
+test("canceled referral callbacks cannot flush or detach a later referral timer",function()
+  for _,completion in ipairs({"terminator","idle"}) do
+    local f,controller,accepted=referralHarness()
+    f:line("<Old Referrer refers Old Player Name (sample-old): 'An old synthetic item")
+    local _,oldTimer=next(f.timers)
+    if completion=="terminator" then f:line("needs review.'>") else f:fireTimer() end
+    eq(#accepted,1); eq(f.storageAppends,1)
+
+    local first="<Corin refers Aerin North (sample-user): 'A new synthetic item"
+    f:line(first); eq(#accepted,1)
+    local pending=controller.pendingStaffMessage
+    local currentTimerId,currentTimer=next(f.timers)
+    oldTimer()
+    eq(#accepted,1); eq(f.storageAppends,1); eq(controller.pendingStaffMessage,pending)
+    eq(controller.staffMessageTimer,currentTimerId); eq(f.timers[currentTimerId],currentTimer)
+    f:line("has another sample flag")
+    local replacementTimerId,replacementTimer=next(f.timers)
+    currentTimer()
+    eq(#accepted,1); eq(f.storageAppends,1); eq(controller.pendingStaffMessage,pending)
+    eq(controller.staffMessageTimer,replacementTimerId); eq(f.timers[replacementTimerId],replacementTimer)
+    f:line("that needs review.'>")
+    eq(#accepted,2); eq(f.storageAppends,2); eq(next(f.timers),nil)
+    eq(accepted[2].line,first.." has another sample flag that needs review.'>")
+    eq(accepted[2].staff_referral,nil); assert(controller:shutdown())
+  end
+end)
+
+test("confirmed saved-history deletion discards pending referrals and stale callbacks stay silent",function()
+  for _,prefix in ipairs({"11. ","<"}) do
+    local f,controller,accepted=referralHarness()
+    f:line(referralCases[1].line); eq(#accepted,1); eq(f.storageAppends,1)
+    f:line(prefix.."Old Referrer refers Old Player Name (sample-old): 'A synthetic pending item")
+    f:line("that predates deletion")
+    local _,oldTimer=next(f.timers)
+    f.storageRemoved=1
+    local cleared,removed=controller:clearSavedHistory(true)
+    eq(cleared,true); eq(removed,1); eq(f.storageClears,1); eq(f.storageClearConfirmed,true)
+    eq(controller.pendingStaffMessage,nil); eq(controller.pendingStaffMessageLines,nil)
+    eq(next(f.timers),nil); eq(#controller.history.items,0); eq(#controller:entries(),0)
+    oldTimer(); f:line("a discarded continuation.'>")
+    eq(#accepted,1); eq(f.storageAppends,1); eq(#controller.history.items,0)
+
+    local first="<Corin refers Aerin North (sample-user): 'A synthetic item after deletion"
+    f:line(first)
+    local pending=controller.pendingStaffMessage
+    local currentTimerId,currentTimer=next(f.timers)
+    oldTimer()
+    eq(controller.pendingStaffMessage,pending); eq(controller.staffMessageTimer,currentTimerId)
+    eq(f.timers[currentTimerId],currentTimer); eq(#accepted,1); eq(f.storageAppends,1)
+    f:line("needs review.'>")
+    eq(#accepted,2); eq(f.storageAppends,2); eq(#controller.history.items,1)
+    eq(controller.history.items[1].line,first.." needs review.'>")
+    eq(controller.history.items[1].staff_referral,nil); eq(next(f.timers),nil)
+    assert(controller:shutdown()); eq(f.storageAppends,2)
+  end
+end)
+
+test("failed or unconfirmed saved-history deletion preserves pending referrals and their timers",function()
+  for _,mode in ipairs({"failed","false","missing"}) do
+    for _,prefix in ipairs({"12. ","<"}) do
+      local f,controller,accepted=referralHarness()
+      local first=prefix.."Corin refers Aerin North (sample-user): 'An unfinished synthetic item"
+      f:line(first)
+      local pending=controller.pendingStaffMessage
+      local timerId,timer=next(f.timers)
+      if mode=="failed" then f.storageClearFailure=true end
+      local confirmed
+      if mode=="failed" then confirmed=true elseif mode=="false" then confirmed=false end
+      local cleared,err=controller:clearSavedHistory(confirmed)
+      eq(cleared,nil); eq(type(err),"string"); eq(f.storageClears,mode=="failed" and 1 or 0)
+      eq(controller.pendingStaffMessage,pending); eq(controller.staffMessageTimer,timerId)
+      eq(f.timers[timerId],timer); eq(#accepted,0); eq(f.storageAppends,0)
+      local final=prefix=="<" and "needs review.'>" or "needs review.' [2 secs ago.]"
+      f:line(final)
+      eq(#accepted,1); eq(f.storageAppends,1); eq(accepted[1].line,first.." "..final)
+      eq(accepted[1].staff_referral,nil); eq(next(f.timers),nil); assert(controller:shutdown())
+    end
+  end
+end)
+
+test("completed referrals reload and hand off silently with STAFF hidden and metadata intact",function()
+  local sources=allSources({STAFF=false})
+  local f,controller,accepted=referralHarness(sources)
+  for _,case in ipairs(referralCases) do f:line(case.line) end
+  eq(#accepted,3); assert(controller:setFilter("STAFF"))
+  local handoff=controller:handoff(); sameEntries(handoff.entries,accepted); eq(handoff.filter,"STAFF")
+  for _,entry in ipairs(handoff.entries) do eq(entry.staff_referral,nil) end
+  assert(controller:shutdown())
+
+  local reloaded=fake(f.appendedEntries); reloaded.character="Synthetic Reload Keeper"; local alerts=0
+  local restored=makeController(reloaded,nil,function() alerts=alerts+1 end,sources)
+  assert(restored:start()); eq(#restored:entries(),0); eq(alerts,0); eq(reloaded.storageAppends,0)
+  assert(restored:setFilter("STAFF")); sameEntries(restored:entries(),accepted)
+  for _,entry in ipairs(restored:entries()) do eq(entry.staff_referral,nil) end
+  assert(restored:shutdown())
+
+  local replacement=fake(); replacement.character="Synthetic Replacement Keeper"
+  local updated=makeController(replacement,nil,function() alerts=alerts+1 end,sources)
+  assert(updated:restoreHandoff(handoff)); assert(updated:start(true))
+  sameEntries(updated:entries(),accepted); eq(replacement.loadRecentCalls,0); eq(alerts,0)
+  replacement:line(referralCases[3].line); eq(replacement.storageAppends,0); eq(alerts,0)
+  replacement.epochValue=104; replacement:line(referralCases[1].line)
+  eq(replacement.storageAppends,1); eq(alerts,1); eq(#updated:entries(),4)
+  eq(updated:entries()[4].character,"Synthetic Replacement Keeper"); eq(updated:entries()[4].staff_referral,nil)
+  assert(updated:setFilter("ALL")); eq(#updated:entries(),0); assert(updated:shutdown())
+end)
+
+test("unfinished referral handoff and shutdown flush once without alerting or leaking framing",function()
+  for _,action in ipairs({"handoff","shutdown"}) do
+    for _,prefix in ipairs({"9. ","<"}) do
+      local f,controller,accepted=referralHarness()
+      local first=prefix.."Corin refers Aerin North (sample-user): 'An unfinished synthetic item"
+      f:line(first); f:line("needs review")
+      local _,lateTimer=next(f.timers)
+      local result=controller[action](controller)
+      eq(#accepted,0); eq(f.storageAppends,1); eq(#controller.history.items,1); eq(next(f.timers),nil)
+      eq(f.appendedEntries[1].line,first.." needs review"); eq(f.appendedEntries[1].staff_referral,nil)
+      if action=="handoff" then sameEntries(result.entries,f.appendedEntries); eq(result.entries[1].staff_referral,nil) end
+      lateTimer(); assert(controller:shutdown()); eq(#accepted,0); eq(f.storageAppends,1)
+    end
+  end
+end)
+
+test("unfinished referral buffers stop at twenty lines and four thousand characters",function()
+  for _,prefix in ipairs({"10. ","<"}) do
+    local f,controller,accepted=referralHarness()
+    local first=prefix.."Corin refers Aerin North (sample-user): 'Synthetic first line"
+    f:line(first); eq(#accepted,0)
+    local lines={first}
+    for index=2,20 do
+      local line="synthetic continuation "..index; lines[#lines+1]=line; f:line(line)
+      eq(#accepted,index==20 and 1 or 0)
+    end
+    eq(f.storageAppends,1); eq(accepted[1].line,table.concat(lines," "))
+    eq(accepted[1].staff_referral,nil); eq(next(f.timers),nil); eq(controller.pendingStaffMessage,nil)
+    f:line("synthetic continuation outside the buffer"); eq(f.storageAppends,1); assert(controller:shutdown())
+
+    for _,wrapped in ipairs({false,true}) do
+      local bounded,boundedController,boundedAccepted=referralHarness()
+      local start=prefix.."Corin refers Aerin North (sample-user): '"..string.rep("x",wrapped and 1000 or 5000)
+      bounded:line(start)
+      if wrapped then eq(#boundedAccepted,0); bounded:line(string.rep("y",5000)) end
+      eq(#boundedAccepted,1); eq(bounded.storageAppends,1)
+      eq(#boundedAccepted[1].message,4000); eq(#boundedAccepted[1].line,4000)
+      eq(boundedAccepted[1].staff_referral,nil); eq(next(bounded.timers),nil)
+      bounded:line("synthetic text beyond the character bound"); eq(bounded.storageAppends,1)
+      assert(boundedController:shutdown())
+    end
+  end
+end)
+
 
 test("WORLD notifications retain full metadata and hidden dedicated history across characters reload and handoff",function()
   local f=fake(); local accepted={}; local redraws={}
