@@ -5372,3 +5372,120 @@ test("view reuse rejects a removed or damaged combined-list Options control",fun
     eq(ok,nil); assert(type(err)=="string" and #err>0)
   end
 end)
+
+local function nativeRuneListVisibility(view)
+  for _,key in ipairs({"inventory","skills","runes"}) do
+    for _,suffix in ipairs({"","_title","_output","_content"}) do nativeInventoryVisibility(view[key..suffix]) end
+  end
+  nativeInventoryVisibility(view.inventory_footer)
+  for _,button in pairs(view.skills_runes_tabs) do nativeInventoryVisibility(button) end
+  for _,button in pairs(view.right_list_tabs) do nativeInventoryVisibility(button) end
+end
+local function retryRuneState()
+  local state=combinedSkillsRunesState(1)
+  state.runes.items={{name="Force",remaining=100}}
+  return state
+end
+test("native cached rune content follows tab changes and cleared or restored captures",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  local state=retryRuneState()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  nativeRuneListVisibility(view)
+  local echo=view.runes_content.echo; local repaints=0
+  function view.runes_content:echo(value) repaints=repaints+1; return echo(self,value) end
+  local signature=view.runes_signature
+  eq(view:setSkillsRunesTab("skills"),"skills"); view:update(state)
+  eq(view.runes_signature,signature); eq(repaints,0); eq(combinedWidgetVisible(view.runes_content),false)
+  state.runes.items={}; view:update(state)
+  eq(repaints,1); eq(view.runes_signature,""); eq(combinedWidgetVisible(view.runes_content),false)
+  eq(view.runes_content.message:find("Force",1,true),nil); eq(#runeContentLines(view),1)
+  eq(view:setSkillsRunesTab("runes"),"runes"); view:update(state)
+  eq(repaints,1); eq(nativeInventoryVisible(view.runes_output),true); eq(combinedWidgetVisible(view.runes_content),true)
+  eq(view:setSkillsRunesTab("skills"),"skills")
+  view.runes_output:hide(true); eq(view.runes_output.auto_hidden,true)
+  state.runes.items={{name="Force",remaining=100}}; view:renderRunes(state)
+  eq(repaints,2); eq(combinedWidgetVisible(view.runes_content),false); eq(view.runes_signature,signature)
+  view.runes_output:show(true); eq(view.runes_output.auto_hidden,false)
+  eq(view:setSkillsRunesTab("runes"),"runes"); view:update(state)
+  eq(repaints,2); eq(nativeInventoryVisible(view.runes_output),true); eq(combinedWidgetVisible(view.runes_content),true)
+  assert(runeContentLines(view)[2]:match("Force%s+100")); eq(view.runes_content.visible,nil)
+end)
+test("empty rune captures retry title and content echo failures before committing the cache",function()
+  for _,key in ipairs({"runes_title","runes_content"}) do
+    local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+    local state=retryRuneState()
+    view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+    nativeRuneListVisibility(view)
+    local signature=view.runes_signature; local widget=view[key]; local echo=widget.echo; local attempts=0
+    widget.echo=function() attempts=attempts+1; error("synthetic empty rune "..key.." failure") end
+    state.runes.items={}
+    local ok,err=pcall(view.renderRunes,view,state)
+    widget.echo=echo
+    eq(ok,false); assert(tostring(err):find("synthetic empty rune "..key.." failure",1,true))
+    eq(attempts,1); eq(view.runes_signature,signature)
+    view:renderRunes(state)
+    eq(view.runes_signature,""); eq(#runeContentLines(view),1)
+    eq(view.runes_content.message:find("Force",1,true),nil); eq(combinedWidgetVisible(view.runes_content),true)
+    local contentEcho=view.runes_content.echo; local repaints=0
+    function view.runes_content:echo(value) repaints=repaints+1; return contentEcho(self,value) end
+    view:renderRunes(state); eq(repaints,0)
+  end
+end)
+test("rune rendering honors native Geyser hidden and auto_hidden output flags",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes"})
+  local state=retryRuneState()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  nativeRuneListVisibility(view)
+  for index,case in ipairs({{true,false,false},{false,true,false},{true,true,false},{false,false,true}}) do
+    view.runes_output.hidden=case[1]; view.runes_output.auto_hidden=case[2]
+    state.runes.items[1].remaining=100-index
+    view:renderRunes(state)
+    eq(view.runes_output.visible,nil); eq(view.runes_content.visible,nil)
+    eq(view.runes_content.hidden,not case[3]); eq(combinedWidgetVisible(view.runes_content),case[3])
+  end
+end)
+test("combined Skills to stacked layout shows unchanged runes with native visibility",function()
+  local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="skills"})
+  local state=retryRuneState()
+  view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+  nativeRuneListVisibility(view)
+  eq(view.right_lists_presentation,"combined"); eq(combinedWidgetVisible(view.runes_content),false)
+  local signature,html=view.runes_signature,view.runes_content.message
+  local echo=view.runes_content.echo; local repaints=0
+  function view.runes_content:echo(value) repaints=repaints+1; return echo(self,value) end
+  eq(view:setCombinedSkillsRunes(false),false)
+  for _=1,3 do
+    view:update(state)
+    eq(view.right_lists_presentation,"stacked")
+    eq(view.runes_output.visible,nil); eq(view.runes_content.visible,nil)
+    eq(nativeInventoryVisible(view.runes_output),true); eq(combinedWidgetVisible(view.runes_content),true)
+    eq(view.runes_signature,signature); eq(view.runes_content.message,html)
+    eq(repaints,0)
+  end
+end)
+for _,operation in ipairs({"echo","move","resize","show","hide"}) do
+  test("unchanged rune render retries after a failed "..operation,function()
+    local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab=operation=="hide" and "skills" or "runes"})
+    local state=retryRuneState()
+    view:applyLayout(require("layout").compute(1920,1080)); view:update(state)
+    nativeRuneListVisibility(view)
+    local signature=view.runes_signature
+    local original=view.runes_content[operation]; local attempts=0
+    view.runes_content[operation]=function()
+      attempts=attempts+1; error("synthetic rune "..operation.." failure")
+    end
+    state.runes.items[1].remaining=99
+    local ok,err=pcall(view.renderRunes,view,state)
+    view.runes_content[operation]=original
+    eq(ok,false); assert(tostring(err):find("synthetic rune "..operation.." failure",1,true))
+    eq(attempts,1); eq(view.runes_signature,signature)
+    view:renderRunes(state)
+    assert(view.runes_signature~=signature)
+    local text=view.runes_content.message:gsub("<[^>]+>",""):gsub("&nbsp;"," ")
+    assert(text:match("Force%s+99"),text)
+    eq(combinedWidgetVisible(view.runes_content),operation~="hide")
+    local echo=view.runes_content.echo; local repaints=0
+    function view.runes_content:echo(value) repaints=repaints+1; return echo(self,value) end
+    view:renderRunes(state); eq(repaints,0)
+  end)
+end

@@ -17,6 +17,7 @@ if standalone then
 end
 local QuickActions=require("quick_actions")
 local Parser=require("command_parser")
+local Collector=require("command_collector")
 local function fixture()
   local f={now=0,nextTimer=0,timers={},history={},sent={},canceled={},notices={},
     enabled={shoprenew=true,shoprenewall=true,trainall=true}}
@@ -82,6 +83,51 @@ local function skills(...)
   for _,row in ipairs({...}) do items[#items+1]={name=row[1],remain=row[2],level=row[3]} end
   return {items=items}
 end
+local function pastedTrainallSkills()
+  -- All 23 rows from the user's first Number/Skill/LVL/USES table. The
+  -- collector's parsed shape puts USES in remain and LVL in level; parser
+  -- coverage owns the raw header/column interpretation separately.
+  return skills(
+    {"Blunts",550,5},{"Missiles",550,5},{"Piercing",550,5},
+    {"Sharps",544,5},{"Thrown",550,5},{"Disarming",84,3},
+    {"Martial Arts",0,3},{"Brawling",200,2},{"First Aid",182,2},
+    {"Quickdraw",85,2},{"Shield Use",185,2},{"Spellcasting",0,2},
+    {"Turn Undead",169,2},{"Bargaining",200,2},{"Detect Traps",200,2},
+    {"Hiding",200,2},{"Identify Armor Quality",200,2},
+    {"Identify Gems/Minerals",200,2},{"Identify Magick",200,2},
+    {"Identify Weapon Quality",200,2},{"Play Instruments",200,2},
+    {"Stealth",200,2},{"Swimming",200,2})
+end
+local function pastedRuneLines()
+  -- Exact elemental and tail fixture already supplied in parser/collector tests.
+  return {
+    "You have the following elemental runes available to you...",
+    "  blending    -  99 weaves remain   disruption  -  61 weaves remain",
+    "  force       -  97 weaves remain   holy        -  86 weaves remain",
+    "  vigor       -  39 weaves remain   dexterity   -  93 weaves remain",
+    "  movement    -  92 weaves remain   strength    -  88 weaves remain",
+    "  translocation - 91 weaves remain   aegis       -  97 weaves remain",
+    "  barrier     -  88 weaves remain",
+    "You may use the following modifier runes upon them...",""," small average","",
+    "You may use them with the following shapes...","",
+    " aura blast chi mist eagle body"," spirit","",
+    "See INFO RUNESPELLS for memorized corridors.","",
+  }
+end
+local pastedRuneCommands={"shop renew aegis","shop renew barrier","shop renew blending",
+  "shop renew dexterity","shop renew disruption","shop renew force","shop renew holy",
+  "shop renew movement","shop renew strength","shop renew translocation","shop renew vigor"}
+local function collectedFixture()
+  local q,f,previous=fixture()
+  f.runeChanges=0
+  local c=Collector.new(f,Parser,function(_,key)
+    if key=="runes" then f.runeChanges=f.runeChanges+1 end
+  end)
+  c.snapshot=previous.snapshot; q.collector=c
+  f.onSend=function(command) c:onOutgoing(command) end
+  function f:lines(lines) for _,line in ipairs(lines) do c:onLine(line) end end
+  return q,f,c
+end
 local function rejected(name,result,err)
   local q,f,c=fixture()
   assert(q:start(name)); c:reply(result,err)
@@ -131,6 +177,33 @@ test("quick actions train ready skills by authoritative IDs in numeric order",fu
   eq(f:actions(),"train raise 1,train raise 7,train raise 23,train raise 46")
   for index=2,#f.sent do eq(f.sent[index].at,index-1) end
   eq(q:busy(),false)
+end)
+test("quick actions pasted trainall fixture queues only 26 and 54, never 42 or nonzero skills",function()
+  local q,f,c=fixture(); local result=pastedTrainallSkills()
+  eq(#result.items,23); eq(result.items[9].name,"First Aid"); eq(result.items[9].remain,182)
+  assert(q:start("trainall")); eq(c.requests[1],"skill")
+  c:reply(result)
+  eq(table.concat(q.current.queue,","),"train raise 26,train raise 54")
+  eq(f.notices[2],"trainall: 2 skills queued for training, one per second. Use trainallstop to stop.")
+  f:advance(1); eq(f:actions(),"train raise 26"); eq(q:busy(),true)
+  f:advance(1); eq(f:actions(),"train raise 26,train raise 54")
+  eq(q:busy(),false); eq(f:pending(),0)
+  f:advance(30); eq(#f.sent,3)
+  eq(f.sent[2].at,1); eq(f.sent[3].at,2)
+  for index=2,#f.sent do eq(f.sent[index].marked,true) end
+  assert(not f:actions():find("train raise 42",1,true))
+  eq(f.notices[3],"trainall finished.")
+end)
+test("quick actions pasted trainall fixture stops on foreign 42 and invalidates its pending 54",function()
+  local q,f,c=fixture(); assert(q:start("trainall")); c:reply(pastedTrainallSkills())
+  f:advance(1); eq(f:actions(),"train raise 26"); eq(q:busy(),true)
+  eq(f.sent[2].marked,true); eq(q.sending,false)
+  local stale=f.history[2].callback
+  assert(q:onOutgoing("train raise 42"))
+  eq(q:busy(),false); eq(f:pending(),0); eq(f.canceled[1],2)
+  eq(f.notices[3],"trainall stopped because you sent another command.")
+  stale(); f:advance(30)
+  eq(f:actions(),"train raise 26"); eq(#f.sent,2); eq(q.sending,false)
 end)
 test("quick actions dedupe old and new skill names with their original IDs",function()
   local q,f,c=fixture(); assert(q:start("trainall"))
@@ -509,6 +582,140 @@ test("quick actions notification cancellation prevents requests or queued comman
   q,f,c=fixture(); assert(q:start("shoprenew"))
   q.options.notify=function() q:cancel("user cancelled") end
   c:reply(runes({"Force",0})); eq(q:busy(),false); eq(f:pending(),0); eq(f:actions(),"")
+end)
+
+test("quick actions pasted rune tail renews exactly eleven elementals once per second after the final prompt",function()
+  for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+    local q,f,c=collectedFixture(); assert(q:start("shoprenewall"))
+    local active=c.active; local done=active.onComplete
+    f:lines(pastedRuneLines())
+    eq(f.runeChanges,1); eq(#c.snapshot.runes.items,11); eq(c.active,active)
+    eq(q:busy(),true); eq(f:actions(),"")
+    f:advance(.25); eq(f:actions(),""); eq(f.sent[2].command,""); eq(q:busy(),true)
+    c:onLine(prompt); c:onLine(prompt)
+    eq(c.active,nil); eq(f:pending(),1); eq(f.runeChanges,1)
+    eq(table.concat(q.current.queue,","),table.concat(pastedRuneCommands,","))
+    done(c.snapshot.runes); done(nil,"late error")
+    for index,command in ipairs(pastedRuneCommands) do
+      local stale=f.history[f.nextTimer].callback
+      f:advance(.5); eq(#f.sent,index+1)
+      f:advance(.5); eq(f.sent[index+2].command,command); eq(f.sent[index+2].at,index+.25)
+      eq(f.sent[index+2].marked,true)
+      stale(); stale(); done(c.snapshot.runes)
+      eq(#f.sent,index+2); eq(f:pending(),index<#pastedRuneCommands and 1 or 0)
+    end
+    eq(f:actions(),table.concat(pastedRuneCommands,",")); eq(q:busy(),false)
+    f:advance(30); eq(#f.sent,13); eq(f:pending(),0)
+    eq(f.notices[#f.notices],"shoprenewall finished.")
+  end
+end)
+test("quick actions shoprenew spends nothing on the exact pasted rune fixture above twenty",function()
+  local q,f,c=collectedFixture(); assert(q:start("shoprenew"))
+  f:lines(pastedRuneLines()); eq(f.runeChanges,1); eq(q:busy(),true)
+  eq(f:actions(),""); c:onLine(">")
+  eq(q:busy(),false); eq(f:pending(),0); eq(#f.sent,1)
+  eq(f.notices[2],"shoprenew: No runes have fewer than 20 weaves remaining.")
+  f:advance(30); eq(f:actions(),""); eq(#f.sent,1)
+end)
+test("quick actions a published rune preview without a final prompt times out without spending",function()
+  for _,name in ipairs({"shoprenew","shoprenewall"}) do
+    local q,f,c=collectedFixture(); assert(q:start(name)); local done=c.active.onComplete
+    f:lines(pastedRuneLines()); eq(f.runeChanges,1); eq(q:busy(),true)
+    f:advance(30); eq(q:busy(),false); eq(c.active,nil); eq(f:pending(),0)
+    eq(f:actions(),""); eq(f.runeChanges,1)
+    done(c.snapshot.runes); c:onLine(">")
+    f:advance(30); eq(f:actions(),""); eq(f:pending(),0); eq(#f.sent,3)
+  end
+end)
+test("quick actions delayed final rune prompt in recovery still waits a full second before spending",function()
+  local q,f,c=collectedFixture(); assert(q:start("shoprenewall"))
+  f:lines(pastedRuneLines()); local active=c.active
+  f:advance(3); eq(c.active,active); eq(active.timeout_stage,"recovery")
+  eq(q:busy(),true); eq(f:actions(),""); eq(#f.sent,3)
+  local recovery=f.history[c.timeout].callback
+  c:onLine(">"); recovery(); eq(f:pending(),1); eq(q:busy(),true)
+  f:advance(.5); eq(f:actions(),"")
+  f:advance(.5); eq(f:actions(),"shop renew aegis"); eq(f.sent[4].at,4)
+  f:advance(10); eq(f:actions(),table.concat(pastedRuneCommands,",")); eq(q:busy(),false)
+  for index=4,#f.sent do eq(f.sent[index].at,index) end
+end)
+test("quick actions malformed or conflicting pasted rune rows cannot spend a valid subset",function()
+  for _,name in ipairs({"shoprenew","shoprenewall"}) do
+    for _,row in ipairs({"  healing - ??? weaves remain",
+        " force - 97 weaves remain   FORCE - 0 weaves remain",
+        " force - 97 weaves remain;force - 0 weaves remain"}) do
+      local q,f,c=collectedFixture(); local prior=c.snapshot.runes
+      assert(q:start(name)); local done=c.active.onComplete; local lines=pastedRuneLines()
+      table.insert(lines,8,row); f:lines(lines); c:onLine(">")
+      eq(q:busy(),false); eq(f:pending(),0); eq(f.runeChanges,0); eq(c.snapshot.runes,prior)
+      done(assert(Parser.parseRunes(pastedRuneLines(),true)))
+      f:advance(30); eq(f:actions(),""); eq(#f.sent,1)
+    end
+  end
+end)
+test("quick actions pasted training duplicates and repeated callbacks never retrain or substitute IDs",function()
+  local q,f,c=fixture(); local result=pastedTrainallSkills()
+  for index=1,23 do result.items[#result.items+1]=result.items[index] end
+  assert(q:start("trainall")); local done=c.callbacks[1]
+  done(result); done(pastedTrainallSkills()); done(nil,"late error")
+  eq(table.concat(q.current.queue,","),"train raise 26,train raise 54")
+  local first=f.history[1].callback
+  f:advance(1); eq(f:actions(),"train raise 26"); first(); done(result)
+  eq(f:pending(),1); eq(#f.sent,2)
+  local second=f.history[2].callback
+  f:advance(.5); eq(#f.sent,2)
+  f:advance(.5); eq(f:actions(),"train raise 26,train raise 54")
+  second(); first(); done(result); f:advance(30)
+  eq(#f.sent,3); eq(f.sent[2].at,1); eq(f.sent[3].at,2); eq(q:busy(),false)
+end)
+test("quick actions pasted training with a conflicting late row cannot partially train",function()
+  for _,field in ipairs({"remain","level"}) do
+    local q,f,c=fixture(); local result=pastedTrainallSkills()
+    local row={name="Martial Arts",remain=0,level=3}; row[field]=row[field]+1
+    result.items[#result.items+1]=row
+    assert(q:start("trainall")); local done=c.callbacks[1]; done(result)
+    eq(q:busy(),false); eq(f:pending(),0)
+    done(pastedTrainallSkills()); f:advance(30)
+    eq(f:actions(),""); eq(#f.sent,1)
+  end
+end)
+test("quick actions cancellation of shoprenewall and pasted trainall invalidates every remaining callback",function()
+  for _,name in ipairs({"shoprenewall","trainall"}) do
+    for _,reason in ipairs({"disconnected","character swap","package update","cancelled"}) do
+      for _,spent in ipairs({0,1}) do
+        local q,f,c=fixture()
+        local result=name=="trainall" and pastedTrainallSkills()
+          or assert(Parser.parseRunes(pastedRuneLines(),true))
+        assert(q:start(name)); local done=c.callbacks[1]; done(result)
+        f:advance(spent); local actions=f:actions(); local stale=f.history[f.nextTimer].callback
+        assert(q:cancel(reason)); eq(f:pending(),0); eq(q:busy(),false)
+        stale(); stale(); done(result); f:advance(30)
+        eq(f:actions(),actions); eq(#f.sent,spent+1); eq(q.sending,false)
+      end
+    end
+  end
+end)
+test("quick actions foreign outgoing commands during each initial request prevent later callback spending",function()
+  for _,name in ipairs({"shoprenew","shoprenewall","trainall"}) do
+    local q,f,c=fixture()
+    f.onSend=function() eq(q.sending,true); q:onOutgoing("train raise 42") end
+    eq(q:start(name),nil); eq(q:busy(),false); eq(q.sending,false)
+    local result=name=="trainall" and pastedTrainallSkills() or runes({"Force",0},{"Healing",19})
+    c:reply(result); c:reply(result); f:advance(30)
+    eq(f:actions(),""); eq(#f.sent,1); eq(f:pending(),0)
+  end
+end)
+test("quick actions unmarked outgoing commands during shoprenewall stop the pending renewals",function()
+  for _,command in ipairs({"train raise 42","info mag","info magic","shop renew barrier","skill ready","look"}) do
+    local q,f,c=collectedFixture(); assert(q:start("shoprenewall"))
+    local done=c.active.onComplete
+    f:lines(pastedRuneLines()); c:onLine(">"); f:advance(1)
+    eq(f:actions(),"shop renew aegis"); local stale=f.history[f.nextTimer].callback
+    assert(q:onOutgoing(command)); c:onOutgoing(command)
+    eq(q:busy(),false); stale(); done(c.snapshot.runes)
+    c:cancelActive(); f:advance(30)
+    eq(f:actions(),"shop renew aegis"); eq(#f.sent,2); eq(f:pending(),0)
+  end
 end)
 
 if standalone then

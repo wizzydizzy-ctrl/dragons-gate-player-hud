@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.99**.
+Applies to DGHUD **v0.3.100**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -56,7 +56,9 @@ Wait for all seven source commands to complete. If only one section is blank, ru
 - Skills: `skill`
 - Game clock: `time`
 
-DGHUD keeps the previous valid value when a response is incomplete. A panel may therefore remain unchanged until the game prints a complete response and prompt.
+DGHUD generally keeps the previous valid value when a response is incomplete. Rune requests intentionally clear the old rune variables and list first, then repopulate them when the elemental table ends or the final prompt arrives. Renewal shortcuts still require a complete, validated response before sending commands.
+
+If `shoprenewall` rejects normal modifier or shape output, update to v0.3.100 or newer and try again after login refresh finishes. If `trainall` trains positive-use skills, disable any older personal alias for the same command in Mudlet's Aliases editor. DGHUD's shortcut trains only zero-use skills and cannot stop a separate alias's timers.
 
 Skills are an exception: a complete skill table ending in blank lines is saved on the next UI tick, without waiting for another prompt. Commands still depend on the game sending the response; DGHUD cannot show fresh results before they arrive.
 

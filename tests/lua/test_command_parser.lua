@@ -481,6 +481,178 @@ test("action response validator accepts confirmed empty rune tables but rejects 
   local valid,err=Parser.validateActionResponse("info magic",{"force - 3 weaves remain",">"})
   eq(valid,nil); eq(type(err),"string"); assert(#err>0)
 end)
+
+local tailRuneRows={
+  actionRuneHeader,
+  "  blending    -  99 weaves remain   disruption  -  61 weaves remain",
+  "  force       -  97 weaves remain   holy        -  86 weaves remain",
+  "  vigor       -  39 weaves remain   dexterity   -  93 weaves remain",
+  "  movement    -  92 weaves remain   strength    -  88 weaves remain",
+  "  translocation - 91 weaves remain   aegis       -  97 weaves remain",
+  "  barrier     -  88 weaves remain",
+}
+local modifierHeading="You may use the following modifier runes upon them..."
+local shapeHeading="You may use them with the following shapes..."
+local runeFooter="See INFO RUNESPELLS for memorized corridors."
+local runeTail={modifierHeading,""," small average","",shapeHeading,"",
+  " aura blast chi mist eagle body"," spirit","",runeFooter,""}
+local function tailRuneResponse(tail,prompt)
+  local lines={}
+  for _,line in ipairs(tailRuneRows) do lines[#lines+1]=line end
+  for _,line in ipairs(tail or runeTail) do lines[#lines+1]=line end
+  if prompt then lines[#lines+1]=prompt end
+  return lines
+end
+local function assertTailRunes(parsed)
+  local expected={{"Vigor",39},{"Disruption",61},{"Holy",86},{"Barrier",88},
+    {"Strength",88},{"Translocation",91},{"Movement",92},{"Dexterity",93},
+    {"Aegis",97},{"Force",97},{"Blending",99}}
+  eq(#parsed.items,11)
+  for index,rune in ipairs(expected) do
+    eq(parsed.items[index].name,rune[1]); eq(parsed.items[index].remaining,rune[2])
+  end
+end
+test("rune tail headings validate and modifier and shape lists stay out of action data",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local lines=tailRuneResponse(nil,prompt)
+      local original={}; for index,line in ipairs(lines) do original[index]=line end
+      local valid,err,vetted=Parser.validateActionResponse(command,lines)
+      eq(valid,true); eq(err,nil); eq(type(vetted),"table")
+      assertTailRunes(assert(Parser.parseRunes(lines)))
+      assertTailRunes(assert(Parser.parseRunes(vetted)))
+      eq(Parser.isComplete(command,lines),true)
+      for _,line in ipairs(vetted) do
+        local plain=line:match("^%s*(.-)%s*$")
+        eq(plain=="small average",false); eq(plain=="aura blast chi mist eagle body",false)
+        eq(plain=="spirit",false)
+      end
+      eq(#lines,#original)
+      for index,line in ipairs(original) do eq(lines[index],line) end
+    end
+  end
+end)
+test("each recognized rune tail boundary accepts a complete elemental table",function()
+  for _,tail in ipairs({{modifierHeading," small average"},{shapeHeading," spirit"},{runeFooter}}) do
+    local lines=tailRuneResponse(tail,">")
+    lines[1]="\27[33m"..lines[1].."\27[0m"
+    lines[#tailRuneRows+1]="\27[32m"..lines[#tailRuneRows+1].."\27[0m"
+    local valid,err,vetted=Parser.validateActionResponse("info magic",lines)
+    eq(valid,true); eq(err,nil); assertTailRunes(assert(Parser.parseRunes(vetted)))
+  end
+end)
+test("a recognized rune tail never excuses malformed elemental rows before it",function()
+  for _,case in ipairs(invalidActionRuneRows) do
+    local lines=tailRuneResponse(nil,">")
+    for index=#case.rows,1,-1 do table.insert(lines,#tailRuneRows+1,case.rows[index]) end
+    local valid,err=Parser.validateActionResponse("info magic",lines)
+    eq(valid,nil); eq(type(err),"string"); assert(#err>0)
+  end
+end)
+test("unexpected numeric and weave rows in rune tails cannot become renewal data",function()
+  for _,heading in ipairs({modifierHeading,shapeHeading}) do
+    for _,row in ipairs({"  1 2 3","  small - 0 weaves remain","  force - 0 weaves remain"}) do
+      local lines=tailRuneResponse({heading,row,runeFooter},">")
+      -- The sidebar may retain the confirmed elementals; an owned action fails closed.
+      assertTailRunes(assert(Parser.parseRunes(lines)))
+      local valid,err=Parser.validateActionResponse("info mag",lines)
+      eq(valid,nil); eq(type(err),"string"); assert(#err>0)
+    end
+  end
+end)
+test("partial modifier and shape lists are irrelevant to runes but still require a terminal prompt",function()
+  for _,tail in ipairs({{modifierHeading},{modifierHeading," sm"},
+      {modifierHeading," small average",shapeHeading," au"},{runeFooter}}) do
+    local lines=tailRuneResponse(tail)
+    table.insert(lines,1,">") -- A stale prompt before the rune header is not terminal.
+    eq(Parser.parseRunes(lines),nil); eq(Parser.isComplete("info magic",lines),false)
+    local valid,err=Parser.validateActionResponse("info magic",lines)
+    eq(valid,nil); eq(type(err),"string")
+    lines[#lines+1]=">"
+    valid,err=Parser.validateActionResponse("info magic",lines)
+    eq(valid,true); eq(err,nil); assertTailRunes(assert(Parser.parseRunes(lines)))
+  end
+end)
+
+test("rune preview parsing and strict validation require a recognized tail boundary",function()
+  for _,tail in ipairs({{modifierHeading},{shapeHeading},{runeFooter}}) do
+    local lines=tailRuneResponse(tail)
+    assertTailRunes(assert(Parser.parseRunes(lines,true)))
+    for _,command in ipairs({"info mag","info magic"}) do
+      local valid,err,vetted=Parser.validateActionResponse(command,lines,true)
+      eq(valid,true); eq(err,nil); eq(type(vetted),"table")
+      assertTailRunes(assert(Parser.parseRunes(vetted,true)))
+      valid,err=Parser.validateActionResponse(command,lines)
+      eq(valid,nil); eq(type(err),"string")
+    end
+    eq(Parser.parseRunes(lines),nil); eq(Parser.isComplete("info magic",lines),false)
+  end
+  for _,lines in ipairs({{actionRuneHeader,tailRuneRows[2]},
+      {actionRuneHeader,tailRuneRows[2],""},tailRuneResponse({""}),
+      {modifierHeading," small average"},{shapeHeading," spirit"},{runeFooter}}) do
+    eq(Parser.parseRunes(lines,true),nil)
+    local valid,err=Parser.validateActionResponse("info magic",lines,true)
+    eq(valid,nil); eq(type(err),"string")
+  end
+end)
+test("strict rune preview rejects unsafe and numeric tail text before the final prompt",function()
+  for _,row in ipairs({"  small;quit","  aura<script>","  small 1","  1 2 3",
+      "  small - 0 weaves remain","  force - 0 weaves remain"}) do
+    local lines=tailRuneResponse({modifierHeading,row})
+    local valid,err=Parser.validateActionResponse("info mag",lines,true)
+    eq(valid,nil); eq(type(err),"string"); assert(#err>0)
+    assertTailRunes(assert(Parser.parseRunes(lines,true)))
+  end
+end)
+
+test("rune parsing rejects conflicting duplicate counts in columns rows and normalized names",function()
+  local cases={
+    {" force - 97 weaves remain   FORCE - 0 weaves remain"},
+    {" force - 0 weaves remain"," Force - 97 weaves remain"},
+    {" life force - 14 weaves remain"," LIFE   FORCE - 15 weaves remain"},
+  }
+  for _,rows in ipairs(cases) do
+    for _,preview in ipairs({false,true}) do
+      local lines=actionLines(actionRuneHeader,rows,preview and modifierHeading or ">")
+      local parsed,err=Parser.parseRunes(lines,preview)
+      eq(parsed,nil); eq(type(err),"string"); assert(#err>0)
+      -- A terminal prompt ends the capture even when parsing must reject its counts.
+      eq(Parser.isComplete("info magic",lines),not preview)
+    end
+  end
+end)
+test("rune parsing deduplicates identical counts case insensitively and collapses name spaces",function()
+  for _,ending in ipairs({">","[199] 301/301 hp, 173/173 ftg >",modifierHeading,shapeHeading,runeFooter}) do
+    local preview=not Parser.isPrompt(ending)
+    local lines=actionLines(actionRuneHeader,{
+      " force - 0 weaves remain   Force - 0 weaves remain",
+      "\27[32m FORCE - 0 weaves remain   life   force - 14 weaves remain\27[0m",
+      " Life Force - 14 weaves remain",
+      " LIFE    FORCE - 14 weaves remain   healing - 20 weaves remain",
+    },ending)
+    local original={}; for index,line in ipairs(lines) do original[index]=line end
+    local parsed=assert(Parser.parseRunes(lines,preview))
+    eq(#parsed.items,3)
+    eq(parsed.items[1].name,"Force"); eq(parsed.items[1].remaining,0)
+    eq(parsed.items[2].name,"Life force"); eq(parsed.items[2].remaining,14)
+    eq(parsed.items[3].name,"Healing"); eq(parsed.items[3].remaining,20)
+    eq(#lines,#original); for index,line in ipairs(original) do eq(lines[index],line) end
+  end
+end)
+test("recognized conflicting chat rune counts never override raw or vetted rune data",function()
+  for _,preview in ipairs({false,true}) do
+    local lines={actionRuneHeader," force - 97 weaves remain",
+      'Tester (ESP): "force - 0 weaves remain"',modifierHeading," small average"}
+    if not preview then lines[#lines+1]=">" end
+    local parsed,err=Parser.parseRunes(lines,preview)
+    eq(err,nil); eq(type(parsed),"table"); eq(#parsed.items,1)
+    eq(parsed.items[1].name,"Force"); eq(parsed.items[1].remaining,97)
+    local valid,validationError,vetted=Parser.validateActionResponse("info magic",lines,preview)
+    eq(valid,true); eq(validationError,nil)
+    parsed=assert(Parser.parseRunes(vetted,preview))
+    eq(#parsed.items,1); eq(parsed.items[1].name,"Force"); eq(parsed.items[1].remaining,97)
+  end
+end)
 test("action response validator accepts unknown valid skill names readiness markers and blank boundaries",function()
   for _,ending in ipairs({">","[199] 301/301 hp, 173/173 ftg >",""}) do
     local lines={"\27[33mSkill Remain Level\27[0m","*Psionics 0 50",
@@ -518,5 +690,138 @@ test("manual rune and skill parsers retain permissive display behavior for malfo
   parsed=assert(Parser.parseSkills(actionLines("Skill Remain Level",{"Brawling 0 4","Dodging ??? 2"})))
   eq(#parsed.items,1); eq(parsed.items[1].name,"Brawling")
 end)
+
+
+test("vetted rune preview and prompt-only data exclude recognized ESP chat between elemental rows",function()
+  local notice='Tester (ESP): "healing - 0 weaves remain"'
+  eq(assert(require("chat_parser").parse(notice,"Tester")).category,"ESP")
+  for _,ending in ipairs({modifierHeading,">","[199] 301/301 hp, 173/173 ftg >"}) do
+    local preview=not Parser.isPrompt(ending)
+    local lines={actionRuneHeader," force - 97 weaves remain",notice," vigor - 39 weaves remain",ending}
+    for _,command in ipairs({"info mag","info magic"}) do
+      local valid,err,vetted=Parser.validateActionResponse(command,lines,preview)
+      eq(valid,true); eq(err,nil); eq(#vetted,4)
+      local parsed=assert(Parser.parseRunes(vetted,preview))
+      eq(#parsed.items,2); eq(parsed.items[1].name,"Vigor"); eq(parsed.items[1].remaining,39)
+      eq(parsed.items[2].name,"Force"); eq(parsed.items[2].remaining,97)
+      eq(#lines,5); eq(lines[3],notice)
+      local rawParsed=assert(Parser.parseRunes(lines,preview))
+      eq(#rawParsed.items,2); eq(rawParsed.items[1].name,"Vigor"); eq(rawParsed.items[1].remaining,39)
+      eq(rawParsed.items[2].name,"Force"); eq(rawParsed.items[2].remaining,97)
+    end
+  end
+end)
+test("rune parsing stops at the first terminal prompt before later rows and response headers",function()
+  for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+    for _,later in ipairs({{" healing - 0 weaves remain"},{actionRuneHeader," force - 99 weaves remain"}}) do
+      local lines={">",actionRuneHeader," force - 3 weaves remain",prompt}
+      for _,line in ipairs(later) do lines[#lines+1]=line end
+      lines[#lines+1]=prompt
+      local valid,err,vetted=Parser.validateActionResponse("info magic",lines)
+      eq(valid,true); eq(err,nil); eq(#assert(Parser.parseRunes(vetted)).items,1)
+      local parsed=assert(Parser.parseRunes(lines))
+      eq(#parsed.items,1); eq(parsed.items[1].name,"Force"); eq(parsed.items[1].remaining,3)
+    end
+  end
+end)
+local otherRecognizedRuneChat={
+  {name="room shouts",line='Aerin shouts, "healing - 0 weaves remain"'},
+  {name="whispers",line='Aerin whispers to you, "healing - 0 weaves remain"'},
+  {name="Psycian links",line='You pick up Aerin\'s Psycian link, "healing - 0 weaves remain"'},
+  {name="staff sends",line='Aerin sends: healing - 0 weaves remain'},
+}
+for _,notice in ipairs(otherRecognizedRuneChat) do
+  test("owned rune validation ignores recognized "..notice.name.." in elemental and tail output",function()
+    assert(require("chat_parser").parse(notice.line,"Tester"))
+    for _,inTail in ipairs({false,true}) do
+      for _,command in ipairs({"info mag","info magic"}) do
+        for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+          local lines={actionRuneHeader," force - 3 weaves remain"}
+          if not inTail then lines[#lines+1]=notice.line end
+          lines[#lines+1]=modifierHeading
+          if inTail then lines[#lines+1]=notice.line end
+          lines[#lines+1]=" small average"; lines[#lines+1]=shapeHeading
+          lines[#lines+1]=" spirit"; lines[#lines+1]=runeFooter; lines[#lines+1]=prompt
+          local valid,err,vetted=Parser.validateActionResponse(command,lines)
+          eq(valid,true); eq(err,nil)
+          local parsed=assert(Parser.parseRunes(vetted))
+          eq(#parsed.items,1); eq(parsed.items[1].name,"Force"); eq(parsed.items[1].remaining,3)
+        end
+      end
+    end
+  end)
+end
+
+
+local extendedRuneChat={
+  {name="directed room speech",category="ROOM",frames={
+    'Ocinaiya says to Suupidosutaa in Elvish, "%s"',
+    'Eilan asks Atrax in Secian, "%s"',
+    'Ocinaiya asks in Elvish to Suupidosutaa, "%s"',
+  }},
+  {name="actor-facing directed asks",category="OWN",frames={
+    'You ask Atrax, "%s"',
+    'You ask Atrax in Secian, "%s"',
+  }},
+  {name="actor-facing directed says",category="OWN",frames={
+    'You say to Atrax, "%s"',
+    'You say to Atrax in Secian, "%s"',
+    'You say in Secian to Atrax, "%s"',
+  }},
+  {name="contact thoughts",category="CONTACT",frames={
+    'Aeron Del\'mar thinks to you, "%s"',
+    'You pick up Seaux\'s thoughts, "%s" [r-1]',
+    'You pick up Faolann\'s thoughts echoing through the area, "%s"',
+  }},
+  {name="Secian links",category="SECIAN",frames={
+    'You pick up Marcelline\'s Secian link, "%s" [r-1]',
+    'You pick up Shayla\'s Secian link, "%s" [r-0]',
+    'You pick up Nythriss\'a\'s Secian link, "%s"',
+  }},
+  {name="staff voices",category="STAFF",frames={
+    'You hear the voice of Wizzy say, "%s"',
+    'You hear the voice of Nythriss\'a ask, "%s"',
+    'You hear the voice of Wizzy ask Tamalon, "%s"',
+  }},
+}
+for _,case in ipairs(extendedRuneChat) do
+  test("raw and owned rune parsing ignore existing "..case.name.." framing",function()
+    for _,frame in ipairs(case.frames) do
+      -- Use only framing already supported by chat_parser. The payload tests
+      -- both a conflicting count and a rune absent from the real table.
+      local notice=string.format(frame,"force - 0 weaves remain   healing - 0 weaves remain")
+      eq(assert(require("chat_parser").parse(notice,"Dace Alterac")).category,case.category)
+      for _,ansi in ipairs({false,true}) do
+        local chat=ansi and "\27[35m"..notice.."\27[0m" or notice
+        for _,mode in ipairs({"bare prompt","preview","tail"}) do
+          for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+            local preview=mode=="preview"
+            local lines={actionRuneHeader," force - 97 weaves remain"}
+            if mode~="tail" then lines[#lines+1]=chat end
+            lines[#lines+1]=" vigor - 39 weaves remain"
+            if preview then lines[#lines+1]=modifierHeading
+            elseif mode=="tail" then
+              for _,line in ipairs({modifierHeading,chat," small average",
+                  shapeHeading,chat," spirit",runeFooter,chat}) do lines[#lines+1]=line end
+            end
+            if not preview then lines[#lines+1]=prompt end
+            local original={}; for index,line in ipairs(lines) do original[index]=line end
+            for _,command in ipairs({"info mag","info magic"}) do
+              local valid,err,vetted=Parser.validateActionResponse(command,lines,preview)
+              eq(valid,true); eq(err,nil)
+              for _,parsed in ipairs({assert(Parser.parseRunes(lines,preview)),
+                  assert(Parser.parseRunes(vetted,preview))}) do
+                eq(#parsed.items,2)
+                eq(parsed.items[1].name,"Vigor"); eq(parsed.items[1].remaining,39)
+                eq(parsed.items[2].name,"Force"); eq(parsed.items[2].remaining,97)
+              end
+              eq(#lines,#original); for index,line in ipairs(original) do eq(lines[index],line) end
+            end
+          end
+        end
+      end
+    end
+  end)
+end
 
 return {inventory=inventory,stat=stat,info=info,religion=religion,skills=skills,time=time}

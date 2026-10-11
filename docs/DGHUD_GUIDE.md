@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.99**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.100**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,17 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.99
+## What's new in v0.3.100
+
+- `shoprenewall` now accepts the full normal magic output, including modifier and shape lists.
+- The Runes list and Lua values refresh as soon as the elemental table ends. Renewal commands still wait for the completed response.
+- Chat mentioning runes is ignored as data, and conflicting or incomplete lists cannot trigger renewals.
+- Rune displays retry failed redraws and stay visible when the layout changes.
+- `trainall` still trains only known skills with **0 uses**. Disable any older personal `trainall` alias if it also runs; your personal aliases are not removed.
+
+See [renewal and training commands](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts) for setup and stopping rules.
+
+## Previous changes in v0.3.99
 
 - Runes use aligned **Runes / Weaves Remain** columns, with all counts in a right-aligned numeric column.
 - `shoprenew` checks fresh runes and renews those below 20 weaves; `shoprenewall` renews every captured rune.

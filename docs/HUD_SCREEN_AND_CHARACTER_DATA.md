@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.99.
+Applies to DGHUD v0.3.100.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -146,6 +146,8 @@ Long rune names such as **Translocation** expand the scrollable content to fit t
 `info magic` (or `info mag`) fills the Runes list. The display has **Runes** and **Weaves Remain** columns: names on the left, all counts right-aligned in one column. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
 
 This puts the runes closest to needing renewal at the top.
+
+The counts refresh as soon as a recognized modifier, shape, or corridor section confirms that the elemental table has ended; otherwise they refresh at the final prompt. Those later sections and recognized chat messages are not counted as elemental runes. The HUD keeps capturing the remaining output, and shortcuts wait for a completed, validated response before sending renewals.
 
 Each new rune request clears the old exported values before saving the complete fresh list. Scripts can read `DGHUD.runes.values.disruption`, `DGHUD.runes.remaining.disruption`, or `DGHUD.runes.getRemaining("disruption")`. Simple rune names also become individual Lua variables, such as `disruption = 3`, unless that name belongs to an existing unrelated global. Multiword names use underscores in the direct variables. Missing/unknown values are `nil`, not zero. The existing `items`, `by_name`, `get`, and `all` rune APIs remain supported. Rune values clear on disconnect/character exit and must be refreshed for the next character.
 

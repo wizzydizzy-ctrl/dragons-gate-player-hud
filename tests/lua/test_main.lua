@@ -110,6 +110,290 @@ test("quick command aliases refresh runes export counts and send renewals one se
     assert(hud:shutdown()); eq(_G.disruption,nil); eq(_G.force,nil)
   end)
 end)
+local runeHeader="You have the following elemental runes available to you..."
+local modifierHeading="You may use the following modifier runes upon them..."
+local shapeHeading="You may use them with the following shapes..."
+local runeFooter="See INFO RUNESPELLS for memorized corridors."
+local runeGlobalNames={"force","disruption","vigor","healing","small","average","aura","blast","chi","mist","eagle","body","spirit"}
+local function withRuneRuntime(fn)
+  withRoot(function()
+    local previous={}
+    for _,name in ipairs(runeGlobalNames) do previous[name]=rawget(_G,name); rawset(_G,name,nil) end
+    _G.DGHUD={}
+    local hud,f
+    local ok,err=xpcall(function()
+      hud,f=runtime({display={skills_runes_tab="runes"}})
+      _G.DGHUD.controller=hud
+      local update=f.view.update
+      function f.view:update(state) self.updates=(self.updates or 0)+1; return update(self,state) end
+      fn(hud,f)
+    end,debug.traceback)
+    if hud then hud:shutdown() end
+    for _,name in ipairs(runeGlobalNames) do rawset(_G,name,previous[name]) end
+    if not ok then error(err,0) end
+  end)
+end
+local function assertElementalRunes(hud,f)
+  eq(#hud.last_state.runes.items,3); eq(#f.view.state.runes.items,3)
+  for index,item in ipairs({{"Vigor",0},{"Disruption",61},{"Force",97}}) do
+    eq(f.view.state.runes.items[index].name,item[1]); eq(f.view.state.runes.items[index].remaining,item[2])
+    local name=item[1]:lower()
+    eq(_G.DGHUD.runes.values[name],item[2]); eq(_G.DGHUD.runes[name],item[2]); eq(rawget(_G,name),item[2])
+    eq(_G.DGHUD.runes.get(name).remaining,item[2]); eq(_G.DGHUD.runes.getRemaining(name),item[2])
+  end
+  eq(#_G.DGHUD.runes.all(),3)
+  for index=5,#runeGlobalNames do
+    local name=runeGlobalNames[index]
+    eq(rawget(_G,name),nil); eq(_G.DGHUD.runes[name],nil); eq(_G.DGHUD.runes.values[name],nil)
+    eq(_G.DGHUD.runes.get(name),nil); eq(_G.DGHUD.runes.getRemaining(name),nil)
+  end
+end
+local function elementalLines(hud)
+  for _,line in ipairs({runeHeader,""," force - 97 weaves remain   disruption - 61 weaves remain",
+      " vigor - 0 weaves remain",""}) do hud.collector:onLine(line) end
+end
+local function fireRenewal(hud,f)
+  local operation=assert(hud.quick_actions.current)
+  local timer=assert(operation.timer,"Expected a delayed renewal")
+  local callback=assert(f.timers[timer.id]); f.timers[timer.id]=nil; callback()
+end
+
+test("shoprenewall clears old variables and publishes elementals once before the full magic tail finishes",function()
+  withRuneRuntime(function(hud,f)
+    hud.collector:onOutgoing("info magic")
+    for _,line in ipairs({runeHeader," force - 3 weaves remain   healing - 14 weaves remain",">"}) do hud.collector:onLine(line) end
+    eq(_G.force,3); eq(_G.healing,14)
+    assert(hud:runQuickAction("shoprenewall")); eq(f.sent[1],"info mag")
+    eq(_G.force,nil); eq(_G.healing,nil); eq(next(_G.DGHUD.runes.values),nil)
+    eq(_G.DGHUD.runes.getRemaining("force"),nil); eq(#_G.DGHUD.runes.all(),0)
+    eq(#f.view.state.runes.items,0)
+    local clearedUpdates=f.view.updates
+    elementalLines(hud)
+    eq(f.view.updates,clearedUpdates); eq(#f.view.state.runes.items,0)
+    eq(hud.quick_actions.current.timer,nil); eq(#f.sent,1)
+    local active=hud.collector.active
+    hud.collector:onLine(modifierHeading)
+    eq(hud.collector.active,active); eq(f.view.updates,clearedUpdates+1)
+    assertElementalRunes(hud,f); eq(_G.healing,nil)
+    eq(hud.quick_actions.current.timer,nil); eq(#f.sent,1)
+    for _,line in ipairs({""," small average","",shapeHeading,""," aura blast chi mist eagle body"," spirit","",runeFooter,""}) do
+      hud.collector:onLine(line)
+      eq(hud.collector.active,active); eq(f.view.updates,clearedUpdates+1)
+      eq(hud.quick_actions.current.timer,nil); eq(#f.sent,1)
+    end
+    assertElementalRunes(hud,f)
+    hud.collector:onLine("[199] 301/301 hp, 173/173 ftg >")
+    eq(hud.collector.active,nil); eq(f.view.updates,clearedUpdates+1); eq(#f.sent,1)
+    assertElementalRunes(hud,f)
+    for index,name in ipairs({"disruption","force","vigor"}) do fireRenewal(hud,f); eq(f.sent[index+1],"shop renew "..name) end
+    eq(#f.sent,4); eq(hud.quick_actions:busy(),false)
+  end)
+end)
+test("manual info magic immediately refreshes sidebar and legacy rune APIs at each recognized boundary",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,heading in ipairs({modifierHeading,shapeHeading,runeFooter}) do
+      withRuneRuntime(function(hud,f)
+        hud.collector:onOutgoing(command)
+        local clearedUpdates=f.view.updates
+        elementalLines(hud)
+        eq(#f.view.state.runes.items,0); eq(f.view.updates,clearedUpdates)
+        local active=hud.collector.active
+        hud.collector:onLine(heading)
+        eq(hud.collector.active,active); eq(f.view.updates,clearedUpdates+1)
+        assertElementalRunes(hud,f)
+        if heading==modifierHeading then hud.collector:onLine(" small average")
+        elseif heading==shapeHeading then hud.collector:onLine(" aura spirit") end
+        hud.collector:onLine(""); eq(hud.collector.active,active)
+        eq(f.view.updates,clearedUpdates+1); eq(#f.sent,0)
+        hud.collector:onLine(">")
+        eq(hud.collector.active,nil); eq(f.view.updates,clearedUpdates+1)
+        assertElementalRunes(hud,f); eq(#f.sent,0)
+      end)
+    end
+  end
+end)
+test("shoprenewall never publishes partial elemental rows or schedules renewals from them",function()
+  for _,row in ipairs({" disruption - 6 weaves rem"," disruption - -1 weaves remain"," force - 97 weaves remain suffix"}) do
+    withRuneRuntime(function(hud,f)
+      assert(hud:runQuickAction("shoprenewall")); local clearedUpdates=f.view.updates
+      for _,line in ipairs({runeHeader," force - 97 weaves remain",row,"",modifierHeading," small average",shapeHeading," spirit",runeFooter}) do hud.collector:onLine(line) end
+      eq(f.view.updates,clearedUpdates); eq(#f.view.state.runes.items,0)
+      eq(next(_G.DGHUD.runes.values),nil); eq(_G.force,nil)
+      eq(hud.quick_actions.current.timer,nil); eq(#f.sent,1)
+      hud.collector:onLine(">")
+      eq(hud.collector.active,nil); eq(hud.quick_actions:busy(),false)
+      eq(#f.sent,1); eq(#f.view.state.runes.items,0)
+    end)
+  end
+end)
+test("shoprenewall retains early elemental display but fails closed on an unsafe magic tail",function()
+  for _,row in ipairs({" small - 0 weaves remain"," 1 2 3"," spirit; shop renew force"}) do
+    withRuneRuntime(function(hud,f)
+      assert(hud:runQuickAction("shoprenewall")); elementalLines(hud)
+      hud.collector:onLine(modifierHeading); assertElementalRunes(hud,f)
+      local publishedUpdates=f.view.updates
+      hud.collector:onLine(row); hud.collector:onLine(shapeHeading); hud.collector:onLine(" spirit")
+      eq(hud.quick_actions.current.timer,nil); eq(#f.sent,1)
+      hud.collector:onLine(">")
+      eq(hud.collector.active,nil); eq(hud.quick_actions:busy(),false)
+      eq(f.view.updates,publishedUpdates); eq(#f.sent,1); assertElementalRunes(hud,f)
+    end)
+  end
+end)
+test("conflicting rune counts fail closed in the sidebar variables and legacy API",function()
+  for _,owned in ipairs({false,true}) do
+    withRuneRuntime(function(hud,f)
+      hud.collector:onOutgoing("info magic"); elementalLines(hud)
+      hud.collector:onLine(modifierHeading); hud.collector:onLine(">")
+      assertElementalRunes(hud,f)
+      if owned then assert(hud:runQuickAction("shoprenewall")) else hud.collector:onOutgoing("info magic") end
+      for _,line in ipairs({runeHeader," force - 3 weaves remain   force - 4 weaves remain",modifierHeading}) do hud.collector:onLine(line) end
+      local function assertCleared()
+        eq(#hud.collector.snapshot.runes.items,0); eq(#hud.last_state.runes.items,0); eq(#f.view.state.runes.items,0)
+        eq(next(_G.DGHUD.runes.values),nil); eq(#_G.DGHUD.runes.all(),0)
+        for _,name in ipairs({"force","disruption","vigor"}) do
+          eq(rawget(_G,name),nil); eq(_G.DGHUD.runes[name],nil)
+          eq(_G.DGHUD.runes.get(name),nil); eq(_G.DGHUD.runes.getRemaining(name),nil)
+        end
+      end
+      assertCleared(); assert(hud.collector.active)
+      if owned then eq(hud.quick_actions.current.timer,nil) end
+      hud.collector:onLine(" small average"); hud.collector:onLine(shapeHeading)
+      hud.collector:onLine(" spirit"); hud.collector:onLine(">")
+      eq(hud.collector.active,nil); eq(hud.quick_actions:busy(),false)
+      assertCleared(); hud:refresh(); assertCleared()
+      eq(#f.sent,owned and 1 or 0)
+    end)
+  end
+end)
+test("validated rune refresh preserves owned counts and unrelated or user edited globals",function()
+  withRuneRuntime(function(hud,f)
+    _G.force=777; _G.DGHUD.runes.force=888
+    hud.collector:onOutgoing("info magic"); elementalLines(hud)
+    hud.collector:onLine(modifierHeading); hud.collector:onLine(">")
+    for _=1,3 do
+      hud:refresh()
+      eq(#f.view.state.runes.items,3); eq(#_G.DGHUD.runes.all(),3)
+      eq(_G.force,777); eq(_G.DGHUD.runes.force,888)
+      eq(_G.disruption,61); eq(_G.vigor,0)
+      eq(_G.DGHUD.runes.values.force,97); eq(_G.DGHUD.runes.getRemaining("force"),97)
+      eq(_G.DGHUD.runes.values.disruption,61); eq(_G.DGHUD.runes.get("disruption").remaining,61)
+    end
+    _G.disruption=12345; hud:refresh()
+    eq(_G.disruption,12345); eq(_G.DGHUD.runes.values.disruption,61)
+    hud.collector:onOutgoing("info magic")
+    eq(next(_G.DGHUD.runes.values),nil); eq(#_G.DGHUD.runes.all(),0)
+    eq(_G.DGHUD.runes.getRemaining("force"),nil); eq(_G.DGHUD.runes.getRemaining("disruption"),nil)
+    eq(_G.force,777); eq(_G.DGHUD.runes.force,888); eq(_G.disruption,12345); eq(_G.vigor,nil)
+    eq(#f.view.state.runes.items,0); eq(#f.sent,0)
+  end)
+end)
+test("legacy rune API rejects injected conflicts without mutating valid exported globals",function()
+  withRuneRuntime(function(hud,f)
+    hud.collector:onOutgoing("info magic"); elementalLines(hud)
+    hud.collector:onLine(modifierHeading); hud.collector:onLine(">")
+    assertElementalRunes(hud,f)
+    local rows={{name="Force",remaining=3},{name="force",remaining=4}}
+    local valid,err=Main.syncRunesApi({runes={items=rows}})
+    eq(valid,nil); eq(type(err),"string")
+    eq(#_G.DGHUD.runes.all(),0); eq(next(_G.DGHUD.runes.by_name),nil); eq(next(_G.DGHUD.runes.remaining),nil)
+    eq(_G.DGHUD.runes.get("force"),nil); eq(_G.DGHUD.runes.getRemaining("force"),nil)
+    eq(_G.force,97); eq(_G.disruption,61); eq(_G.vigor,0)
+    eq(_G.DGHUD.runes.values.force,97); eq(_G.DGHUD.runes.force,97)
+    eq(#rows,2); eq(rows[1].remaining,3); eq(rows[2].remaining,4)
+    eq(rows[1].name,"Force"); eq(rows[2].name,"force")
+    hud:refresh(); assertElementalRunes(hud,f); eq(#f.sent,0)
+  end)
+end)
+test("legacy rune sync preserves exporter keys after whitespace normalization and deduplication",function()
+  withRoot(function()
+    _G.DGHUD={}
+    local environment={}
+    local exporter=require("rune_variables").new(_G.DGHUD,environment)
+    local rows={{name="  Stone\t  Skin  ",remaining=0},{name="STONE SKIN",remaining=0},{name=" Force ",remaining=97}}
+    assert(exporter:save(rows)); Main.installRunesApi(_G.DGHUD)
+    local api=_G.DGHUD.runes; local values=api.values
+    eq(api.getRemaining("stone skin"),0); eq(api.get("stone skin").name,"Stone Skin")
+    for _=1,3 do
+      local valid,err=Main.syncRunesApi({runes={items=rows}})
+      eq(valid,true); eq(err,nil); eq(api.values,values)
+      eq(#api.all(),2); eq(api.all()[1].name,"Stone Skin"); eq(api.all()[2].name,"Force")
+      eq(api.get("STONE SKIN").name,"Stone Skin"); eq(api.getRemaining("stone skin"),0)
+      eq(api.by_name["stone skin"].remaining,0); eq(api.remaining["stone skin"],0)
+      eq(api.getRemaining("force"),97); eq(values.stone_skin,0); eq(api.stone_skin,0); eq(environment.stone_skin,0)
+      local count=0; for _ in pairs(api.by_name) do count=count+1 end; eq(count,2)
+      local item=api.get("stone skin"); item.name="Edited"; item.remaining=99
+      local all=api.all(); all[1].remaining=88; all[2]=nil
+      eq(api.get("stone skin").name,"Stone Skin"); eq(api.getRemaining("stone skin"),0); eq(#api.all(),2)
+    end
+    eq(rows[1].name,"  Stone\t  Skin  "); eq(rows[2].name,"STONE SKIN"); eq(#rows,3)
+    exporter:clear(); eq(environment.stone_skin,nil); eq(api.getRemaining("stone skin"),nil)
+  end)
+end)
+test("legacy rune sync rejects malformed lists without changing owned exports and recovers on refresh",function()
+  withRuneRuntime(function(hud,f)
+    hud.collector:onOutgoing("info magic"); elementalLines(hud)
+    hud.collector:onLine(modifierHeading); hud.collector:onLine(">")
+    for _,rows in ipairs({{[2]={name="Force",remaining=3}},setmetatable({},{}),{{name="Force",remaining="3"}}}) do
+      local valid,err=Main.syncRunesApi({runes={items=rows}})
+      eq(valid,nil); eq(type(err),"string")
+      eq(#_G.DGHUD.runes.all(),0); eq(next(_G.DGHUD.runes.by_name),nil); eq(next(_G.DGHUD.runes.remaining),nil)
+      eq(_G.DGHUD.runes.get("force"),nil); eq(_G.DGHUD.runes.getRemaining("force"),nil)
+      eq(_G.DGHUD.runes.values.force,97); eq(_G.DGHUD.runes.force,97); eq(_G.force,97)
+      hud:refresh(); assertElementalRunes(hud,f)
+    end
+    eq(#f.sent,0)
+  end)
+end)
+test("legacy rune sync rejects an explicit false list instead of treating it as empty",function()
+  withRuneRuntime(function(hud,f)
+    hud.collector:onOutgoing("info magic"); elementalLines(hud)
+    hud.collector:onLine(modifierHeading); hud.collector:onLine(">")
+    local valid,err=Main.syncRunesApi({runes={items=false}})
+    eq(valid,nil); eq(type(err),"string")
+    eq(#_G.DGHUD.runes.all(),0); eq(_G.DGHUD.runes.getRemaining("force"),nil)
+    eq(_G.DGHUD.runes.values.force,97); eq(_G.DGHUD.runes.force,97); eq(_G.force,97)
+    hud:refresh(); assertElementalRunes(hud,f); eq(#f.sent,0)
+  end)
+end)
+test("a valid capture after a rejected refresh restores sidebar and rune API parity",function()
+  for _,owned in ipairs({false,true}) do
+    withRuneRuntime(function(hud,f)
+      hud.collector:onOutgoing("info magic"); elementalLines(hud)
+      hud.collector:onLine(modifierHeading); hud.collector:onLine(">")
+      assertElementalRunes(hud,f)
+      if owned then assert(hud:runQuickAction("shoprenewall")) else hud.collector:onOutgoing("info magic") end
+      for _,line in ipairs({runeHeader," force - 3 weaves remain   force - 4 weaves remain",modifierHeading,">"}) do hud.collector:onLine(line) end
+      eq(hud.collector.active,nil); eq(hud.quick_actions:busy(),false)
+      eq(#f.view.state.runes.items,0); eq(#_G.DGHUD.runes.all(),0); eq(_G.force,nil)
+      if owned then assert(hud:runQuickAction("shoprenewall")) else hud.collector:onOutgoing("info magic") end
+      for _,line in ipairs({runeHeader," force - 0 weaves remain",modifierHeading}) do hud.collector:onLine(line) end
+      eq(#f.view.state.runes.items,1); eq(f.view.state.runes.items[1].remaining,0)
+      eq(_G.force,0); eq(_G.DGHUD.runes.values.force,0); eq(_G.DGHUD.runes.force,0)
+      eq(_G.DGHUD.runes.get("force").remaining,0); eq(_G.DGHUD.runes.getRemaining("force"),0); eq(#_G.DGHUD.runes.all(),1)
+      eq(_G.disruption,nil); eq(_G.vigor,nil); eq(_G.DGHUD.runes.getRemaining("disruption"),nil)
+      local updates=f.view.updates
+      if owned then eq(hud.quick_actions.current.timer,nil) end
+      hud.collector:onLine(">"); eq(f.view.updates,updates)
+      if owned then fireRenewal(hud,f); eq(f.sent[3],"shop renew force") end
+      eq(hud.quick_actions:busy(),false); eq(#f.sent,owned and 3 or 0)
+      hud:refresh(); eq(_G.force,0); eq(_G.DGHUD.runes.getRemaining("force"),0); eq(#f.view.state.runes.items,1)
+    end)
+  end
+end)
+test("identical rune counts deduplicate display variables legacy API and renewal targets",function()
+  withRuneRuntime(function(hud,f)
+    assert(hud:runQuickAction("shoprenewall"))
+    for _,line in ipairs({runeHeader," force - 3 weaves remain   Force - 3 weaves remain",modifierHeading}) do hud.collector:onLine(line) end
+    eq(#hud.collector.snapshot.runes.items,1); eq(#f.view.state.runes.items,1)
+    eq(_G.force,3); eq(_G.DGHUD.runes.values.force,3); eq(_G.DGHUD.runes.getRemaining("force"),3)
+    eq(#_G.DGHUD.runes.all(),1); eq(hud.quick_actions.current.timer,nil); eq(#f.sent,1)
+    hud.collector:onLine(" small average"); hud.collector:onLine(">")
+    eq(#hud.collector.snapshot.runes.items,1); eq(#f.view.state.runes.items,1)
+    fireRenewal(hud,f)
+    eq(f.sent[2],"shop renew force"); eq(#f.sent,2); eq(hud.quick_actions:busy(),false)
+  end)
+end)
 test("trainall uses fresh authoritative game IDs independently of skill filters and stops on settings changes",function()
   withRoot(function()
     _G.DGHUD={}

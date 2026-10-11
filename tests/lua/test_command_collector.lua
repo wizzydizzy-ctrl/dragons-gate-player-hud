@@ -771,3 +771,304 @@ test("manual rune and skill collection remains permissive without an owned reque
     assert(c:shutdown()); eq(f:owned(),0)
   end
 end)
+
+
+-- Elemental rows and tail sections supplied for the prompt-independent rune refresh.
+local tailElementals={
+  ownedActionRuneHeader,
+  "  blending    -  99 weaves remain   disruption  -  61 weaves remain",
+  "  force       -  97 weaves remain   holy        -  86 weaves remain",
+  "  vigor       -  39 weaves remain   dexterity   -  93 weaves remain",
+  "  movement    -  92 weaves remain   strength    -  88 weaves remain",
+  "  translocation - 91 weaves remain   aegis       -  97 weaves remain",
+  "  barrier     -  88 weaves remain",
+}
+local modifierHeading="You may use the following modifier runes upon them..."
+local shapeHeading="You may use them with the following shapes..."
+local runeFooter="See INFO RUNESPELLS for memorized corridors."
+local runeTail={modifierHeading,""," small average","",shapeHeading,"",
+  " aura blast chi mist eagle body"," spirit","",runeFooter,""}
+local function assertTailElementals(parsed)
+  local expected={{"Vigor",39},{"Disruption",61},{"Holy",86},{"Barrier",88},
+    {"Strength",88},{"Translocation",91},{"Movement",92},{"Dexterity",93},
+    {"Aegis",97},{"Force",97},{"Blending",99}}
+  eq(#parsed.items,11)
+  for index,rune in ipairs(expected) do
+    eq(parsed.items[index].name,rune[1]); eq(parsed.items[index].remaining,rune[2])
+  end
+end
+local function assertNoTailVariables(environment)
+  for _,name in ipairs({"small","average","aura","blast","chi","mist","eagle","body","spirit"}) do
+    eq(environment[name],nil)
+  end
+end
+test("manual rune sidebar and variables publish once at each known tail boundary before a prompt",function()
+  for _,heading in ipairs({modifierHeading,shapeHeading,runeFooter}) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local f=fake(); local changes=0; local environment={}
+      local variables=require("rune_variables").new({},environment)
+      local c=Collector.new(f,Parser,function(snapshot,key,parsed)
+        eq(key,"runes"); eq(snapshot.runes,parsed); changes=changes+1
+        assert(variables:save(parsed.items))
+      end)
+      assert(c:start()); f:outgoing("info magic"); local active=c.active
+      f:lines(tailElementals); eq(changes,0); eq(c.snapshot.runes,nil)
+      f:line("\27[32m"..heading.."\27[0m")
+      eq(changes,1); eq(c.active,active); assertTailElementals(c.snapshot.runes)
+      eq(environment.blending,99); eq(environment.disruption,61); eq(environment.barrier,88)
+      local exported=0; for _ in pairs(environment) do exported=exported+1 end; eq(exported,11)
+      if heading==modifierHeading then
+        for index=2,#runeTail do f:line(runeTail[index]) end
+      elseif heading==shapeHeading then f:lines({""," aura blast chi mist eagle body"," spirit","",runeFooter,""})
+      else f:line("") end
+      eq(changes,1); eq(c.active,active); eq(f:fireDelay(0),false); eq(#f.sent,0)
+      assertNoTailVariables(environment)
+      f:line(prompt); eq(changes,1); assertTailElementals(c.snapshot.runes)
+      eq(c.active,nil); eq(c.timeout,nil); eq(c.prompt_nudge,nil); eq(#f.sent,0)
+      assert(c:shutdown()); variables:clear(); eq(f:owned(),0)
+    end
+  end
+end)
+test("startup rune preview retains capture until the final prompt and advances exactly once",function()
+  for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+    local f=fake(); local changes=0
+    local c=Collector.new(f,Parser,function(_,key) if key=="runes" then changes=changes+1 end end)
+    assert(c:start()); assert(c:refresh())
+    f:lines(inventory); f:lines(stat); f:lines(info); f:lines(religion)
+    local active=c.active; eq(active.command,"info magic"); eq(c.sequence_index,5)
+    f:lines(tailElementals); eq(changes,0)
+    for _,line in ipairs(runeTail) do
+      f:line(line); eq(changes,1); eq(c.active,active); eq(c.sequence_index,5)
+      eq(#f.sent,5); eq(f:fireDelay(0),false)
+    end
+    assertTailElementals(c.snapshot.runes)
+    f:line(prompt); eq(changes,1); eq(c.active.command,"skill"); eq(c.sequence_index,6)
+    eq(#f.sent,6); eq(f.sent[6],"skill")
+    f:line(prompt); eq(changes,1); eq(#f.sent,6)
+    f:lines(skills); f:lines(time)
+    eq(changes,1); assertTailElementals(c.snapshot.runes); eq(c.active,nil); eq(c.sequence_index,nil)
+    eq(table.concat(f.sent,","),"inventory,stat,info,info religion,info magic,skill,time")
+    assert(c:shutdown()); eq(f:owned(),0)
+  end
+end)
+test("owned rune preview waits for the terminal prompt and completes its callback once",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,tail in ipairs({runeTail,{modifierHeading," sm",shapeHeading," au"}}) do
+      local f=fake(); local changes,calls=0,0; local result
+      local c=Collector.new(f,Parser,function(_,key) eq(key,"runes"); changes=changes+1 end)
+      assert(c:start())
+      assert(c:request(command,function(value,err) calls=calls+1; eq(err,nil); result=value end))
+      local active=c.active; f:lines(tailElementals); eq(changes,0); eq(calls,0)
+      for _,line in ipairs(tail) do
+        f:line(line); eq(changes,1); eq(calls,0); eq(c.active,active)
+      end
+      assertTailElementals(c.snapshot.runes); eq(#f.sent,1)
+      f:line(">"); eq(calls,1); eq(changes,1); assertTailElementals(result)
+      assertTailElementals(c.snapshot.runes); eq(c.active,nil)
+      f:line(">"); c:cancelActive(); assert(c:shutdown()); eq(calls,1); eq(changes,1); eq(f:owned(),0)
+    end
+  end
+end)
+test("rune headings cannot publish a malformed elemental subset for owned actions",function()
+  local f,c,prior,check=ownedActionFixture("info mag")
+  f:lines(tailElementals); f:line("  healing - ??? weaves remain")
+  f:lines(runeTail); eq(c.snapshot.runes,prior); assert(c.active)
+  f:line(">"); check(false)
+end)
+test("rune renewal uses only eleven elementals and waits for the final prompt after sidebar publication",function()
+  local f=fake(); local changes=0; local environment={}
+  local variables=require("rune_variables").new({},environment)
+  local c=Collector.new(f,Parser,function(_,key,parsed)
+    eq(key,"runes"); changes=changes+1; assert(variables:save(parsed.items))
+  end)
+  assert(c:start())
+  local q=require("quick_actions").new(f,c,{enabled=function() return true end})
+  assert(q:start("shoprenewall")); f:lines(tailElementals); f:lines(runeTail)
+  eq(changes,1); assertTailElementals(c.snapshot.runes); assertNoTailVariables(environment)
+  eq(#f.sent,1); eq(f.sent[1],"info mag"); eq(f:fireDelay(1),false); eq(q:busy(),true)
+  f:line(">"); eq(changes,1); eq(#f.sent,1)
+  for index=1,11 do assert(f:fireDelay(1)) end
+  eq(f:fireDelay(1),false); eq(q:busy(),false)
+  eq(table.concat(f.sent,","),"info mag,shop renew aegis,shop renew barrier,shop renew blending,shop renew dexterity,shop renew disruption,shop renew force,shop renew holy,shop renew movement,shop renew strength,shop renew translocation,shop renew vigor")
+  assertNoTailVariables(environment); assert(c:shutdown()); variables:clear(); eq(f:owned(),0)
+end)
+test("unsafe or numeric rune tails stop renewal after the confirmed sidebar preview",function()
+  for _,row in ipairs({"  1 2 3","  small - 0 weaves remain","  force - 0 weaves remain","  aura;quit"}) do
+    local f=fake(); local changes=0; local environment={}
+    local variables=require("rune_variables").new({},environment)
+    local c=Collector.new(f,Parser,function(_,key,parsed)
+      eq(key,"runes"); changes=changes+1; assert(variables:save(parsed.items))
+    end)
+    assert(c:start())
+    local q=require("quick_actions").new(f,c,{enabled=function() return true end})
+    assert(q:start("shoprenewall")); f:lines(tailElementals); f:line(modifierHeading)
+    eq(changes,1); assertTailElementals(c.snapshot.runes)
+    f:lines({row,shapeHeading," spirit",runeFooter,">"})
+    eq(q:busy(),false); eq(f:fireDelay(1),false); eq(#f.sent,1)
+    eq(changes,1); assertTailElementals(c.snapshot.runes); assertNoTailVariables(environment)
+    assert(c:shutdown()); variables:clear(); eq(f:owned(),0)
+  end
+end)
+test("blank rune boundaries never publish a possibly split network table",function()
+  local f=fake(); local changes=0
+  local c=Collector.new(f,Parser,function(_,key) eq(key,"runes"); changes=changes+1 end)
+  assert(c:start()); f:outgoing("info magic"); local active=c.active
+  f:lines({"",tailElementals[1],"",tailElementals[2],""})
+  eq(f:fireDelay(0),false); eq(changes,0); eq(c.snapshot.runes,nil); eq(c.active,active)
+  for index=3,#tailElementals do f:line(tailElementals[index]) end
+  f:line(""); eq(f:fireDelay(0),false); eq(changes,0); eq(c.snapshot.runes,nil)
+  f:line(shapeHeading); eq(changes,1); assertTailElementals(c.snapshot.runes)
+  eq(c.active,active); f:line(">"); eq(changes,1); eq(c.active,nil)
+  assert(c:shutdown()); eq(f:owned(),0)
+end)
+test("missing terminal rune prompt cannot release the owned action callback as a success",function()
+  local f=fake(); local changes,calls=0,0; local result,responseError
+  local c=Collector.new(f,Parser,function(_,key) eq(key,"runes"); changes=changes+1 end)
+  assert(c:start())
+  assert(c:request("info mag",function(value,err) calls=calls+1; result=value; responseError=err end))
+  f:lines(tailElementals); f:lines({modifierHeading," sm",shapeHeading," au"})
+  eq(changes,1); eq(calls,0); assert(c.active); assertTailElementals(c.snapshot.runes)
+  c:finish(nil); eq(calls,1); eq(result,nil); eq(type(responseError),"string")
+  assert(#responseError>0); eq(changes,1); assertTailElementals(c.snapshot.runes)
+  assert(c:shutdown()); eq(calls,1); eq(f:owned(),0)
+end)
+
+test("conflicting owned rune counts fail at the terminal prompt without waiting for a timeout",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,row in ipairs({" force - 97 weaves remain   FORCE - 0 weaves remain",
+        " force - 97 weaves remain;force - 0 weaves remain"}) do
+      local f,c,prior,check=ownedActionFixture(command)
+      f:lines({ownedActionRuneHeader,row})
+      eq(c.snapshot.runes,prior); assert(c.active)
+      f:line(">"); check(false)
+    end
+  end
+end)
+test("conflicting rune counts and unsafe duplicate suffixes never schedule renewal after a final prompt",function()
+  for _,row in ipairs({" force - 97 weaves remain   FORCE - 0 weaves remain",
+      " force - 97 weaves remain;force - 0 weaves remain"}) do
+    local f=fake(); local changes=0
+    local c=Collector.new(f,Parser,function() changes=changes+1 end)
+    local prior={items={{name="Previously Saved",remaining=77}}}; c.snapshot.runes=prior
+    assert(c:start())
+    local q=require("quick_actions").new(f,c,{enabled=function() return true end})
+    assert(q:start("shoprenewall"))
+    f:lines({ownedActionRuneHeader,row,modifierHeading," small average",shapeHeading," spirit",runeFooter})
+    eq(changes,0); eq(c.snapshot.runes,prior); eq(q:busy(),true); assert(c.active)
+    f:line(">")
+    eq(c.active,nil); eq(q:busy(),false); eq(c.timeout,nil); eq(c.prompt_nudge,nil)
+    eq(changes,0); eq(c.snapshot.runes,prior); eq(prior.items[1].remaining,77)
+    eq(f:fireDelay(1),false); eq(f:fireDelay(2.5),false); eq(f:fireDelay(.15),false)
+    eq(#f.sent,1); eq(f.sent[1],"info mag")
+    f:line(">"); eq(changes,0); eq(#f.sent,1)
+    assert(c:shutdown()); eq(f:owned(),0)
+  end
+end)
+test("completed rune capture cancels stale timeout and prompt nudge callbacks before another rune request",function()
+  local f=fake(); local changes=0
+  local c=Collector.new(f,Parser,function(_,key) eq(key,"runes"); changes=changes+1 end)
+  assert(c:start()); f:outgoing("info magic")
+  local oldTimeout,oldNudge=c.timeout,c.prompt_nudge
+  local lateTimeout,lateNudge=assert(f.timers[oldTimeout]),assert(f.timers[oldNudge])
+  f:lines(tailElementals); f:lines(runeTail); f:line(">")
+  eq(changes,1); eq(f.timers[oldTimeout],nil); eq(f.timers[oldNudge],nil)
+  f:outgoing("info magic")
+  local active,timeout,nudge=c.active,c.timeout,c.prompt_nudge; local nextID=f.next
+  lateTimeout(); lateNudge()
+  eq(c.active,active); eq(c.timeout,timeout); eq(c.prompt_nudge,nudge)
+  eq(#f.sent,0); eq(f.next,nextID); eq(changes,1)
+  assert(f.timers[timeout]); assert(f.timers[nudge])
+  assert(c:shutdown()); eq(f:owned(),0)
+end)
+
+local function assertChatFilteredRunes(parsed)
+  eq(type(parsed),"table"); eq(#parsed.items,2)
+  eq(parsed.items[1].name,"Vigor"); eq(parsed.items[1].remaining,39)
+  eq(parsed.items[2].name,"Force"); eq(parsed.items[2].remaining,97)
+end
+local function checkInterleavedRuneChat(mode,withTail)
+  local notice='Tester (ESP): "healing - 0 weaves remain"'
+  eq(assert(require("chat_parser").parse(notice,"Tester")).category,"ESP")
+  local commands=mode=="startup" and {"info magic"} or {"info mag","info magic"}
+  for _,command in ipairs(commands) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local f=fake(); local changes,calls=0,0; local published,result,responseError
+      local c=Collector.new(f,Parser,function(_,key,parsed)
+        if key=="runes" then changes=changes+1; published=parsed end
+      end)
+      assert(c:start())
+      if mode=="startup" then
+        assert(c:refresh()); f:lines(inventory); f:lines(stat); f:lines(info); f:lines(religion)
+      elseif mode=="owned" then
+        assert(c:request(command,function(value,err) calls=calls+1; result=value; responseError=err end))
+      else f:outgoing(command) end
+      local active=c.active; eq(active.command,"info magic")
+      f:lines({ownedActionRuneHeader," force - 97 weaves remain",notice," vigor - 39 weaves remain"})
+      eq(changes,0); eq(calls,0); eq(c.active,active)
+      if withTail then
+        f:line(modifierHeading); eq(changes,1); assertChatFilteredRunes(published)
+        assertChatFilteredRunes(c.snapshot.runes)
+        f:lines({" small average",shapeHeading," spirit",runeFooter,""})
+        eq(changes,1); eq(calls,0); eq(c.active,active)
+      end
+      f:line(prompt)
+      eq(changes,1); assertChatFilteredRunes(published)
+      -- The completed snapshot must agree with the data delivered to every
+      -- onChange consumer; quoted chat is never a third elemental rune.
+      assertChatFilteredRunes(c.snapshot.runes)
+      if mode=="owned" then
+        eq(calls,1); eq(responseError,nil); assertChatFilteredRunes(result)
+      else eq(calls,0) end
+      if mode=="startup" then eq(c.active.command,"skill"); eq(f.sent[#f.sent],"skill")
+      else eq(c.active,nil) end
+      assert(c:shutdown()); eq(f:owned(),0)
+    end
+  end
+end
+for _,mode in ipairs({"manual","startup","owned"}) do
+  test(mode.." rune completion preserves vetted preview with recognized ESP chat between elemental rows",function()
+    checkInterleavedRuneChat(mode,true)
+  end)
+  test(mode.." prompt-only rune refresh ignores recognized ESP chat between elemental rows",function()
+    checkInterleavedRuneChat(mode,false)
+  end)
+end
+
+test("manual repeated elemental headers cannot publish combined tables rejected at preview",function()
+  for _,command in ipairs({"info mag","info magic"}) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local f=fake(); local changes=0; local prior={items={{name="Previous",remaining=77}}}
+      local c=Collector.new(f,Parser,function() changes=changes+1 end)
+      c.snapshot.runes=prior; assert(c:start()); f:outgoing(command)
+      f:lines({ownedActionRuneHeader," force - 3 weaves remain",
+        ownedActionRuneHeader," healing - 20 weaves remain",modifierHeading})
+      eq(changes,0); eq(c.snapshot.runes,prior); assert(c.active)
+      f:lines({" small average",shapeHeading," spirit",runeFooter,prompt})
+      eq(c.active,nil); eq(changes,0); eq(c.snapshot.runes,prior)
+      assert(c:shutdown()); eq(f:owned(),0)
+    end
+  end
+end)
+test("owned repeated elemental headers abort renewal before or after vetted preview publication",function()
+  for _,afterPreview in ipairs({false,true}) do
+    for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do
+      local f=fake(); local changes=0
+      local c=Collector.new(f,Parser,function() changes=changes+1 end)
+      assert(c:start())
+      local q=require("quick_actions").new(f,c,{enabled=function() return true end})
+      assert(q:start("shoprenewall"))
+      f:lines({ownedActionRuneHeader," force - 3 weaves remain"})
+      if afterPreview then f:line(modifierHeading); eq(changes,1) end
+      f:lines({ownedActionRuneHeader," healing - 20 weaves remain",modifierHeading," small average",
+        shapeHeading," spirit",runeFooter})
+      eq(q:busy(),true); eq(f:fireDelay(1),false)
+      local published=c.snapshot.runes
+      f:line(prompt)
+      eq(c.active,nil); eq(q:busy(),false); eq(f:fireDelay(1),false)
+      eq(changes,afterPreview and 1 or 0); eq(c.snapshot.runes,published)
+      eq(#f.sent,1); eq(f.sent[1],"info mag")
+      eq(c.timeout,nil); eq(c.prompt_nudge,nil)
+      assert(c:shutdown()); eq(f:owned(),0)
+    end
+  end
+end)

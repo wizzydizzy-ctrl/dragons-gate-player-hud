@@ -38,10 +38,13 @@ function Collector:queueSkillBoundary(active)
 end
 function Collector:schedulePromptNudge(command)
   if not PROMPT_NUDGE[command] then return end
-  self.prompt_nudge=self.adapter:schedule(self.prompt_nudge_delay,function()
+  local active=self.active; local timer
+  timer=self.adapter:schedule(self.prompt_nudge_delay,function()
+    if self.prompt_nudge~=timer or self.active~=active then return end
     self.prompt_nudge=nil
-    if self.active and self.active.command==command then self.adapter:sendCommand("") end
+    if active and active.command==command then self.adapter:sendCommand("") end
   end)
+  self.prompt_nudge=timer
 end
 function Collector:scheduleTimeout(active,delay,fn)
   local timer
@@ -116,6 +119,19 @@ function Collector:mergeStat(parsed)
   end
   return stat,delta
 end
+function Collector:publishRuneTable(active)
+  if self.active~=active or active.runes_published then return false end
+  -- A named tail section closes the elemental list. Update the sidebar now,
+  -- but keep owning the trailing output and wait for the prompt before any
+  -- automated renewals or startup advancement can begin.
+  local called,valid,_,vetted=pcall(self.parser.validateActionResponse,"info magic",active.lines,true)
+  if not called or not valid then return false end
+  local ok,result=pcall(self.parser.parseRunes,vetted,true)
+  if not ok or not result then return false end
+  active.runes_published=true
+  self.snapshot.runes=result; self.onChange(self.snapshot,"runes",result)
+  return true
+end
 function Collector:finish(lines,tableBoundary)
   local active=self.active; if not active then return end
   if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
@@ -148,7 +164,8 @@ function Collector:finish(lines,tableBoundary)
         end
         result=previous
       end
-      self.snapshot[spec.snapshot]=result; self.onChange(self.snapshot,spec.snapshot,parsed)
+      self.snapshot[spec.snapshot]=result
+      if spec.snapshot~="runes" or not active.runes_published then self.onChange(self.snapshot,spec.snapshot,parsed) end
       completed=parsed
     end
   end
@@ -191,6 +208,9 @@ function Collector:onLine(value)
   -- complete delayed response can still succeed before the bounded drain ends.
   if #self.active.lines==1 and self.parser.isPrompt(self.active.lines[1]) and not self.parser.isPrompt(value) then self.active.lines={} end
   self.active.lines[#self.active.lines+1]=value
+  if self.active.command=="info magic" and self.parser.runeSectionBoundary and self.parser.runeSectionBoundary(plain) then
+    self:publishRuneTable(self.active)
+  end
   if self.active.command=="skill" then
     if plain=="" then self:queueSkillBoundary(self.active)
     elseif plain:match("^%s*(.-)%s+(%d+)%s+(%d+)%s*$")

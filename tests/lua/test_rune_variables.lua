@@ -21,3 +21,36 @@ test("rune variables allow zero and reject malformed data before publishing",fun
   }) do eq(vars:save(items),nil); eq(root.runes.force,0); eq(env.force,0) end
   assert(vars:save({})); eq(env.force,nil); eq(next(root.runes.values),nil)
 end)
+test("rune snapshot normalizes names and deduplicates without mutating its input",function()
+  local source={{name="  Life   Force  ",remaining=0},{name="LIFE FORCE",remaining=0},{name="Healing",remaining=19}}
+  local rows,err,values=Runes.snapshot(source)
+  eq(err,nil); eq(#rows,2); eq(rows[1].name,"Life Force"); eq(rows[1].remaining,0)
+  eq(rows[2].name,"Healing"); eq(values.life_force,0); eq(values.healing,19)
+  rows[1].remaining=999; eq(source[1].remaining,0); eq(source[1].name,"  Life   Force  ")
+  local root={}; local env={}; local vars=Runes.new(root,env)
+  assert(vars:save(source)); eq(env.life_force,0); eq(root.runes.by_name["life force"].remaining,0)
+  eq(root.runes.items[1].name,"Life Force"); eq(root.runes.remaining["life force"],0)
+end)
+test("incomplete or decorated rune arrays reject before clearing confirmed variables",function()
+  local root={}; local env={}; local vars=Runes.new(root,env)
+  assert(vars:save({{name="Force",remaining=97}}))
+  local item={name="Healing",remaining=14}
+  for _,items in ipairs({{[2]=item},{[1]=item,[3]=item},{[0]=item},{[-1]=item},{[1.5]=item},
+      {[257]=item},{[1]=item,extra=item},setmetatable({item},{}),
+      {setmetatable({}, {__index=function() error("must not read untrusted metamethod") end})}}) do
+    local rows,err=Runes.snapshot(items); eq(rows,nil); eq(type(err),"string")
+    eq(vars:save(items),nil); eq(root.runes.values.force,97); eq(env.force,97)
+    eq(root.runes.remaining.force,97); eq(env.healing,nil)
+  end
+  vars:clear()
+end)
+test("rune snapshots accept the bounded complete list and reject one extra row",function()
+  local items={}
+  for index=1,256 do
+    items[index]={name="Rune "..string.char(97+math.floor((index-1)/26))..string.char(97+(index-1)%26),remaining=index}
+  end
+  local rows,err=Runes.snapshot(items); eq(err,nil); eq(#rows,256)
+  items[257]={name="Overflow",remaining=0}
+  eq(Runes.snapshot(items),nil)
+  rows,err=Runes.snapshot({}); eq(err,nil); eq(#rows,0)
+end)

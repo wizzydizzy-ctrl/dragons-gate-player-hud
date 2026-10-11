@@ -272,24 +272,77 @@ function Parser.parseReligion(lines)
   return result
 end
 
-function Parser.parseRunes(lines)
-  local result={items={}}; local header=false; local complete=false
+local RUNE_HEADER="You have the following elemental runes available to you..."
+local RUNE_MODIFIERS="You may use the following modifier runes upon them..."
+local RUNE_SHAPES="You may use them with the following shapes..."
+local RUNE_FOOTER="See INFO RUNESPELLS for memorized corridors."
+local CHAT_SPEAKER="[%w_%-'][%w_%-' ]*"
+local CHAT_VERBS={"says","asks","exclaims","shouts","yells","whispers","thinks"}
+local VOICE_VERBS={"say","ask","exclaim","shout","yell"}
+local function responseChatter(line)
+  if line:match("^%[GM%]") or line:match("^%[GUIDE%]")
+    or line:match("^%*%* .- just arrived in the world%.$")
+    or line:match("^%*%* .- has left the world")
+    or line:match('^'..CHAT_SPEAKER..' %([A-Z]+%):%s*"')
+    or line:match("^"..CHAT_SPEAKER.." sends: ")
+    or line:match("^You say %S")
+    or line:match('^You ask '..CHAT_SPEAKER..', "')
+    or line:match('^You ask '..CHAT_SPEAKER..' .-, "')
+    or line:match('^You whisper to '..CHAT_SPEAKER..', "')
+    or line:match("^You pick up "..CHAT_SPEAKER.."'s [%a ]+ link, \"")
+    or line:match("^"..CHAT_SPEAKER.." picks up "..CHAT_SPEAKER.."'s mental link, \"")
+    or line:match("^You pick up "..CHAT_SPEAKER.."'s thoughts, \"")
+    or line:match("^You pick up "..CHAT_SPEAKER.."'s thoughts echoing through the area, \"")
+    or line:match("^You now feel more skilled in .-%.$")
+    or line:match("^You now feel prepared to train further in .-%.$")
+    or line:match("^Your [%a ]+ has increased!$")
+    or line=="Due to your diligent training, you have gained additional fatigue!" then return true end
+  -- Match chat framing, not the quoted payload: a player can mention any
+  -- rune/count in speech or a link without adding it to the renewal list.
+  for _,verb in ipairs(CHAT_VERBS) do
+    if line:match('^'..CHAT_SPEAKER..' '..verb..', "')
+      or line:match('^'..CHAT_SPEAKER..' '..verb..' .-, "') then return true end
+  end
+  for _,verb in ipairs(VOICE_VERBS) do
+    if line:match('^You hear the voice of '..CHAT_SPEAKER..' '..verb..', "')
+      or line:match('^You hear the voice of '..CHAT_SPEAKER..' '..verb..' .-, "') then return true end
+  end
+  return false
+end
+function Parser.runeSectionBoundary(value)
+  local line=trim(value)
+  if line==RUNE_MODIFIERS then return "modifiers" end
+  if line==RUNE_SHAPES then return "shapes" end
+  if line==RUNE_FOOTER then return "footer" end
+end
+
+function Parser.parseRunes(lines,tableBoundary)
+  local result={items={}}; local seen={}; local header=false; local complete=false; local tail=false
   for _,raw in ipairs(lines or {}) do
     local line=clean(raw)
-    if line:match("^You have the following elemental runes available to you%.%.%.$") then header=true
-    elseif header and isPrompt(line) then complete=true
-    elseif header then
+    if trim(line)==RUNE_HEADER then
+      if header then return nil,"repeated rune response header" end
+      header=true
+    elseif header and isPrompt(line) then complete=true; break
+    elseif header and Parser.runeSectionBoundary(line) then tail=true
+    elseif header and not tail and not responseChatter(trim(line)) then
       local cursor=1
       while true do
         local first,last,name,remaining=line:find("([%a][%a%s]-)%s*%-%s*(%d+)%s+weaves?%s+remain",cursor)
         if not first then break end
-        name=name:match("^%s*(.-)%s*$")
-        if name~="" then result.items[#result.items+1]={name=name:gsub("^%l",string.upper),remaining=tonumber(remaining)} end
+        name=name:match("^%s*(.-)%s*$"):gsub("%s+"," ")
+        if name~="" then
+          local key,count=name:lower(),tonumber(remaining)
+          if seen[key]~=nil and seen[key]~=count then return nil,"conflicting rune counts" end
+          if seen[key]==nil then result.items[#result.items+1]={name=name:gsub("^%l",string.upper),remaining=count}; seen[key]=count end
+        end
         cursor=last+1
       end
     end
   end
-  if not complete then return nil,"incomplete rune response" end
+  -- Known modifier/shape headings prove the elemental table has ended. This
+  -- optional flag is for an immediate sidebar preview, never a spending queue.
+  if not complete and not (tableBoundary==true and header and tail) then return nil,"incomplete rune response" end
   if not header then return nil,"unrecognized rune response" end
   table.sort(result.items,function(a,b) if a.remaining~=b.remaining then return a.remaining<b.remaining end; return a.name:lower()<b.name:lower() end)
   return result
@@ -321,32 +374,30 @@ end
 -- Automated renew/train requests must not act on a partially parsed table.
 -- Manual/startup parsing remains tolerant of unrelated output; owned actions
 -- validate every table row and parse only the vetted rows below.
-function Parser.validateActionResponse(command,lines)
+function Parser.validateActionResponse(command,lines,tableBoundary)
   if command~="skill" and command~="info mag" and command~="info magic" then return true,nil,lines end
   if type(lines)~="table" or #lines>1024 then return nil,"The game response could not be confirmed. No actions were sent." end
-  local header=false; local vetted={}; local complete=false; local rows=0
-  local function chatter(line)
-    return line:match("^%[GM%]") or line:match("^%[GUIDE%]")
-      or line:match("^%*%* .- just arrived in the world%.$")
-      or line:match("^%*%* .- has left the world")
-      or line:match('^[%a][%a\' ]- says, "') or line:match('^[%a][%a\' ]- asks, "')
-      or line:match('^[%a][%a\' %-]- %([A-Z]+%):%s*"')
-      or line:match("^You now feel more skilled in .-%.$")
-      or line:match("^You now feel prepared to train further in .-%.$")
-      or line:match("^Your [%a ]+ has increased!$")
-      or line=="Due to your diligent training, you have gained additional fatigue!"
-  end
+  local header=false; local vetted={}; local complete=false; local rows=0; local runeTail
   for _,raw in ipairs(lines) do
     local line=trim(raw)
     local isHeader=command=="skill" and line:match("^Skill%s+Remain%s+Level$")
-      or command~="skill" and line=="You have the following elemental runes available to you..."
+      or command~="skill" and line==RUNE_HEADER
     if isHeader then
       if header then return nil,"The game response changed while refreshing. Try again; no actions were sent." end
       header=true; vetted[#vetted+1]=line
     elseif header then
       if isPrompt(line) then vetted[#vetted+1]=line; complete=true; break end
-      if line=="" then vetted[#vetted+1]=line
-      elseif chatter(line) then -- Never reinterpret interleaved chat as a data row.
+      local boundary=command~="skill" and Parser.runeSectionBoundary(line)
+      if boundary then
+        runeTail=boundary; vetted[#vetted+1]=line
+      elseif line=="" then vetted[#vetted+1]=line
+      elseif responseChatter(line) then -- Never reinterpret interleaved chat as a data row.
+      elseif runeTail then
+        -- Modifiers and shapes are labels, not rune counts or commands. Never
+        -- let a weave-like tail row become an extra renewal target.
+        if runeTail=="footer" or #line>4096 or not (line:match("^[A-Za-z][A-Za-z ]*$") or line=="None.") then
+          return nil,"The game response contained an unreadable rune section. Refresh it and try again; no actions were sent."
+        end
       else
         local valid=true
         if #line>4096 or line:find("%c") then valid=false
@@ -375,6 +426,7 @@ function Parser.validateActionResponse(command,lines)
     end
   end
   if command=="skill" and rows>0 and trim(lines[#lines])=="" then complete=true end
+  if command~="skill" and tableBoundary==true and runeTail then complete=true end
   if not header or not complete then return nil,"The game response was incomplete. Try again; no actions were sent." end
   return true,nil,vetted
 end
@@ -401,6 +453,12 @@ end
 function Parser.isComplete(command,lines)
   local fn={inventory=Parser.parseInventory,stat=Parser.parseStat,info=Parser.parseInfo,["info religion"]=Parser.parseReligion,["info mag"]=Parser.parseRunes,["info magic"]=Parser.parseRunes,skill=Parser.parseSkills,time=Parser.parseTime}
   if not fn[command] or type(lines)~="table" or #lines==0 or not isPrompt(lines[#lines]) then return false end
+  if command=="info mag" or command=="info magic" then
+    -- A recognized response ends at the prompt even when its counts are bad;
+    -- finish() must reject it promptly, not stall on a parser failure.
+    for _,line in ipairs(lines) do if trim(line)==RUNE_HEADER then return true end end
+    return false
+  end
   return fn[command](lines)~=nil
 end
 return Parser

@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.99.
+Applies to DGHUD v0.3.100.
 
 Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
@@ -46,6 +46,10 @@ These shortcuts start **ON**. Change each independently under **OPTIONS → Skil
 Go to a suitable shop or trainer first. These commands perform real game actions and may spend currency or training resources; they do not move you there or bypass requirements. Commands are sent one at a time, **one second apart**. Only one queue runs at a time. If character information is still refreshing, wait and try again.
 
 An incomplete response sends no renewal or training commands. Disconnecting, changing characters, reloading/updating the HUD, disabling the active shortcut, or sending an unrelated manual command stops the queue. Commands already sent cannot be undone. Training uses the game's skill IDs, not display positions; an unknown skill is never guessed.
+
+Normal modifier, shape, and corridor sections are supported. Rune counts can appear in the sidebar before those sections finish, but renewal commands wait for the complete response. Chat mentioning weave counts is ignored as rune data.
+
+If `trainall` sends commands for positive-use skills, check for an older personal alias with the same command. Disable that alias in Mudlet's Aliases editor before using the HUD shortcut. DGHUD preserves personal aliases, and its stop command cannot cancel timers started by a separate script.
 
 ## Skills commands
 

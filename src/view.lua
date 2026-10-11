@@ -1334,9 +1334,9 @@ function View:applyLayout(layout)
     else
       for _,key in ipairs(self.right_list_tab_order) do hideList(key) end; for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
     end
-    if self.inventory_output.visible then self.inventory_content:show() end
-    if self.runes_output.visible then self.runes_content:show() end
-    if self.skills_output.visible then self.skills_content:show() end
+    if widgetVisible(self.inventory_output) then self.inventory_content:show() end
+    if widgetVisible(self.runes_output) then self.runes_content:show() end
+    if widgetVisible(self.skills_output) then self.skills_content:show() end
     local raised={self.equipment,self.inventory,self.details,self.runes,self.skills,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes_title,self.runes_output,self.runes_content,self.skills_title,self.skills_output,self.skills_content}; for _,button in pairs(self.right_list_tabs or {}) do raised[#raised+1]=button end; View.raiseCards(raised)
     -- Native Geyser uses hidden/auto_hidden rather than a .visible field.
     -- Raise the selected card's tabs after its frame and content so the
@@ -3222,7 +3222,7 @@ function View:renderRunes(s)
   local layout=self.layout; if not layout then return end
   local runes=s.runes or {}; local items=runes.items or {}; local signature={}
   for _,rune in ipairs(items) do signature[#signature+1]=tostring(rune.name or rune.rune or rune.label or "").."\31"..tostring(rune.remaining or rune.remain or rune.weaves or rune.count or "") end
-  signature=table.concat(signature,"\30"); if signature==self.runes_signature then return end; self.runes_signature=signature
+  signature=table.concat(signature,"\30"); if signature==self.runes_signature then return end
   self.runes_content_width=math.max(self.list_viewport_width or self.list_outer_width or 1,View.runesRequiredColumns(items)*(self.list_character_width or layout.list_font))
   self.runes_horizontal_overflow=self.runes_content_width>(self.list_viewport_width or self.list_outer_width or 1)
   -- Keep both headers inside the ScrollBox so the count column scrolls with
@@ -3241,6 +3241,7 @@ function View:renderRunes(s)
   end
   self.runes_content:echo("<div style='white-space:nowrap'>"..table.concat(lines,"<br>").."</div>"); self.runes_content:move(0,0); self.runes_content:resize(self.runes_content_width or self.list_content_width or 1,math.max(layout.list_row_height*5,#lines*layout.list_row_height))
   if self.combine_skills_runes~=false and not widgetVisible(self.runes_output) then self.runes_content:hide() else self.runes_content:show() end
+  self.runes_signature=signature
 end
 function View:renderSkills(s)
   local layout=self.layout; if not layout then return end

@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.99**.
+Documentation covers **DGHUD v0.3.100**.
 
 ## Quick start
 
@@ -43,7 +43,17 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.99
+## Latest changes — v0.3.100
+
+- Fixed `shoprenewall` rejecting valid rune responses that include modifiers, shapes, and corridor instructions.
+- Rune counts refresh as soon as the elemental table ends, without waiting for the rest of the magic output. Renewals still require the completed response and remain one second apart.
+- Chat messages mentioning weave counts no longer become rune data. Repeated headers, conflicting counts, and incomplete lists cannot start renewal commands.
+- The Runes tab, exported variables, and existing rune APIs use consistent validated counts. Failed redraws can retry, and resized lists remain visible with native Mudlet widgets.
+- `trainall` remains **0 uses only**. If an older personal alias also matches `trainall`, disable that alias yourself to avoid running both scripts; DGHUD does not remove personal aliases.
+
+[Read the commands and safety notes](docs/COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
+
+## Previous changes — v0.3.99
 
 - Runes now use clear **Runes / Weaves Remain** columns with the counts aligned on the right.
 - `shoprenew` refreshes runes and renews those below 20 weaves; `shoprenewall` renews the whole fresh list.

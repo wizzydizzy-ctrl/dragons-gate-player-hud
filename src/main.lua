@@ -217,9 +217,16 @@ function Main.installRunesApi(namespace)
   return api
 end
 function Main.syncRunesApi(state)
-  local root=rawget(_G,"DGHUD"); if not root then return end
+  -- Validate legacy getters too; never let them expose a table rejected by
+  -- the namespaced values/global-variable exporter.
+  local items=state and state.runes and state.runes.items
+  if items==nil then items={} end
+  local rows,err=RuneVariables.snapshot(items)
+  local valid=rows and true or nil
+  local root=rawget(_G,"DGHUD"); if not root then return valid,err end
   local api=Main.installRunesApi(root); api.items={}; api.by_name={}; api.remaining={}
-  for i,item in ipairs(state and state.runes and state.runes.items or {}) do local copy=runeCopy(item); api.items[i]=copy; api.by_name[copy.name:lower()]=copy; api.remaining[copy.name:lower()]=copy.remaining end
+  for i,item in ipairs(rows or {}) do local copy=runeCopy(item); api.items[i]=copy; api.by_name[copy.name:lower()]=copy; api.remaining[copy.name:lower()]=copy.remaining end
+  return valid,err
 end
 function Main.installColorizerApi(namespace)
   local api=type(namespace.colors)=="table" and namespace.colors or {}; namespace.colors=api
@@ -329,10 +336,11 @@ function Main:refresh()
   if type(posture)=="table" then normalized.vitals.standing=posture.standing; normalized.vitals.sitting=posture.sitting; normalized.vitals.unconscious=posture.unconscious end
   if self.needs then normalized.needs=self.needs:status() end
   if self.roundtime_display~=nil then normalized.vitals.roundtime=self.roundtime_display end; normalized.clock=self:clockDisplay()
+  if not Main.syncRunesApi(normalized) then normalized.runes={items={}} end
   local signature=(normalized.vitals.psi.visible and "1" or "0")..(normalized.vitals.web.visible and "1" or "0")
   self.last_state=normalized
   if signature~=self.layout_vitals_signature then self:applyResponsiveLayout(normalized) end
-  self.view:update(normalized); Main.syncRunesApi(normalized); if self.chat then self.chat:syncCharacter() end
+  self.view:update(normalized); if self.chat then self.chat:syncCharacter() end
   self:syncMapSpecialLines()
   return true
 end
@@ -1619,7 +1627,13 @@ function Main:start()
   if self.view.setCopyTextCallback then self.view:setCopyTextCallback(function(text) return self.adapter:copyText(text) end) end
   self:applyResponsiveLayout()
   self.collector=Collector.new(self.adapter,Parser,function(snapshot,key,parsed)
-    if key=="runes" and self.rune_variables then self.rune_variables:save(parsed.items) end
+    if key=="runes" and self.rune_variables then
+      local saved=self.rune_variables:save(parsed.items)
+      if not saved then
+        self.rune_variables:clear(); snapshot.runes={items={}}
+        if self.adapter.reportCommandError then self.adapter:reportCommandError("Rune counts could not be confirmed. Run info mag again.") end
+      end
+    end
     if key=="time" then self:onClockSync(snapshot.time); return end
     if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
     self:refresh()
