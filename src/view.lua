@@ -120,8 +120,8 @@ function View.identityContent(character,t,layout,needs)
   local standing={}; if character.religious_balance and character.religious_balance~="" then standing[#standing+1]=esc(character.religious_balance) end; local alignment=alignmentLabel(character.alignment); if alignment~="" then standing[#standing+1]=esc(alignment) end
   local standingLine=#standing>0 and "<br><span style='color:"..t.muted.."'>"..table.concat(standing," · ").."</span>" or ""
   needs=type(needs)=="table" and needs or {}; local hunger=needs.hunger or {}; local thirst=needs.thirst or {}
-  local hungerText={unknown="—",ok="Ok",satiated="Satiated",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",ok="Ok",quenched="Quenched",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched",dehydrated="Dehydrated"}
-  local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42",dehydrated="#d34a42"}
+  local hungerText={unknown="—",ok="Ok",satiated="Satiated",full="Full",hungry="Hungry",ravenous="Ravenous",starving="Starving"}; local thirstText={unknown="—",ok="Ok",quenched="Quenched",sloshing="Sloshing",thirsty="Thirsty",very_thirsty="Very Thirsty",parched="Parched",dehydrated="Dehydrated"}
+  local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,full=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,sloshing="#d6a84b",thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42",dehydrated="#d34a42"}
   local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
   local role=character.class
   if tostring(character.race or ""):lower()=="dragon" then
@@ -319,6 +319,18 @@ local function widgetHeight(item,fallback)
   local value=tonumber(raw) or (type(raw)=="string" and tonumber(raw:match("^([%d%.]+)px$")))
   if value and value>=0 and value<math.huge then return value end
   return fallback or 0
+end
+local function fallbackListViewport(cardHeight,padding,titleHeight,rowHeight,scrollbarHeight)
+  local minimum=rowHeight+scrollbarHeight
+  local viewport=cardHeight-padding*2-titleHeight-4
+  -- The outer tab already names the list. Shed its duplicate heading and
+  -- inner whitespace before sacrificing a complete row or scrollbar.
+  if viewport<minimum then titleHeight=0; viewport=cardHeight-padding*2 end
+  if viewport<minimum and cardHeight>=minimum then
+    padding=math.max(0,math.floor((cardHeight-minimum)/2))
+    viewport=cardHeight-padding*2
+  end
+  return padding,titleHeight,math.max(1,viewport)
 end
 SkillSettingsView.attach(View,{label=label,copy=viewCopy,safeText=safeText})
 function View:ensureInventoryTabs()
@@ -1023,7 +1035,8 @@ function View:layoutCompactLists(layout,top)
   -- Preserve at least one complete rendered row in very short windows. The
   -- card keeps normal padding whenever it fits and sheds only inner whitespace.
   local row_h=math.max(1,tonumber(layout.list_row_height) or 1)
-  local rp=math.max(1,math.min(7,layout.list_padding or 4,math.floor(math.max(2,card_h-row_h)/2)))
+  local row_minimum=row_h+(layout.list_horizontal_scrollbar_height or 0)
+  local rp=math.max(0,math.min(7,layout.list_padding or 4,math.floor(math.max(0,card_h-row_minimum)/2)))
   local card_x=6; local card_w=width-12; local list_x=card_x+rp; local list_w=math.max(1,card_w-rp*2)
   self.list_outer_width=list_w; self.list_viewport_width,self.list_resolved_scrollbar_width=listViewportWidth(active=="inventory" and self.inventory_output or active=="runes" and self.runes_output or self.skills_output,list_w,self.list_scrollbar_width)
   self.skills_content_width=math.max(self.list_viewport_width,29*self.list_character_width); self.runes_content_width=math.max(self.list_viewport_width,View.runesRequiredColumns(self.last_state and self.last_state.runes and self.last_state.runes.items)*self.list_character_width)
@@ -1036,15 +1049,24 @@ function View:layoutCompactLists(layout,top)
   if active=="inventory" then
     local vitals=self.last_state and self.last_state.vitals or {}; local footer_capacity=math.max(4,math.floor(list_w/math.max(1,self.list_character_width*((layout.list_font+2)/math.max(1,layout.list_font))))); self.inventory_footer_capacity=footer_capacity
     local footer_lines=View.inventoryFooterLines(vitals,t,footer_capacity); local footer_h=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/math.max(1,layout.list_font)),math.ceil((layout.list_font+2)*1.3))*#footer_lines+3; local inner_h=math.max(1,card_h-rp*2)
-    if inner_h<footer_h+math.max(1,layout.list_row_height) then footer_h=0 end
+    local scrollbar_h=self.inventory_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
+    if inner_h<footer_h+math.max(1,layout.list_row_height)+scrollbar_h then
+      footer_h=0; self.inventory_footer_scrolling=true
+    end
     local viewport_h=math.max(1,inner_h-footer_h)
     place(self.inventory,card_x,card_y,card_w,card_h); self.inventory_title:hide(); place(self.inventory_output,list_x,card_y+rp,list_w,viewport_h)
-    if footer_h>0 then place(self.inventory_footer,list_x,card_y+card_h-rp-footer_h,list_w,footer_h); self:renderInventoryFooter(vitals) else self.inventory_footer:hide() end
+    if footer_h>0 then place(self.inventory_footer,list_x,card_y+card_h-rp-footer_h,list_w,footer_h) else self.inventory_footer:hide() end
+    self:renderInventoryFooter(vitals)
     self.inventory_content:resize(self.inventory_content_width,math.max(viewport_h,inventory_rows*layout.list_row_height)); self.inventory_content:show()
   elseif active=="runes" then
     local viewport_h=math.max(1,card_h-rp*2); place(self.runes,card_x,card_y,card_w,card_h); self.runes_title:hide(); place(self.runes_output,list_x,card_y+rp,list_w,viewport_h); self.runes_content:resize(self.runes_content_width,math.max(viewport_h,rune_rows*layout.list_row_height)); self.runes_content:show()
   else
-    local inner_h=math.max(1,card_h-rp*2); local wanted_title=layout.list_row_height+2; local title_h=inner_h>=wanted_title+1 and wanted_title or 0; local viewport_h=math.max(1,inner_h-title_h); place(self.skills,card_x,card_y,card_w,card_h); if title_h>0 then place(self.skills_title,list_x,card_y+rp,list_w,title_h) else self.skills_title:hide() end; place(self.skills_output,list_x,card_y+rp+title_h,list_w,viewport_h); self.skills_content:resize(self.skills_content_width,math.max(viewport_h,skill_rows*layout.list_row_height)); self.skills_content:show()
+    local inner_h=math.max(1,card_h-rp*2); local wanted_title=layout.list_row_height+2
+    local scrollbar_h=self.skills_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
+    local title_h=inner_h>=wanted_title+row_h+scrollbar_h and wanted_title or 0
+    local viewport_h=math.max(1,inner_h-title_h)
+    place(self.skills,card_x,card_y,card_w,card_h); if title_h>0 then place(self.skills_title,list_x,card_y+rp,list_w,title_h) else self.skills_title:hide() end
+    place(self.skills_output,list_x,card_y+rp+title_h,list_w,viewport_h); self.skills_content:resize(self.skills_content_width,math.max(viewport_h,skill_rows*layout.list_row_height)); self.skills_content:show()
   end
   local raised={self.compact,self.inventory,self.inventory_output,self.inventory_content,self.inventory_footer,self.runes,self.runes_output,self.runes_content,self.skills,self.skills_title,self.skills_output,self.skills_content}; for _,button in pairs(self.right_list_tabs or {}) do raised[#raised+1]=button end; View.raiseCards(raised)
   return true
@@ -1185,7 +1207,8 @@ function View:applyLayout(layout)
     local combinedEnabled=self.combine_skills_runes~=false
     local shared_tab_h=math.max(22,layout.list_font+12)
     local minimum_shared=math.max(minimum_runes,minimum_skills)+shared_tab_h+3
-    local combinedFits=remaining>=minimum_inventory+gap+minimum_shared
+    local combined_h=math.floor((remaining-gap)/2)
+    local combinedFits=combined_h>=math.max(minimum_inventory,minimum_shared)
     local tabbed=combinedEnabled and not combinedFits or (not combinedEnabled and (layout.right_lists_mode=="tabbed" or not stackedFits))
     local listWidgets={
       inventory={self.inventory,self.inventory_title,self.inventory_output,self.inventory_content,self.inventory_footer},
@@ -1196,11 +1219,11 @@ function View:applyLayout(layout)
     if combinedEnabled and combinedFits then
       self.right_lists_presentation="combined"
       for _,button in pairs(self.right_list_tabs or {}) do button:hide() end
-      -- Inventory retains its old one-third share; the shared list gets the
-      -- space formerly occupied by both Runes and Skills, minus its tab header.
-      local usable=remaining-gap
-      local inventory_h=math.max(minimum_inventory,math.min(math.floor((remaining-gap*2)/3),usable-minimum_shared))
-      local shared_h=usable-inventory_h; local shared_y=inventory_y+inventory_h+gap
+      -- Split the usable rail evenly, regardless of the selected list or
+      -- content count. At most one rounding pixel remains at the bottom.
+      -- Use the existing compact tabs if either equal card cannot fit a row.
+      local inventory_h=combined_h
+      local shared_h=combined_h; local shared_y=inventory_y+inventory_h+gap
       local inventory_view_h=inventory_h-rp*2-title_h-footer_h-4
       place(self.inventory,card_x,inventory_y,card_w,inventory_h); place(self.inventory_title,list_x,inventory_y+rp,list_w,title_h)
       place(self.inventory_output,list_x,inventory_y+rp+title_h,list_w,inventory_view_h)
@@ -1284,12 +1307,16 @@ function View:applyLayout(layout)
         self:renderInventoryFooter(self.last_state and self.last_state.vitals or {})
         self:resizeInventoryContent(inventory_rows,viewport_h); self.inventory_content:show()
       elseif active=="runes" then
-        viewport_h=math.max(1,card_h-rp*2-title_h-4)
-        place(self.runes,card_x,card_y,card_w,card_h); place(self.runes_title,list_x,card_y+rp,list_w,title_h); place(self.runes_output,list_x,card_y+rp+title_h,list_w,viewport_h)
+        local padding,title; padding,title,viewport_h=fallbackListViewport(card_h,rp,title_h,layout.list_row_height,runes_scroll_h)
+        place(self.runes,card_x,card_y,card_w,card_h)
+        if title>0 then place(self.runes_title,list_x,card_y+padding,list_w,title) else self.runes_title:hide() end
+        place(self.runes_output,list_x,card_y+padding+title,list_w,viewport_h)
         self.runes_content:resize(self.runes_content_width,math.max(viewport_h,rune_rows*layout.list_row_height)); self.runes_content:show()
       else
-        viewport_h=math.max(1,card_h-rp*2-title_h-4)
-        place(self.skills,card_x,card_y,card_w,card_h); place(self.skills_title,list_x,card_y+rp,list_w,title_h); place(self.skills_output,list_x,card_y+rp+title_h,list_w,viewport_h)
+        local padding,title; padding,title,viewport_h=fallbackListViewport(card_h,rp,title_h,layout.list_row_height,skills_scroll_h)
+        place(self.skills,card_x,card_y,card_w,card_h)
+        if title>0 then place(self.skills_title,list_x,card_y+padding,list_w,title) else self.skills_title:hide() end
+        place(self.skills_output,list_x,card_y+padding+title,list_w,viewport_h)
         self.skills_content:resize(self.skills_content_width,math.max(viewport_h,skill_rows*layout.list_row_height)); self.skills_content:show()
       end
     else

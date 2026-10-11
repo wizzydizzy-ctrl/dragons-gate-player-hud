@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.97**.
+Applies to DGHUD **v0.3.98**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -90,15 +90,15 @@ The setting is saved and survives updates.
 
 ## Combined Skills / Runes
 
-DGHUD v0.3.97 combines Skills and Runes into one tabbed card by default.
+DGHUD v0.3.98 keeps Skills and Runes in one tabbed card by default.
 
-**OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. In the normal layout, Combat stays at the top and sizes to its contents. Inventory remains a separate card below Combat with its existing **Equipped** / **Carried** tabs. Below Inventory, one taller **Skills / Runes** card replaces the two separate list cards.
+**OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. In the normal combined layout, Combat stays at the top and sizes to its contents. Below it, Inventory and the combined **Skills / Runes** card have the same height and width and evenly split the available space after the normal gaps. This follows window resizing and each Mudlet MultiView profile pane. Inventory retains its **Equipped** / **Carried** tabs.
 
 Click **Skills** or **Runes** to choose the visible list. **Skills** is selected initially. Both lists continue updating in the background; changing tabs displays saved information without sending a game command. Existing fonts, sorting, colors, column alignment, and vertical/horizontal scrolling are preserved.
 
-Turn the option **OFF** to return to separate Runes and Skills boxes. The preference and chosen combined-card tab are saved per Mudlet profile and survive updates, restarts, and character changes.
+Turn the option **OFF** to return to separate Runes and Skills boxes; their normal sizing is unchanged in v0.3.98. The preference and chosen combined-card tab are saved per Mudlet profile and survive updates, restarts, and character changes.
 
-This option controls the normal sidebar layout. The existing three-way Inventory / Runes / Skills compact tabs still take over only when a short or narrow window needs them to keep the lists readable; turning the combined option off does not disable that small-window protection. See [Right sidebar](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar).
+This option controls the normal sidebar layout. If the window is too short for both equal-sized cards to fit complete rows, tabs, and the Inventory footer safely, the existing three-way Inventory / Runes / Skills compact/tabbed fallback continues without forcing tiny fonts or clipping. Narrow windows retain their existing compact behavior; turning the combined option off does not disable that small-window protection. See [Right sidebar](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar).
 
 ## Main-window word wrap
 
@@ -206,11 +206,11 @@ These submissions do not require a GitHub account or browser. See [Support, Priv
 
 DGHUD recalculates panel sizes, font-aware spacing, chat wrapping, list scrollbars, map height, and resource bars when the Mudlet window changes size. Main game-console wrapping also follows the window while **AUTO MAIN WRAP** is on.
 
-In Mudlet MultiView, these sizes use the individual profile pane, not the entire application window. On narrow panes, Combat stacks its fields so OR, DR, position, and posture remain visible, with its height sized to the resulting lines. Inventory, Runes, and Skills start at the top of their scrollable space; long names and columns remain available through horizontal scrolling. The combined card does not reduce existing font sizes.
+In Mudlet MultiView, these sizes use the individual profile pane, not the entire application window. On narrow panes, Combat stacks its fields so OR, DR, position, and posture remain visible, with its height sized to the resulting lines. In the normal combined layout, Inventory and the Skills / Runes card keep equal height and width and evenly split the remaining space below Combat after the normal gaps. Inventory, Runes, and Skills start at the top of their scrollable space; long names and columns remain available through horizontal scrolling. Existing fonts, columns, sorting, tab choices, and both scrollbars are unchanged.
 
 In a very short window, Inventory keeps room for readable item rows. If the money and carry summary cannot fit below the list, it moves inside the list: scroll to the bottom to see it. It returns to its fixed position when you make the window taller.
 
-At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. In the normal layout, Inventory stays separate below Combat, and the taller **Skills / Runes** card below Inventory shows the selected list. **COMBINED SKILLS / RUNES OFF** restores separate Runes and Skills boxes. Only when a shorter or narrower desktop window needs it to protect readable space do **Inventory**, **Runes**, and **Skills** share the existing three-way compact tabs; no list is discarded. At compact widths the side rails hide, but those same three scrollable tabs move into a compact strip above the chatbox. On an exceptionally short window, normal game output takes priority and the optional strip returns automatically when enough height is available.
+At wide and medium widths, the side panels use roughly 17 percent of the window each, with a small gap beside the main display. In the normal combined layout, equal-sized **Inventory** and **Skills / Runes** cards evenly share the available space below content-sized Combat. **COMBINED SKILLS / RUNES OFF** restores the unchanged separate Runes and Skills boxes. When height is too short to fit complete rows, tabs, and the Inventory footer safely in both equal-sized cards, **Inventory**, **Runes**, and **Skills** use the existing three-way compact/tabbed fallback without forced tiny fonts or clipping; no list is discarded. Narrow panes retain their existing compact behavior. At compact widths the side rails hide, but those same three scrollable tabs move into a compact strip above the chatbox. On an exceptionally short window, normal game output takes priority and the optional strip returns automatically when enough height is available.
 
 If something disappears after resizing:
 

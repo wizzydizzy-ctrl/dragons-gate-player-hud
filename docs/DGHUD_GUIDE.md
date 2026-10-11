@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.97**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.98**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,18 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.97
+## What's new in v0.3.98
+
+- In the normal combined layout, **Inventory** and the combined **Skills / Runes** card now have the same height and width, evenly splitting the available space below content-sized **Combat** across window sizes and Mudlet MultiView panes.
+- Existing fonts, aligned columns, sorting, tab choices, and horizontal/vertical scrollbars are unchanged. **COMBINED SKILLS / RUNES OFF** keeps the separate-box sizing unchanged.
+- When the window is too short for both cards to fit complete rows, tabs, and the Inventory footer safely, the existing three-way Inventory / Runes / Skills compact/tabbed fallback continues without forcing tiny fonts or clipping.
+- Very short panes now give complete rows and horizontal scrollbars priority over duplicate headings and inner whitespace. Inventory totals move into the scrollable list when they cannot fit below it.
+- Food and Water now recognize explicit recovery and stop messages, including **Full** and **Sloshing**. Sloshing is a stop-drinking warning. See the [six exact status transitions](HUD_SCREEN_AND_CHARACTER_DATA.md#identity).
+- Wrapped, confirmed complete INFO still reports **Satiated** / **Quenched**, or **Ok** for an omitted status. Eating/drinking, burps, “not bad,” and “hit the spot” alone never infer status.
+
+See [Right sidebar](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) and [Combined Skills / Runes](OPTIONS_AND_DISPLAY.md#combined-skills--runes), or read the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.98).
+
+## Previous changes in v0.3.97
 
 - **OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**, with a taller tabbed card below the separate Inventory card and its existing **Equipped** / **Carried** tabs. Combat stays at the top, sized to its contents.
 - **Skills** is selected initially. The layout choice and selected **Skills** / **Runes** tab are saved per profile through updates, restarts, and character changes.
@@ -90,11 +101,11 @@ With **SKILL FILTERS ON**, filtering remains independent of custom or disabled c
 - **Center:** The normal Dragons Gate game display.
 - **Bottom-center:** Resource bars without covering the command line.
 - **Identity and navigation side:** Name, race, profession or dragon stage, physical details, faith, favors, alignment, hunger, thirst, equipment readiness, location, mapper, compass, travel buttons, and the roundtime bar.
-- **Information side:** In the [combined layout](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar), Combat is content-sized at the top, Inventory stays separate with Equipped / Carried tabs, and a taller Skills / Runes card sits below it with Skills selected initially. Both lists update in the background; switching tabs sends no command. Existing fonts, sorting, colors, columns, and scrollbars remain.
+- **Information side:** In the normal [combined layout](HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar), content-sized Combat sits above Inventory and the combined Skills / Runes card. The two list cards have the same height and width and evenly split the available space below Combat across window sizes and MultiView panes. Inventory keeps Equipped / Carried tabs; Skills is selected initially in the lower card. Both lists update in the background; switching tabs sends no command. Existing fonts, sorting, colors, columns, tab choices, and both scrollbars remain.
 
 **OPTIONS → COMBINED SKILLS / RUNES** defaults to ON; OFF restores separate boxes. The preference and selected Skills / Runes tab persist per profile through updates, restarts, and character changes.
 
-DGHUD responds to window resizing. The existing three-way Inventory / Runes / Skills compact tabs remain a fallback only when needed to protect readable space. At smaller sizes, optional sections may hide so the game display and command line remain usable. This does not erase their data.
+DGHUD responds to window resizing and each MultiView pane. If both equal-sized cards cannot safely fit complete rows, tabs, and the Inventory footer at a short height, the existing three-way Inventory / Runes / Skills compact/tabbed fallback continues without forcing tiny fonts or clipping. Narrow windows retain their existing compact behavior. At smaller sizes, optional sections may hide so the game display and command line remain usable. This does not erase their data.
 
 ## What happens after character login
 

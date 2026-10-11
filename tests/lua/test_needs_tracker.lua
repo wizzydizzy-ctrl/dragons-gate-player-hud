@@ -165,3 +165,164 @@ test("combined INFO ANSI and action lines remain conservative",function()
   local s=n:status(); eq(s.hunger.status,"hungry"); eq(s.thirst.status,"very_thirsty"); eq(s.thirst.timestamp,7); eq(s.thirst.source,"info")
   eq(n:onLine("You eat the last of your bread."),false); eq(n:onLine("You drink the last of your water."),false); eq(n:status().hunger.status,"hungry"); eq(n:status().thirst.status,"very_thirsty")
 end)
+
+local confirmedNeedNotices={
+  {"You're no longer ravenous, only hungry now!","hunger","hungry"},
+  {"You're no longer hungry.","hunger","ok"},
+  {"You're full, time to stop eating for a while.","hunger","full"},
+  {"You're no longer parched, only thirsty now!","thirst","thirsty"},
+  {"You're no longer thirsty.","thirst","quenched"},
+  {"You're sloshing, you've been drinking so much. Time to stop drinking for a while.","thirst","sloshing"},
+}
+local function assertNeedSnapshotUnchanged(actual,before,need)
+  for _,field in ipairs({"status","timestamp","source","raw"}) do eq(actual[need][field],before[need][field]) end
+end
+
+test("exact eating and drinking notices accept ANSI BEL and prompts without changing the opposite need",function()
+  local variants={
+    function(line) return line end,
+    function(line) return " \t\27[33m"..line.."\27[0m " end,
+    function(line) return "\7"..line.."\7" end,
+    function(line) return "> "..line end,
+    function(line) return "[199] 147/147 hp, 60/60 ftg >"..line end,
+    function(line) return "\7\27[33m[199] 147/147 hp, 60/60 ftg > "..line.."\27[0m\7" end,
+    function(line) return "> "..line:gsub(" "," \t\n  ") end,
+  }
+  for _,case in ipairs(confirmedNeedNotices) do
+    for _,decorate in ipairs(variants) do
+      local stamp,changes=10,0
+      local n=Needs.new({epoch=function() return stamp end},function() changes=changes+1 end)
+      assert(n:onLine("You are ravenous. You are parched.","info"))
+      local before=n:status(); local line=decorate(case[1]); stamp=11
+      local hunger,thirst=Needs.detected(line)
+      eq(hunger,case[2]=="hunger" and case[3] or nil); eq(thirst,case[2]=="thirst" and case[3] or nil)
+      assert(n:onLine(line),case[1]); local after=n:status()
+      eq(after[case[2]].status,case[3]); eq(after[case[2]].timestamp,11); eq(after[case[2]].source,"output")
+      eq(after[case[2]].raw:find("\27",1,true),nil); eq(after[case[2]].raw:find("\7",1,true),nil)
+      assertNeedSnapshotUnchanged(after,before,case[2]=="hunger" and "thirst" or "hunger")
+      eq(changes,2)
+    end
+  end
+end)
+
+test("full and sloshing durable prefixes tolerate wrapped remainder text",function()
+  for _,case in ipairs({
+    {"You're full, time to stop eating","full","parched"},
+    {"You're full, time to stop eating\nfor a while.","full","parched"},
+    {"You're sloshing,","ravenous","sloshing"},
+    {"You're sloshing, you've been drinking so much.\nTime to stop drinking for a while.","ravenous","sloshing"},
+  }) do
+    local n=Needs.new({epoch=function() return 42 end}); assert(n:onLine("You are ravenous. You are parched."))
+    assert(n:onLine(case[1])); eq(n:status().hunger.status,case[2]); eq(n:status().thirst.status,case[3])
+  end
+end)
+
+test("eating and drinking recovery transitions preserve independent warning and excess states",function()
+  local stamp,changes=10,0
+  local n=Needs.new({epoch=function() return stamp end},function() changes=changes+1 end)
+  assert(n:onLine("You are ravenous. You are parched.","info"))
+  for _,case in ipairs({
+    confirmedNeedNotices[1],confirmedNeedNotices[4],confirmedNeedNotices[2],
+    confirmedNeedNotices[5],confirmedNeedNotices[3],confirmedNeedNotices[6],
+    {"You are starving.","hunger","starving"},{"You are dehydrated.","thirst","dehydrated"},
+    confirmedNeedNotices[3],confirmedNeedNotices[5],
+  }) do
+    local before=n:status(); stamp=stamp+1
+    assert(n:onLine(case[1])); local after=n:status()
+    eq(after[case[2]].status,case[3]); eq(after[case[2]].timestamp,stamp)
+    eq(after[case[2]].source,"output"); eq(after[case[2]].raw,case[1])
+    assertNeedSnapshotUnchanged(after,before,case[2]=="hunger" and "thirst" or "hunger")
+  end
+  eq(n:status().hunger.status,"full"); eq(n:status().thirst.status,"quenched"); eq(changes,11)
+end)
+
+test("combined eating and drinking notices update both needs once at the same timestamp",function()
+  for _,pair in ipairs({{1,4,"hungry","thirsty"},{2,5,"ok","quenched"},{3,6,"full","sloshing"}}) do
+    for _,reverse in ipairs({false,true}) do
+      local changes=0; local n=Needs.new({epoch=function() return 42 end},function() changes=changes+1 end)
+      local food,water=confirmedNeedNotices[pair[1]][1],confirmedNeedNotices[pair[2]][1]
+      local line=reverse and water.." "..food or food.." "..water
+      assert(n:onLine("\7\27[32m[199] 147/147 hp, 60/60 ftg > "..line.."\27[0m\7","info"))
+      local s=n:status(); eq(s.hunger.status,pair[3]); eq(s.thirst.status,pair[4])
+      eq(s.hunger.timestamp,42); eq(s.thirst.timestamp,42); eq(s.hunger.source,"info"); eq(s.thirst.source,"info")
+      eq(changes,1)
+    end
+  end
+end)
+
+test("incomplete eating drinking and taste actions never infer recovery or excess",function()
+  for _,seed in ipairs({false,true}) do
+    local changes=0; local n=Needs.new({epoch=function() return 7 end},function() changes=changes+1 end)
+    if seed then assert(n:onLine("You are ravenous. You are parched.","info")) end
+    local before=n:status()
+    for _,line in ipairs({
+      "You drink", "You drink some water.", "You drink a sip from your waterskin.",
+      "You eat", "You eat some bread.", "You eat the last of your bread.",
+      "Not bad.", "That's not bad.", "You burp.", "You burp loudly.",
+      "That hit the spot.", "That hits the spot.", "You're full.", "You're fully healed.",
+      "You're no longer ravenous, only hungry now", "You're no longer hungry",
+      "You're no longer parched, only thirsty now", "You're no longer thirsty",
+    }) do
+      for _,value in ipairs({line,"\7\27[33m> "..line.."\27[0m"}) do
+        eq(n:onLine(value),false)
+        for _,need in ipairs({"hunger","thirst"}) do assertNeedSnapshotUnchanged(n:status(),before,need) end
+      end
+    end
+    eq(changes,seed and 1 or 0)
+  end
+end)
+
+test("unrelated full prose and quoted chat cannot consume the new eating and drinking notices",function()
+  local lines={"Your backpack is full.","The bottle is full of water.","You're full of ideas.",
+    "A full waterskin sloshes when shaken.","The room is full, time to stop entering for a while."}
+  for _,case in ipairs(confirmedNeedNotices) do
+    for _,quoted in ipairs({
+      'Ada says, "'..case[1]..'"', "Ada tells you, '"..case[1].."'",
+      '[CHAT] Ada: "'..case[1]..'"', 'You say, "'..case[1]..'"',
+      'A plaque reads. "'..case[1]..'"',
+    }) do lines[#lines+1]=quoted end
+  end
+  local changes=0; local n=Needs.new({epoch=function() return 9 end},function() changes=changes+1 end)
+  assert(n:onLine("You are ravenous. You are parched.","info")); local before=n:status()
+  for _,line in ipairs(lines) do
+    for _,value in ipairs({line,"\7\27[32m[199] 147/147 hp, 60/60 ftg > "..line.."\27[0m"}) do
+      local hunger,thirst=Needs.detected(value); eq(hunger,nil); eq(thirst,nil)
+      eq(n:onLine(value),false)
+      for _,need in ipairs({"hunger","thirst"}) do assertNeedSnapshotUnchanged(n:status(),before,need) end
+    end
+  end
+  eq(changes,1)
+end)
+
+test("wrapped INFO preserves biography and confirmed recovery full and sloshing notices",function()
+  local cases={
+    {{"You're no longer","ravenous, only hungry now! You're no longer","parched, only thirsty now!"},"hungry","thirsty"},
+    {{"You're no longer","hungry. You're no longer","thirsty."},"ok","quenched"},
+    {{"You're full, time to","stop eating for a while. You're","sloshing, you've been drinking so much. Time to stop","drinking for a while."},"full","sloshing"},
+    {{"You are","satiated. Your thirst is","quenched."},"satiated","quenched"},
+  }
+  for _,case in ipairs(cases) do
+    local lines={"You are Dace Alterac, a delicate boned and skinny bodied",
+      "28 year old Entropic Male young Monitanian. You are",[[7'0" and weigh 247 lbs. You are seated.]]}
+    for _,line in ipairs(case[1]) do lines[#lines+1]=line end
+    lines[#lines+1]=">"
+    local parsed=assert(Parser.parseInfo(lines)); eq(parsed.character.full_name,"Dace Alterac")
+    eq(parsed.character.race,"Monitanian"); eq(parsed.physical.age,28)
+    eq(parsed.physical.height,[[7'0"]]); eq(parsed.physical.weight,247)
+    for _,unsolicited in ipairs({false,true}) do
+      local stamp=10; local n=Needs.new({epoch=function() return stamp end})
+      assert(n:onLine("You are ravenous. You are parched.")); stamp=11
+      if unsolicited then
+        for index=1,#lines-1 do
+          n:onLine("\7\27[32m"..(index==1 and "[199] 147/147 hp, 60/60 ftg > " or "")..lines[index].."\27[0m")
+        end
+        eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+        assert(n:onLine("\7\27[32m[199] 147/147 hp, 60/60 ftg >\27[0m"))
+      else assert(n:onInfo(parsed)) end
+      local s=n:status(); eq(s.hunger.status,case[2]); eq(s.thirst.status,case[3])
+      for _,need in ipairs({"hunger","thirst"}) do
+        eq(s[need].timestamp,11); eq(s[need].source,unsolicited and "output" or "info")
+      end
+    end
+  end
+end)

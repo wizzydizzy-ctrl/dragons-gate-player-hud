@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.97.
+Applies to DGHUD v0.3.98.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -31,19 +31,23 @@ Input alignment is independent of **AUTO MAIN WRAP**, which controls line wrappi
 
 ## Right sidebar
 
-DGHUD v0.3.97 combines Skills and Runes into one tabbed card by default.
+DGHUD v0.3.98 keeps Skills and Runes in one tabbed card by default.
 
 In the normal layout, the right side runs from top to bottom:
 
 - **Combat**, sized to the number of lines it contains.
 - **Inventory**, kept separate with its existing **Equipped** / **Carried** tabs, money, and carry totals.
-- A taller **Skills / Runes** card with **Skills** and **Runes** tabs, using the space of the former separate cards. **Skills** is selected initially.
+- A combined **Skills / Runes** card with **Skills** and **Runes** tabs. **Skills** is selected initially.
+
+Inventory and the combined Skills / Runes card have the same height and width, evenly splitting the available space below content-sized Combat after the normal gaps. This parity follows window resizing and the individual profile pane in Mudlet MultiView.
 
 Both Skills and Runes keep receiving background data updates while their tab is hidden. Switching tabs immediately shows the saved list; it does not request information from the game. Existing fonts, sorting, colors, aligned columns, and horizontal/vertical scrollbars remain unchanged.
 
-**OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. Turn it **OFF** to restore separate Runes and Skills boxes below Inventory. The layout preference and selected combined-card tab stay with the Mudlet profile through updates, restarts, and character changes.
+**OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. Turn it **OFF** to restore separate Runes and Skills boxes below Inventory; their normal sizing is unchanged in v0.3.98. The layout preference and selected combined-card tab stay with the Mudlet profile through updates, restarts, and character changes.
 
-Only when a short or narrow window needs more readable space does the existing compact fallback share Inventory, Runes, and Skills through three tabs. Click **INVENTORY**, **RUNES**, or **SKILLS**; narrower layouts shorten these to **INV**, **RUN**, and **SKL**. Inventory still retains its own Equipped / Carried sections within that fallback. If there is too little height even for the tabs, enlarge the window. See [Options and Display](OPTIONS_AND_DISPLAY.md#combined-skills--runes) for the combined layout option and responsive controls.
+If the window is too short for both equal-sized cards to fit complete rows, tabs, and the Inventory footer safely, the existing three-way compact/tabbed fallback continues without forcing tiny fonts or clipping. Narrow windows retain their existing compact behavior. Click **INVENTORY**, **RUNES**, or **SKILLS**; narrower layouts shorten these to **INV**, **RUN**, and **SKL**. Inventory still retains its own Equipped / Carried sections within that fallback. If there is too little height even for the tabs, enlarge the window. See [Options and Display](OPTIONS_AND_DISPLAY.md#combined-skills--runes) for the combined layout option and responsive controls.
+
+In very short compact/tabbed panes, complete list rows and their horizontal scrollbar take priority over duplicate headings and inner spacing. Inventory totals scroll below the items when they cannot fit underneath. These protections work with either combined-layout choice.
 
 ## Identity
 
@@ -59,9 +63,22 @@ The Identity section may show:
 
 Alignment wording is made more readable in the HUD: order becomes **Orderly**, entropy becomes **Entropic**, and chaos becomes **Chaotic**.
 
-Food and Water begin unknown. A complete character INFO description updates both: any reported hunger or thirst status is shown, while a missing status shows **Ok** in green. This works whenever that description appears in game output, including wrapped lines, not just during the startup command sequence.
+Food and Water begin unknown. A confirmed complete character INFO description updates both: any reported hunger or thirst status is shown, while an omitted status shows **Ok** in green. Wrapped INFO lines are still supported whenever the complete description appears, including outside the startup command sequence. Incomplete INFO responses do not clear previous warnings.
 
-`You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green. Later hunger or thirst messages replace the corresponding status independently. A lone hunger notice does not reset Water, and eating or drinking alone does not prove either status is healthy. Incomplete INFO responses do not clear previous warnings.
+`You are satiated.` shows **Food: Satiated**, and `Your thirst is quenched.` shows **Water: Quenched**, both in green, including in wrapped INFO. Within INFO, only omission from a confirmed complete description sets the corresponding status to **Ok**; a partial response or lone notice does not reset the other status.
+
+Explicit game messages update the corresponding status as follows:
+
+| Exact game message | Identity status |
+| --- | --- |
+| `You're no longer ravenous, only hungry now!` | **Food: Hungry** |
+| `You're no longer hungry.` | **Food: Ok** |
+| `You're full, time to stop eating for a while.` | **Food: Full** |
+| `You're no longer parched, only thirsty now!` | **Water: Thirsty** |
+| `You're no longer thirsty.` | **Water: Quenched** |
+| `You're sloshing, you've been drinking so much. Time to stop drinking for a while.` | **Water: Sloshing** — a stop-drinking warning |
+
+Each explicit message replaces only its matching Food or Water status. Eating or drinking alone, burps, and reactions such as “not bad” or “hit the spot” never infer a status; the previous confirmed state remains until an explicit status message or confirmed complete INFO updates it. **Sloshing** is a warning to stop drinking, not a healthy/quenched status.
 
 `You are dehydrated.` shows **Water: Dehydrated** in red, whether it appears by itself or within a complete INFO description. It is not treated as an absent thirst status or reset to Ok.
 
@@ -123,7 +140,7 @@ Items and total carried weight come from `inventory`. Both **Items equipped** an
 
 ## Runes
 
-In the combined layout, click **Runes** in the taller Skills / Runes card below Inventory. With **COMBINED SKILLS / RUNES OFF**, the same list appears in its separate card. Background capture continues in either layout; selecting the tab sends no request.
+In the normal combined layout, click **Runes** in the Skills / Runes card below Inventory, which has the same height and width as Inventory. With **COMBINED SKILLS / RUNES OFF**, the same list appears in its unchanged separate card. Background capture continues in either layout; selecting the tab sends no request.
 
 Long rune names such as **Translocation** expand the scrollable content to fit the full name and weave count. In narrow windows, use the horizontal scrollbar rather than shrinking the text.
 

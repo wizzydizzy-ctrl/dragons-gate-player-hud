@@ -48,11 +48,34 @@ test("names pane distinguishes startup unknown and per-side jade Ok defaults",fu
     {"hungry","ok","Hungry","Ok","#d6a84b",theme.jade},
     {"ok","thirsty","Ok","Thirsty",theme.jade,"#d6a84b"},
     {"satiated","quenched","Satiated","Quenched",theme.jade,theme.jade},
+    {"full","quenched","Full","Quenched",theme.jade,theme.jade},
+    {"full","sloshing","Full","Sloshing",theme.jade,"#d6a84b"},
+    {"ok","sloshing","Ok","Sloshing",theme.jade,"#d6a84b"},
   }) do
     local identity=View.identityContent({full_name="Dace Alterac",race="Monitanian",class="Fighter"},theme,layout,
       {hunger={status=case[1]},thirst={status=case[2]}})
     for index,label in ipairs({"Food","Water"}) do
       eq(identity:find(label..": </span><span style='color:"..case[index+4].."'><b>"..case[index+2].."</b>",1,true)~=nil,true)
+    end
+  end
+end)
+test("food and water identity labels follow confirmed eating and drinking transitions",function()
+  local Needs=require("needs_tracker")
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}; local layout={body_font=20,heading_font=25}
+  local tracker=Needs.new({epoch=function() return 42 end})
+  assert(tracker:onLine("You are ravenous. You are parched."))
+  for _,case in ipairs({
+    {"You're no longer ravenous, only hungry now!","Hungry","Parched","#d6a84b","#d34a42"},
+    {"You're no longer parched, only thirsty now!","Hungry","Thirsty","#d6a84b","#d6a84b"},
+    {"You're no longer hungry.","Ok","Thirsty",theme.jade,"#d6a84b"},
+    {"You're no longer thirsty.","Ok","Quenched",theme.jade,theme.jade},
+    {"You're full, time to stop eating for a while.","Full","Quenched",theme.jade,theme.jade},
+    {"You're sloshing, you've been drinking so much. Time to stop drinking for a while.","Full","Sloshing",theme.jade,"#d6a84b"},
+  }) do
+    assert(tracker:onLine("\7\27[32m[199] 147/147 hp, 60/60 ftg > "..case[1].."\27[0m"))
+    local html=View.identityContent({full_name="Test",race="Human",class="Fighter"},theme,layout,tracker:status())
+    for index,label in ipairs({"Food","Water"}) do
+      assert(html:find(label..": </span><span style='color:"..case[index+3].."'><b>"..case[index+1].."</b>",1,true),case[1])
     end
   end
 end)
@@ -2945,7 +2968,14 @@ test("408px Large inventory reduces only local vertical padding to fit item and 
     end
     local outputHeight=output.height
     view.right_list_tabs.runes.click()
-    eq(view.runes_output.y-view.runes.y,layout.list_padding+layout.list_row_height+4)
+    local title_height=view.runes_title.visible and layout.list_row_height+4 or 0
+    local runes_padding=layout.list_padding
+    if not view.runes_title.visible then
+      runes_padding=math.max(0,math.min(runes_padding,math.floor((view.runes.height-layout.list_row_height-layout.list_horizontal_scrollbar_height)/2)))
+    end
+    eq(view.runes_output.y-view.runes.y,runes_padding+title_height)
+    eq(view.runes_output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+    eq(view.runes_output.y+view.runes_output.height<=view.runes.y+view.runes.height,true)
     view.right_list_tabs.inventory.click(); eq(view.inventory_output.height,outputHeight)
   end
 end)
@@ -3510,15 +3540,27 @@ test("compact footer scales measured line height before deciding whether it fits
     view:applyLayout(layout)
     eq(layout.list_font,10); eq(layout.list_row_height,measuredRow); eq(view.inventory_footer.fontSize,12)
     local lines=View.inventoryFooterLines(vitals,view.settings.theme,view.inventory_footer_capacity); eq(#lines,3)
-    if measuredRow==15 then
+    local scrollbar=view.inventory_horizontal_overflow and layout.list_horizontal_scrollbar_height or 0
+    local footer_height=math.ceil(measuredRow*12/10)*3+3
+    local inner_height=view.inventory.height-2*(view.inventory_output.y-view.inventory.y)
+    if inner_height>=footer_height+measuredRow+scrollbar then
       eq(view.inventory_footer.visible,true)
-      eq(view.inventory_footer.height,math.ceil(measuredRow*12/10)*3+3)
+      eq(view.inventory_footer_scrolling,false); eq(view.inventory_footer.height,footer_height)
       eq(view.inventory_output.y+view.inventory_output.height<=view.inventory_footer.y,true)
       assert(view.inventory_footer.message:find("49.3%",1,true))
     else
       eq(view.inventory_footer.visible,false)
+      eq(view.inventory_footer_scrolling,true)
+      local footer=view.inventory_scroll_footer
+      eq(footer.visible,true); eq(footer.parent,view.inventory_output)
+      eq(footer.y,view.inventory_content.y+view.inventory_content.height+4)
+      eq(footer.height,math.ceil(measuredRow*12/10)*#lines+6)
+      eq(footer.x+footer.width<=view.inventory_output.width-view.list_resolved_scrollbar_width,true)
+      eq(footer.height/#lines<=view.inventory_output.height-scrollbar,true)
+      eq(footer.y+footer.height>view.inventory_output.height-scrollbar,true)
+      eq(footer.message,table.concat(lines,"<br>"))
     end
-    eq(view.inventory_output.height>=measuredRow,true)
+    eq(view.inventory_output.height>=measuredRow+scrollbar,true)
     eq(view.inventory_output.y+view.inventory_output.height<=view.inventory.y+view.inventory.height,true)
   end
 end)
@@ -4526,17 +4568,37 @@ local function assertCombinedSkillsRunesGeometry(view,layout,selected)
   end
   for _,key in ipairs({"inventory","runes","skills"}) do eq(view.right_list_tabs[key].visible,false) end
   local card,output=view[active],view[active.."_output"]
-  eq(view.details.y+view.details.height<=view.inventory.y,true)
-  eq(view.inventory.y+view.inventory.height<card.y,true)
-  eq(card.y+card.height<=layout.window_height-12,true)
-  eq(output.height>=layout.list_row_height+layout.list_horizontal_scrollbar_height,true)
+  eq(view.inventory.x,card.x); eq(view.inventory.width,card.width); eq(view.inventory.height,card.height)
+  eq(view.inventory.y,view.details.y+view.details.height+10)
+  eq(card.y,view.inventory.y+view.inventory.height+8)
+  local rail_bottom=layout.window_height-(layout.command_line_clearance or 0)-12
+  local unused=rail_bottom-card.y-card.height
+  eq(unused>=0 and unused<=1,true)
+  eq(view.inventory.height,math.floor(view.inventory.height)); eq(view.inventory.height>0,true)
+  eq(view.inventory.width>0,true); eq(view.inventory.y>=0,true)
+  local scrollbar=layout.list_horizontal_scrollbar_height
+  eq(output.height-(view[active.."_horizontal_overflow"] and scrollbar or 0)>=layout.list_row_height,true)
+  eq(view.inventory_output.height-(view.inventory_horizontal_overflow and scrollbar or 0)>=layout.list_row_height,true)
+  eq(view[active.."_title"].visible,true); eq(view.inventory_title.visible,true)
+  eq(view[active.."_title"].y+view[active.."_title"].height<=output.y,true)
+  eq(view.inventory_title.y>=view.inventory.y,true)
+  eq(view.inventory_title.y+view.inventory_title.height<=view.inventory_output.y,true)
   eq(output.y+output.height<=card.y+card.height,true)
   eq(view.inventory_output.y+view.inventory_output.height<=view.inventory_footer.y,true)
   eq(view.inventory_footer.y+view.inventory_footer.height<=view.inventory.y+view.inventory.height,true)
+  eq(view.inventory_footer_scrolling,false)
+  local footer_line_height=math.max(math.ceil(layout.list_row_height*(layout.list_font+2)/layout.list_font),math.ceil((layout.list_font+2)*1.3))
+  eq(view.inventory_footer.height>=footer_line_height*view.inventory_footer_rows+6,true)
+  for _,widget in ipairs({output,view.inventory_output,view.inventory_footer,view[active.."_title"],view.inventory_title}) do
+    eq(widget.width>0,true); eq(widget.height>0,true); eq(widget.y>=0,true)
+    eq(widget.width<=card.width,true)
+  end
   local first,second=view.skills_runes_tabs.skills,view.skills_runes_tabs.runes
+  local card_left=layout.window_width-layout.right+layout.panel_padding
   for _,button in ipairs({first,second}) do
     eq(button.visible,true); eq(button.parent,view.root); eq(button.width>0,true)
-    eq(button.y>=card.y,true); eq(button.y+button.height<=output.y,true)
+    eq(button.x>=card_left,true); eq(button.x+button.width<=card_left+card.width,true)
+    eq(button.y>=card.y,true); eq(button.y+button.height<=view[active.."_title"].y,true)
     eq(button.height>=layout.list_font,true)
   end
   eq(first.x+first.width<=second.x,true); eq(second.x+second.width<=layout.window_width-layout.panel_padding,true)
@@ -4569,18 +4631,195 @@ test("combined rail keeps inventory separate on tall narrow and moderate-height 
     if size[1]<1100 then eq(layout.right_lists_mode,"tabbed") end
   end
 end)
-test("shared lower list receives the former Runes and Skills space without taking inventory space",function()
+test("combined inventory and shared list have exactly equal heights and widths",function()
   local combined,separate=combinedSkillsRunesView(),chatView()
   local state=combinedSkillsRunesState()
   combined:applyLayout(require("layout").compute(1920,1080)); combined:update(state)
   separate:applyLayout(require("layout").compute(1920,1080)); separate:update(state)
   assertCombinedSkillsRunesGeometry(combined,combined.layout)
-  eq(math.abs(combined.inventory.height-separate.inventory.height)<=1,true)
-  eq(math.abs(combined.skills.height-(separate.runes.height+separate.skills.height+8))<=2,true)
+  eq(combined.inventory.height,combined.skills.height); eq(combined.inventory.width,combined.skills.width)
+  eq(combined.inventory.height>separate.inventory.height,true)
   eq(combined.skills_output.height>separate.skills_output.height,true)
   eq(combined.inventory_output.fontSize,separate.inventory_output.fontSize)
   eq(combined.skills_content.fontSize,separate.skills_content.fontSize)
   eq(combined.runes_content.fontSize,separate.runes_content.fontSize)
+end)
+test("equal combined cards fit measured fonts counts and inventory sections across desktop and MultiView sizes",function()
+  local Layout=require("layout")
+  local cases={
+    {1920,1080,1,24,8,"Menlo"}, {1366,769,1,21,7,"Consolas"},
+    {1920,701,.8,20,7,"Courier New"}, {960,1001,1.1,26,9,"Menlo"},
+    {800,1081,1.2,32,12,"Consolas"}, {1075,801,.8,20.2,6,"Courier New"},
+    {960,701,.8,20,7,"Menlo"}, {3840,2161,1.2,36,12,"Consolas"},
+  }
+  for _,case in ipairs(cases) do
+    for _,count in ipairs({0,1,40}) do
+      local view=combinedSkillsRunesView({combine_skills_runes=true,side_text_scale=case[3]})
+      local state=combinedSkillsRunesState(count); state.inventory=inventoryTabsState(count,count).inventory
+      view.list_font_family=case[6]
+      view.list_measure.getSizeHint=function() return case[5]*10,case[4]*5 end
+      local layout=Layout.compute(case[1],case[2],nil,nil,state.vitals,view.settings.display)
+      view:applyLayout(layout); view:update(state)
+      assert(view.right_lists_presentation=="combined",string.format("%dx%d scale %s row %s count %d: %s",case[1],case[2],case[3],case[4],count,view.right_lists_presentation))
+      eq(layout.list_row_height,case[4]); assertCombinedSkillsRunesGeometry(view,layout)
+      local height,y,width=view.inventory.height,view.inventory.y,view.inventory.width
+      for _,section in ipairs({"equipped","carried"}) do
+        local buttons=assertInventorySectionControls(view); eq(buttons[section].click(),section)
+        eq(view.inventory_active,section)
+        if count==0 then assert(view.inventory_content.message:find("No "..section.." items.",1,true)) end
+        eq(view.inventory_content.height>=math.max(1,count)*layout.list_row_height,true)
+        for _,tab in ipairs({"runes","skills"}) do
+          eq(view.skills_runes_tabs[tab].click(),tab)
+          assertCombinedSkillsRunesGeometry(view,layout,tab); assertInventorySectionControls(view)
+          eq(view.inventory.height,height); eq(view.inventory.y,y); eq(view.inventory.width,width)
+          eq(view.inventory_active,section)
+          for _,key in ipairs({"inventory","skills","runes"}) do
+            eq(view[key.."_content"].font,case[6]); eq(view[key.."_content"].fontSize,layout.list_font)
+            eq(view[key.."_content"].height>=count*layout.list_row_height,true)
+          end
+          local footer_text=view.inventory_footer.message:gsub("<[^>]+>","")
+          for _,value in ipairs({"12345gp","98765sp","174.4/354","49.3%"}) do
+            assert(footer_text:find(value,1,true),value)
+          end
+        end
+      end
+      eq(#state.inventory.items,count*2); eq(#state.skills.items,count); eq(#state.runes.items,count)
+    end
+  end
+end)
+test("odd combined rail heights use all available space except one rounding pixel",function()
+  local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState(1)
+  local initial_y,initial_height
+  for offset=0,3 do
+    local layout=require("layout").compute(1920,1080+offset,nil,nil,state.vitals)
+    view:applyLayout(layout); view:update(state); assertCombinedSkillsRunesGeometry(view,layout)
+    if offset==0 then initial_y=view.inventory.y; initial_height=view.inventory.height end
+    eq(view.inventory.y,initial_y)
+    local unused=layout.window_height-12-view.skills.y-view.skills.height
+    eq(unused,(layout.window_height-12-initial_y-8)%2)
+    eq(view.inventory.height,initial_height+math.floor((offset+(1080-12-initial_y-8)%2)/2))
+    view.skills_runes_tabs.runes.click(); assertCombinedSkillsRunesGeometry(view,layout,"runes")
+    view.skills_runes_tabs.skills.click()
+  end
+end)
+local function assertCombinedFallbackSlot(view,layout)
+  local presentation=view.right_lists_presentation; local slot; local row_failures,checked={},{}
+  eq(presentation,layout.mode=="compact" and "compact-tabs" or "tabbed")
+  for _,button in pairs(view.skills_runes_tabs) do eq(button.visible,false) end
+  for _,key in ipairs({"inventory","runes","skills","inventory"}) do
+    eq(view.right_list_tabs[key].click(),key); eq(view.right_lists_presentation,presentation)
+    local card,output=view[key],view[key.."_output"]
+    if not slot then slot={card.x,card.y,card.width,card.height} end
+    eq(card.x,slot[1]); eq(card.y,slot[2]); eq(card.width,slot[3]); eq(card.height,slot[4])
+    eq(card.visible,true); eq(output.visible,true); eq(card.y>=0,true)
+    eq(card.width>0,true); eq(card.height>0,true); eq(output.width>0,true)
+    local scrollbar=view[key.."_horizontal_overflow"] and layout.list_horizontal_scrollbar_height or 0
+    if output.height<layout.list_row_height+scrollbar and not checked[key] then
+      row_failures[#row_failures+1]=string.format("%dx%d %s %s viewport %s < row %s + scrollbar %s",layout.window_width,layout.window_height,presentation,key,output.height,layout.list_row_height,scrollbar)
+    end
+    checked[key]=true
+    eq(output.y>=card.y,true); eq(output.y+output.height<=card.y+card.height,true)
+    for _,other in ipairs({"inventory","runes","skills"}) do
+      eq(view[other].visible,other==key); eq(view[other.."_output"].visible,other==key)
+      local button=view.right_list_tabs[other]
+      eq(button.visible,true); eq(button.width>0,true); eq(button.height>0,true)
+      eq(button.y>=0,true); eq(button.y+button.height<=card.y,true)
+    end
+    if key=="inventory" then
+      assertInventorySectionControls(view)
+      if presentation=="tabbed" then assertInventoryRowFits(view,layout) end
+      if view.inventory_footer.visible then
+        eq(output.y+output.height<=view.inventory_footer.y,true)
+        eq(view.inventory_footer.y+view.inventory_footer.height<=card.y+card.height,true)
+      end
+    end
+  end
+  local bottom=layout.mode=="compact" and layout.header_height or layout.window_height-(layout.command_line_clearance or 0)-12
+  eq(slot[2]+slot[4],bottom)
+  assert(#row_failures==0,table.concat(row_failures,"; "))
+end
+test("combined fit boundary requires each equal half to fit inventory and shared measured minima",function()
+  for _,case in ipairs({{800,1.2,32,12,"inventory"},{1920,.8,20.2,6,"shared"}}) do
+    local view=combinedSkillsRunesView({combine_skills_runes=true,side_text_scale=case[2]})
+    local state=combinedSkillsRunesState(40)
+    if case[5]=="shared" then state.runes.items[1].name=string.rep("Long rune ",20) end
+    view.list_measure.getSizeHint=function() return case[4]*10,case[3]*5 end
+    local function resize(height)
+      local layout=require("layout").compute(case[1],height,nil,nil,state.vitals,view.settings.display)
+      -- A wider native scrollbar isolates the shared minimum from the footer.
+      if case[5]=="shared" then layout.list_horizontal_scrollbar_height=48 end
+      view:applyLayout(layout); view:update(state); return layout
+    end
+    local layout=resize(1081); assertCombinedSkillsRunesGeometry(view,layout)
+    local row,bar=layout.list_row_height,layout.list_horizontal_scrollbar_height
+    local inventory_min=view.inventory.height-view.inventory_output.height+row+(view.inventory_horizontal_overflow and bar or 0)
+    local shared_min=view.skills.height-view.skills_output.height+row+(view.skills_horizontal_overflow and bar or 0)
+    view.skills_runes_tabs.runes.click(); assertCombinedSkillsRunesGeometry(view,layout,"runes")
+    shared_min=math.max(shared_min,view.runes.height-view.runes_output.height+row+(view.runes_horizontal_overflow and bar or 0))
+    eq(case[5]=="inventory" and inventory_min>shared_min or case[5]=="shared" and shared_min>inventory_min,true)
+    local threshold=view.inventory.y+8+2*math.ceil(math.max(inventory_min,shared_min))+12+(layout.command_line_clearance or 0)
+    for _,offset in ipairs({-1,0,1,2,-1,0}) do
+      layout=resize(threshold+offset)
+      if offset<0 then
+        assertCombinedFallbackSlot(view,layout)
+        eq(view.settings.display.combine_skills_runes,true)
+      else
+        assertCombinedSkillsRunesGeometry(view,layout,view.skills_runes_active)
+        eq(view.inventory.height>=inventory_min,true); eq(view[view.skills_runes_active].height>=shared_min,true)
+        for _,tab in ipairs({"skills","runes"}) do
+          view.skills_runes_tabs[tab].click(); assertCombinedSkillsRunesGeometry(view,layout,tab)
+        end
+      end
+    end
+  end
+end)
+test("combined resize growth shrink and compact fallback reuse slots without game sends",function()
+  local oldSend,oldSendAll,oldExpand=send,sendAll,expandAlias; local calls=0
+  local function forbidden() calls=calls+1; error("sidebar regression must not send a command") end
+  send=forbidden; sendAll=forbidden; expandAlias=forbidden
+  local ok,err=pcall(function()
+    local view=combinedSkillsRunesView({combine_skills_runes=true,skills_runes_tab="runes",side_text_scale=1.1})
+    local state=combinedSkillsRunesState(40); state.inventory=inventoryTabsState(40,1).inventory
+    local root,tabs=view.root,view.skills_runes_tabs
+    local fallback_errors,seen_errors={},{}
+    local steps={{1920,1081,"combined"},{960,1001,"combined"},{800,501,"tabbed"},
+      {760,700,"compact-tabs"},{320,500,"compact-tabs"},{800,408,"tabbed"},
+      {1366,769,"combined"},{1920,1080,"combined"},{1920,1081,"combined"}}
+    local first_height
+    for cycle=1,2 do
+      for index,size in ipairs(steps) do
+        local layout=require("layout").compute(size[1],size[2],nil,nil,state.vitals,view.settings.display)
+        view:applyLayout(layout); view:update(state)
+        eq(view.root,root); eq(view.skills_runes_tabs,tabs); eq(view.right_lists_presentation,size[3])
+        if size[3]=="combined" then
+          assertCombinedSkillsRunesGeometry(view,layout,"runes")
+          if not first_height then first_height=view.inventory.height end
+          if index==1 or index==#steps then eq(view.inventory.height,first_height) end
+          for _,section in ipairs({"equipped","carried"}) do
+            eq(view.inventory_tabs[section].click(),section)
+            for _,tab in ipairs({"skills","runes"}) do
+              view.skills_runes_tabs[tab].click(); assertCombinedSkillsRunesGeometry(view,layout,tab)
+              eq(view.inventory_active,section)
+            end
+          end
+        else
+          -- Exercise later growth and all tabs even when a short fallback clips
+          -- a row, then report every distinct release regression together.
+          local fits,fit_error=pcall(assertCombinedFallbackSlot,view,layout)
+          if not fits and not seen_errors[fit_error] then
+            seen_errors[fit_error]=true; fallback_errors[#fallback_errors+1]=fit_error
+          end
+          eq(view:setSkillsRunesTab("runes"),"runes")
+          eq(view.runes.visible,true)
+        end
+        eq(view.settings.display.combine_skills_runes,true); eq(view.settings.display.skills_runes_tab,"runes")
+      end
+    end
+    eq(calls,0)
+    assert(#fallback_errors==0,table.concat(fallback_errors,"\n  "))
+  end)
+  send=oldSend; sendAll=oldSendAll; expandAlias=oldExpand
+  assert(ok,err); eq(calls,0)
 end)
 test("combined pair buttons preserve the numerical Skill heading and scrolling data columns",function()
   local view=combinedSkillsRunesView(); local state=combinedSkillsRunesState()

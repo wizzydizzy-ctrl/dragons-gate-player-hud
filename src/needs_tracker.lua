@@ -1,13 +1,34 @@
 local Needs={}; Needs.__index=Needs
 local Parser=require("command_parser")
-local function clean(line) return tostring(line or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]","") end
+local function clean(line) return tostring(line or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("\7","") end
+local function notice(text,phrase)
+  -- Accept game sentences, including prompt-prefixed/combined output, but
+  -- do not mistake quoted chat or unrelated uses of "full" for a status.
+  local from=1
+  while true do
+    local first,last=text:find(phrase,from,true)
+    if not first then return false end
+    local before=text:sub(1,first-1):match("^%s*(.-)%s*$")
+    if not before:find('"',1,true) and (before=="" or before:match("[.!?]$")) then return true end
+    from=last+1
+  end
+end
 local function detected(line)
-  local raw=clean(line); local text=raw:lower(); local hunger,thirst
-  if text:find("you are satiated",1,true) then hunger="satiated"
+  local raw=clean(line)
+  local text=raw:lower():gsub("%s+"," "):match("^%s*(.-)%s*$")
+  text=text:gsub("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>%s*",""):gsub("^>%s*","")
+  local hunger,thirst
+  if notice(text,"you're no longer ravenous, only hungry now!") then hunger="hungry"
+  elseif notice(text,"you're no longer hungry.") then hunger="ok"
+  elseif notice(text,"you're full, time to stop eating") then hunger="full"
+  elseif text:find("you are satiated",1,true) then hunger="satiated"
   elseif text:find("feel like you're starving",1,true) or text:find("you are starving",1,true) then hunger="starving"
   elseif text:find("you are ravenously hungry",1,true) or text:find("you are ravenous",1,true) then hunger="ravenous"
   elseif text:find("you are hungry",1,true) or text:find("starting to feel hungry",1,true) then hunger="hungry" end
-  if text:find("your thirst is quenched.",1,true) then thirst="quenched"
+  if notice(text,"you're no longer parched, only thirsty now!") then thirst="thirsty"
+  elseif notice(text,"you're no longer thirsty.") then thirst="quenched"
+  elseif notice(text,"you're sloshing,") then thirst="sloshing"
+  elseif text:find("your thirst is quenched.",1,true) then thirst="quenched"
   elseif text:find("you are dehydrated",1,true) then thirst="dehydrated"
   elseif text:find("you are parched",1,true) then thirst="parched"
   elseif text:find("you are very thirsty",1,true) then thirst="very_thirsty"

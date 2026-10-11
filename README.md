@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.97**.
+Documentation covers **DGHUD v0.3.98**.
 
 ## Quick start
 
@@ -43,7 +43,18 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.97
+## Latest changes — v0.3.98
+
+- In the normal combined layout, **Inventory** and the combined **Skills / Runes** card now have the same height and width, evenly splitting the available space below content-sized **Combat** across window sizes and Mudlet MultiView panes.
+- Existing fonts, aligned columns, sorting, tab choices, and horizontal/vertical scrollbars are unchanged. **COMBINED SKILLS / RUNES OFF** keeps the separate-box sizing unchanged.
+- When the window is too short for both cards to fit complete rows, tabs, and the Inventory footer safely, the existing three-way Inventory / Runes / Skills compact/tabbed fallback continues without forcing tiny fonts or clipping.
+- Very short panes now give complete rows and horizontal scrollbars priority over duplicate headings and inner whitespace. Inventory totals move into the scrollable list when they cannot fit below it.
+- Food and Water now recognize explicit recovery and stop messages, including **Full** and **Sloshing**. Sloshing is a stop-drinking warning. See the [six exact status transitions](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#identity).
+- Wrapped, confirmed complete INFO still reports **Satiated** / **Quenched**, or **Ok** for an omitted status. Eating/drinking, burps, “not bad,” and “hit the spot” alone never infer status.
+
+[Read the sidebar guide](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) or the [release notes](https://github.com/wizzydizzy-ctrl/dragons-gate-player-hud/releases/tag/v0.3.98).
+
+## Previous changes — v0.3.97
 
 - **OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**, with a taller tabbed card below the separate Inventory card and its existing **Equipped** / **Carried** tabs. Combat stays at the top, sized to its contents.
 - **Skills** is selected initially. The layout choice and selected **Skills** / **Runes** tab are saved per profile through updates, restarts, and character changes.
@@ -89,11 +100,11 @@ dghud update
 
 ### Combined Skills / Runes sidebar
 
-The normal layout keeps **Combat** at the top, sized to its contents, and **Inventory** below it with its existing **Equipped** / **Carried** tabs. Beneath Inventory, a taller combined **Skills / Runes** card uses the space previously shared by the two separate cards. Its tabs are **Skills** and **Runes**, with Skills selected initially.
+The normal combined layout keeps **Combat** at the top, sized to its contents. Below it, **Inventory** and the combined **Skills / Runes** card have the same height and width, evenly splitting the available sidebar space after the normal gaps across window sizes and Mudlet MultiView panes. Inventory retains its **Equipped** / **Carried** tabs; the card below it has **Skills** and **Runes** tabs, with Skills selected initially.
 
 **OPTIONS → COMBINED SKILLS / RUNES** defaults to **ON**. Turn it **OFF** to return to separate Runes and Skills boxes. The preference and selected combined-card tab are saved per profile through updates, restarts, and character changes. Both lists continue updating in the background; switching tabs only shows saved information and sends no game command. Existing fonts, sorting, colors, aligned columns, and horizontal/vertical scrollbars remain unchanged.
 
-The existing three-way Inventory / Runes / Skills compact tabs remain a fallback only when a short or narrow window needs them to protect readable space. See [the sidebar guide](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) and [the layout option](docs/OPTIONS_AND_DISPLAY.md#combined-skills--runes).
+If the window is too short for both equal-sized cards to fit complete rows, tabs, and the Inventory footer safely, the existing three-way Inventory / Runes / Skills compact/tabbed fallback continues without forcing tiny fonts or clipping. Narrow windows retain their existing compact behavior. The separate layout with **COMBINED SKILLS / RUNES OFF** is unchanged. See [the sidebar guide](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#right-sidebar) and [the layout option](docs/OPTIONS_AND_DISPLAY.md#combined-skills--runes).
 
 ### Other features
 
