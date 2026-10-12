@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.100**.
+Documentation covers **DGHUD v0.3.101**.
 
 ## Quick start
 
@@ -43,7 +43,15 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.100
+## Latest changes — v0.3.101
+
+- Fixed autoroller Presence and Luck minimums showing **OFF** while an older Voice or Appearance target remained active.
+- Turning either minimum off now clears both names and stays off after saving, restarting, and updating. Numeric targets and legacy commands remain compatible.
+- Use `off` to ignore a characteristic. `1` is still an enabled minimum and can reserve a pool value in **MY MINIMUMS + AUTO**.
+
+[Read the autoroller minimum settings](docs/AUTOROLLER.md#characteristic-minimums).
+
+## Previous changes — v0.3.100
 
 - Fixed `shoprenewall` rejecting valid rune responses that include modifiers, shapes, and corridor instructions.
 - Rune counts refresh as soon as the elemental table ends, without waiting for the rest of the magic output. Renewals still require the completed response and remain one second apart.

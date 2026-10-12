@@ -5,6 +5,7 @@ local legacyOrder={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","
 local oldOrder={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","VOI","PER","APP","MP"}
 local supportedStats={"STR","INT","WIS","DEX","AGI","CON","CHA","WIL","PRE","PER","LUK","VOI","APP","MP"}
 local pairedStat={PRE="VOI",LUK="APP",VOI="PRE",APP="LUK"}
+local renamedStats={{"PRE","VOI"},{"LUK","APP"}}
 local creatorFirst={"STR","INT","WIS","DEX","AGI","CON"}
 local creatorSecond={"CHA","WIL","VOI","PER","APP","MP"}
 local legacyCreatorSecond={"CHA","WIL","VOI","PER","APP"}
@@ -119,6 +120,18 @@ local function minimumFor(config,name)
   if value==nil and pairedStat[name] then value=minimums[pairedStat[name]] end
   return tonumber(value)
 end
+local function synchronizeMinimums(minimums,changes)
+  for _,pair in ipairs(renamedStats) do
+    local current,legacy=pair[1],pair[2]; local value
+    if changes and changes[current]~=nil then value=minimums[current]
+    elseif changes and changes[legacy]~=nil then value=minimums[legacy]
+    else value=minimums[current]; if value==nil then value=minimums[legacy] end end
+    -- An explicit OFF (including its saved false sentinel) must also clear
+    -- the old stat name, or compatibility lookup would revive that target.
+    if value==false then value=nil end
+    minimums[current]=value; minimums[legacy]=value
+  end
+end
 local function safeLocalName(value)
   local name=trim(value)
   if name=="" then return "not configured" end
@@ -142,8 +155,7 @@ function Roller.new(adapter,settings,onConfig,onAlert,onSession,onResult,onResul
   for _,key in ipairs({"target_total","hard_stop","max_rolls","minimum_greats","minimum_good_plus"}) do if config[key]==false then config[key]=nil end end
   config.arrange_mode=trim(config.arrange_mode):lower(); if not arrangeModes[config.arrange_mode] then config.arrange_mode="manual" end
   config.min_stats=copy(config.min_stats or {})
-  if config.min_stats.PRE==nil and config.min_stats.VOI~=nil then config.min_stats.PRE=config.min_stats.VOI end
-  if config.min_stats.LUK==nil and config.min_stats.APP~=nil then config.min_stats.LUK=config.min_stats.APP end
+  synchronizeMinimums(config.min_stats)
   for _,key in ipairs(supportedStats) do if config.min_stats[key]==false then config.min_stats[key]=nil end end
   local self=setmetatable({adapter=adapter,cfg=config,onConfig=onConfig,onAlert=onAlert,onSession=onSession,onResult=onResult,onResultCleared=onResultCleared},Roller); self:reset(); return self
 end
@@ -755,6 +767,7 @@ function Roller:configure(values,silent)
   for _,key in ipairs({"log_folder","master_file"}) do if values[key]~=nil then local value=trim(values[key]); if value=="" or value=="." or value==".." or not value:match("^[%w%._%-]+$") then return nil,key.." must be a safe name without a path" end; candidate[key]=value end end
   candidate.min_stats=copy(candidate.min_stats or {})
   for _,key in ipairs(supportedStats) do if values.min_stats and values.min_stats[key]~=nil then local raw=trim(values.min_stats[key]); local number=tonumber(raw); if raw=="" or raw:lower()=="off" then candidate.min_stats[key]=nil elseif not number or number<1 or number>7 or number~=math.floor(number) then return nil,key.." minimum must be 1-7 or off" else candidate.min_stats[key]=number end end end
+  synchronizeMinimums(candidate.min_stats,values.min_stats)
   if not candidate.target_total and not candidate.hard_stop and not candidate.max_rolls then return nil,"enable a target, hard stop, or maximum rolls" end
   if candidate.use_min_stats then local any=false; for _,key in ipairs(supportedStats) do if candidate.min_stats[key] then any=true; break end end; if not any then return nil,"enable at least one stat minimum or turn minimums off" end end
   if self.onConfig then local saved,err=self.onConfig(copy(candidate)); if saved==nil or saved==false then return nil,err or "could not save settings" end end

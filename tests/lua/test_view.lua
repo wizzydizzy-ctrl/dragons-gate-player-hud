@@ -2146,6 +2146,77 @@ test("autoroller settings modal validates through one save callback and remains 
   view.roller_fields.target_total.input.text="60"; assert(view:saveRollerSettings()); eq(received.target_total,"60"); eq(received.arrange_mode,"minimums"); eq(received.minimum_greats,"2"); eq(received.minimum_good_plus,"5"); eq(received.min_stats.LUK,"5"); eq(view.roller_settings_visible,false)
 end)
 
+do
+  local Roller=require("autoroller")
+  local Adapter=require("mudlet_adapter")
+  local Settings=require("settings")
+  local defaults=require("defaults")
+  for _,pair in ipairs({{"PRE","VOI"},{"LUK","APP"}}) do
+    for _,edit in ipairs({{text="OFF"},{text="1",target=1}}) do
+      test("autoroller settings Save keeps "..pair[1].."/"..pair[2].." "..edit.text.." after reopening and reload",function()
+        local current,legacy=pair[1],pair[2]
+        local config=Settings.merge(defaults.roller,{min_stats={STR=1,PRE=7,VOI=7,LUK=7,APP=7,MP=6}})
+        local originalMinimums={}
+        for key,value in pairs(config.min_stats) do originalMinimums[key]=value end
+        local view=chatView(); view:applyLayout(require("layout").compute(1200,800))
+        local function newRoller(settings)
+          return Roller.new({},settings,nil,nil,function(summary) view:setRollerSession(summary) end)
+        end
+        local realRoller=newRoller(config); local saves,received=0,nil
+        view:setOptionsActionCallback(function(action)
+          eq(action,"roller_settings"); return realRoller.cfg
+        end)
+        view:setRollerSettingsCallback(function(values)
+          saves=saves+1; received=values
+          local ok,err=realRoller:configure(values)
+          if not ok then return nil,err end
+          return true,nil,realRoller.cfg
+        end)
+        local function openSettings()
+          view.color_toggle.click(); assert(view.option_action_buttons.roller_settings.click())
+          eq(view.roller_settings_visible,true)
+        end
+        local function assertMinimums(roller)
+          eq(roller.cfg.use_min_stats,true)
+          for key,value in pairs(originalMinimums) do
+            if key==current or key==legacy then value=edit.target end
+            eq(roller.cfg.min_stats[key],value)
+          end
+          local summary=roller:sessionSummary(); eq(#summary.stats,#Roller.order)
+          local targets={}
+          for _,row in ipairs(summary.stats) do targets[row.name]=row end
+          for _,key in ipairs(Roller.order) do
+            local value=originalMinimums[key]
+            if key==current then value=edit.target end
+            eq(assert(targets[key]).target,value)
+          end
+          eq(assert(view.roller_session.stats[#Roller.order]).name,"LUK")
+          for _,row in ipairs(view.roller_session.stats) do eq(row.target,assert(targets[row.name]).target) end
+        end
+        openSettings(); eq(view.roller_fields[current].input:getText(),"7")
+        view.roller_fields[current].input:print(edit.text)
+        eq(realRoller.cfg.min_stats[current],7); eq(realRoller.cfg.min_stats[legacy],7); eq(saves,0)
+        local ok,saved=view.roller_save.click(); assert(ok); eq(saved,realRoller.cfg); eq(saves,1)
+        eq(received.min_stats[current],edit.text); eq(received.min_stats[legacy],nil)
+        eq(view.roller_settings_visible,false); assertMinimums(realRoller)
+        openSettings(); eq(view.roller_fields[current].input:getText(),edit.target and "1" or "off")
+        eq(view.roller_fields.STR.input:getText(),"1"); view.roller_cancel.click(); eq(saves,1)
+        local snapshot=assert(Adapter.rollerSettingsSnapshot(realRoller.cfg))
+        eq(snapshot.min_stats[current],edit.target or false); eq(snapshot.min_stats[legacy],edit.target or false)
+        for key,value in pairs(originalMinimums) do
+          if key~=current and key~=legacy then eq(snapshot.min_stats[key],value) end
+        end
+        local merged=Settings.merge(defaults.roller,snapshot)
+        eq(merged.min_stats[current],edit.target or false); eq(merged.min_stats[legacy],edit.target or false)
+        realRoller=newRoller(merged); assertMinimums(realRoller)
+        openSettings(); eq(view.roller_fields[current].input:getText(),edit.target and "1" or "off")
+        eq(view.roller_fields.STR.input:getText(),"1"); eq(saves,1)
+        view:delete()
+      end)
+    end
+  end
+end
+
 test("help and autoroller settings overlays are mutually exclusive",function()
   local view=chatView(); view:applyLayout(require("layout").compute(800,650)); view:showHelp(); eq(view.help_panel.visible,true)
   view:showRollerSettings({target_total=53,reroll_command="n",min_stats={}}); eq(view.help_visible,false); eq(view.help_panel.visible,false); eq(view.roller_panel.visible,true)

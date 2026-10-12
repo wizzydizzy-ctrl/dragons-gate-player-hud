@@ -598,6 +598,158 @@ test("bulk settings leave live config unchanged when persistence fails",function
   local ok,err=r:configure({target_total="70"}); eq(ok,nil); eq(err,"disk full"); eq(r.cfg.target_total,53); eq(r.cfg.reroll_command,"reroll")
 end)
 
+-- PRE/VOI and LUK/APP share targets across current and legacy creator screens.
+local minimumPairs={{"PRE","VOI"},{"LUK","APP"}}
+local function pairedMinimumRoller(onConfig)
+  return Roller.new(fake(),{target_total=53,hard_stop=62,max_rolls=1000,
+    use_min_stats=true,require_min_stats_to_stop=true,
+    min_stats={STR=5,PRE=7,VOI=7,LUK=7,APP=7}},onConfig)
+end
+local function pairedMinimumIs(r,pair,value)
+  eq(r.cfg.min_stats[pair[1]],value); eq(r.cfg.min_stats[pair[2]],value)
+  local failures=r:minimumFailures({[pair[1]]=1,[pair[2]]=1},pair)
+  eq(#failures,(r.cfg.use_min_stats==true and value and value>1) and 2 or 0)
+end
+
+for _,pair in ipairs(minimumPairs) do
+  local current,legacy=pair[1],pair[2]
+  test(current.." GUI OFF and blank values clear the stale "..legacy.." minimum",function()
+    for _,off in ipairs({"off","OFF","oFf",""," \t ",false}) do
+      local saved; local r=pairedMinimumRoller(function(value) saved=value; return true end)
+      assert(r:configure({min_stats={[current]=off}})); pairedMinimumIs(r,pair,nil)
+      eq(saved.min_stats[current],nil); eq(saved.min_stats[legacy],nil)
+      eq(r.cfg.target_total,53); eq(r.cfg.use_min_stats,true); eq(r.cfg.require_min_stats_to_stop,true)
+      eq(r.cfg.min_stats.STR,5)
+      local other=minimumPairs[current=="PRE" and 2 or 1]; pairedMinimumIs(r,other,7)
+    end
+  end)
+
+  test(current.." configure treats one as Awful and synchronizes numeric updates through either name",function()
+    local saved; local r=pairedMinimumRoller(function(value) saved=value; return true end)
+    for _,name in ipairs(pair) do
+      for _,value in ipairs({1,"1","5",6}) do
+        assert(r:configure({min_stats={[name]=value}})); pairedMinimumIs(r,pair,tonumber(value))
+        eq(saved.min_stats[current],tonumber(value)); eq(saved.min_stats[legacy],tonumber(value))
+        eq(r.cfg.target_total,53); eq(r.cfg.use_min_stats,true)
+      end
+    end
+  end)
+
+  test(current.." configure wins conflicting explicit "..legacy.." values including false",function()
+    for _,case in ipairs({
+      {current="4",legacy="7",expected=4},{current=1,legacy=7,expected=1},
+      {current=false,legacy=7},{current="OFF",legacy=7},{current="",legacy=7},
+      {current=7,legacy="off",expected=7},
+    }) do
+      local r=pairedMinimumRoller()
+      assert(r:configure({min_stats={[current]=case.current,[legacy]=case.legacy}}))
+      pairedMinimumIs(r,pair,case.expected)
+    end
+  end)
+
+  test(current.." constructor false clears both names despite saved "..legacy.." seven",function()
+    local settings={target_total=53,use_min_stats=true,min_stats={STR=5,[current]=false,[legacy]=7}}
+    local r=Roller.new(fake(),settings); pairedMinimumIs(r,pair,nil)
+    eq(settings.min_stats[current],false); eq(settings.min_stats[legacy],7)
+    eq(r.cfg.target_total,53); eq(r.cfg.use_min_stats,true)
+  end)
+
+  test(legacy.." only constructor minimum still migrates to "..current,function()
+    local settings={target_total=53,use_min_stats=true,min_stats={[legacy]=7}}
+    local r=Roller.new(fake(),settings); pairedMinimumIs(r,pair,7)
+    eq(settings.min_stats[current],nil); eq(settings.min_stats[legacy],7)
+  end)
+
+  test(current.." constructor numeric value wins conflicting saved "..legacy.." minimum",function()
+    for _,value in ipairs({1,5}) do
+      local r=Roller.new(fake(),{target_total=53,use_min_stats=true,min_stats={[current]=value,[legacy]=7}})
+      pairedMinimumIs(r,pair,value)
+    end
+  end)
+
+  test(current.." and "..legacy.." commands synchronize numeric and case insensitive OFF updates",function()
+    local saved; local r=pairedMinimumRoller(function(value) saved=value; return true end)
+    for _,name in ipairs(pair) do
+      for _,value in ipairs({"1","6","oFf"}) do
+        assert(r:command("SeT "..name:lower().." "..value))
+        local expected=tonumber(value); pairedMinimumIs(r,pair,expected)
+        eq(saved.min_stats[current],expected); eq(saved.min_stats[legacy],expected)
+        eq(r.cfg.target_total,53); eq(r.cfg.use_min_stats,true); eq(r.cfg.min_stats.STR,5)
+      end
+    end
+  end)
+
+  test(current.." OFF preserves the last minimum and total configuration guards",function()
+    local saves=0
+    local r=Roller.new(fake(),{target_total=53,use_min_stats=true,min_stats={[current]=7,[legacy]=7}},
+      function() saves=saves+1; return true end)
+    local config=r.cfg
+    local ok,err=r:configure({min_stats={[current]="off"}})
+    eq(ok,nil); assert(err:find("at least one stat minimum",1,true))
+    eq(r.cfg,config); pairedMinimumIs(r,pair,7); eq(saves,0)
+    ok,err=r:configure({target_total="off",use_min_stats=false,min_stats={[current]="off"}})
+    eq(ok,nil); assert(err:find("target, hard stop, or maximum rolls",1,true))
+    eq(r.cfg,config); pairedMinimumIs(r,pair,7); eq(saves,0)
+    assert(r:configure({use_min_stats=false,min_stats={[current]="off"}}))
+    pairedMinimumIs(r,pair,nil); eq(r.cfg.target_total,53); eq(r.cfg.use_min_stats,false); eq(saves,1)
+  end)
+
+  test(current.." and "..legacy.." OFF commands disable minimums when the shared target is last",function()
+    for _,name in ipairs(pair) do
+      local r=Roller.new(fake(),{target_total=53,use_min_stats=true,min_stats={[current]=7,[legacy]=7}})
+      assert(r:command("set "..name.." OFF")); pairedMinimumIs(r,pair,nil)
+      eq(r.cfg.use_min_stats,false); eq(r.cfg.target_total,53)
+      assert(r:command("set "..name.." 1")); pairedMinimumIs(r,pair,1); eq(r.cfg.use_min_stats,true)
+    end
+  end)
+end
+
+test("paired minimum snapshots save and reload OFF blank and numeric targets in memory",function()
+  local Adapter=require("mudlet_adapter")
+  local previous={io=io,os=os,lfs=lfs,getMudletHomeDir=getMudletHomeDir,loadfile=loadfile}
+  local files={}; local home="/paired-minimum-test-profile"; local destination=home.."/DGHUDData/roller-settings.lua"
+  local ok,err=xpcall(function()
+    io={open=function(name,mode)
+      assert(name==destination or name==destination..".tmp" or name==destination..".bak")
+      if mode=="rb" then
+        if not files[name] then return nil,"missing" end
+        return {read=function(_,format) eq(format,"*a"); return files[name] end,close=function() return true end}
+      end
+      eq(name,destination..".tmp"); eq(mode,"wb")
+      return {write=function(self,source) files[name]=source; return self end,close=function() return true end}
+    end}
+    os={remove=function(name) files[name]=nil; return true end,rename=function(from,to)
+      if not files[from] then return nil,"missing" end
+      files[to]=files[from]; files[from]=nil; return true
+    end}
+    lfs={mkdir=function(base) eq(base,home.."/DGHUDData"); return true end}
+    getMudletHomeDir=function() return home end
+    loadfile=function(name)
+      eq(name,destination); if not files[name] then return nil,"missing" end
+      return loadstring(files[name])
+    end
+    local adapter=Adapter.new()
+    for _,pair in ipairs(minimumPairs) do
+      for _,value in ipairs({"OFF","",false,1,"5"}) do
+        local r=pairedMinimumRoller(function(config) return adapter:saveRollerSettings(config) end)
+        assert(r:configure({min_stats={[pair[1]]=value}})); pairedMinimumIs(r,pair,tonumber(value))
+        local expected=tonumber(value) or false
+        local snapshot=assert(Adapter.rollerSettingsSnapshot(r.cfg))
+        eq(snapshot.min_stats[pair[1]],expected); eq(snapshot.min_stats[pair[2]],expected)
+        local loaded=assert(Adapter.loadRollerSettings())
+        eq(loaded.min_stats[pair[1]],expected); eq(loaded.min_stats[pair[2]],expected)
+        eq(loaded.target_total,53); eq(loaded.use_min_stats,true); eq(loaded.min_stats.STR,5)
+        local reloaded=Roller.new(fake(),loaded); pairedMinimumIs(reloaded,pair,tonumber(value))
+        eq(reloaded.cfg.target_total,53); eq(reloaded.cfg.use_min_stats,true)
+        local other=minimumPairs[pair[1]=="PRE" and 2 or 1]; pairedMinimumIs(reloaded,other,7)
+      end
+    end
+  end,debug.traceback)
+  io=previous.io; os=previous.os; lfs=previous.lfs; getMudletHomeDir=previous.getMudletHomeDir; loadfile=previous.loadfile
+  if not ok then error(err,0) end
+end)
+
+
 test("protocol controls reroll commands even if live config is tampered",function()
   local f=fake(); local r=Roller.new(f,{target_total=60,reroll_command="anything",reroll_delay=0}); r:start(); newRoll(r,"Low Low Low Low Low Low","Low Low Low Low Low Low"); r:onLine(creatorPrompt); r.cfg.reroll_command="n"; f.timers[1].fn(); eq(f.sent[1],"reroll")
 end)

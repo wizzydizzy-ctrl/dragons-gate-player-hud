@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.100.
+Applies to DGHUD v0.3.101.
 
 The DGHUD autoroller watches the current Dragons Gate Character Creator, scores each complete set of 11 characteristics, and sends one `reroll` when the set does not meet your saved rules.
 
@@ -185,6 +185,10 @@ Each of the 11 characteristic fields accepts:
 - `off` for no minimum on that characteristic
 
 These apply directly to Roll-in-place results. For Roll-and-arrange, they are used by **LET ME PLACE** to test whether the pool is capable of satisfying them, and by **MY MINIMUMS + AUTO** to make the placements.
+
+Use `off` when you do not want a minimum for that characteristic. `1` is not OFF: it is an enabled Awful minimum. In **MY MINIMUMS + AUTO**, an enabled field reserves a qualifying pool value and may receive a higher rank, including Great.
+
+Presence (**PRE**, formerly VOI) and Luck (**LUK**, formerly APP) now keep their current and older saved names in sync. Setting either field to `off` clears both names, so an older target cannot turn it back on after saving or restarting. Numeric settings and old `rr set VOI` / `rr set APP` commands remain supported.
 
 ### Auto-start when roll screen appears
 

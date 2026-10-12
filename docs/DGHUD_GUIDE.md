@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.100**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.101**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,15 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.100
+## What's new in v0.3.101
+
+- Autoroller Presence and Luck minimums now stay **OFF**, even when older Voice or Appearance targets were saved.
+- Numeric targets and old command names stay compatible; saving, reopening, and restarting no longer bring an old target back.
+- Use `off`, not `1`, to leave a characteristic out of your minimums and automatic minimum placement.
+
+See [characteristic minimums](AUTOROLLER.md#characteristic-minimums) for the difference between OFF and rank 1.
+
+## Previous changes in v0.3.100
 
 - `shoprenewall` now accepts the full normal magic output, including modifier and shape lists.
 - The Runes list and Lua values refresh as soon as the elemental table ends. Renewal commands still wait for the completed response.

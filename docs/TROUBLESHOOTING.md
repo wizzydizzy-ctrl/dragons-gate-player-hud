@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.100**.
+Applies to DGHUD **v0.3.101**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -61,6 +61,12 @@ DGHUD generally keeps the previous valid value when a response is incomplete. Ru
 If `shoprenewall` rejects normal modifier or shape output, update to v0.3.100 or newer and try again after login refresh finishes. If `trainall` trains positive-use skills, disable any older personal alias for the same command in Mudlet's Aliases editor. DGHUD's shortcut trains only zero-use skills and cannot stop a separate alias's timers.
 
 Skills are an exception: a complete skill table ending in blank lines is saved on the next UI tick, without waiting for another prompt. Commands still depend on the game sending the response; DGHUD cannot show fresh results before they arrive.
+
+## Autoroller Presence or Luck says OFF but still requires a rank
+
+Update to **v0.3.101** or newer, open **OPTIONS → AUTOROLLER**, enter `off` for the unwanted minimum, and **SAVE**. The update also honors an already-saved explicit OFF rather than restoring its old Voice or Appearance target.
+
+For a command-line alternative, use `rr set PRE off` for Presence or `rr set LUK off` for Luck, then `rr show` to check the saved minimums. Do not use `1` as a substitute for OFF: in **MY MINIMUMS + AUTO**, rank 1 still participates in placement and can consume a higher pool value.
 
 ## A `skill` command repeats at the login menu
 
