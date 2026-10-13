@@ -1,4 +1,4 @@
-# DGHUD v0.3.101 manual acceptance checklist
+# DGHUD v0.3.102 manual acceptance checklist
 
 This is a checklist for a disposable test profile, not a claim that these live checks were performed. Never use it as permission to change a live profile or publish a release.
 
@@ -34,14 +34,14 @@ Input alignment acceptance: turn **OPTIONS → ALIGN INPUT** on with an unsent d
 
 Mudlet starter UI acceptance: in a disposable Mudlet 5 profile that has the `mudlet-base-ui` package, install DGHUD while the starter dock has no saved show/hide choice. Confirm only the extra dock hides, leaving main game text, input, native toolbar, and DGHUD mapper usable. Choose **OPTIONS → MUDLET UI: OFF** to show it and **ON** to hide it; resize in MultiView and verify the Options button remains reachable. Show it again, reload/update DGHUD, and restart the profile; the explicit choice must survive. Remove the starter package in the disposable profile and confirm clicking the option reports unavailability without sending a command to the game.
 
-1. Build the v0.3.101 package locally and install it only into the disposable profile. Record the profile's existing personal triggers, aliases, scripts, packages, map data, and settings before installation.
+1. Build the v0.3.102 package locally and install it only into the disposable profile. Record the profile's existing personal triggers, aliases, scripts, packages, map data, and settings before installation.
 2. Confirm Identity and optional Equipment are left, Combat plus Inventory/Runes/Skills are right, Location/mapper/compass are lower-left, and Vitals span the center immediately above the input line. Enter a character and confirm exactly one sequential startup refresh.
 3. Compare inventory, weapon/shield readiness, attributes, physical details, armor, OR/DR, movement, damage bonus, stance, and novice protection with command output. Run each command manually and confirm its HUD section refreshes.
 4. Confirm available compass directions are bright and clickable; unavailable directions are dim and inert. In a safe test room, verify `GO PORTAL`, `GO DOOR`, `GO GATE`, and `GO ARCH` send their exact commands.
 5. With SHOW CHATBOX on, confirm the chatbox sits directly above the center console and matches its left edge and width. Turn it off and confirm the console expands while capture and saved history continue; turn it on again and confirm history returns. Normal game output must remain unchanged.
-6. Feed the approved ROOM, OWN, WHISPER, ESP, DRAGON, SECIAN, CONTACT, and STAFF examples through the real line-capture path. Include direct-target forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. Verify each is retained under its exact category, that ROOM includes both ROOM and OWN entries, and that every entry appears through the appropriate `ALL`, `ROOM`, `PRIVATE`, or exact-category filter.
+6. Feed the approved ROOM, OWN, WHISPER, ESP, DRAGON, PSYCIAN, SECIAN, CONTACT, and STAFF examples through the real line-capture path. Verify ESP/contact/generic mental links appear in MENTAL, named links stay in their own tabs, and ROOM includes ROOM and OWN. Include direct-target forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. Check ALL, PRIVATE, and each exact filter. Restore older ESP/CONTACT history and choices; confirm correct displayed tabs without rewriting saved records, losing messages, or replaying old sounds.
 7. Feed misleading NPC/system narration containing words such as `says`, `asks`, `exclaims`, or `whispers`. Confirm it is not captured and remains unmodified in the main console.
-8. Feed the same ESP entry twice adjacently within three seconds. Confirm it appears once. Feed a later, non-adjacent, or different-speaker equivalent and confirm it remains.
+8. Feed the same ESP entry twice adjacently within three seconds. Confirm it appears once. Feed a contact message from the same speaker with identical text and confirm it remains separately in MENTAL. Matching GMCP/text copies should appear once. Feed a later, non-adjacent, or different-speaker equivalent and confirm it remains.
 9. Create one temporary personal trigger that calls `DGHUD.chat.capture("QUEST", line)`. Trigger it with a synthetic local line, confirm a `QUEST` filter becomes available, then retain the trigger for the reload checks below.
 10. Run `dghud chatstatus`. Confirm it reports the active filter, visible count, `profile` storage key, and `last storage error=none` unless you intentionally created a local storage failure.
 11. Inspect `<Mudlet home>/DGHUDData/chat/profile/YYYY-MM-DD.jsonl`. Confirm one valid JSON object per captured entry, append-only behavior, no path traversal components, and that private entries are treated as locally sensitive data.

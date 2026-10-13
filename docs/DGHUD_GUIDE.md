@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.101**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.102**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,16 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.101
+## What's new in v0.3.102
+
+- **MENTAL** combines ESP, contact thoughts, and generic mental links.
+- Explicit **Psycian links** now have a dedicated **PSYCIAN** tab. Named **DRAGON** and **SECIAN** links keep their own tabs.
+- Older saved messages are shown in the correct tabs without changing their text. Tab order and saved Show in ALL and sound choices migrate automatically.
+- MENTAL and PSYCIAN can each be included in ALL or given their own sound under **OPTIONS → CHAT SETTINGS**.
+
+See [Chatbox filters and migration](CHATBOX.md#built-in-filters) for details.
+
+## Previous changes in v0.3.101
 
 - Autoroller Presence and Luck minimums now stay **OFF**, even when older Voice or Appearance targets were saved.
 - Numeric targets and old command names stay compatible; saving, reopening, and restarting no longer bring an old target back.

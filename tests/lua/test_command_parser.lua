@@ -694,7 +694,7 @@ end)
 
 test("vetted rune preview and prompt-only data exclude recognized ESP chat between elemental rows",function()
   local notice='Tester (ESP): "healing - 0 weaves remain"'
-  eq(assert(require("chat_parser").parse(notice,"Tester")).category,"ESP")
+  eq(assert(require("chat_parser").parse(notice,"Tester")).category,"MENTAL")
   for _,ending in ipairs({modifierHeading,">","[199] 301/301 hp, 173/173 ftg >"}) do
     local preview=not Parser.isPrompt(ending)
     local lines={actionRuneHeader," force - 97 weaves remain",notice," vigor - 39 weaves remain",ending}
@@ -768,7 +768,7 @@ local extendedRuneChat={
     'You say to Atrax in Secian, "%s"',
     'You say in Secian to Atrax, "%s"',
   }},
-  {name="contact thoughts",category="CONTACT",frames={
+  {name="contact thoughts",category="MENTAL",frames={
     'Aeron Del\'mar thinks to you, "%s"',
     'You pick up Seaux\'s thoughts, "%s" [r-1]',
     'You pick up Faolann\'s thoughts echoing through the area, "%s"',

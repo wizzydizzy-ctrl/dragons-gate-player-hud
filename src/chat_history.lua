@@ -1,25 +1,47 @@
+local Channels=require("chat_channels")
 local History={}
 History.__index=History
 History.MAX_ENTRIES=1000
-History.MAX_RETAINED_ENTRIES=11000
+History.MAX_RETAINED_ENTRIES=13000
 
-local private={WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true}
+local private={WHISPER=true,ESP=true,CONTACT=true,MENTAL=true,PSYCIAN=true,DRAGON=true,SECIAN=true}
 -- A busy source must not consume another source's history. Custom categories
 -- share one bounded bucket rather than allocating memory for arbitrary names.
-local retainedSources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true,WORLD=true,ALL=true}
+local retainedSources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,MENTAL=true,PSYCIAN=true,STAFF=true,COMBAT=true,WORLD=true,ALL=true}
 
 local function normalized(value)
   return tostring(value or ""):lower():match("^%s*(.-)%s*$"):gsub("%s+"," ")
 end
 
-local function key(entry)
-  return table.concat({normalized(entry.category),normalized(entry.speaker),normalized(entry.target),normalized(entry.message)},"\0")
+local function key(entry,category)
+  return table.concat({normalized(category or Channels.entryCategory(entry)),normalized(entry.speaker),normalized(entry.target),normalized(entry.message)},"\0")
 end
 
-local function identity(entry)
+local mentalKinds={esp=true,contact=true,link=true}
+
+function History:restoreDedupe(lastKey,lastEpoch,lastMentalKind)
+  self.lastKey=type(lastKey)=="string" and lastKey or nil
+  self.lastEpoch=tonumber(lastEpoch)
+  self.lastMentalKind=nil
+  local last=self.items[#self.items]
+  -- Old handoffs carry raw category keys. Reclassify only a matching key,
+  -- keeping its timestamp and the retained record itself unchanged.
+  if last and self.lastKey==key(last,last.category) then self.lastKey=key(last) end
+  if last and self.lastKey==key(last) and Channels.entryCategory(last)=="MENTAL" then
+    -- A deduped text frame may enrich an unknown original record. Only the
+    -- transient handoff carries that family; older handoffs derive it here.
+    self.lastMentalKind=(type(lastMentalKind)=="string" and mentalKinds[lastMentalKind] and lastMentalKind) or Channels.mentalKind(last)
+  end
+end
+
+local function identity(entry,projectedOverlap)
   local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source"}
   local values={}
-  for index,name in ipairs(fields) do values[index]=tostring(entry[name] or "") end
+  for index,name in ipairs(fields) do
+    local value=entry[name]
+    if projectedOverlap and name=="category" then value=Channels.entryCategory(entry) end
+    values[index]=tostring(value or "")
+  end
   return table.concat(values,"\0")
 end
 
@@ -27,7 +49,7 @@ local function rebuildCategories(history)
   history.categoryOrder={}
   history.knownCategories={}
   for _,entry in ipairs(history.items) do
-    local category=tostring(entry.category or ""):upper()
+    local category=Channels.entryCategory(entry)
     if category~="" and not history.knownCategories[category] then
       history.knownCategories[category]=true
       history.categoryOrder[#history.categoryOrder+1]=category
@@ -73,22 +95,33 @@ function History:append(entry,epoch)
   if type(entry)~="table" then return false end
   epoch=tonumber(epoch) or os.time()
   local entryKey=key(entry)
+  local mentalKind=Channels.mentalKind(entry)
   local elapsed=epoch-(self.lastEpoch or epoch)
-  if self.lastKey==entryKey and elapsed>=0 and elapsed<=self.dedupeSeconds then return false end
+  local compatible=self.lastMentalKind==nil or mentalKind==nil or self.lastMentalKind==mentalKind
+  if self.lastKey==entryKey and compatible and elapsed>=0 and elapsed<=self.dedupeSeconds then
+    self.lastMentalKind=self.lastMentalKind or mentalKind
+    return false
+  end
   self.lastKey=entryKey
   self.lastEpoch=epoch
+  self.lastMentalKind=mentalKind
   self.items[#self.items+1]=entry
   local bucket=History.retentionKey(entry)
   self.retentionBuckets[#self.retentionBuckets+1]=bucket
   self.retentionCounts[bucket]=(self.retentionCounts[bucket] or 0)+1
   if self.retentionCounts[bucket]>self.limit then
+    local removedCategory
     for index,existingBucket in ipairs(self.retentionBuckets) do
-      if existingBucket==bucket then table.remove(self.items,index); table.remove(self.retentionBuckets,index); break end
+      if existingBucket==bucket then
+        removedCategory=Channels.entryCategory(table.remove(self.items,index))
+        table.remove(self.retentionBuckets,index)
+        break
+      end
     end
     self.retentionCounts[bucket]=self.limit
-    if bucket=="OTHER" then rebuildCategories(self) end
+    if bucket=="OTHER" or removedCategory~=Channels.entryCategory(entry) then rebuildCategories(self) end
   end
-  local category=tostring(entry.category or ""):upper()
+  local category=Channels.entryCategory(entry)
   if category~="" and not self.knownCategories[category] then
     self.knownCategories[category]=true
     self.categoryOrder[#self.categoryOrder+1]=category
@@ -96,11 +129,11 @@ function History:append(entry,epoch)
   return true
 end
 
-function History:hydrate(entries)
+function History:hydrate(entries,projectedOverlap)
   local combined,seen={},{}
   local function include(entry)
     if type(entry)~="table" then return end
-    local entryIdentity=identity(entry)
+    local entryIdentity=identity(entry,projectedOverlap)
     if seen[entryIdentity] then return end
     seen[entryIdentity]=true
     combined[#combined+1]=entry
@@ -114,19 +147,12 @@ function History:hydrate(entries)
   return true
 end
 
-local function includedInAll(category,sources)
-  if type(sources)~="table" then return true end
-  if category=="OWN" then category="ROOM" end
-  local enabled=sources[category]
-  return enabled==nil or enabled==true
-end
-
 function History:entries(filter,allSources)
-  filter=tostring(filter or "ALL"):upper()
+  filter=Channels.category(filter or "ALL")
   local entries={}
   for _,entry in ipairs(self.items) do
-    local category=tostring(entry.category or ""):upper()
-    if (filter=="ALL" and includedInAll(category,allSources)) or category==filter or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=entry end
+    local category=Channels.entryCategory(entry)
+    if (filter=="ALL" and Channels.inAll(category,allSources)) or category==filter or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=Channels.project(entry) end
   end
   return entries
 end
@@ -146,6 +172,7 @@ function History:clearVisible()
   self.knownCategories={}
   self.lastKey=nil
   self.lastEpoch=nil
+  self.lastMentalKind=nil
   return removed
 end
 

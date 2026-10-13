@@ -1,6 +1,7 @@
 local Controller={}
 Controller.__index=Controller
 local History=require("chat_history")
+local Channels=require("chat_channels")
 
 local HANDOFF_SCHEMA=1
 local STAFF_MESSAGE_FLUSH_DELAY=.4
@@ -182,15 +183,16 @@ function Controller:handoff()
     schema=HANDOFF_SCHEMA,
     character_key=validStorageKey(self.currentCharacterKey),
     filter=self.filter,
-    entries=copyEntries(self.history:entries("ALL")),
+    entries=copyEntries(self.history.items),
     last_key=self.history.lastKey,
     last_epoch=self.history.lastEpoch,
+    last_mental_kind=self.history.lastMentalKind,
   }
 end
 
 function Controller:restoreHandoff(handoff)
   if type(handoff)~="table" or tonumber(handoff.schema)~=HANDOFF_SCHEMA then return nil,"unsupported chat handoff" end
-  local filter=self.parser.category(handoff.filter) or "ALL"
+  local filter=self.parser.category(Channels.category(handoff.filter)) or "ALL"
   local key="profile"
   self.history:hydrate(copyEntries(handoff.entries))
   if handoff.partial==true then
@@ -198,10 +200,10 @@ function Controller:restoreHandoff(handoff)
     -- records too; a full handoff must still preserve an explicitly cleared view.
     local recent,loadErr=call(self.storage,"loadRecent")
     if loadErr then self:reportStorageError(loadErr) end
-    self.history:hydrate(type(recent)=="table" and recent or {})
+    -- Prefer the raw disk record when a partial snapshot contains its projection.
+    self.history:hydrate(type(recent)=="table" and recent or {},true)
   end
-  self.history.lastKey=type(handoff.last_key)=="string" and handoff.last_key or nil
-  self.history.lastEpoch=tonumber(handoff.last_epoch)
+  self.history:restoreDedupe(handoff.last_key,handoff.last_epoch,handoff.last_mental_kind)
   self.filter=filter
   self.currentCharacterKey=key
   self.historiesByCharacter[key]=self.history
@@ -260,7 +262,7 @@ end
 
 function Controller:setFilter(filter)
   if not self.started then return nil,"chatbox is not running" end
-  filter=self.parser.category(filter)
+  filter=self.parser.category(Channels.category(filter))
   if not filter then return nil,"invalid chat category" end
   self.filter=filter
   self:notify()

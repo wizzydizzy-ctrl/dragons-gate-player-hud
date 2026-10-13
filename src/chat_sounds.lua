@@ -1,12 +1,15 @@
+local Channels=require("chat_channels")
 local Sounds={}
 Sounds.__index=Sounds
-Sounds.tabOrder={"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}
+Sounds.tabOrder={"ALL","ROOM","PRIVATE","MENTAL","PSYCIAN","DRAGON","SECIAN","STAFF","COMBAT","WORLD"}
 -- Keep room for all 55 custom tabs accepted before WORLD was introduced.
 Sounds.MAX_TABS=#Sounds.tabOrder+55
 Sounds.catalog={
   {id="all",label="Soft Bell",file="chat-all-v1.wav"},
   {id="room",label="Room Chime",file="chat-room-v1.wav"},
   {id="private",label="Quiet Knock",file="chat-private-v1.wav"},
+  {id="mental",label="Mental Chime",file="chat-mental-v1.wav"},
+  {id="psycian",label="Psycian Link",file="chat-psycian-v1.wav"},
   {id="esp",label="Crystal Rise",file="chat-esp-v1.wav"},
   {id="dragon",label="Dragon Call",file="chat-dragon-v1.wav"},
   {id="secian",label="Secian Twinkle",file="chat-secian-v1.wav"},
@@ -17,13 +20,18 @@ Sounds.catalog={
 }
 local byId={}; for _,sound in ipairs(Sounds.catalog) do byId[sound.id]=sound end
 function Sounds.get(id) return type(id)=="string" and byId[id] or nil end
-function Sounds.tabKey(value)
+local function rawTabKey(value)
   if type(value)~="string" or #value>32 then return nil end
   local key=value:upper():match("^%s*(.-)%s*$")
   if not key:match("^[A-Z][A-Z0-9 _%-]*$") then return nil end
+  return key
+end
+function Sounds.tabKey(value)
+  local key=rawTabKey(value)
+  if not key then return nil end
   if key=="OWN" then return "ROOM" end
   if key=="WHISPER" then return "PRIVATE" end
-  return key
+  return Channels.category(key)
 end
 function Sounds.defaults()
   local result={volume=60,tabs={}}
@@ -41,14 +49,20 @@ function Sounds.validate(config)
   end
   if config.tabs~=nil then
     if type(config.tabs)~="table" then return nil,"sound tabs must be a table" end
-    local count,seen=#Sounds.tabOrder,{}
+    local count,seen,seenRaw=#Sounds.tabOrder,{},{}
+    local mental,legacySounds={},{}
+    local mergeAliases={MENTAL=true,ESP=true,CONTACT=true}
     for tab,value in pairs(config.tabs) do
+      local raw=rawTabKey(tab)
       local key=Sounds.tabKey(tab)
-      if not key or seen[key] or type(value)~="table" then return nil,"invalid sound tab settings" end
-      seen[key]=true
-      if not result.tabs[key] then count=count+1 end
+      if not key or seenRaw[raw] or type(value)~="table" then return nil,"invalid sound tab settings" end
+      if seen[key] and not (key=="MENTAL" and mergeAliases[raw] and mergeAliases[seen[key]]) then return nil,"invalid sound tab settings" end
+      seenRaw[raw]=true
+      if not seen[key] and not result.tabs[key] then count=count+1 end
+      seen[key]=raw
       if count>Sounds.MAX_TABS then return nil,"too many sound tabs" end
       local entry=result.tabs[key] or {enabled=false,sound="all"}
+      if raw=="ESP" or raw=="CONTACT" then entry={enabled=false,sound=raw:lower()} end
       if value.enabled~=nil then
         if type(value.enabled)~="boolean" then return nil,"sound ON/OFF must be a boolean" end
         entry.enabled=value.enabled
@@ -57,8 +71,20 @@ function Sounds.validate(config)
         if not Sounds.get(value.sound) then return nil,"choose a bundled alert sound" end
         entry.sound=value.sound
       end
-      result.tabs[key]=entry
+      if key=="MENTAL" then mental[raw]=entry; legacySounds[raw]=value.sound
+      else result.tabs[key]=entry end
     end
+    local esp,contact=mental.ESP,mental.CONTACT
+    if mental.MENTAL then result.tabs.MENTAL=mental.MENTAL
+    elseif esp or contact then
+      local entry=result.tabs.MENTAL
+      entry.enabled=(esp and esp.enabled) or (contact and contact.enabled) or false
+      entry.sound=(esp and esp.enabled and esp.sound) or (contact and contact.enabled and contact.sound)
+        or legacySounds.ESP or legacySounds.CONTACT or entry.sound
+    end
+    -- An explicit canonical entry, including OFF, always wins. Legacy ESP
+    -- choices also belonged to Psycian links before the channels were split.
+    if not seen.PSYCIAN and esp then result.tabs.PSYCIAN={enabled=esp.enabled,sound=esp.sound} end
   end
   return result
 end
@@ -68,6 +94,8 @@ end
 local tones={
   all={{660,.26}}, room={{440,.16},{554.37,.20}},
   private={{330,.10},{330,.13}}, esp={{659.25,.13},{987.77,.24}},
+  mental={{523.25,.12},{659.25,.18},{783.99,.16}},
+  psycian={{880,.09},{1174.66,.12},{987.77,.24}},
   dragon={{261.63,.16},{392,.28}}, secian={{1046.5,.09},{1318.51,.09},{1567.98,.16}},
   contact={{783.99,.16},{587.33,.22}}, staff={{659.25,.16},{880,.16},{1108.73,.30}},
   combat={{220,.12},{293.66,.12},{220,.12}},
@@ -96,7 +124,7 @@ function Sounds.wav(id)
   return "RIFF"..little(36+#data,4).."WAVEfmt "..little(16,4)..little(1,2)..little(1,2)..little(rate,4)..little(rate*2,4)..little(2,2)..little(16,2).."data"..little(#data,4)..data
 end
 
-local private={WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true}
+local private={MENTAL=true,PSYCIAN=true,DRAGON=true,SECIAN=true}
 function Sounds.choose(config,category,allSources)
   local key=Sounds.tabKey(category)
   if not key or type(config)~="table" or type(config.tabs)~="table" then return nil end
@@ -106,10 +134,8 @@ function Sounds.choose(config,category,allSources)
   end
   local sound,tab=enabled(key)
   if sound then return sound,tab end
-  local raw=type(category)=="string" and category:upper():match("^%s*(.-)%s*$") or ""
-  if private[raw] and key~="PRIVATE" then sound,tab=enabled("PRIVATE"); if sound then return sound,tab end end
-  if raw=="OWN" then raw="ROOM" end
-  if type(allSources)~="table" or allSources[raw]~=false then return enabled("ALL") end
+  if private[key] then sound,tab=enabled("PRIVATE"); if sound then return sound,tab end end
+  if Channels.inAll(category,allSources) then return enabled("ALL") end
 end
 function Sounds.new(adapter,config)
   local validated,err=Sounds.validate(config)
@@ -129,7 +155,7 @@ function Sounds:play(id)
 end
 function Sounds:onEntry(entry,allSources)
   if type(entry)~="table" then return false end
-  local id,tab=Sounds.choose(self.config,entry.category,allSources)
+  local id,tab=Sounds.choose(self.config,Channels.entryCategory(entry),allSources)
   if not id then return false end
   local now=os.time()
   local clock=self.adapter and (self.adapter.chatSoundTime or self.adapter.epoch)

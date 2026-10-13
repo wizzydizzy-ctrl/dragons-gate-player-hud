@@ -1,6 +1,6 @@
 # DGHUD Updates and Emergency Recovery
 
-Applies to DGHUD **v0.3.101**.
+Applies to DGHUD **v0.3.102**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 

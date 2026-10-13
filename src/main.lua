@@ -4,6 +4,7 @@ local Main={}; Main.__index=Main
 local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
+local ChatChannels=require("chat_channels")
 local RollerAudio=require("autoroller_audio")
 local RollerAlerts=require("autoroller_alerts")
 local SkillDisplay=require("skill_display")
@@ -764,6 +765,7 @@ function Main:startChat()
   end
   if self.view and self.view.setChatOrderCallback then
     self.view:setChatOrderCallback(function(order)
+      order=ChatChannels.tabOrder(order)
       local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources,visible=not (self.settings.chat and self.settings.chat.visible==false),sounds=self.settings.chat and self.settings.chat.sounds}
       if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
       self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=order
@@ -809,7 +811,7 @@ end
 function Main:setChatVisible(visible)
   if type(visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local chatSettings=self.settings.chat or {}
-  local candidate={visible=visible,tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT","WORLD"},all_sources=chatSettings.all_sources,sounds=chatSettings.sounds}
+  local candidate={visible=visible,tab_order=ChatChannels.tabOrder(chatSettings.tab_order or ChatChannels.order),all_sources=chatSettings.all_sources,sounds=chatSettings.sounds}
   if self.adapter.saveChatSettings then
     local saved,err=self.adapter:saveChatSettings(candidate)
     if not saved then return nil,"Could not save chat visibility: "..tostring(err) end
@@ -827,15 +829,14 @@ function Main:setChatVisible(visible)
   self:applyResponsiveLayout()
   return visible
 end
-local chatAllSourceKeys={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,STAFF=true,COMBAT=true,WORLD=true}
+local chatAllSourceKeys={ROOM=true,WHISPER=true,MENTAL=true,DRAGON=true,PSYCIAN=true,SECIAN=true,STAFF=true,COMBAT=true,WORLD=true}
 function Main:setChatAllSource(category,enabled)
-  category=tostring(category or ""):upper()
+  category=ChatChannels.category(category)
   if not chatAllSourceKeys[category] then return nil,"unknown ALL tab source" end
   enabled=enabled==true
-  local chatSettings=self.settings.chat or {}; local sources={}
-  for key,value in pairs(chatSettings.all_sources or {}) do sources[key]=value~=false end
+  local chatSettings=self.settings.chat or {}; local sources=ChatChannels.allSources(chatSettings.all_sources)
   sources[category]=enabled
-  local candidate={tab_order=chatSettings.tab_order or {"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT","WORLD"},all_sources=sources,visible=chatSettings.visible~=false,sounds=chatSettings.sounds}
+  local candidate={tab_order=ChatChannels.tabOrder(chatSettings.tab_order or ChatChannels.order),all_sources=sources,visible=chatSettings.visible~=false,sounds=chatSettings.sounds}
   if self.adapter.saveChatSettings then local saved,err=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save ALL tab sources: "..tostring(err) end end
   self.settings.chat=chatSettings; chatSettings.all_sources=sources
   local root=rawget(_G,"DGHUD")

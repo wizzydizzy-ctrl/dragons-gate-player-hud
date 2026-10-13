@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.101**.
+Documentation covers **DGHUD v0.3.102**.
 
 ## Quick start
 
@@ -43,7 +43,17 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.101
+## Latest changes — v0.3.102
+
+- **MENTAL** combines ESP, contact thoughts, and generic mental links in one clear tab.
+- **PSYCIAN** has its own tab for explicitly named Psycian links. **DRAGON** and **SECIAN** remain separate for their named links.
+- Saved chat history displays under the correct tabs without rewriting the original messages. Older ESP/CONTACT tab order, Show in ALL, and sound preferences migrate automatically.
+- MENTAL and PSYCIAN have independent Show in ALL and sound controls. Existing choices are retained where possible; new profiles still start with only STAFF sound alerts on.
+- Repeated messages still deduplicate, but identical text received through different mental communication formats is kept separately.
+
+[Read the Chatbox Guide](docs/CHATBOX.md#built-in-filters).
+
+## Previous changes — v0.3.101
 
 - Fixed autoroller Presence and Luck minimums showing **OFF** while an older Voice or Appearance target remained active.
 - Turning either minimum off now clears both names and stays off after saving, restarting, and updating. Numeric targets and legacy commands remain compatible.
@@ -238,7 +248,7 @@ The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, an
 
 ## Persistent top chatbox
 
-The top-center chatbox (shown by default) records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry the visible history, active filter, and reading position into the replacement HUD without repainting the preserved chat console. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, `CONTACT`, `STAFF`, `COMBAT`, and `WORLD`; `ROOM` includes both nearby speech and your own outgoing speech, including direct forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. `STAFF` includes GUIDE/GM messages, staff voice/sends output, GUIDE assistance requests with their room and pending-request count, and assistance-request cancellations. `PRIVATE` shows `WHISPER`, `ESP`, `DRAGON`, `SECIAN`, and `CONTACT` together. Each entry retains its exact category even when a combined filter is used.
+The top-center chatbox (shown by default) records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry history, active filter, and reading position into the replacement HUD. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `MENTAL`, `DRAGON`, `PSYCIAN`, `SECIAN`, `STAFF`, `COMBAT`, and `WORLD`. MENTAL combines ESP, contact thoughts, and generic mental links; named Dragon, Psycian, and Secian links stay separate. ROOM includes nearby and outgoing speech, including direct forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. STAFF includes GUIDE/GM messages, staff voice/sends output, assistance notices, and referrals. PRIVATE combines WHISPER, MENTAL, DRAGON, PSYCIAN, and SECIAN. Older saved messages display under the correct tabs without rewriting their original records; old ESP/CONTACT filter and capture API names remain compatible.
 
 The `WORLD` tab captures character arrivals and departures, such as `** Obatalla Ogoun just arrived in the world.` and `** Obatalla Ogoun has left the world.`. It also recognizes unexpected departures. Arrivals are green and departures are red in both WORLD chat and the main display; customize them under **OPTIONS → Color Settings → Text Styles → World arrivals / World departures**. WORLD starts included in ALL; turn it off under **OPTIONS → Chat Settings → Show in ALL** to keep those notices only in WORLD. Its own history remains saved, and WORLD sound alerts start off.
 
@@ -299,7 +309,7 @@ Captured entries are append-only JSON Lines stored permanently under the active 
 
 The HUD keeps up to 1,000 recent entries per message source, so a busy COMBAT channel cannot erase ROOM, STAFF, or private conversations. Your own speech shares the ROOM allowance; custom categories share a separate bounded allowance. Each displayed tab shows up to 1,000 matching entries, with ALL choices applied before that display limit. Older dated logs remain intact. Profile-wide loading also reads prior character-named chat directories, combines entries chronologically, and removes exact duplicates in memory; future entries are written to `chat/profile`. Reloading, updating, rolling back, or uninstalling the HUD does not delete these files. Use the confirmed saved-history clear action only when you want to permanently remove them.
 
-Private communications such as whispers, ESP, Dragon, Secian, and Contact traffic are saved locally in these plain JSONL files. Anyone with access to your Mudlet profile, computer account, backups, or copied profile data may be able to read them. The HUD does not transmit chat logs, but you should treat the directory as sensitive local data.
+Private communications such as whispers, MENTAL (ESP/contact), Dragon, Psycian, and Secian traffic are saved locally in these plain JSONL files. Anyone with access to your Mudlet profile, computer account, backups, or copied profile data may be able to read them. The HUD does not transmit chat logs, but you should treat the directory as sensitive local data.
 
 Run `dghud chatstatus` to print the active filter, the current visible-entry count, the `profile` storage key, and the most recent storage error (`none` when no storage error has occurred in the running chat session).
 

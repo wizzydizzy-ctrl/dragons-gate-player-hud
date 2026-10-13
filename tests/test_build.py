@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 EXPECTED_EDITION='player'
 EXPECTED_REPOSITORY='dragons-gate-player-hud'
-EXPECTED_VERSION='0.3.101'
+EXPECTED_VERSION='0.3.102'
 class BuildTest(unittest.TestCase):
     def run_lua(self, source, cwd):
         completed=subprocess.run(['lua','-'],input=source,text=True,cwd=cwd,capture_output=True)
@@ -80,7 +80,7 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(manifest['view_schema'],5)
             self.assertRegex(manifest['view_contract'],r'^[0-9a-f]{64}$')
             expected_contract=hashlib.sha256()
-            for filename in ('view.lua','navigation.lua','skill_settings_view.lua'):
+            for filename in ('view.lua','navigation.lua','skill_settings_view.lua','chat_channels.lua','chat_sounds.lua'):
                 payload=(ROOT/'src'/filename).read_bytes()
                 expected_contract.update(filename.encode('utf-8')+b'\0')
                 expected_contract.update(len(payload).to_bytes(8,'big'))

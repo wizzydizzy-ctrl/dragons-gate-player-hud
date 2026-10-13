@@ -1064,7 +1064,8 @@ function Adapter.loadDisplaySettings()
   local snapshot=Adapter.displaySettingsSnapshot(value); return snapshot
 end
 local function chatSettingsPath() return Adapter.dataBase().."/chat-settings.lua" end
-local chatAllSourceOrder={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}
+local ChatChannels=require("chat_channels")
+local chatAllSourceOrder=ChatChannels.sourceOrder
 function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
   if config.visible~=nil and type(config.visible)~="boolean" then return nil,"chat visibility must be a boolean" end
@@ -1072,18 +1073,17 @@ function Adapter.chatSettingsSnapshot(config)
   local tabLimit=require("chat_sounds").MAX_TABS
   for index,value in ipairs(order) do
     if index>tabLimit then break end
-    local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
+    local category=ChatChannels.category(value)
     if category~="" and #category<=32 and not category:find("[%c<>]") and category~="OWN" and category~="WHISPER" and not seen[category] then result.tab_order[#result.tab_order+1]=category; seen[category]=true end
   end
   if #result.tab_order==0 then return nil,"chat tab order is empty" end
   if config.all_sources~=nil then
     if type(config.all_sources)~="table" then return nil,"ALL tab sources must be a table" end
-    result.all_sources={}
-    for _,category in ipairs(chatAllSourceOrder) do
+    for _,category in ipairs({"ROOM","WHISPER","ESP","CONTACT","MENTAL","DRAGON","PSYCIAN","SECIAN","STAFF","COMBAT","WORLD"}) do
       local value=config.all_sources[category]
       if value~=nil and type(value)~="boolean" then return nil,"ALL tab source values must be booleans" end
-      result.all_sources[category]=value~=false
     end
+    result.all_sources=ChatChannels.allSources(config.all_sources)
   end
   if config.sounds~=nil then
     local sounds,err=require("chat_sounds").validate(config.sounds)

@@ -1009,10 +1009,11 @@ test("hidden chat tab reorders and ALL source saves retain visibility and reject
     eq(f.chatSettingsSaves,2); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,true)
     eq(f.optionsActionCallback("chat_all_source","ROOM",false),false)
     eq(f.chatSettingsSaves,3); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.all_sources.ROOM,false)
-    local saved=f.savedChatSettings; local sources=hud.settings.chat.all_sources
+    local saved=f.savedChatSettings; local sources=hud.settings.chat.all_sources; local acceptedOrder=hud.settings.chat.tab_order
+    eq(table.concat(acceptedOrder,","),table.concat(order,","))
     f.failChatSettingsSave="disk full"
     local result,err=f.chatOrderCallback({"ROOM","ALL","STAFF"})
-    eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.tab_order,order); eq(DGHUD.user_settings.chat.tab_order,order)
+    eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.tab_order,acceptedOrder); eq(DGHUD.user_settings.chat.tab_order,acceptedOrder)
     result,err=f.optionsActionCallback("chat_all_source","ROOM",true)
     eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.all_sources,sources); eq(sources.ROOM,false)
     eq(DGHUD.user_settings.chat.all_sources.ROOM,false); eq(f.viewChatAllSources.ROOM,false); eq(f.savedChatSettings,saved)
@@ -1074,11 +1075,24 @@ local function withChatVisibilityEntry(persisted,run)
 end
 
 
+test("MENTAL settings snapshot round trips canonical tabs and independent OFF choices",function()
+  local old={visible=false,tab_order={"STAFF","CONTACT","ESP","ALL","DRAGON"},all_sources={ESP=false,CONTACT=false,COMBAT=true}}
+  local first=assert(MudletAdapter.chatSettingsSnapshot(old))
+  eq(table.concat(first.tab_order,","),"STAFF,MENTAL,ALL,DRAGON")
+  eq(first.all_sources.MENTAL,false); eq(first.all_sources.PSYCIAN,false)
+  eq(first.all_sources.ESP,nil); eq(first.all_sources.CONTACT,nil)
+  eq(old.all_sources.ESP,false); eq(old.tab_order[2],"CONTACT")
+  first.all_sources.PSYCIAN=true
+  local cold=assert(MudletAdapter.chatSettingsSnapshot(first))
+  eq(cold.visible,false); eq(cold.all_sources.MENTAL,false); eq(cold.all_sources.PSYCIAN,true); eq(cold.all_sources.COMBAT,true)
+  eq(table.concat(cold.tab_order,","),table.concat(first.tab_order,","))
+end)
+
 test("WORLD settings snapshot keeps explicit false and defaults older source preferences to true",function()
   local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT","WORLD"}
   local snapshot=assert(MudletAdapter.chatSettingsSnapshot({tab_order=order,all_sources={WORLD=false,COMBAT=false,ROOM=true}}))
   eq(snapshot.all_sources.WORLD,false); eq(snapshot.all_sources.COMBAT,false); eq(snapshot.all_sources.ROOM,true)
-  eq(table.concat(snapshot.tab_order,","),table.concat(order,","))
+  eq(table.concat(snapshot.tab_order,","),table.concat(require("chat_channels").tabOrder(order),","))
   snapshot.tab_order[1]="WORLD"; eq(order[1],"STAFF")
   local legacy=assert(MudletAdapter.chatSettingsSnapshot({tab_order={"STAFF","ALL","ROOM"},all_sources={COMBAT=false}}))
   eq(legacy.all_sources.WORLD,true); eq(legacy.all_sources.COMBAT,false)
@@ -1093,7 +1107,7 @@ test("WORLD hidden-from-ALL choice survives entry reload character changes and u
   withChatVisibilityEntry({tab_order=order,all_sources={WORLD=false,COMBAT=false}},function(f,defaults)
     dofile("src/entry.lua")
     eq(DGHUD.settings.chat.all_sources.WORLD,false); eq(f.viewChatAllSources.WORLD,false)
-    eq(table.concat(DGHUD.settings.chat.tab_order,","),table.concat(order,","))
+    eq(table.concat(DGHUD.settings.chat.tab_order,","),table.concat(require("chat_channels").tabOrder(order),","))
     local controller=DGHUD.controller
     f.triggers[controller.chat.trigger]("** Obatalla Ogoun just arrived in the world.")
     eq(#controller.chat:entries(),0); assert(DGHUD.chat.setFilter("WORLD"))
@@ -1132,7 +1146,7 @@ test("entry WORLD default remains on for legacy settings without reordering save
   withChatVisibilityEntry({tab_order=order,all_sources={COMBAT=false}},function(f)
     dofile("src/entry.lua")
     eq(DGHUD.settings.chat.all_sources.WORLD,true); eq(f.viewChatAllSources.WORLD,true)
-    for index,tab in ipairs(order) do eq(DGHUD.settings.chat.tab_order[index],tab) end
+    for index,tab in ipairs(require("chat_channels").tabOrder(order)) do eq(DGHUD.settings.chat.tab_order[index],tab) end
     f.triggers[DGHUD.controller.chat.trigger]("** Xlade Vespar just arrived in the world.")
     eq(#DGHUD.controller.chat:entries(),1); eq(DGHUD.controller.chat:entries()[1].category,"WORLD")
     eq(f.chatSettingsSaves,nil)
@@ -1166,7 +1180,7 @@ test("entry upgrade carries all eleven full source buckets including hidden WORL
     for _,entry in ipairs(replacement.chat.history.items) do counts[entry.category]=(counts[entry.category] or 0)+1 end
     for _,category in ipairs(categories) do
       eq(counts[category],1000)
-      if category~="ALL" then eq(#replacement.chat.history:entries(category),1000) end
+      if category~="ALL" then eq(#replacement.chat.history:entries(category),(category=="ESP" or category=="CONTACT") and 2000 or 1000) end
     end
     eq(DGHUD.settings.chat.all_sources.WORLD,false); eq(f.loadRecentCalls,loads)
     eq(f.chatStorageAppends or 0,appends)

@@ -1,4 +1,5 @@
 local OutputColorizer=require("output_colorizer")
+local Channels=require("chat_channels")
 local Parser={}
 
 local name="([%w_%-']+)"
@@ -23,7 +24,7 @@ local function timestamp(now)
 end
 
 function Parser.category(value)
-  value=tostring(value or ""):upper():match("^%s*(.-)%s*$")
+  value=Channels.category(value)
   return value:match("^[A-Z][A-Z0-9_%-]*$") and value or nil
 end
 
@@ -52,9 +53,9 @@ local rules={
   {category="ALL",pattern="^(You now feel more skilled in%s+[^%s%.][^%c]-%.)$",message=1},
   {category="ALL",pattern="^(Due to your diligent training, you have gained additional fatigue!)$",message=1},
   {category="ALL",pattern="^(You now feel prepared to train further in%s+%S.*)$",message=1},
-  {category="ESP",pattern='^'..name..' %(ESP%): "(.*)"$',speaker=1,message=2},
-  {category="ESP",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
-  {category="ESP",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\"$",speaker=1,message=2},
+  {category="MENTAL",pattern='^'..name..' %(ESP%): "(.*)"$',speaker=1,message=2},
+  {category="PSYCIAN",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="PSYCIAN",pattern="^You pick up "..activeName.."'s Psycian link, \"(.*)\"$",speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' %(ELDER%): "(.*)"$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GUIDE%] '..activeName..': (.+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..activeName..': (.+)$',speaker=1,message=2},
@@ -63,15 +64,18 @@ local rules={
   {category="STAFF",pattern='^%[GM%] '..activeName..' %[[%w_.%-]+%] (submits an idea: .+)$',speaker=1,message=2},
   {category="STAFF",pattern='^%[GM%] '..activeName..' (resolved report #%d+: .+)$',speaker=1,message=2},
   {category="STAFF",pattern='^'..name..' sends: (.+)$',speaker=1,message=2},
-  {category="DRAGON",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
-  {category="DRAGON",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},
+  {category="MENTAL",pattern="^You pick up "..name.."'s mental link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="MENTAL",pattern="^You pick up "..name.."'s mental link, \"(.*)\"$",speaker=1,message=2},
+  {category="MENTAL",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=2,message=3},
+  {category="MENTAL",pattern="^"..name.." picks up "..name.."'s mental link, \"(.*)\"$",speaker=2,message=3},
   {category="DRAGON",pattern="^You pick up "..name.."'s Dragon link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="DRAGON",pattern="^You pick up "..name.."'s Dragon link, \"(.*)\"$",speaker=1,message=2},
   {category="SECIAN",pattern="^You pick up "..name.."'s Secian link, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
   {category="SECIAN",pattern="^You pick up "..name.."'s Secian link, \"(.*)\"$",speaker=1,message=2},
-  {category="CONTACT",pattern='^'..activeName..' thinks to you, "(.*)"$',speaker=1,message=2},
-  {category="CONTACT",pattern="^You pick up "..activeName.."'s thoughts, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
-  {category="CONTACT",pattern="^You pick up "..activeName.."'s thoughts, \"(.*)\"$",speaker=1,message=2},
-  {category="CONTACT",pattern="^You pick up "..name.."'s thoughts echoing through the area, \"(.*)\"$",speaker=1,message=2},
+  {category="MENTAL",pattern='^'..activeName..' thinks to you, "(.*)"$',speaker=1,message=2},
+  {category="MENTAL",pattern="^You pick up "..activeName.."'s thoughts, \"(.*)\" %[%s*r%-(%d+)%s*%]$",speaker=1,message=2},
+  {category="MENTAL",pattern="^You pick up "..activeName.."'s thoughts, \"(.*)\"$",speaker=1,message=2},
+  {category="MENTAL",pattern="^You pick up "..name.."'s thoughts echoing through the area, \"(.*)\"$",speaker=1,message=2},
 }
 
 local function builtIn(category,message,metadata,character,now,line)

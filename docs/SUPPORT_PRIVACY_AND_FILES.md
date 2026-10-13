@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.101.
+Applies to DGHUD v0.3.102.
 
 ## Feedback and feature requests
 
@@ -67,7 +67,7 @@ These files are local profile data, not encrypted private storage: anyone with a
 
 ## Chat privacy
 
-The top chatbox saves recognized communication locally, including private categories such as whispers, ESP, Dragon links, Secian links, and Contact messages.
+The top chatbox saves recognized communication locally, including private categories such as whispers, MENTAL (ESP/contact/generic links), Dragon links, Psycian links, and Secian links. Older saved categories are displayed under the updated tabs without rewriting the original records.
 
 Default location:
 

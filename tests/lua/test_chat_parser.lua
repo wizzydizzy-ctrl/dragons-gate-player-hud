@@ -303,19 +303,19 @@ end)
 
 test("parses private mental and staff channels",function()
   local esp=assert(Parser.parse('Tekk (ESP): "ahhh and she returns"'))
-  eq(esp.category,"ESP"); eq(esp.speaker,"Tekk"); eq(esp.message,"ahhh and she returns")
+  eq(esp.category,"MENTAL"); eq(esp.speaker,"Tekk"); eq(esp.message,"ahhh and she returns")
   local thought=assert(Parser.parse('Seaux thinks to you, "Hello"',"Dace Alterac"))
-  eq(thought.category,"CONTACT"); eq(thought.speaker,"Seaux"); eq(thought.target,nil); eq(thought.message,"Hello")
+  eq(thought.category,"MENTAL"); eq(thought.speaker,"Seaux"); eq(thought.target,nil); eq(thought.message,"Hello")
   local named=assert(Parser.parse('\27[35mAeron Del\'mar thinks to you, "Testing."\27[0m',"Dace Alterac"))
-  eq(named.category,"CONTACT"); eq(named.speaker,"Aeron Del'mar"); eq(named.message,"Testing.")
+  eq(named.category,"MENTAL"); eq(named.speaker,"Aeron Del'mar"); eq(named.message,"Testing.")
   local broadcast=assert(Parser.parse('You pick up Seaux\'s thoughts, "TEST MESSAGE" [r-1]'))
-  eq(broadcast.category,"CONTACT"); eq(broadcast.speaker,"Seaux"); eq(broadcast.message,"TEST MESSAGE")
+  eq(broadcast.category,"MENTAL"); eq(broadcast.speaker,"Seaux"); eq(broadcast.message,"TEST MESSAGE")
   local psycian=assert(Parser.parse('You pick up Seaux\'s Psycian link, "Hello." [r-1]'))
-  eq(psycian.category,"ESP"); eq(psycian.speaker,"Seaux"); eq(psycian.message,"Hello.")
+  eq(psycian.category,"PSYCIAN"); eq(psycian.speaker,"Seaux"); eq(psycian.message,"Hello.")
   local dragon=assert(Parser.parse('You pick up Losmir\'s mental link, "dragon door... is unlocked"'))
-  eq(dragon.category,"DRAGON"); eq(dragon.speaker,"Losmir"); eq(dragon.message,"dragon door... is unlocked")
+  eq(dragon.category,"MENTAL"); eq(dragon.speaker,"Losmir"); eq(dragon.message,"dragon door... is unlocked")
   local contact=assert(Parser.parse('You pick up Faolann\'s thoughts echoing through the area, "leave me be"'))
-  eq(contact.category,"CONTACT"); eq(contact.speaker,"Faolann"); eq(contact.message,"leave me be")
+  eq(contact.category,"MENTAL"); eq(contact.speaker,"Faolann"); eq(contact.message,"leave me be")
   eq(assert(Parser.parse('Aerin (ELDER): "Please remain calm."')).category,"STAFF")
   eq(assert(Parser.parse('[GUIDE] Aerin: Follow the northern road.')).category,"STAFF")
 end)
@@ -399,7 +399,7 @@ test("parses ranked and unranked Secian links",function()
   eq(ansi.category,"SECIAN"); eq(ansi.speaker,"Shayla"); eq(ansi.line,'You pick up Shayla\'s Secian link, "colored" [r-1]')
 end)
 test("parses third-person mental links using the linked speaker",function()
-  local entry=assert(Parser.parse('Mieglyn picks up Kiki\'s mental link, "Four dragons."')); eq(entry.category,"DRAGON"); eq(entry.speaker,"Kiki"); eq(entry.message,"Four dragons.")
+  local entry=assert(Parser.parse('Mieglyn picks up Kiki\'s mental link, "Four dragons."')); eq(entry.category,"MENTAL"); eq(entry.speaker,"Kiki"); eq(entry.message,"Four dragons.")
 end)
 
 test("normalizes ANSI before parsing",function()
@@ -476,4 +476,91 @@ test("validates safe custom categories and preserves supplied metadata",function
   eq(entry.message,"The invasion has started."); eq(entry.line,"Herald announces the invasion."); eq(entry.source,"custom")
   eq(Parser.custom("bad category!","hello"),nil)
   eq(Parser.custom("QUEST","   "),nil)
+end)
+
+test("named link families keep exact routing for ranked and unranked messages",function()
+  local now="2026-10-13T12:34:56-04:00"
+  for _,case in ipairs({
+    {kind="Psycian",category="PSYCIAN",speaker="Nera O'Vale"},
+    {kind="Dragon",category="DRAGON",speaker="Rook-7"},
+    {kind="Secian",category="SECIAN",speaker="Nythriss'a"},
+    {kind="mental",category="MENTAL",speaker="Lark_2"},
+  }) do
+    for _,suffix in ipairs({""," [r-0]"," [r-1]"," [ r-27 ]"}) do
+      local message='The fixture says "hello"; it\'s unchanged.'
+      local line="You pick up "..case.speaker.."'s "..case.kind..' link, "'..message..'"'..suffix
+      local entry=assert(Parser.parse(" \t\27[35m"..line.."\27[0m \r\n","Synthetic Keeper",now),line)
+      eq(entry.category,case.category); eq(entry.speaker,case.speaker); eq(entry.message,message)
+      eq(entry.line,line); eq(entry.timestamp,now); eq(entry.character,"Synthetic Keeper")
+      eq(entry.schema,1); eq(entry.source,"builtin"); eq(entry.target,nil); eq(entry.language,nil)
+    end
+  end
+end)
+
+test("ESP direct thoughts and generic links all route to MENTAL with original text",function()
+  for _,case in ipairs({
+    {speaker="Rook-7",line='Rook-7 (ESP): "Mental fixture."'},
+    {speaker="Nera O'Vale",line='Nera O\'Vale thinks to you, "Mental fixture."'},
+    {speaker="Nera O'Vale",line='You pick up Nera O\'Vale\'s thoughts, "Mental fixture."'},
+    {speaker="Nera O'Vale",line='You pick up Nera O\'Vale\'s thoughts, "Mental fixture." [r-27]'},
+    {speaker="Lark_2",line='You pick up Lark_2\'s thoughts echoing through the area, "Mental fixture."'},
+    {speaker="Lark_2",line='Rook-7 picks up Lark_2\'s mental link, "Mental fixture."'},
+    {speaker="Lark_2",line='Rook-7 picks up Lark_2\'s mental link, "Mental fixture." [r-27]'},
+  }) do
+    local entry=assert(Parser.parse(case.line,"Synthetic Keeper"))
+    eq(entry.category,"MENTAL"); eq(entry.speaker,case.speaker); eq(entry.message,"Mental fixture.")
+    eq(entry.line,case.line); eq(entry.target,nil); eq(entry.language,nil)
+  end
+end)
+
+test("mental link routing rejects malformed names ranks wrappers and incomplete lines",function()
+  for _,kind in ipairs({"Psycian","Dragon","Secian","mental"}) do
+    local line='You pick up Lark\'s '..kind..' link, "Mental fixture."'
+    for _,input in ipairs({
+      "The sign reads: "..line,">"..line,line.." Extra prose.",
+      line.." [rank-1]",line.." [r--1]",line.." [r-x]",line.." [R-1]",
+      line:gsub("Lark","<Lark>"),line:gsub("Lark","Lark/Other"),
+      line:gsub("Lark","La\7rk"),line:gsub("Lark","La\nrk"),
+      line:sub(1,-2),line:gsub("Mental fixture%.",""),
+      line:gsub(" link,"," linkage,"),line:gsub(" link,"," link:"),
+    }) do eq(Parser.parse(input,"Synthetic Keeper"),nil) end
+  end
+  for _,kind in ipairs({"psycian","PSYCIAN","Psychic","dragon","secian","Mental"}) do
+    eq(Parser.parse('You pick up Lark\'s '..kind..' link, "Fixture."'),nil)
+  end
+  eq(Parser.parse('Rook/Other picks up Lark\'s mental link, "Fixture."'),nil)
+  eq(Parser.parse('Rook picks up Lark/Other\'s mental link, "Fixture."'),nil)
+  eq(Parser.parse('Rook picks up Lark\'s mental link, "Fixture." [rank-1]'),nil)
+end)
+
+test("quoted mental link text preserves the surrounding room own whisper and staff channel",function()
+  for _,kind in ipairs({"Psycian","Dragon","Secian","mental"}) do
+    local message='You pick up Lark\'s '..kind..' link, "Quoted fixture." [r-1]'
+    for _,case in ipairs({
+      {line='Rook says, "'..message..'"',category="ROOM",speaker="Rook"},
+      {line='Synthetic Keeper says, "'..message..'"',category="OWN",speaker="Synthetic Keeper"},
+      {line='Rook whispers to you, "'..message..'"',category="WHISPER",speaker="Rook"},
+      {line='[GM] Rook: '..message,category="STAFF",speaker="Rook"},
+    }) do
+      local entry=assert(Parser.parse(case.line,"Synthetic Keeper"))
+      eq(entry.category,case.category); eq(entry.speaker,case.speaker)
+      eq(entry.message,message); eq(entry.line,case.line)
+    end
+  end
+end)
+
+test("custom legacy categories canonicalize without changing validation or supplied output",function()
+  for _,category in ipairs({" esp ","contact","MENTAL"}) do
+    eq(Parser.category(category),"MENTAL")
+    local entry=assert(Parser.custom(category,"Original fixture.",{line="Original line.",speaker="Lark"}))
+    eq(entry.category,"MENTAL"); eq(entry.message,"Original fixture."); eq(entry.line,"Original line.")
+    eq(entry.speaker,"Lark"); eq(entry.source,"custom")
+  end
+  eq(Parser.category(" psycian "),"PSYCIAN")
+  local entry=assert(Parser.custom("PSYCIAN","Named fixture."))
+  eq(entry.category,"PSYCIAN")
+  local value,message=Parser.custom("bad category!","Fixture.")
+  eq(value,nil); eq(message,"invalid chat category")
+  value,message=Parser.custom("MENTAL"," ")
+  eq(value,nil); eq(message,"chat text is empty")
 end)

@@ -71,6 +71,7 @@ moduleNames[#moduleNames+1]="skill_sort"; moduleNames[#moduleNames+1]="skill_set
 moduleNames[#moduleNames+1]="roundtime_check"
 moduleNames[#moduleNames+1]="autoroller_audio"; moduleNames[#moduleNames+1]="autoroller_alerts"
 moduleNames[#moduleNames+1]="quick_actions"; moduleNames[#moduleNames+1]="rune_variables"
+moduleNames[#moduleNames+1]="chat_channels"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")

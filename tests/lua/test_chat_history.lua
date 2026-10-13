@@ -1,4 +1,5 @@
 local History=require("chat_history")
+local Channels=require("chat_channels")
 
 
 test("WORLD has a dedicated retention bucket and remains visible in its own tab when hidden in ALL",function()
@@ -31,20 +32,20 @@ for _,mode in ipairs({"append","hydrate"}) do
     for index=1,7 do eq(history:append({category="WORLD",speaker="Traveler-"..index,message="has left the world."},100+index*4),true) end
     eq(#history:entries("WORLD"),3); eq(history:entries("WORLD")[1].speaker,"Traveler-5")
     eq(#history:entries("COMBAT"),3); eq(history.retentionCounts.OTHER,3); eq(#history:entries("STAFF"),1)
-    eq(#history.items,10); eq(#history:entries("ALL",{WORLD=false}),7)
+    eq(#history.items,10); eq(#history:entries("ALL",{WORLD=false,COMBAT=true}),7)
   end)
 end
 test("deduplicates only identical adjacent entries",function()
   local history=History.new(1000,3)
-  local entry={category="ESP",speaker="Tekk",message="hello"}
+  local entry={category="MENTAL",speaker="Tekk",message="hello"}
   eq(history:append(entry,100),true)
   eq(history:append(entry,101),false)
-  eq(history:append({category="ESP",speaker="Gia",message="hello"},102),true)
+  eq(history:append({category="MENTAL",speaker="Gia",message="hello"},102),true)
   eq(history:append(entry,103),true)
 end)
 
 test("deduplicates only within the inclusive forward time window",function()
-  local entry={category="ESP",speaker="Tekk",message="hello"}
+  local entry={category="MENTAL",speaker="Tekk",message="hello"}
   local exact=History.new(10,3)
   eq(exact:append(entry,100),true)
   eq(exact:append(entry,103),false)
@@ -58,9 +59,9 @@ end)
 
 test("normalizes every dedupe field while retaining a changed target",function()
   local history=History.new(10,3)
-  eq(history:append({category=" esp ",speaker=" Tekk  Prime ",target=" Dace   Alterac ",message=" Hello   there "},100),true)
-  eq(history:append({category="ESP",speaker="tekk prime",target="dace alterac",message="hello there"},101),false)
-  eq(history:append({category="ESP",speaker="tekk prime",target="Other",message="hello there"},102),true)
+  eq(history:append({category=" mental ",speaker=" Tekk  Prime ",target=" Dace   Alterac ",message=" Hello   there "},100),true)
+  eq(history:append({category="MENTAL",speaker="tekk prime",target="dace alterac",message="hello there"},101),false)
+  eq(history:append({category="MENTAL",speaker="tekk prime",target="Other",message="hello there"},102),true)
   eq(#history:entries("ALL"),2)
 end)
 
@@ -88,7 +89,7 @@ end)
 
 test("hydrates older entries without duplicating overlap or disturbing live order",function()
   local history=History.new(4,3)
-  local overlap={schema=1,timestamp="2026-08-31T12:00:00-04:00",character="Dace Alterac",category="ESP",speaker="Tekk",message="overlap",line='Tekk (ESP): "overlap"',source="builtin"}
+  local overlap={schema=1,timestamp="2026-08-31T12:00:00-04:00",character="Dace Alterac",category="MENTAL",speaker="Tekk",message="overlap",line='Tekk (ESP): "overlap"',source="builtin"}
   history:append(overlap,100)
   history:append({schema=1,timestamp="2026-08-31T13:00:00-04:00",character="Unknown",category="QUEST",message="live",line="live",source="custom"},104)
   history:hydrate({
@@ -100,17 +101,17 @@ test("hydrates older entries without duplicating overlap or disturbing live orde
   eq(entries[1].message,"older")
   eq(entries[2].message,"overlap")
   eq(entries[3].message,"live")
-  eq(table.concat(history:categories(),","),"ROOM,ESP,QUEST")
+  eq(table.concat(history:categories(),","),"ROOM,MENTAL,QUEST")
 end)
 
 test("filters private categories and preserves category insertion order",function()
   local history=History.new(10,3)
   history:append({category="ROOM",message="room"},1)
   history:append({category="WHISPER",message="whisper"},2)
-  history:append({category="ESP",message="esp"},3)
+  history:append({category="MENTAL",message="esp"},3)
   history:append({category="DRAGON",message="dragon"},4)
   history:append({category="SECIAN",message="secian"},5)
-  history:append({category="CONTACT",message="contact"},6)
+  history:append({category="PSYCIAN",message="contact"},6)
   history:append({category="STAFF",message="staff"},7)
   eq(#history:entries("PRIVATE"),5)
   eq(history:entries("PRIVATE")[1].message,"whisper")
@@ -123,7 +124,7 @@ test("room filter includes both nearby speakers and the active character",functi
   local history=History.new(10,3)
   history:append({category="ROOM",message="Gia asks Dace"},1)
   history:append({category="OWN",message="Dace answers Gia"},2)
-  history:append({category="ESP",message="remote"},3)
+  history:append({category="MENTAL",message="remote"},3)
   local entries=history:entries("ROOM")
   eq(#entries,2); eq(entries[1].category,"ROOM"); eq(entries[2].category,"OWN")
   eq(#history:entries("PRIVATE"),1)
@@ -131,16 +132,16 @@ end)
 
 test("ALL source settings hide only selected categories and map OWN to ROOM",function()
   local history=History.new(10,3)
-  for index,category in ipairs({"ROOM","OWN","WHISPER","ESP","COMBAT","QUEST"}) do history:append({category=category,message=category},index) end
-  local sources={ROOM=false,WHISPER=true,ESP=true,COMBAT=false}
+  for index,category in ipairs({"ROOM","OWN","WHISPER","MENTAL","COMBAT","QUEST"}) do history:append({category=category,message=category},index) end
+  local sources={ROOM=false,WHISPER=true,MENTAL=true,COMBAT=false}
   local entries=history:entries("ALL",sources)
-  eq(#entries,3); eq(entries[1].category,"WHISPER"); eq(entries[2].category,"ESP"); eq(entries[3].category,"QUEST")
+  eq(#entries,3); eq(entries[1].category,"WHISPER"); eq(entries[2].category,"MENTAL"); eq(entries[3].category,"QUEST")
   eq(#history:entries("ROOM",sources),2); eq(#history:entries("COMBAT",sources),1); eq(#history:entries("PRIVATE",sources),2)
 end)
 
 test("ALL source visibility changes never remove stored entries or category filters",function()
   local history=History.new(20,3)
-  local categories={"COMBAT","ROOM","OWN","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","QUEST"}
+  local categories={"COMBAT","ROOM","OWN","WHISPER","MENTAL","DRAGON","SECIAN","PSYCIAN","STAFF","QUEST"}
   local entries={}; local sources={}
   for index,category in ipairs(categories) do
     local entry={category=category,message=category=="COMBAT" and "Your head takes 8 points of impact damage!" or category}
@@ -187,10 +188,10 @@ test("hidden COMBAT entries appended before and after live toggles keep their or
 end)
 
 test("hydration retains hidden source overlap and future live entries",function()
-  local history=History.new(10,3); local sources={COMBAT=false,ROOM=false,ESP=false,STAFF=false}
+  local history=History.new(10,3); local sources={COMBAT=false,ROOM=false,MENTAL=false,STAFF=false}
   local damage={schema=1,timestamp="2026-08-31T12:00:00-04:00",category="COMBAT",message="Your head takes 8 points of impact damage!",source="builtin"}
   local room={schema=1,timestamp="2026-08-31T12:01:00-04:00",category="ROOM",message="nearby",source="builtin"}
-  local esp={schema=1,timestamp="2026-08-31T12:02:00-04:00",category="ESP",message="private",source="builtin"}
+  local esp={schema=1,timestamp="2026-08-31T12:02:00-04:00",category="MENTAL",message="private",source="builtin"}
   local staff={schema=1,timestamp="2026-08-31T12:03:00-04:00",category="STAFF",message="staff",source="builtin"}
   eq(history:append(esp,100),true); eq(history:append(staff,104),true)
   local lastKey,lastEpoch=history.lastKey,history.lastEpoch
@@ -200,7 +201,7 @@ test("hydration retains hidden source overlap and future live entries",function(
   for index,entry in ipairs(expected) do
     eq(history.items[index],entry); eq(history:entries(entry.category,sources)[1],entry)
   end
-  eq(table.concat(history:categories(),","),"COMBAT,ROOM,ESP,STAFF")
+  eq(table.concat(history:categories(),","),"COMBAT,ROOM,MENTAL,STAFF")
   eq(history.lastKey,lastKey); eq(history.lastEpoch,lastEpoch); eq(history:append(staff,105),false)
   local attack={category="COMBAT",message="The dark hound claws at you!",source="builtin"}
   eq(history:append(attack,108),true); eq(#history:entries("ALL",sources),0)
@@ -212,7 +213,7 @@ end)
 
 test("clears only the visible in-memory history and resets dedupe state",function()
   local history=History.new(10,3)
-  local entry={category="ESP",speaker="Tekk",message="repeatable"}
+  local entry={category="MENTAL",speaker="Tekk",message="repeatable"}
   assert(history:append(entry,100)); assert(history:append({category="ROOM",message="nearby"},104))
   eq(history:clearVisible(),2)
   eq(#history:entries("ALL"),0); eq(#history:categories(),0); eq(history.lastKey,nil); eq(history.lastEpoch,nil)
@@ -220,7 +221,7 @@ test("clears only the visible in-memory history and resets dedupe state",functio
 end)
 
 -- Retention fixtures are synthetic and never read a Mudlet profile or chat log.
-local retentionBuckets={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD","ALL","OTHER"}
+local retentionBuckets={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","MENTAL","PSYCIAN","STAFF","COMBAT","WORLD","ALL","OTHER"}
 
 local function retentionFixture(limit)
   local entries,expected={},{}
@@ -241,14 +242,14 @@ end
 local function sameRetained(actual,expected)
   eq(#actual,#expected)
   for index,entry in ipairs(expected) do
-    eq(actual[index].category,entry.category)
+    eq(actual[index].category,Channels.entryCategory(entry))
     eq(actual[index].message,entry.message)
   end
 end
 
-test("retention exposes a thousand-entry bucket cap and eleven-thousand-entry total bound",function()
+test("retention exposes a thousand-entry bucket cap and thirteen-thousand-entry total bound",function()
   eq(History.MAX_ENTRIES,1000)
-  eq(History.MAX_RETAINED_ENTRIES,11000)
+  eq(History.MAX_RETAINED_ENTRIES,13000)
 end)
 
 for _,mode in ipairs({"append","hydrate"}) do
@@ -261,13 +262,14 @@ for _,mode in ipairs({"append","hydrate"}) do
       else for index,entry in ipairs(entries) do eq(history:append(entry,index*4),true) end end
       eq(history.limit,limit)
       sameRetained(history:entries("ALL"),expected)
-      eq(#history.items,11*limit)
+      eq(#history.items,13*limit)
       assert(#history.items<=History.MAX_RETAINED_ENTRIES)
-      for _,category in ipairs({"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}) do
+      for _,category in ipairs({"ROOM","WHISPER","DRAGON","SECIAN","PSYCIAN","STAFF","COMBAT","WORLD"}) do
         eq(#history:entries(category),limit)
       end
+      for _,category in ipairs({"MENTAL","ESP","CONTACT"}) do eq(#history:entries(category),3*limit) end
       -- History returns every matching retained private entry, even above limit.
-      eq(#history:entries("PRIVATE"),5*limit)
+      eq(#history:entries("PRIVATE"),7*limit)
       local notices=0
       for _,entry in ipairs(history:entries("ALL")) do
         if entry.category=="ALL" then notices=notices+1 end
@@ -357,7 +359,7 @@ test("hydrating every bucket deduplicates saved overlap preserves live dedupe an
   local newestSavedStaff
   for _,entry in ipairs(expected) do if entry.category=="STAFF" then newestSavedStaff=entry end end
   sameRetained(history:entries("STAFF"),{newestSavedStaff,live,nextStaff})
-  eq(#history:entries("ALL"),33)
+  eq(#history:entries("ALL"),39)
 end)
 
 test("clearing all retained buckets resets their quotas dedupe and sibling state",function()
@@ -366,7 +368,7 @@ test("clearing all retained buckets resets their quotas dedupe and sibling state
   assert(history:hydrate(entries))
   local sibling=history:newSibling()
   eq(sibling.limit,3); eq(sibling.dedupeSeconds,4); eq(#sibling:entries(),0)
-  eq(history:clearVisible(),33)
+  eq(history:clearVisible(),39)
   eq(#history:entries(),0); eq(#history:categories(),0)
   eq(history.lastKey,nil); eq(history.lastEpoch,nil)
   for index,entry in ipairs(expected) do assert(history:append(entry,index*4)) end
@@ -375,4 +377,237 @@ test("clearing all retained buckets resets their quotas dedupe and sibling state
   eq(#sibling:entries(),0)
   assert(sibling:append({category="ROOM",message="synthetic-sibling"},200))
   sameRetained(history:entries(),expected)
+end)
+
+local function legacyRoutingEntries()
+  local cases={
+    {raw="ESP",effective="PSYCIAN",line='You pick up Nera O\'Vale\'s Psycian link, "Named fixture." [r-1]'},
+    {raw="ESP",effective="MENTAL",line='Lark (ESP): "ESP fixture."'},
+    {raw="CONTACT",effective="MENTAL",line='Nera O\'Vale thinks to you, "Contact fixture."'},
+    {raw="DRAGON",effective="MENTAL",line='You pick up Lark\'s mental link, "Generic fixture."'},
+    {raw="DRAGON",effective="MENTAL",line='Rook picks up Lark\'s mental link, "Third-person fixture." [r-0]'},
+    {raw="DRAGON",effective="DRAGON",line='You pick up Rook\'s Dragon link, "Dragon fixture." [r-1]'},
+    {raw="SECIAN",effective="SECIAN",line='You pick up Lark\'s Secian link, "Secian fixture."'},
+    {raw="ESP",effective="MENTAL",line='Rook says, "You pick up Lark\'s Psycian link, \"Quoted fixture.\""'},
+    {raw="DRAGON",effective="DRAGON",line='You pick up Lark\'s mental link, "Malformed fixture." [rank-1]'},
+    {raw="ESP",effective="MENTAL",line='You pick up Lark\'s psycian link, "Wrong case fixture."'},
+  }
+  local entries={}
+  for index,case in ipairs(cases) do
+    entries[index]={schema=1,timestamp="2026-10-13T12:00:00Z",character="Synthetic Keeper",
+      category=case.raw,speaker="Lark",message="Saved fixture "..index,line=case.line,source="builtin",
+      metadata={marker="synthetic"}}
+  end
+  return entries,cases
+end
+
+for _,mode in ipairs({"append","hydrate"}) do
+  test(mode.." projects legacy history only in views with canonical category deduplication",function()
+    local saved,cases=legacyRoutingEntries()
+    local history=History.new(1000,3)
+    if mode=="hydrate" then assert(history:hydrate(saved))
+    else for index,entry in ipairs(saved) do assert(history:append(entry,index*4)) end end
+    local visible=history:entries("ALL")
+    eq(#visible,#saved)
+    for index,entry in ipairs(saved) do
+      eq(history.items[index],entry); eq(entry.category,cases[index].raw)
+      eq(History.retentionKey(entry),cases[index].raw)
+      eq(visible[index].category,cases[index].effective)
+      for key,value in pairs(entry) do if key~="category" then eq(visible[index][key],value) end end
+      if cases[index].raw~=cases[index].effective then
+        assert(visible[index]~=entry)
+        visible[index].message="Changed view fixture."
+        eq(entry.message,"Saved fixture "..index)
+        eq(history:entries("ALL")[index].message,entry.message)
+      end
+    end
+    eq(table.concat(history:categories(),","),"PSYCIAN,MENTAL,DRAGON,SECIAN")
+    eq(history.knownCategories.ESP,nil); eq(history.knownCategories.CONTACT,nil)
+    for _,filter in ipairs({"MENTAL"," esp ","CONTACT"}) do eq(#history:entries(filter),6) end
+    eq(#history:entries("PSYCIAN"),1); eq(#history:entries("DRAGON"),2)
+    eq(#history:entries("SECIAN"),1); eq(#history:entries("PRIVATE"),10)
+    assert(history:hydrate(saved)); eq(#history.items,#saved)
+    for index,entry in ipairs(saved) do eq(history.items[index],entry); eq(entry.category,cases[index].raw) end
+  end)
+end
+
+test("legacy and new mental retention buckets stay separate through hydrate and live overflow",function()
+  local saved={}
+  for index=1,4 do
+    for _,category in ipairs({"ESP","CONTACT","MENTAL","PSYCIAN"}) do
+      saved[#saved+1]={category=category,message=category.."-"..index,line=category.."-"..index}
+    end
+  end
+  local history=History.new(2,0); assert(history:hydrate(saved))
+  eq(#history.items,8); eq(#history:entries("MENTAL"),6); eq(#history:entries("PSYCIAN"),2)
+  eq(table.concat(history:categories(),","),"MENTAL,PSYCIAN")
+  for _,category in ipairs({"ESP","CONTACT","MENTAL","PSYCIAN"}) do eq(history.retentionCounts[category],2) end
+  for index=5,8 do assert(history:append({category="MENTAL",message="MENTAL-"..index},index*4)) end
+  eq(#history.items,8); eq(#history:entries("MENTAL"),6); eq(#history:entries("PRIVATE"),8)
+  eq(history:entries("MENTAL")[1].message,"ESP-3"); eq(history:entries("MENTAL")[2].message,"CONTACT-3")
+  eq(history.retentionCounts.ESP,2); eq(history.retentionCounts.CONTACT,2)
+  eq(history.items[1].category,"ESP"); eq(history.items[2].category,"CONTACT")
+end)
+
+test("mixed legacy ALL flags merge while explicit MENTAL and PSYCIAN settings win",function()
+  local history=History.new(10,0)
+  assert(history:append({category="ESP",message="ESP fixture."},1))
+  assert(history:append({category="CONTACT",message="Contact fixture."},2))
+  assert(history:append({category="MENTAL",message="New mental fixture."},3))
+  assert(history:append({category="ESP",message="Named fixture.",line='You pick up Lark\'s Psycian link, "Named fixture."'},4))
+  local cases={
+    {sources={ESP=false,CONTACT=false},mental=false,psycian=false},
+    {sources={ESP=true,CONTACT=false},mental=true,psycian=true},
+    {sources={ESP=false,CONTACT=true},mental=true,psycian=false},
+    {sources={ESP=false,CONTACT=false,MENTAL=true},mental=true,psycian=false},
+    {sources={ESP=true,CONTACT=true,MENTAL=false,PSYCIAN=false},mental=false,psycian=false},
+    {sources={ESP=false,CONTACT=false,PSYCIAN=true},mental=false,psycian=true},
+  }
+  for _,case in ipairs(cases) do
+    local expected=(case.mental and 3 or 0)+(case.psycian and 1 or 0)
+    eq(#history:entries("ALL",case.sources),expected)
+    eq(#history:entries("MENTAL",case.sources),3); eq(#history:entries("PSYCIAN",case.sources),1)
+    eq(#history:entries("PRIVATE",case.sources),4); eq(#history.items,4)
+  end
+end)
+
+test("adjacent legacy and current dedupe keys use effective channels and preserve raw records",function()
+  for _,case in ipairs({
+    {raw="ESP",effective="MENTAL",line='Lark (ESP): "Same fixture."'},
+    {raw="CONTACT",effective="MENTAL",line='Lark thinks to you, "Same fixture."'},
+    {raw="DRAGON",effective="MENTAL",line='You pick up Lark\'s mental link, "Same fixture."'},
+    {raw="ESP",effective="PSYCIAN",line='You pick up Lark\'s Psycian link, "Same fixture." [r-1]'},
+  }) do
+    local history=History.new(10,3)
+    local raw={category=case.raw,speaker="Lark",message="Same fixture.",line=case.line}
+    eq(history:append(raw,100),true)
+    eq(history:append({category=case.effective,speaker="lark",message=" same   fixture. ",line=case.line},103),false)
+    eq(history.items[1],raw); eq(raw.category,case.raw); eq(history.lastEpoch,100)
+    eq(history:append({category=case.effective,speaker="Lark",message="Same fixture.",line=case.line},104),true)
+    eq(#history.items,2)
+  end
+  local history=History.new(10,3)
+  eq(history:append({category="MENTAL",speaker="Lark",message="Same fixture."},100),true)
+  eq(history:append({category="PSYCIAN",speaker="Lark",message="Same fixture."},101),true)
+end)
+
+test("legacy mixed-bucket eviction rebuilds only surviving effective categories",function()
+  local history=History.new(1,0)
+  assert(history:append({category="ESP",message="Named fixture.",line='You pick up Lark\'s Psycian link, "Named fixture."'},1))
+  eq(table.concat(history:categories(),","),"PSYCIAN")
+  assert(history:append({category="ESP",message="ESP fixture.",line='Lark (ESP): "ESP fixture."'},2))
+  eq(table.concat(history:categories(),","),"MENTAL"); eq(history.knownCategories.PSYCIAN,nil)
+  eq(history.retentionCounts.ESP,1); eq(history.items[1].category,"ESP")
+end)
+
+test("partial projected overlap prefers saved raw records without rewriting default hydration",function()
+  local raw={schema=1,timestamp="2026-10-13T12:00:00Z",category="ESP",speaker="Lark",
+    message="Named fixture.",line='You pick up Lark\'s Psycian link, "Named fixture." [r-1]',source="builtin"}
+  local projected=Channels.project(raw)
+  local history=History.new(10,3); assert(history:hydrate({projected}))
+  assert(history:hydrate({raw},true))
+  eq(#history.items,1); eq(history.items[1],raw); eq(history.items[1].category,"ESP")
+  eq(history:entries("PSYCIAN")[1].category,"PSYCIAN")
+  local ordinary=History.new(10,3); assert(ordinary:hydrate({raw,projected}))
+  eq(#ordinary.items,2); eq(ordinary.items[1].category,"ESP"); eq(ordinary.items[2].category,"PSYCIAN")
+end)
+
+local mentalWireLines={
+  esp='Tester (ESP): "hello"',
+  contact='Tester thinks to you, "hello"',
+  link='You pick up Tester\'s mental link, "hello"',
+}
+local function mentalWireEntry(kind,category)
+  return {category=category or "MENTAL",speaker="Tester",message="hello",line=mentalWireLines[kind] or "hello",source=kind and "builtin" or "custom"}
+end
+
+test("same-body ESP contact and generic link families remain distinct while adjacent repeats dedupe",function()
+  for _,first in ipairs({"esp","contact","link"}) do
+    for _,second in ipairs({"esp","contact","link"}) do
+      local history=History.new(10,3)
+      local original=mentalWireEntry(first)
+      eq(history:append(original,100),true); eq(history.lastMentalKind,first)
+      eq(history:append(mentalWireEntry(second),101),first~=second)
+      eq(#history.items,first==second and 1 or 2); eq(history.lastMentalKind,second)
+      eq(history:append(mentalWireEntry(second),102),false)
+      eq(history.items[1],original); eq(original.line,mentalWireLines[first])
+      eq(original.lastMentalKind,nil); eq(original.mental_kind,nil)
+    end
+  end
+  local history=History.new(10,3)
+  assert(history:append(mentalWireEntry("contact"),100))
+  eq(history:append({category="MENTAL",speaker="Tester",message="hello",line='You pick up Tester\'s thoughts, "hello" [r-1]'},101),false)
+  assert(history:append(mentalWireEntry("link"),102))
+  eq(history:append({category="MENTAL",speaker="Tester",message="hello",line='Rook picks up Tester\'s mental link, "hello" [r-1]'},103),false)
+  eq(#history.items,2)
+end)
+
+test("unknown mental duplicates enrich only transient family state and cannot bridge recognized families",function()
+  for _,kind in ipairs({"esp","contact","link"}) do
+    for _,knownFirst in ipairs({false,true}) do
+      local history=History.new(10,3)
+      local original=mentalWireEntry(knownFirst and kind or nil)
+      local line,source=original.line,original.source
+      assert(history:append(original,100)); local lastKey=history.lastKey
+      local incoming=knownFirst and mentalWireEntry(nil) or mentalWireEntry(kind)
+      eq(history:append(incoming,101),false)
+      eq(history:append(mentalWireEntry(nil),102),false)
+      eq(history.lastMentalKind,kind); eq(history.lastKey,lastKey); eq(history.lastEpoch,100)
+      eq(#history.items,1); eq(history.items[1],original); eq(original.line,line); eq(original.source,source)
+      eq(original.lastMentalKind,nil); eq(original.mental_kind,nil)
+      local other=kind=="contact" and "esp" or "contact"
+      eq(history:append(mentalWireEntry(other),103),true)
+      eq(history.lastMentalKind,other); eq(#history.items,2)
+    end
+  end
+  local history=History.new(10,3)
+  assert(history:append(mentalWireEntry(nil),100))
+  eq(history:append(mentalWireEntry(nil),101),false); eq(history.lastMentalKind,nil)
+end)
+
+test("legacy restore derives wire families without changing raw entries or the dedupe window",function()
+  for _,case in ipairs({
+    {kind="esp",raw="ESP"},{kind="contact",raw="CONTACT"},{kind="link",raw="DRAGON"},
+  }) do
+    local raw=mentalWireEntry(case.kind,case.raw)
+    local history=History.new(10,3); assert(history:hydrate({raw}))
+    local legacyKey=table.concat({case.raw:lower(),"tester","","hello",0},"\0")
+    history:restoreDedupe(legacyKey,100)
+    eq(history.lastMentalKind,case.kind); eq(history.lastEpoch,100)
+    eq(history:append(mentalWireEntry(case.kind),103),false)
+    local other=case.kind=="esp" and "contact" or "esp"
+    eq(history:append(mentalWireEntry(other),103),true)
+    eq(history.items[1],raw); eq(raw.category,case.raw); eq(raw.line,mentalWireLines[case.kind])
+    eq(raw.lastMentalKind,nil); eq(raw.mental_kind,nil)
+  end
+end)
+
+test("restored transient family accepts only the whitelist with legacy derivation as fallback",function()
+  local values={"esp","contact","link","none","ESP","invalid",false,true,42,{}}
+  for _,kind in ipairs({"esp","unknown"}) do
+    for _,value in ipairs(values) do
+      local raw=kind=="unknown" and mentalWireEntry(nil) or mentalWireEntry(kind)
+      local history=History.new(10,3); assert(history:append(raw,100))
+      local lastKey=history.lastKey
+      history:restoreDedupe(lastKey,100,value)
+      local whitelisted=value=="esp" or value=="contact" or value=="link"
+      eq(history.lastMentalKind,whitelisted and value or (kind=="esp" and "esp" or nil))
+      eq(history.items[1],raw); eq(raw.lastMentalKind,nil); eq(raw.mental_kind,nil)
+    end
+  end
+  local history=History.new(10,3); assert(history:append({category="ROOM",message="hello"},100))
+  history:restoreDedupe(history.lastKey,100,"esp"); eq(history.lastMentalKind,nil)
+  history:restoreDedupe(nil,100,"esp"); eq(history.lastMentalKind,nil)
+end)
+
+test("hydration preserves transient enrichment and clear sibling and nonmental capture reset it",function()
+  local history=History.new(1,3)
+  local unknown=mentalWireEntry(nil)
+  assert(history:append(unknown,100)); eq(history:append(mentalWireEntry("esp"),101),false)
+  assert(history:hydrate({unknown})); eq(history.lastMentalKind,"esp"); eq(#history.items,1)
+  eq(history:newSibling().lastMentalKind,nil)
+  eq(history:clearVisible(),1); eq(history.lastMentalKind,nil)
+  assert(history:append(mentalWireEntry("contact"),102)); eq(history.lastMentalKind,"contact")
+  assert(history:append({category="ROOM",message="hello"},103)); eq(history.lastMentalKind,nil)
+  eq(History.MAX_RETAINED_ENTRIES,13000); eq(history.limit,1); eq(#history.items,2)
 end)

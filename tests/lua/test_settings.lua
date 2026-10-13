@@ -1,6 +1,23 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+test("mental tab migration preserves unrelated choices and explicit OFF on repeated loads",function()
+  local user={schema=1,chat={visible=false,tab_order={"STAFF","CONTACT","DRAGON","ESP","ALL"},
+    all_sources={ESP=false,CONTACT=false,COMBAT=true,ROOM=false},sounds={volume=35}},update={auto_apply=true}}
+  local resolved,migrated=Settings.resolve(defaults,user)
+  eq(table.concat(migrated.chat.tab_order,","),"STAFF,MENTAL,DRAGON,ALL")
+  eq(table.concat(user.chat.tab_order,","),"STAFF,CONTACT,DRAGON,ESP,ALL")
+  eq(user.chat.all_sources.ESP,false); eq(migrated.chat.all_sources.ESP,nil)
+  eq(resolved.chat.visible,false); eq(resolved.chat.all_sources.MENTAL,false); eq(resolved.chat.all_sources.PSYCIAN,false)
+  eq(resolved.chat.all_sources.COMBAT,true); eq(resolved.chat.all_sources.ROOM,false)
+  eq(resolved.update.auto_apply,true)
+  local cold=Settings.resolve(defaults,migrated)
+  eq(cold.chat.all_sources.MENTAL,false); eq(cold.chat.all_sources.PSYCIAN,false)
+  eq(table.concat(cold.chat.tab_order,","),table.concat(resolved.chat.tab_order,","))
+  local explicit=Settings.resolve(defaults,{schema=1,chat={all_sources={MENTAL=false,PSYCIAN=false,ESP=true,CONTACT=true}}})
+  eq(explicit.chat.all_sources.MENTAL,false); eq(explicit.chat.all_sources.PSYCIAN,false)
+end)
+
 test("quick commands default ON for fresh and legacy display settings without mutating input",function()
   for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do eq(defaults.display[key],true) end
   for _,schema in ipairs({0,1}) do
@@ -191,10 +208,9 @@ test("WORLD defaults to its own tab and inclusion in ALL for fresh and older set
     {schema=1,chat={tab_order={"STAFF","ALL","ROOM"},all_sources={ROOM=false}}}}) do
     local resolved=Settings.resolve(defaults,user)
     eq(resolved.chat.all_sources.WORLD,true)
-    -- The resolver preserves saved array slots; View adds/deduplicates missing
-    -- built-in tabs. Do not demand a settings-layer tab-order migration.
+    -- Legacy ESP/CONTACT positions combine once; View adds missing built-ins.
     if not user.chat then eq(table.concat(resolved.chat.tab_order,","),table.concat(defaults.chat.tab_order,",")) end
-    for index,tab in ipairs(user.chat and user.chat.tab_order or {}) do eq(resolved.chat.tab_order[index],tab) end
+    for index,tab in ipairs(require("chat_channels").tabOrder(user.chat and user.chat.tab_order or {})) do eq(resolved.chat.tab_order[index],tab) end
     if user.chat then eq(user.chat.all_sources.WORLD,nil) end
   end
   eq(table.concat(legacyOrder,","),"STAFF,ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,COMBAT")

@@ -5,6 +5,7 @@ local ColorStyles=require("color_styles")
 local ColorPreferences=require("color_preferences")
 local MAX_CUSTOM_RULES=ColorPreferences.MAX_CUSTOM_RULES
 local Sounds=require("chat_sounds")
+local Channels=require("chat_channels")
 local RollerAudio=require("autoroller_audio")
 local SkillSort=require("skill_sort")
 local SkillSettingsView=require("skill_settings_view")
@@ -25,7 +26,7 @@ local function groupedNumber(value)
   repeat text,changed=text:gsub("^(-?%d+)(%d%d%d)","%1,%2") until changed==0
   return text
 end
-local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62",WORLD="#9eafc6"}
+local chat_colors={ROOM="text",OWN="jade",WHISPER="#d49bc8",MENTAL="#a6a3e8",PSYCIAN="#c6a3e8",ESP="#a6a3e8",DRAGON="#d9a869",SECIAN="#8fcbd4",CONTACT="#8bc6b0",STAFF="#e09672",COMBAT="#e46c62",WORLD="#9eafc6"}
 local CHAT_DISPLAY_LIMIT=1000
 local CHAT_NATIVE_LINES=100000
 local CHAT_NATIVE_DELETE_BATCH=1000
@@ -70,7 +71,7 @@ local function restoreChatScroll(output,state,ranges)
   pcall(function() output:scrollTo(math.min(line,(ok and tonumber(last)) or line)) end)
 end
 function View.chatLine(entry,t,timestamps,colorConfig,colorOptions)
-  entry=type(entry)=="table" and entry or {}
+  entry=Channels.project(type(entry)=="table" and entry or {})
   local category=tostring(entry.category or "CHAT"):upper()
   local color=chat_colors[category] or t.accent
   if color=="text" then color=t.text elseif color=="jade" then color=t.jade end
@@ -618,8 +619,8 @@ function View.new(settings)
   end)
   self.chat_settings_text=label("DGHUD.ChatSettings.Text",self.chat_settings_content,"background:transparent;color:"..t.text..";")
   self.chat_settings_sources_caption=label("DGHUD.ChatSettings.SourcesCaption",self.chat_settings_content,"background:transparent;color:"..t.accent..";font-weight:700;")
-  self.chat_all_source_order={"ROOM","WHISPER","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}; self.chat_all_source_buttons={}; self.chat_all_sources={}
-  local sourceLabels={ROOM="ROOM + OWN",WHISPER="WHISPERS",ESP="ESP",DRAGON="DRAGON",SECIAN="SECIAN",CONTACT="CONTACT",STAFF="STAFF",COMBAT="COMBAT",WORLD="WORLD"}
+  self.chat_all_source_order=Channels.sourceOrder; self.chat_all_source_buttons={}; self.chat_all_sources={}
+  local sourceLabels={ROOM="ROOM + OWN",WHISPER="WHISPERS",MENTAL="MENTAL",DRAGON="DRAGON",PSYCIAN="PSYCIAN",SECIAN="SECIAN",STAFF="STAFF",COMBAT="COMBAT",WORLD="WORLD"}
   for _,key in ipairs(self.chat_all_source_order) do local sourceKey=key; local button=label("DGHUD.ChatSettings.Source."..sourceKey,self.chat_settings_content); button.option_text=sourceLabels[sourceKey]; button:setClickCallback(function() local wanted=not (self.chat_all_sources[sourceKey]~=false); if not self.options_action_callback then return nil,"chat source settings are unavailable" end; local saved,err=self.options_action_callback("chat_all_source",sourceKey,wanted); if saved==nil then self.chat_settings_status_text=tostring(err or "Could not save ALL tab source"); self:renderChatSettings(); return nil,err end; self.chat_all_sources[sourceKey]=saved==true; self.chat_settings_status_text=sourceLabels[sourceKey].." is now "..(self.chat_all_sources[sourceKey] and "shown" or "hidden").." in ALL."; self:renderChatSettings(); return saved end); self.chat_all_source_buttons[sourceKey]=button end
   self.chat_settings_clear_visible=label("DGHUD.ChatSettings.ClearVisible",self.chat_settings_content,"background:#17231c;border:1px solid "..t.jade..";border-radius:5px;color:"..t.jade..";font-weight:700;")
   self.chat_settings_clear_saved=label("DGHUD.ChatSettings.ClearSaved",self.chat_settings_content,"background:#3a1715;border:1px solid #a94d46;border-radius:5px;color:#ffb0a8;font-weight:700;")
@@ -903,10 +904,10 @@ function View:setChatVisible(visible)
   if self.chat_settings_visibility then self:renderChatSettings() end
   return self.chat_visible
 end
-local default_chat_filters={"ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","STAFF","COMBAT","WORLD"}
-local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,ESP=true,DRAGON=true,CONTACT=true,STAFF=true,COMBAT=true,WORLD=true,OWN=true,WHISPER=true}
+local default_chat_filters=Channels.order
+local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,MENTAL=true,DRAGON=true,PSYCIAN=true,STAFF=true,COMBAT=true,WORLD=true,OWN=true,WHISPER=true}
 local function cleanChatCategory(value)
-  local category=tostring(value or ""):upper():match("^%s*(.-)%s*$") or ""
+  local category=Channels.category(value)
   if category=="" or #category>32 or category:find("[%c<>]") or category=="OWN" or category=="WHISPER" then return nil end
   return category
 end
@@ -953,7 +954,7 @@ end
 function View:renderChatTabs(categories,activeFilter)
   self.chat_categories={}; for _,category in ipairs(type(categories)=="table" and categories or {}) do self.chat_categories[#self.chat_categories+1]=category end
   if self:syncChatSoundRows() and self.chat_settings_visible and self.layout then self:layoutChatSettings(self.layout) end
-  self.chat_active_filter=tostring(activeFilter or "ALL"):upper()
+  self.chat_active_filter=Channels.category(activeFilter or "ALL")
   categories=self.chat_categories; activeFilter=self.chat_active_filter
   if not self:isChatVisible() then self:applyChatVisibility(); return true end
   if self.chat_drag then self.chat_tabs_refresh_pending=true; return true end
@@ -2311,7 +2312,7 @@ function View:renderChatSettings(font)
   self.chat_settings_visibility:echo(View.withFont("<center><b>SHOW CHATBOX: "..(visible and "ON" or "OFF").."</b></center>",(font or 11)+2))
   font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. Dedicated tabs and saved history are unchanged." or "Choose which message sources appear in the ALL tab. Turning one off does not disable capture, delete history, or hide it from its dedicated tab."; self.chat_settings_text:echo(View.withFont("Hide the chatbox to expand the main console. Capture and history continue.<br><br>"..explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); self.chat_settings_dirty=false; return true
 end
-function View:setChatAllSources(sources) self.chat_all_sources={}; for _,key in ipairs(self.chat_all_source_order or {}) do self.chat_all_sources[key]=not (type(sources)=="table" and sources[key]==false) end; if self.chat_settings_visible then self:renderChatSettings() end; return true end
+function View:setChatAllSources(sources) self.chat_all_sources=Channels.allSources(sources); if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:showChatSettings()
   self:hideSkillSettings()
   if self.disposed or not self.root then return nil,"HUD view is unavailable." end
@@ -3264,7 +3265,7 @@ function View:chatDisplayMatches(entries,categories,activeFilter)
   if self.disposed or self.chat_display_complete==false or type(self.chat_entries)~="table" or type(self.chat_categories)~="table" or type(self.chat_line_ranges)~="table" then return false end
   local first=math.max(1,#entries-CHAT_DISPLAY_LIMIT+1); local count=math.min(#entries,CHAT_DISPLAY_LIMIT)
   if #self.chat_entries~=count or #self.chat_categories~=#categories or #self.chat_line_ranges~=count then return false end
-  if self.chat_active_filter~=tostring(activeFilter or "ALL"):upper() then return false end
+  if self.chat_active_filter~=Channels.category(activeFilter or "ALL") then return false end
   for index,value in ipairs(categories) do if value~=self.chat_categories[index] then return false end end
   local last=chatLastLine(self.chat_output); if last==nil then return false end
   local previous=0
@@ -3284,7 +3285,7 @@ function View:renderChat(entries,categories,activeFilter,savedScroll)
   local state=savedScroll or chatScroll(self.chat_output,self.chat_line_ranges); local first=math.max(1,#entries-CHAT_DISPLAY_LIMIT+1)
   self.chat_entries={}; for index=first,#entries do self.chat_entries[#self.chat_entries+1]=entries[index] end
   self.chat_categories={}; for index,value in ipairs(categories) do self.chat_categories[index]=value end
-  self.chat_active_filter=tostring(activeFilter or "ALL"):upper()
+  self.chat_active_filter=Channels.category(activeFilter or "ALL")
   self:renderChatTabs(self.chat_categories,self.chat_active_filter)
   self.chat_output:clear()
   -- A thousand wrapped records can exceed a small native line buffer. Keep a

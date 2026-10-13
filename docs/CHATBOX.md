@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.101.
+Applies to DGHUD v0.3.102.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
@@ -16,28 +16,36 @@ The same settings window has a **SHOW IN ALL** section. Toggle any source to con
 
 ## Sound alerts
 
-Open **OPTIONS → CHAT SETTINGS → SOUND ALERTS**. Each tab has an **ON/OFF** control, a choice of ten short sounds, and a **PREVIEW** button. Each built-in tab starts with a different sound. **STAFF starts ON; all other alerts start OFF.** You can change the shared alert volume too. Changes save immediately for this Mudlet profile and survive restarts, character changes, and HUD updates.
+Open **OPTIONS → CHAT SETTINGS → SOUND ALERTS**. Each tab has an **ON/OFF** control, a choice of twelve short sounds, and a **PREVIEW** button. Each built-in tab starts with a different sound. **STAFF starts ON; all other alerts start OFF** in a new profile. Existing alert choices migrate during updates. You can change the shared alert volume too. Changes save immediately for this Mudlet profile and survive restarts, character changes, and HUD updates.
 
 Preview lets you hear a sound even when that tab's alerts are OFF; it does not turn the alert on. The sounds are created locally from tones included in the HUD—no external media download or account is required. Mudlet's **Mute all media** and your computer's audio settings still apply.
 
 Only newly captured messages alert. Loading saved history, scrolling, switching tabs, changing characters, and updating the HUD do not replay old alerts. Rapid messages are limited to one alert per second per selected tab.
 
-A message can appear in more than one filter, but plays only one sound: its specific enabled tab takes priority, then **PRIVATE** for private channels, then **ALL** if the message is included there. For example, enabling ESP and ALL does not make ESP messages ding twice. Hiding the chatbox does not mute alerts; turn off its alert switches when you want silence. Custom tabs appear in the sound settings after they are created and start OFF.
+A message can appear in more than one filter, but plays only one sound: its specific enabled tab takes priority, then **PRIVATE** for private channels, then **ALL** if the message is included there. For example, enabling MENTAL and ALL does not make mental messages ding twice. Hiding the chatbox does not mute alerts; turn off its alert switches when you want silence. Custom tabs appear in the sound settings after they are created and start OFF.
 
 ## Built-in filters
 
 - **ALL** — Captured categories enabled under **SHOW IN ALL**, plus skill improvements, skill-training readiness, stat increases, and fatigue gains from diligent training.
 - **ROOM** — Nearby speech and your own speech.
-- **PRIVATE** — Whispers, ESP, Dragon links, Secian links, and contact-style thoughts together.
-- **ESP** — ESP messages only.
-- **DRAGON** — Mental and Dragon link messages.
+- **PRIVATE** — Whispers and all mental, Dragon, Psycian, and Secian communication together.
+- **MENTAL** — ESP messages, direct contact thoughts, thoughts echoing through the area, and generic mental links.
+- **DRAGON** — Explicitly named Dragon links only.
+- **PSYCIAN** — Explicitly named Psycian links only.
 - **SECIAN** — Secian link messages; this filter becomes available after a Secian message is captured. These messages also appear in PRIVATE.
-- **CONTACT** — Thoughts echoing through the area.
 - **STAFF** — Recognized Guide, GM, Elder, sends, voice, and referral list, handling, and detail formats.
 - **COMBAT** — Your attacks, incoming weapon attacks, hit/miss results, damage, movement blocks, spell threats, upkeep, and recovery. This tab keeps capturing and saving messages even when **SHOW IN ALL → COMBAT** is OFF.
 - **WORLD** — Character arrivals (green) and departures (red), including unexpected departures. It starts included in ALL. Turn **SHOW IN ALL → WORLD** OFF to keep these messages only in WORLD; capture and saved history continue. WORLD sound alerts start OFF. Customize the two colors independently in **Color Settings → Text Styles → World arrivals / World departures**.
 
 Drag any chat tab left or right to arrange the filters in the order you prefer. The order is saved for the whole Mudlet profile and survives character changes, reconnects, and HUD updates. A short click still selects the tab normally.
+
+### Older tabs and saved messages
+
+ESP and CONTACT now share MENTAL. It takes the first position occupied by either old tab in your saved order; the duplicate is removed. PSYCIAN is available independently. Saved messages with explicit Psycian, Dragon, or Secian link wording display in the matching tab, while generic mental links display in MENTAL. Original saved categories and message text are not rewritten.
+
+MENTAL remains included in ALL if either previous ESP or CONTACT source was included. PSYCIAN initially inherits the previous ESP inclusion choice. An explicit saved MENTAL or PSYCIAN choice always wins, including OFF.
+
+For alerts, MENTAL retains an enabled ESP sound first, otherwise an enabled CONTACT sound; if both were off, it stays off. PSYCIAN initially inherits the old ESP alert preference. Your explicit new-channel choices always win. The older ESP and CONTACT sound choices remain available in the sound list.
 
 If all tabs do not fit, click the final overflow control to cycle through hidden categories. A filter missing from the visible row may be there. Custom categories added by personal triggers become available as filters too, and can be reordered after they appear. Combat capture recognizes specific game messages independently of color settings; turning off a highlight does not stop chat capture. Ordinary room prose is not copied into COMBAT.
 
@@ -57,7 +65,10 @@ Private communication includes forms such as:
 Xarus whispers, "I do not know."
 Tekk (ESP): "hello"
 You pick up Losmir's mental link, "test"
+You pick up Tekk's Psycian link, "hello" [r-1]
+You pick up Tekk's Dragon link, "hello" [r-1]
 You pick up Marcelline's Secian link, "Hello?" [r-1]
+Tekk thinks to you, "hello"
 You pick up Faolann's thoughts echoing through the area, "leave me be"
 ```
 
@@ -110,7 +121,7 @@ Each displayed tab shows the newest 1,000 matching entries. ALL first applies yo
 
 ## Duplicate messages
 
-Identical adjacent entries with the same category, speaker, target, and message are ignored once within the short deduplication window. A legitimate repeat later remains in the history.
+Identical adjacent entries with the same category, speaker, target, and message are ignored once within the short deduplication window. A legitimate repeat later remains in the history. Identical text delivered through distinct ESP, contact, and generic-link formats remains separate in MENTAL; matching GMCP/text copies still deduplicate.
 
 ## Add a custom capture trigger
 

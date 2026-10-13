@@ -135,7 +135,7 @@ end)
 test("chat settings snapshot sanitizes persistent tab order as data",function()
   local value=assert(Adapter.chatSettingsSnapshot({tab_order={" staff ","ALL","STAFF","OWN","<BAD>","ROOM\nESP"},all_sources={ROOM=true,COMBAT=false}}))
   eq(table.concat(value.tab_order,","),"STAFF,ALL")
-  eq(value.all_sources.ROOM,true); eq(value.all_sources.COMBAT,false); eq(value.all_sources.ESP,true)
+  eq(value.all_sources.ROOM,true); eq(value.all_sources.COMBAT,false); eq(value.all_sources.MENTAL,true); eq(value.all_sources.PSYCIAN,true)
   local missing,err=Adapter.chatSettingsSnapshot({tab_order={}}); eq(missing,nil); assert(err:find("empty",1,true))
   missing,err=Adapter.chatSettingsSnapshot({tab_order={"ALL"},all_sources={COMBAT="no"}}); eq(missing,nil); assert(err:find("booleans",1,true))
 end)
@@ -211,7 +211,7 @@ test("chat visibility snapshots preserve booleans and default legacy records to 
     local config={visible=visible,tab_order={" staff ","ALL"},all_sources={ROOM=false,COMBAT=true}}
     local snapshot=assert(Adapter.chatSettingsSnapshot(config))
     eq(snapshot.visible,visible); eq(table.concat(snapshot.tab_order,","),"STAFF,ALL")
-    eq(snapshot.all_sources.ROOM,false); eq(snapshot.all_sources.COMBAT,true); eq(snapshot.all_sources.ESP,true)
+    eq(snapshot.all_sources.ROOM,false); eq(snapshot.all_sources.COMBAT,true); eq(snapshot.all_sources.MENTAL,true); eq(snapshot.all_sources.PSYCIAN,true)
     eq(config.tab_order[1]," staff "); eq(config.visible,visible)
   end
   eq(assert(Adapter.chatSettingsSnapshot({tab_order={"ALL"}})).visible,true)
@@ -234,7 +234,7 @@ test("chat settings save and load round trip visibility with tab order and ALL s
       eq(serialized.visible,visible); eq(type(serialized.visible),"boolean")
       local loaded=assert(Adapter.loadChatSettings())
       eq(loaded.visible,visible); eq(table.concat(loaded.tab_order,","),"STAFF,ALL,ROOM")
-      eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,true); eq(loaded.all_sources.ESP,true)
+      eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,true); eq(loaded.all_sources.MENTAL,true); eq(loaded.all_sources.PSYCIAN,true)
       eq(config.visible,visible); eq(config.tab_order[1],"STAFF"); eq(h.files[h.path..".tmp"],nil); eq(h.files[h.path..".bak"],nil)
     end
     eq(h.writes,3)
@@ -432,7 +432,7 @@ test("each built-in sound resolves through the catalog to its fixed cache filena
       eq(h.plays[#h.plays].name,h.directory.."/"..record.file)
       eq(h.files[h.directory.."/"..record.file],h.wav(record.id))
     end
-    eq(#h.plays,10); eq(#h.mkdirs,2)
+    eq(#h.plays,#Sounds.catalog); eq(#h.mkdirs,2)
   end)
 end)
 

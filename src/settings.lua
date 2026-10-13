@@ -1,5 +1,6 @@
 local SHA=require("sha256")
 local SkillSort=require("skill_sort")
+local Channels=require("chat_channels")
 local Settings={CURRENT_SCHEMA=1}
 local function copy(value,seen)
   if type(value)~="table" then return value end
@@ -28,6 +29,21 @@ function Settings.migrate(input)
     if minimums.PRE==nil and minimums.VOI~=nil then minimums.PRE=minimums.VOI; changed=true end
     if minimums.LUK==nil and minimums.APP~=nil then minimums.LUK=minimums.APP; changed=true end
   end
+  local chat=type(result.chat)=="table" and result.chat or nil
+  if chat then
+    if type(chat.tab_order)=="table" then
+      local order=Channels.tabOrder(chat.tab_order)
+      local differs=#order~=#chat.tab_order
+      for index,value in ipairs(order) do if value~=chat.tab_order[index] then differs=true end end
+      if differs then chat.tab_order=order; changed=true end
+    end
+    if type(chat.all_sources)=="table" then
+      local sources=Channels.allSources(chat.all_sources)
+      for key,value in pairs(sources) do if chat.all_sources[key]~=value then changed=true end end
+      if chat.all_sources.ESP~=nil or chat.all_sources.CONTACT~=nil then changed=true end
+      chat.all_sources=sources
+    end
+  end
   local colors=type(result.colorization)=="table" and result.colorization or nil
   if colors and colors.highlights_enabled~=nil then
     for _,name in ipairs({"portal","presence","attack","damage","danger","recovery","upkeep","spell","discovery","illumination","notice","world","skills"}) do
@@ -39,6 +55,7 @@ end
 function Settings.resolve(defaults,input)
   local migrated,changed=Settings.migrate(input)
   local resolved=Settings.merge(defaults,migrated)
+  if type(resolved.chat)=="table" and type(resolved.chat.tab_order)=="table" then resolved.chat.tab_order=Channels.tabOrder(resolved.chat.tab_order) end
   resolved.display=type(resolved.display)=="table" and resolved.display or {}
   for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do
     if type(resolved.display[key])~="boolean" then resolved.display[key]=true end

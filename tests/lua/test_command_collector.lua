@@ -988,7 +988,7 @@ local function assertChatFilteredRunes(parsed)
 end
 local function checkInterleavedRuneChat(mode,withTail)
   local notice='Tester (ESP): "healing - 0 weaves remain"'
-  eq(assert(require("chat_parser").parse(notice,"Tester")).category,"ESP")
+  eq(assert(require("chat_parser").parse(notice,"Tester")).category,"MENTAL")
   local commands=mode=="startup" and {"info magic"} or {"info mag","info magic"}
   for _,command in ipairs(commands) do
     for _,prompt in ipairs({">","[199] 301/301 hp, 173/173 ftg >"}) do

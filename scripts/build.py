@@ -19,7 +19,8 @@ MODULES.append('skill_display')
 MODULES.append('skill_sort')
 MODULES.append('skill_settings_view')
 MODULES.extend(('quick_actions','rune_variables'))
-VIEW_CONTRACT_FILES=('view.lua','navigation.lua','skill_settings_view.lua')
+MODULES.append('chat_channels')
+VIEW_CONTRACT_FILES=('view.lua','navigation.lua','skill_settings_view.lua','chat_channels.lua','chat_sounds.lua')
 def view_contract():
     digest=hashlib.sha256()
     for name in VIEW_CONTRACT_FILES:

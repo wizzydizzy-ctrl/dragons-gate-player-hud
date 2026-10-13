@@ -1276,11 +1276,11 @@ test("chat settings separates visible clearing from confirmed saved-history dele
   assert(view.chat_settings_clear_saved.click()); eq(actions[#actions],"chat_clear_saved"); eq(view.chat_settings_clear_pending,false); eq(view.chat_settings_status.message:find("3 saved",1,true)~=nil,true)
   view.chat_settings_close.click(); eq(view.chat_settings_visible,false)
 end)
-test("chat sound defaults expose all ten labeled sounds through Options",function()
+test("chat sound defaults expose all canonical channel controls through Options",function()
   local Sounds=require("chat_sounds"); local view=chatView(); local used={}
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click(); view.option_action_buttons.chat_settings.click()
   eq(view.chat_settings_visible,true); eq(#view.chat_sound_order,10); eq(view.chat_sounds.volume,60)
-  for index,key in ipairs({"ALL","ROOM","PRIVATE","ESP","DRAGON","SECIAN","CONTACT","STAFF","COMBAT","WORLD"}) do
+  for index,key in ipairs(Sounds.tabOrder) do
     eq(view.chat_sound_order[index],key)
     local setting=view.chat_sounds.tabs[key]; local row=view.chat_sound_rows[key]
     eq(setting.enabled,key=="STAFF"); eq(setting.sound,key:lower()); eq(used[setting.sound],nil); used[setting.sound]=true
@@ -1315,7 +1315,9 @@ test("chat sound selectors cycle the catalog in both directions with exact paylo
     eq(action,"chat_sound_choice"); assert(Sounds.get(value)); calls[#calls+1]={tab,value}; return value
   end)
   for index,key in ipairs(Sounds.tabOrder) do
-    local row=view.chat_sound_rows[key]; local nextId=Sounds.catalog[index%#Sounds.catalog+1].id
+    local row=view.chat_sound_rows[key]; local catalogIndex
+    for i,sound in ipairs(Sounds.catalog) do if sound.id==key:lower() then catalogIndex=i; break end end
+    local nextId=Sounds.catalog[catalogIndex%#Sounds.catalog+1].id
     eq(row.next.click(),nextId); eq(calls[#calls][1],key); eq(calls[#calls][2],nextId)
     eq(view:chatSoundSetting(key).sound,nextId); assert(row.choice.message:find(Sounds.get(nextId).label,1,true))
     eq(row.previous.click(),key:lower()); eq(view:chatSoundSetting(key).sound,key:lower())
@@ -4105,16 +4107,62 @@ test("chat rendering tolerates native buffer sizing failures",function()
 end)
 
 test("WORLD is a reserved default tab and preserves all existing custom tab order",function()
-  eq(table.concat(View.chatFilterOrder({},nil),","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD")
+  eq(table.concat(View.chatFilterOrder({},nil),","),"ALL,ROOM,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT,WORLD")
   local preferred={"QUEST","STAFF","SECIAN","ALL","COMBAT","ROOM","PRIVATE","CONTACT","ESP","DRAGON","EVENTS"}
   local categories={"EVENTS","QUEST","SECIAN","WORLD","world"}
   local order=View.chatFilterOrder(categories,preferred)
-  eq(table.concat(order,","),table.concat(preferred,",")..",WORLD")
+  eq(table.concat(order,","),"QUEST,STAFF,SECIAN,ALL,COMBAT,ROOM,PRIVATE,MENTAL,DRAGON,EVENTS,PSYCIAN,WORLD")
   local worldFirst=View.chatFilterOrder(categories,{"world","QUEST","STAFF","WORLD"})
   eq(worldFirst[1],"WORLD"); eq(worldFirst[2],"QUEST"); eq(worldFirst[3],"STAFF")
   local count=0; for _,key in ipairs(worldFirst) do if key=="WORLD" then count=count+1 end end; eq(count,1)
 end)
 
+test("MENTAL replaces both legacy tabs and PSYCIAN stays available across viewport sizes",function()
+  local view=chatView(); local calls={}
+  view.settings.chat.tab_order={"STAFF","CONTACT","DRAGON","ESP","WORLD"}
+  view:setChatFilterCallback(function(category) calls[#calls+1]=category; return true end)
+  for _,width in ipairs({280,420,1000,1920}) do
+    view:applyLayout(require("layout").compute(width,800))
+    view:renderChat({},{"ESP","CONTACT","PSYCIAN","SECIAN"},"ESP")
+    eq(view.chat_active_filter,"MENTAL")
+    local count=0; local psycian=false
+    for _,key in ipairs(view.chat_filter_order) do
+      if key=="MENTAL" then count=count+1 end
+      if key=="PSYCIAN" then psycian=true end
+      assert(key~="ESP" and key~="CONTACT")
+    end
+    eq(count,1); eq(psycian,true); eq(view.chat_filter_order[1],"STAFF"); eq(view.chat_filter_order[2],"MENTAL")
+    view:renderChat({},{},"PSYCIAN")
+    local active=false
+    for _,button in ipairs(view.chat_buttons) do
+      assert(button.x+button.width<=view.layout.chat_width)
+      if button.category=="PSYCIAN" then active=true; button.click(); eq(calls[#calls],"PSYCIAN") end
+    end
+    eq(active,true)
+  end
+  view:delete()
+end)
+test("MENTAL and PSYCIAN show-in-ALL controls remain separate and preserve legacy OFF choices",function()
+  local view=chatView(); local calls={}
+  view:setChatAllSources({ESP=false,CONTACT=false,STAFF=true})
+  eq(view.chat_all_sources.MENTAL,false); eq(view.chat_all_sources.PSYCIAN,false)
+  eq(view.chat_all_source_buttons.ESP,nil); eq(view.chat_all_source_buttons.CONTACT,nil)
+  view:setOptionsActionCallback(function(action,key,value)
+    eq(action,"chat_all_source"); calls[#calls+1]={key,value}; return value
+  end)
+  eq(view.chat_all_source_buttons.MENTAL.click(),true); eq(calls[#calls][1],"MENTAL")
+  eq(view.chat_all_sources.MENTAL,true); eq(view.chat_all_sources.PSYCIAN,false)
+  eq(view.chat_all_source_buttons.PSYCIAN.click(),true); eq(calls[#calls][1],"PSYCIAN")
+  eq(view.chat_all_sources.PSYCIAN,true)
+  view:delete()
+end)
+test("chat text relabels historical Psycian and generic links without changing their originals",function()
+  local theme={accent="#ddbb77",text="#ffffff",jade="#99cc99",muted="#888888"}
+  local oldPsycian={category="ESP",line='You pick up Fiora\'s Psycian link, "hello" [r-1]'}
+  local oldMental={category="DRAGON",line='You pick up Tester\'s mental link, "hello"'}
+  assert(View.chatLine(oldPsycian,theme,false):find("PSYCIAN",1,true)); eq(oldPsycian.category,"ESP")
+  assert(View.chatLine(oldMental,theme,false):find("MENTAL",1,true)); eq(oldMental.category,"DRAGON")
+end)
 test("WORLD arrivals use the editable green style and preserve the full statement",function()
   local view=chatView(); view:applyLayout(require("layout").compute(1200,800))
   local line=" ** Obatalla Ogoun just arrived in the world."
@@ -4214,7 +4262,7 @@ test("WORLD can be moved first and its saved position survives wide and narrow l
   local view=chatView(); view:applyLayout(require("layout").compute(1920,1080)); local saved
   view:setChatOrderCallback(function(order) saved=table.concat(order,","); return true end)
   view:renderChat({}, {"WORLD"}, "WORLD"); assert(view:reorderChatTab("WORLD",1))
-  eq(saved,"WORLD,ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT")
+  eq(saved,"WORLD,ALL,ROOM,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT")
   for _,width in ipairs({280,1200,1920}) do
     view:applyLayout(require("layout").compute(width,800))
     eq(view.chat_filter_order[1],"WORLD"); eq(table.concat(view.settings.chat.tab_order,","),saved)
@@ -4291,7 +4339,7 @@ test("chat tabs stay inside narrow panels and expose deterministic overflow",fun
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)
   view:renderChat({}, {"QUEST","EVENTS","QUEST<script>","LINE\nBREAK"}, "ALL")
-  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD,QUEST,EVENTS")
+  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT,WORLD,QUEST,EVENTS")
   eq(#view.chat_overflow_categories>0,true)
   for _,button in ipairs(view.chat_buttons) do
     eq(button.x+button.width<=layout.chat_width,true); eq(tostring(button.message):find("<script>",1,true),nil)
@@ -4301,7 +4349,7 @@ end)
 
 test("chat tab order sanitizes saved preferences and appends missing categories",function()
   local order=View.chatFilterOrder({"QUEST","EVENTS"},{" events ","ROOM","OWN","<BAD>","EVENTS","ALL"})
-  eq(table.concat(order,","),"EVENTS,ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD,QUEST")
+  eq(table.concat(order,","),"EVENTS,ROOM,ALL,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT,WORLD,QUEST")
 end)
 
 test("chat tabs drag left and right, persist once, and keep click filtering",function()
@@ -4310,7 +4358,7 @@ test("chat tabs drag left and right, persist once, and keep click filtering",fun
   view:setChatOrderCallback(function(order) saved=table.concat(order,","); calls=(calls or 0)+1; return true end)
   view:renderChat({}, {}, "ALL")
   local room=view.chat_buttons[2]; room.click({button="LeftButton",globalX=100}); room.release({button="LeftButton",globalX=20})
-  eq(saved,"ROOM,ALL,PRIVATE,ESP,DRAGON,CONTACT,STAFF,COMBAT,WORLD"); eq(calls,1); eq(view.chat_active_filter,"ALL")
+  eq(saved,"ROOM,ALL,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT,WORLD"); eq(calls,1); eq(view.chat_active_filter,"ALL")
   local all=view.chat_buttons[2]; all.click({button="LeftButton",globalX=100}); all.release({button="LeftButton",globalX=101})
   eq(selected,"ALL"); eq(calls,1)
 end)
@@ -4329,10 +4377,10 @@ test("chat wrap reflows on resize while preserving scroll intent and filter",fun
   },{"ESP"},"ESP")
   view.chat_output.currentScroll=0; view:applyLayout(narrow)
   eq(view.chat_output.wrap,narrow.chat_wrap_columns); eq(view.chat_output.scrollCalls[#view.chat_output.scrollCalls],0)
-  eq(view.chat_active_filter,"ESP"); eq(#view.chat_output.echoes,2)
+  eq(view.chat_active_filter,"MENTAL"); eq(#view.chat_output.echoes,2)
   view.chat_output.currentScroll=view.chat_output.lastLine; view:applyLayout(wide)
   eq(view.chat_output.wrap,wide.chat_wrap_columns); eq(view.chat_output.scrollCalls[#view.chat_output.scrollCalls],"bottom")
-  eq(view.chat_active_filter,"ESP")
+  eq(view.chat_active_filter,"MENTAL")
 end)
 
 test("chat reflow keeps the same wrapped entry visible while narrowing and widening",function()
