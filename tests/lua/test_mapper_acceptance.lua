@@ -25,7 +25,7 @@ local function runtime(world)
   function f:createView() return {update=function() end,applyLayout=function() end,renderChat=function() end,setChatFilterCallback=function() end,setMapZoomCallback=function(_,callback) f.zoomCallback=callback end,delete=function() end} end
   function f:getGMCP() return self.gmcp end
   function f:isCharacterActive() return false end
-  function f:addEvent(name,fn) self.next=self.next+1; local id="event-"..self.next; self.events[id]={name=name,fn=fn}; return id end
+  function f:addEvent(name,fn) self.next=self.next+1; local id=self.next; self.events[id]={name=name,fn=fn}; return id end
   function f:killEvent(id) self.events[id]=nil end
   function f:addAlias(pattern,fn) self.next=self.next+1; local id="alias-"..self.next; self.aliases[id]={pattern=pattern,fn=fn}; return id end
   function f:killAlias(id) self.aliases[id]=nil end
@@ -207,8 +207,8 @@ local function submapSettings()
   return Settings.merge(Defaults,{mapper={transition_submaps={gate=true,portal=true,door=true,arch=true,path=true,other=true}}})
 end
 
-test("HUD release defaults are ready for version 0.3.102",function()
-  eq(Defaults.version,"0.3.102"); eq(Defaults.view_schema,5); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
+test("HUD release defaults are ready for version 0.3.103",function()
+  eq(Defaults.version,"0.3.103"); eq(Defaults.view_schema,5); eq(Defaults.mapper.enabled,true); eq(Defaults.mapper.walk_timeout,12)
   eq(Defaults.chat.all_sources.COMBAT,false); eq(Defaults.chat.all_sources.ROOM,true); eq(Defaults.chat.all_sources.STAFF,true); eq(Defaults.chat.all_sources.WORLD,true)
   eq(Defaults.theme.hp,"#ba5147"); eq(Defaults.theme.fatigue,"#b08f18")
   eq(Defaults.time.speed,2); eq(Defaults.time.sunrise_hour,6); eq(Defaults.time.sunset_hour,18)

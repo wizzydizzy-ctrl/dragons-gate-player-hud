@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.102**.
+Documentation covers **DGHUD v0.3.103**.
 
 ## Quick start
 
@@ -43,7 +43,19 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.102
+## Latest changes — v0.3.103
+
+- Outgoing `contact <target> <message>` requests now appear in MENTAL after a confirmed character session. Matching own broadcast echoes are shown once, without self-alert sounds. Turn capture off in **OPTIONS → CHAT SETTINGS**.
+- Prefer fewer tabs? Select **LINK TABS: COMBINED LINK** to view MENTAL, DRAGON, PSYCIAN, and SECIAN together. Separate tabs remain the default; source history, Show in ALL choices, sounds, and separate tab order are preserved.
+- A new **Visibility: Hidden / Visible / Unknown** indicator appears below Food and Water. It follows confirmed hide/reveal notices and your own INFO, supports wrapped output and invisibility, and marks old confirmations as stale. Hide it with **OPTIONS → HIDDEN / VISIBLE**.
+- Other characters' INFO no longer overwrites your Food, Water, or visibility. Failed hides, absent concealment wording, and quoted chat do not invent a visibility change.
+- Observer/session regression checks cover cached login data, disconnects, failed setting saves, reloads, and history retention. No extra INFO or SPELLS polling was added.
+
+Effects and Tactical displays are not included yet: representative active-effect output and a defined Tactical source are still needed.
+
+See [outgoing CONTACT and combined LINK settings](docs/CHATBOX.md#outgoing-contact-messages) and [visibility](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#hidden-visible-and-unknown).
+
+## Previous changes — v0.3.102
 
 - **MENTAL** combines ESP, contact thoughts, and generic mental links in one clear tab.
 - **PSYCIAN** has its own tab for explicitly named Psycian links. **DRAGON** and **SECIAN** remain separate for their named links.

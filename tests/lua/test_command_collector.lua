@@ -29,6 +29,82 @@ local function fake()
   return f
 end
 
+test("collector rejects foreign INFO by independent welcome identity without mutating retained self",function()
+  for _,foreign in ipairs({"Other Tester","TestOther Tester"}) do
+    local f=fake(); local changes=0
+    local c=Collector.new(f,Parser,function(_,key) if key=="info" then changes=changes+1 end end,nil,function() end)
+    assert(c:start()); f:line("Welcome to Dragon's Gate, Test!")
+    f:outgoing("info"); f:lines(info); local prior=c.snapshot.info
+    eq(prior.character.full_name,"Test Tester"); eq(changes,1)
+    f:outgoing("info"); local other={}
+    for i,line in ipairs(info) do other[i]=line:gsub("Test Tester",foreign) end
+    other[1]=other[1].." You are hidden. You are satiated."
+    f:lines(other); eq(c.active,nil); eq(c.snapshot.info,prior)
+    eq(prior.character.full_name,"Test Tester"); eq(prior.condition_text,""); eq(changes,1)
+    f:outgoing("info"); f:lines({"You are Other Tester, a young Elder.","HP: 1 of 200",">"})
+    eq(c.snapshot.info,prior); eq(prior.vitals,nil); eq(changes,1)
+    c:shutdown(); eq(f:owned(),0)
+  end
+end)
+
+test("targeted INFO interruptions quarantine owned requests even when identity is unknown",function()
+  for _,known in ipairs({false,true}) do
+    local f=fake(); local changes,calls=0,0
+    local c=Collector.new(f,Parser,function() changes=changes+1 end); assert(c:start())
+    if known then c.active_character="Test" end
+    f:outgoing("info"); f:lines(info); local prior=c.snapshot.info; eq(changes,1)
+    assert(c:request("info",function(result,err)
+      calls=calls+1; eq(result,nil); assert(err:find("targeted INFO",1,true))
+    end))
+    f:line(info[1]); f:outgoing("INFO Other")
+    assert(c.active.info_quarantine); eq(f:fireDelay(.15),false)
+    -- Even a biography-less foreign attribute result must remain quarantined.
+    f:lines({info[2],info[3],">"})
+    eq(c.snapshot.info,prior); eq(prior.character.full_name,"Test Tester")
+    eq(changes,1); eq(calls,1); eq(c.active,nil); eq(#f.sent,1)
+    f:outgoing("info"); f:lines(info); eq(changes,2)
+    c:shutdown(); eq(calls,1); eq(f:owned(),0)
+  end
+end)
+
+test("targeted INFO quarantine has a bounded silent timeout and resets on disconnect",function()
+  local f=fake(); local c=Collector.new(f,Parser,function() end); assert(c:start())
+  f:outgoing("info"); f:outgoing("info Other"); eq(f:fireDelay(5),true)
+  eq(c.active,nil); eq(c.snapshot.info,nil); eq(#f.sent,0)
+  f:outgoing("info"); f:outgoing("info Other"); f:disconnect()
+  eq(c.active,nil); eq(c.active_character,nil)
+  f:outgoing("info"); f:lines(info); eq(c.snapshot.info.character.full_name,"Test Tester")
+  c:shutdown(); eq(f:owned(),0)
+end)
+
+test("collector INFO limits and repeated biographies preserve snapshots and completion callbacks",function()
+  for _,mode in ipairs({"lines","bytes","multiple"}) do
+    local f=fake(); local calls,changes=0,0
+    local c=Collector.new(f,Parser,function() changes=changes+1 end); assert(c:start())
+    f:outgoing("info"); f:lines(info); local prior=c.snapshot.info
+    assert(c:request("info",function(result,err) calls=calls+1; eq(result,nil); assert(err) end))
+    f:line(info[1])
+    if mode=="lines" then for _=1,65 do f:line("Harmless INFO detail.") end
+    elseif mode=="bytes" then f:line(string.rep("x",16385)) else f:line(info[1]) end
+    assert(c.active.info_quarantine); assert(#c.active.lines<=64)
+    f:lines({"You are hidden.",">"}); eq(c.snapshot.info,prior); eq(changes,1); eq(calls,1)
+    c:shutdown(); eq(f:owned(),0)
+  end
+end)
+
+test("collector current character switches prevent previous self INFO from returning",function()
+  local f=fake(); local changes=0
+  local c=Collector.new(f,Parser,function(_,key) if key=="info" then changes=changes+1 end end,nil,function() end)
+  c:start(); f:line("Welcome to Dragon's Gate, Test!"); f:outgoing("info"); f:lines(info); eq(changes,1)
+  f:line("Welcome to Dragon's Gate, Other!"); eq(c.snapshot.info,nil)
+  f:outgoing("info"); f:lines(info); eq(c.snapshot.info,nil); eq(changes,1)
+  local own={}; for i,line in ipairs(info) do own[i]=line:gsub("Test Tester","Other Tester") end
+  f:outgoing("info"); f:lines(own); eq(c.snapshot.info.character.full_name,"Other Tester"); eq(changes,2)
+  -- Strict ownership of named biographies still permits bare self attribute deltas.
+  f:outgoing("info"); f:lines({info[2],info[3],">"}); eq(changes,3)
+  eq(c.snapshot.info.character.full_name,"Other Tester"); c:shutdown(); eq(f:owned(),0)
+end)
+
 test("owned fresh requests publish parsed data once and suppress their outgoing echo",function()
   local f=fake(); local changes=0; local c=Collector.new(f,Parser,function() changes=changes+1 end)
   c:start()

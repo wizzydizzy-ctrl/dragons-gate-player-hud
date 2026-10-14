@@ -2,11 +2,21 @@ local Controller={}
 Controller.__index=Controller
 local History=require("chat_history")
 local Channels=require("chat_channels")
+local Outgoing=require("chat_outgoing")
 
 local HANDOFF_SCHEMA=1
 local STAFF_MESSAGE_FLUSH_DELAY=.4
 local STAFF_MESSAGE_MAX_LINES=20
 local STAFF_MESSAGE_MAX_CHARS=4000
+local LINK_VIEW=Channels.linkFilter
+local linkConstituents=Channels.linkMembers
+
+local function boundedCategory(value)
+  if type(value)~="string" or #value>32 then return nil end
+  value=Channels.category(value)
+  if value==LINK_VIEW then return value end
+  return value:match("^[A-Z][A-Z0-9_%-]*$") and value or nil
+end
 
 local function copyEntries(entries)
   local source=History.retained(entries,History.MAX_ENTRIES)
@@ -37,8 +47,8 @@ local function call(object,name,...)
   return first,second
 end
 
-function Controller.new(adapter,parser,history,storage,onChange,characterProvider,allSources,onAccepted)
-  return setmetatable({adapter=adapter,parser=parser,history=history,storage=storage,onChange=onChange or function() end,characterProvider=characterProvider or function() end,allSources=type(allSources)=="table" and allSources or nil,onAccepted=type(onAccepted)=="function" and onAccepted or nil,filter="ALL",started=false,historiesByCharacter={}},Controller)
+function Controller.new(adapter,parser,history,storage,onChange,characterProvider,allSources,onAccepted,captureOutgoing)
+  return setmetatable({adapter=adapter,parser=parser,history=history,storage=storage,onChange=onChange or function() end,characterProvider=characterProvider or function() end,allSources=type(allSources)=="table" and allSources or nil,onAccepted=type(onAccepted)=="function" and onAccepted or nil,filter="ALL",started=false,historiesByCharacter={},captureOutgoing=captureOutgoing~=false,outgoing=Outgoing.new(),linkCombined=false},Controller)
 end
 
 function Controller:character()
@@ -51,7 +61,7 @@ function Controller:notify()
 end
 
 function Controller:entries()
-  local retained=self.history:entries(self.filter,self.allSources)
+  local retained=self.history:entries(self.filter,self.allSources,self.linkCombined)
   local visible={}
   -- Limit the rendered view only after filtering. Hidden combat cannot push
   -- ordinary conversations out of ALL, and dedicated histories remain intact.
@@ -63,6 +73,37 @@ end
 function Controller:setAllSources(sources)
   if type(sources)~="table" then return nil,"ALL tab sources must be a table" end
   self.allSources=sources
+  if self.started then self:notify() end
+  return true
+end
+
+function Controller:setLinkCombined(enabled)
+  if type(enabled)~="boolean" then return nil,"combined link mode must be a boolean" end
+  if enabled and not self.currentCharacterKey then self:syncCharacter() end
+  local customLinkView=false
+  if enabled or self.filter==LINK_VIEW then
+    for _,entry in ipairs(self.history.items or {}) do
+      if Channels.category(entry.category)==LINK_VIEW then
+        customLinkView=true; break
+      end
+    end
+  end
+  if enabled and customLinkView then
+    if self.linkCombined then self:setLinkCombined(false) end
+    return nil,"LINK VIEW is already a custom chat category"
+  end
+  local wasCombined=self.linkCombined
+  self.linkCombined=enabled
+  if enabled and linkConstituents[self.filter] then
+    self.linkPriorFilter=self.filter
+    self.filter=LINK_VIEW
+  elseif not enabled then
+    if self.filter==LINK_VIEW and (wasCombined or not customLinkView) then
+      local prior=boundedCategory(self.linkPriorFilter)
+      self.filter=prior and prior~=LINK_VIEW and prior or "MENTAL"
+    end
+    self.linkPriorFilter=nil
+  end
   if self.started then self:notify() end
   return true
 end
@@ -80,8 +121,10 @@ function Controller:status()
   return {active_filter=self.filter,visible_count=#self:entries(),storage_key=storageKey,last_storage_error=storageError or self.lastStorageError}
 end
 
-function Controller:accept(entry,suppressAlert)
-  local added=self.history:append(entry,call(self.adapter,"epoch"))
+function Controller:accept(entry,suppressAlert,force)
+  -- A real custom category always wins over the virtual combined view.
+  if self.linkCombined and Channels.category(entry.category)==LINK_VIEW then self:setLinkCombined(false) end
+  local added=self.history:append(entry,call(self.adapter,"epoch"),force==true and entry.source=="outgoing")
   if not added then return false end
   local ok,err=call(self.storage,"append",entry)
   if not ok then self:reportStorageError(err or "could not append chat log") end
@@ -178,11 +221,13 @@ function Controller:acceptParsed(entry)
 end
 
 function Controller:handoff()
+  self.outgoing:clear()
   self:flushStaffMessage(true)
   return {
     schema=HANDOFF_SCHEMA,
     character_key=validStorageKey(self.currentCharacterKey),
     filter=self.filter,
+    previous_link_filter=boundedCategory(self.linkPriorFilter),
     entries=copyEntries(self.history.items),
     last_key=self.history.lastKey,
     last_epoch=self.history.lastEpoch,
@@ -192,7 +237,10 @@ end
 
 function Controller:restoreHandoff(handoff)
   if type(handoff)~="table" or tonumber(handoff.schema)~=HANDOFF_SCHEMA then return nil,"unsupported chat handoff" end
-  local filter=self.parser.category(Channels.category(handoff.filter)) or "ALL"
+  self.outgoing:clear()
+  local filter=boundedCategory(handoff.filter) or "ALL"
+  local prior=boundedCategory(handoff.previous_link_filter)
+  self.linkPriorFilter=prior~=LINK_VIEW and prior or nil
   local key="profile"
   self.history:hydrate(copyEntries(handoff.entries))
   if handoff.partial==true then
@@ -226,13 +274,95 @@ function Controller:syncCharacter()
   return true
 end
 
+function Controller:stopOutgoingObserver()
+  self.outgoingGeneration=(self.outgoingGeneration or 0)+1
+  local event=self.outgoingEvent; self.outgoingEvent=nil
+  if event then call(self.adapter,"killEvent",event) end
+  self.outgoing:clear()
+end
+
+function Controller:startOutgoingObserver()
+  if self.outgoingEvent or not self.captureOutgoing or type(self.adapter.addEvent)~="function" then return true end
+  self.outgoingGeneration=(self.outgoingGeneration or 0)+1
+  local generation=self.outgoingGeneration
+  local event,err=call(self.adapter,"addEvent","sysDataSendRequest",function(_,command)
+    if self.outgoingGeneration==generation then self:onOutgoing(command) end
+  end)
+  if type(event)~="number" or event<1 or event~=math.floor(event) then return nil,err or "could not register outgoing chat observer" end
+  self.outgoingEvent=event
+  return true
+end
+
+function Controller:setCaptureOutgoing(enabled)
+  if type(enabled)~="boolean" then return nil,"outgoing capture must be a boolean" end
+  self.captureOutgoing=enabled
+  if not enabled then self:stopOutgoingObserver(); return true end
+  if self.started then return self:startOutgoingObserver() end
+  return true
+end
+
+function Controller:outgoingCharacter()
+  if type(self.sessionActive)=="function" then
+    local ok,active=pcall(self.sessionActive)
+    if not ok or active~=true then self.outgoing:clear(); return nil end
+  end
+  if call(self.adapter,"isCharacterActive")~=true then self.outgoing:clear(); return nil end
+  local character=Outgoing.character(self:character())
+  if not character then self.outgoing:clear() end
+  return character
+end
+
+function Controller:nextOutgoingId(epoch)
+  epoch=tonumber(epoch)
+  if not epoch or epoch~=epoch or epoch==math.huge or epoch==-math.huge then epoch=os.time() end
+  local epochKey=tostring(epoch)
+  local sequence=self.outgoingSequence or 0
+  if self.outgoingEpoch~=epochKey then
+    -- A replacement controller can start in the same second as saved sends.
+    -- Seed from retained IDs, keeping cold reloads and handoffs distinct.
+    for _,entry in ipairs(self.history.items or {}) do
+      if entry.source=="outgoing" and type(entry.outgoing_id)=="string" and #entry.outgoing_id<=64 then
+        local savedEpoch,savedSequence=entry.outgoing_id:match("^([^:]+):(%d+)$")
+        savedSequence=tonumber(savedSequence)
+        if savedEpoch==epochKey and savedSequence and savedSequence<9007199254740991 then sequence=math.max(sequence,savedSequence) end
+      end
+    end
+  end
+  self.outgoingEpoch=epochKey; self.outgoingSequence=sequence+1
+  return epochKey..":"..string.format("%.0f",self.outgoingSequence)
+end
+
+function Controller:onOutgoing(command)
+  if not self.started then return nil,"chatbox is not running" end
+  if not self.captureOutgoing then return false end
+  local character=self:outgoingCharacter()
+  if not character then return false end
+  local entry=Outgoing.parse(command,character,call(self.adapter,"timestamp"))
+  if not entry then return false end
+  local epoch=call(self.adapter,"epoch")
+  local serverName=Outgoing.serverName(character,call(self.adapter,"getGMCP"))
+  entry.outgoing_id=self:nextOutgoingId(epoch)
+  self:flushStaffMessage()
+  local accepted=self:accept(entry,true,true)
+  if accepted then self.outgoing:record(entry,epoch,serverName) end
+  return accepted
+end
+
 function Controller:start(preserveDisplay)
   if self.started then return true end
   self:syncCharacter()
+  if self.linkCombined then self:setLinkCombined(true) end
   local trigger,triggerErr=call(self.adapter,"addLineTrigger",function(line) self:onLine(line) end)
   if not trigger then return nil,triggerErr or "could not register chat trigger" end
   self.trigger=trigger
   self.started=true
+  local observed,observerErr=self:startOutgoingObserver()
+  if not observed then
+    self.started=false; self.trigger=nil
+    self:stopOutgoingObserver()
+    call(self.adapter,"killTrigger",trigger)
+    return nil,observerErr
+  end
   if preserveDisplay~=true then self:notify() end
   return true
 end
@@ -240,6 +370,14 @@ end
 function Controller:onLine(line)
   if not self.started then return nil,"chatbox is not running" end
   local entry=self.parser.parse(line,self:character(),call(self.adapter,"timestamp"))
+  if entry and self.captureOutgoing then
+    local character=self:outgoingCharacter()
+    local serverName=Outgoing.serverName(character,call(self.adapter,"getGMCP"))
+    if self.outgoing:reconcile(entry,character,call(self.adapter,"epoch"),serverName) then
+      if self.pendingStaffMessage then self:flushStaffMessage() end
+      return false
+    end
+  end
   if self.pendingStaffMessage then
     if staffMessageBoundary(line,entry) and not referralTerminatorContinuation(self.pendingStaffMessage,line) then
       self:flushStaffMessage()
@@ -254,22 +392,26 @@ end
 
 function Controller:capture(category,text,metadata)
   if not self.started then return nil,"chatbox is not running" end
-  local entry,err=self.parser.custom(category,text,metadata,self:character(),call(self.adapter,"timestamp"))
+  local customLinkView=Channels.category(category)==LINK_VIEW
+  local entry,err=self.parser.custom(customLinkView and "LINK_VIEW" or category,text,metadata,self:character(),call(self.adapter,"timestamp"))
   if not entry then return nil,err end
+  if customLinkView then entry.category=LINK_VIEW end
   local accepted=self:accept(entry)
   return accepted==false and true or accepted
 end
 
 function Controller:setFilter(filter)
   if not self.started then return nil,"chatbox is not running" end
-  filter=self.parser.category(Channels.category(filter))
+  filter=boundedCategory(filter)
   if not filter then return nil,"invalid chat category" end
+  if self.linkCombined and linkConstituents[filter] then self.linkPriorFilter=filter; filter=LINK_VIEW end
   self.filter=filter
   self:notify()
   return true
 end
 
 function Controller:clearVisibleHistory()
+  self.outgoing:clear()
   local removed=self.history:clearVisible()
   self:notify()
   return true,removed
@@ -287,6 +429,7 @@ function Controller:clearSavedHistory(confirmed)
   -- timer may put that private text back into the freshly cleared history.
   self:cancelStaffMessageTimer()
   self.pendingStaffMessage=nil; self.pendingStaffMessageLines=nil
+  self.outgoing:clear()
   self.history:clearVisible()
   self.currentCharacterKey="profile"
   self.historiesByCharacter={profile=self.history}
@@ -295,6 +438,7 @@ function Controller:clearSavedHistory(confirmed)
 end
 
 function Controller:shutdown()
+  self:stopOutgoingObserver()
   self:flushStaffMessage(true)
   self.started=false
   local trigger=self.trigger; self.trigger=nil; local storage=self.storage

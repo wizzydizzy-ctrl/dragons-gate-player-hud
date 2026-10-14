@@ -30,7 +30,7 @@ local function datedFiles(files)
 end
 
 local function entryIdentity(entry)
-  local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source"}; local values={}
+  local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source","outgoing_id"}; local values={}
   for index,name in ipairs(fields) do values[index]=tostring(entry[name] or "") end
   return table.concat(values,"\0")
 end

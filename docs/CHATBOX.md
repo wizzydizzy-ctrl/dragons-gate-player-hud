@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.102.
+Applies to DGHUD v0.3.103.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
@@ -13,6 +13,30 @@ Chat history belongs to the Mudlet profile, not to one character. Switching char
 Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanently remove all saved DGHUD chat history. Permanent deletion requires two clicks; the command-line equivalent requires the full `dghud chat clear saved confirm` phrase.
 
 The same settings window has a **SHOW IN ALL** section. Toggle any source to control whether it appears in the combined **ALL** tab. `COMBAT` starts off there; every other source starts on. This changes only the combined view—dedicated tabs continue to work, capture continues, and saved history is untouched. The choices persist through profile restarts and HUD updates.
+
+## Outgoing CONTACT messages
+
+Open **OPTIONS → CHAT SETTINGS → CAPTURE OUTGOING CONTACTS**. It starts **ON** and your saved choice survives updates and restarts. After the HUD confirms a character session, a complete `contact <target> <message>` request is copied into **MENTAL**:
+
+```text
+You -> recipient (outgoing request): Hello!
+```
+
+This records what you requested, **not proof that the game accepted or delivered it**. The HUD does not resend the command, change it, or hide its normal game output. `contact all`, `contact room`, and named targets are supported when followed by a message. Bare commands, help requests, other commands, login input, and multiline input are not recorded by this feature.
+
+An exact, recent, matching own broadcast echo is not added a second time to the chatbox. Ambiguous echoes and other speakers' messages stay visible. Repeating a request intentionally keeps each request. Outgoing requests and reconciled own echoes do not play chat alerts.
+
+Outgoing entries follow MENTAL's **SHOW IN ALL** choice, remain visible in PRIVATE, and save in the same local profile history even while the chatbox is hidden. They are not uploaded. Turn the setting **OFF** if you do not want outgoing requests saved; this does not delete existing history.
+
+## One LINK tab or separate link tabs
+
+Open **OPTIONS → CHAT SETTINGS → LINK TABS**. **SEPARATE** is the default: MENTAL, DRAGON, PSYCIAN, and SECIAN retain their own tabs. Choose **COMBINED LINK** to see their messages together in one **LINK** tab.
+
+This changes only the displayed filters. Every message retains its original channel, saved history, and per-channel sound settings. **SHOW IN ALL** continues to use the individual source choices, not the combined label. PRIVATE is unchanged.
+
+The LINK tab initially takes the first constituent tab's position. Drag it to your preferred position; its combined order is remembered separately. Returning to SEPARATE restores your separate tab order. If you combine while viewing one constituent, LINK is selected; ALL, PRIVATE, STAFF, and personal filters remain selected normally. A profile restart or ordinary reload starts on ALL as before.
+
+Personal categories are not merged: an existing custom LINK appears as **LINK (custom)** alongside the combined tab. A personal **LINK VIEW** category conflicts with the internal combined filter, so the HUD keeps separate tabs instead of hiding that category.
 
 ## Sound alerts
 

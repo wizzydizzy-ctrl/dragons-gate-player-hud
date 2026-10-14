@@ -1,4 +1,5 @@
 local Collector={}; Collector.__index=Collector
+local Visibility=require("visibility_tracker")
 local SPECS={inventory={parser="parseInventory",snapshot="inventory"},stat={parser="parseStat",snapshot="stat"},info={parser="parseInfo",snapshot="info"},["info religion"]={parser="parseReligion",snapshot="religion"},["info magic"]={parser="parseRunes",snapshot="runes"},skill={parser="parseSkills",snapshot="skills"},time={parser="parseTime",snapshot="time"}}
 -- TIME now returns a complete prompt on its own. Nudging it injects visible,
 -- duplicate prompts on Dragon's Gate 4.0.9.4 and later.
@@ -139,6 +140,9 @@ function Collector:finish(lines,tableBoundary)
   self:cancelSkillBoundary()
   self.active=nil
   local completed,requestError
+  if active.info_quarantine then
+    lines=nil; requestError=active.info_quarantine
+  end
   if lines and active.onComplete and (active.command=="skill" or active.command=="info magic") then
     local called,valid,err,vetted=pcall(self.parser.validateActionResponse,active.command,lines)
     if called and valid then lines=vetted or lines
@@ -147,6 +151,15 @@ function Collector:finish(lines,tableBoundary)
   if lines then
     local spec=SPECS[active.command]; local fn=spec and self.parser[spec.parser]
     local ok,result=pcall(fn,lines,active.command=="skill" and tableBoundary==true)
+    if ok and result and spec.snapshot=="info" then
+      local identity=Visibility.selfIdentity(self.selfProvider or function() return self.active_character end)
+      -- Attribute-only deltas from a bare self INFO remain supported. A named
+      -- biography, even a partial one, must belong to the independently known self.
+      local named=result.character and result.character.full_name or active.info_name
+      if named and not Visibility.infoOwned({character={full_name=named}},identity,self.selfProvider==nil) then
+        result=nil; requestError="INFO belongs to another character. Self data was not changed."
+      end
+    end
     if ok and result then
       local parsed=result
       if spec.snapshot=="stat" then result=self:mergeStat(result)
@@ -204,6 +217,27 @@ function Collector:onLine(value)
     if next(delta) then self.onChange(self.snapshot,"stat",delta) end
   end
   if not self.active then return end
+  if self.active.command=="info" then
+    local active=self.active
+    if not active.info_quarantine then
+      local content=Visibility.content(value)
+      local full=content:match('^You are ([^,"]+),')
+      if full then
+        if active.info_name then active.info_quarantine="INFO contains multiple biographies. Self data was not changed."
+        else active.info_name=full end
+      end
+      active.info_bytes=(active.info_bytes or 0)+#value
+      if #active.lines>=64 or active.info_bytes>16384 then
+        active.info_quarantine="INFO exceeded the capture limit. Self data was not changed."
+      end
+    end
+    if active.info_quarantine then
+      -- Retain ownership until the terminal prompt or existing bounded timeout.
+      -- Do not retain additional lines, publish conditions, or overwrite INFO.
+      if self.parser.isPrompt(value) then self:finish(nil) end
+      return
+    end
+  end
   -- Lines remain owned by the timed-out command throughout recovery/drain. A
   -- complete delayed response can still succeed before the bounded drain ends.
   if #self.active.lines==1 and self.parser.isPrompt(self.active.lines[1]) and not self.parser.isPrompt(value) then self.active.lines={} end
@@ -237,6 +271,18 @@ function Collector:onLine(value)
 end
 function Collector:onOutgoing(command)
   command=tostring(command or ""):match("^%s*(.-)%s*$"):lower()
+  if command:match("^info%s+.+$") and not SPECS[command] and command~="info mag" then
+    if self.active and self.active.command=="info" then
+      local active=self.active
+      active.info_quarantine="Self INFO was interrupted by a targeted INFO request. Self data was not changed."
+      if self.timeout then self.adapter:cancelTimer(self.timeout); self.timeout=nil end
+      if self.prompt_nudge then self.adapter:cancelTimer(self.prompt_nudge); self.prompt_nudge=nil end
+      -- The foreign response owns this capture until its prompt/timeout. No
+      -- recovery Enter may manufacture a boundary before that response arrives.
+      self:scheduleTimeout(active,(RESPONSE_WAIT.info+RECOVERY_WAIT.info),function() self:finish(nil) end)
+    end
+    return
+  end
   if self.native_skill_arguments and command:match("^skill%s+.+$") then
     -- Native staff requests inspect someone else's skills. Do not let their
     -- response replace this character's saved list if a prior SKILL is pending.
@@ -247,6 +293,7 @@ function Collector:onOutgoing(command)
   if command=="inv" then command="inventory" end
   if command=="info mag" then command="info magic" end
   if not SPECS[command] or self.sending_startup_command==command or self.sending_requested_command==command then return end
+  if self.active and self.active.info_quarantine then return end
   if self.active then
     if self.active.command=="skill" and self.skill_boundary and not self.active.onComplete then
       -- Another tracked command can start before the zero-delay boundary fires.

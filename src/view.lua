@@ -105,7 +105,7 @@ local function applyChatStyle(output,style)
   if type(output.setBold)=="function" then pcall(output.setBold,output,style.bold==true) end
   if type(output.setUnderline)=="function" then pcall(output.setUnderline,output,style.underline==true) end
 end
-function View.identityContent(character,t,layout,needs)
+function View.identityContent(character,t,layout,needs,visibility)
   local physical=character.physical or {}; local detail=""
   if physical.age or physical.sex or physical.height then detail="<br><span style='color:"..t.muted.."'>"..esc(physical.age or "")..(physical.age and " · " or "")..esc(physical.sex or "")..(physical.height and " · "..esc(physical.height) or "").."</span>" end
   local faithValues={}
@@ -118,11 +118,17 @@ function View.identityContent(character,t,layout,needs)
   local hungerColor={unknown=t.muted,ok=t.jade,satiated=t.jade,full=t.jade,hungry="#d6a84b",ravenous="#d9792b",starving="#d34a42"}; local thirstColor={unknown=t.muted,ok=t.jade,quenched=t.jade,sloshing="#d6a84b",thirsty="#d6a84b",very_thirsty="#d9792b",parched="#d34a42",dehydrated="#d34a42"}
   local needsLine="<br><span style='color:"..t.muted.."'>Food: </span><span style='color:"..(hungerColor[hunger.status] or t.muted).."'><b>"..(hungerText[hunger.status] or "—").."</b></span><span style='color:"..t.muted.."'> · Water: </span><span style='color:"..(thirstColor[thirst.status] or t.muted).."'><b>"..(thirstText[thirst.status] or "—").."</b></span>"
   local role=character.class
+  local visibilityLine=""
+  if type(visibility)=="table" then
+    local text=({hidden="Hidden",visible="Visible",unknown="Unknown"})[visibility.status] or "Unknown"
+    local color=visibility.stale and "#d6a84b" or (visibility.status=="hidden" and t.jade or t.muted)
+    visibilityLine="<br><span style='color:"..t.muted.."'>Visibility: </span><span style='color:"..color.."'><b>"..text.."</b>"..(visibility.stale and " · last confirmed" or "").."</span>"
+  end
   if tostring(character.race or ""):lower()=="dragon" then
     local ordinal=tostring(physical.life_stage or ""):lower():match("^(%d+[a-z][a-z])%s+stage$")
     if ordinal then role=ordinal.." Stage" end
   end
-  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..needsLine,layout.body_font)
+  return View.withFont("<span style='color:"..t.accent..";font-size:"..layout.heading_font.."px'><b>"..esc(character.full_name).."</b></span><br><span style='color:"..t.jade.."'><b>"..esc(character.race).." · "..esc(role).."</b></span>"..detail..faith..needsLine..visibilityLine,layout.body_font)
 end
 function View.headerContent(layout,t,fullName)
   local detail=layout.mode=="compact" and " &nbsp; <span style='color:"..t.text.."'><b>"..esc(fullName).."</b></span>" or ""
@@ -564,6 +570,8 @@ function View.new(settings)
   self.option_action_order={"command_help","refresh_data","auto_update","base_ui_toggle","text_size","auto_main_wrap","align_main_input","main_skills","chat_settings","keybindings_settings","color_settings","map_settings","roller_settings","support"}
   local actionLabels={command_help="HELP & COMMANDS…",refresh_data="REFRESH CHARACTER DATA",auto_update="AUTOMATIC UPDATES: OFF",base_ui_toggle="MUDLET UI: UNAVAILABLE",text_size="HUD TEXT: NORMAL",auto_main_wrap="AUTO MAIN WRAP: ON",align_main_input="ALIGN INPUT: OFF",chat_settings="CHAT SETTINGS…",keybindings_settings="KEYBINDINGS…",color_settings="COLOR SETTINGS…",map_settings="MAP SETTINGS…",roller_settings="AUTOROLLER…",support="SUPPORT…"}
   actionLabels.main_skills="MAIN SKILLS: ON"
+  actionLabels.visibility_status="HIDDEN / VISIBLE: ON"
+  table.insert(self.option_action_order,8,"visibility_status")
   actionLabels.skill_settings="SKILLS & RUNES…"
   actionLabels.combine_skills_runes="COMBINED SKILLS / RUNES: ON"
   for index,key in ipairs(self.option_action_order) do if key=="text_size" then table.insert(self.option_action_order,index+1,"combine_skills_runes"); break end end
@@ -571,6 +579,7 @@ function View.new(settings)
   self.option_action_buttons={}
   for _,key in ipairs(self.option_action_order) do local button=label("DGHUD.Header.Options."..key,self.options_scroll); button.option_text=actionLabels[key]; button:setClickCallback(function() return self:selectOptionsAction(key) end); self.option_action_buttons[key]=button end
   self:setMainSkillsEnabled(not (self.settings.display and self.settings.display.main_skills==false))
+  self:setVisibilityDisplay(not (self.settings.display and self.settings.display.visibility_status==false))
   self:setCombinedSkillsRunes(not (self.settings.display and self.settings.display.combine_skills_runes==false))
   self:createSkillSettings()
   self:setSkillSortPreferences(self.settings.display)
@@ -606,6 +615,20 @@ function View.new(settings)
   self.chat_settings_content=Geyser.ScrollBox:new({name="DGHUD.ChatSettings.Content",x=12,y=46,width=556,height=406},self.chat_settings_panel)
   self:createChatSoundControls()
   self.chat_settings_visibility=label("DGHUD.ChatSettings.Visibility",self.chat_settings_content)
+  self.chat_settings_outgoing=label("DGHUD.ChatSettings.Outgoing",self.chat_settings_content)
+  self.chat_settings_links=label("DGHUD.ChatSettings.Links",self.chat_settings_content)
+  self.chat_capture_outgoing=not (settings.chat and settings.chat.capture_outgoing==false)
+  self.chat_combine_links=settings.chat and settings.chat.combine_links==true
+  for _,row in ipairs({{self.chat_settings_outgoing,"chat_outgoing","chat_capture_outgoing"},{self.chat_settings_links,"chat_combine_links","chat_combine_links"}}) do
+    local button,action,field=row[1],row[2],row[3]
+    button:setClickCallback(function()
+      if not self.options_action_callback then return nil,"Chat settings are unavailable." end
+      local saved,err=self.options_action_callback(action,nil,not self[field])
+      if saved==nil then self.chat_settings_status_text=tostring(err or "Could not save chat preference."); self:renderChatSettings(); return nil,err end
+      self[field]=saved==true
+      self:renderChatSettings(); return saved
+    end)
+  end
   self.chat_settings_visibility:setClickCallback(function()
     if self.disposed or not self.root then return nil,"HUD view is unavailable." end
     local wanted=self.chat_visible==false
@@ -924,8 +947,9 @@ local function chatFilterOrder(categories,preferred)
   return result
 end
 View.chatFilterOrder=chatFilterOrder
-local function chatTabWidth(category,font)
-  return math.max(42,math.min(96,math.floor(#tostring(category)*(tonumber(font) or 13)*.55+18)))
+local function chatTabWidth(category,font,combined)
+  local caption=combined and (category==Channels.linkFilter and "LINK" or category=="LINK" and "LINK (custom)") or category
+  return math.max(42,math.min(combined and category=="LINK" and 120 or 96,math.floor(#tostring(caption)*(tonumber(font) or 13)*.55+18)))
 end
 function View:setChatFilterCallback(callback)
   self.chat_filter_callback=type(callback)=="function" and callback or nil
@@ -947,7 +971,7 @@ function View:reorderChatTab(category,targetIndex)
     local ok,accepted,message=pcall(self.chat_order_callback,reordered)
     if not ok or accepted==nil or accepted==false then self.chat_drag=nil; return nil,tostring(message or accepted or "Could not save chat tab order") end
   end
-  self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=reordered; self.chat_filter_order=reordered; self.chat_drag=nil
+  self.settings.chat=self.settings.chat or {}; self.settings.chat[self.chat_presentation_combined and "combined_tab_order" or "tab_order"]=reordered; self.chat_filter_order=reordered; self.chat_drag=nil
   self:renderChatTabs(self.chat_categories,self.chat_active_filter)
   return true
 end
@@ -961,11 +985,13 @@ function View:renderChatTabs(categories,activeFilter)
   self.chat_tabs_refresh_pending=nil
   for _,button in ipairs(self.chat_buttons or {}) do if button.delete then button:delete() end end
   self.chat_buttons={}; self.chat_overflow_button=nil; self.chat_filter_order=chatFilterOrder(categories,self.settings.chat and self.settings.chat.tab_order)
+  self.chat_presentation_combined=false
+  if self.chat_combine_links then self.chat_filter_order,self.chat_presentation_combined=Channels.combinedOrder(self.chat_filter_order,categories,self.settings.chat and self.settings.chat.combined_tab_order) end
   local width=math.max(80,tonumber(self.layout and self.layout.chat_width) or 640)
   local font=tonumber(self.layout and self.layout.chat_font) or 13
   local gap,padding,overflowWidth=4,8,64
   local total=padding
-  for _,category in ipairs(self.chat_filter_order) do total=total+chatTabWidth(category,font)+gap end
+  for _,category in ipairs(self.chat_filter_order) do total=total+chatTabWidth(category,font,self.chat_presentation_combined)+gap end
   local visible={}; local hidden={}
   if total+padding-gap<=width then
     for _,category in ipairs(self.chat_filter_order) do visible[#visible+1]=category end
@@ -973,7 +999,7 @@ function View:renderChatTabs(categories,activeFilter)
     local room=math.max(42,width-padding*2-overflowWidth-gap)
     local used=0
     for _,category in ipairs(self.chat_filter_order) do
-      local needed=chatTabWidth(category,font)+(used>0 and gap or 0)
+      local needed=chatTabWidth(category,font,self.chat_presentation_combined)+(used>0 and gap or 0)
       if used+needed<=room or #visible==0 then visible[#visible+1]=category; used=used+needed else hidden[#hidden+1]=category end
     end
     local active=tostring(activeFilter or "ALL"):upper(); local activeHidden=false
@@ -989,12 +1015,13 @@ function View:renderChatTabs(categories,activeFilter)
   for visibleIndex,category in ipairs(visible) do
     local remaining=maxNormal-x; if remaining<=0 then break end
     local button=label("DGHUD.Chat.Tab."..(#self.chat_buttons+1),self.chat_tabs,nil,self.geyser)
-    local buttonWidth=math.min(chatTabWidth(category,font),remaining)
+    local buttonWidth=math.min(chatTabWidth(category,font,self.chat_presentation_combined),remaining)
     place(button,x,4,buttonWidth,24); x=x+buttonWidth+gap
     local selected=category
     button.category=selected
     button:setStyleSheet("background:"..(selected==active and "#26382d" or "#121a16")..";border:1px solid "..(selected==active and t.jade or t.border)..";border-radius:4px;color:"..(selected==active and t.jade or t.muted)..";font-size:"..font.."px;")
-    button:echo("<center><b>"..safeText(selected).."</b></center>")
+    local caption=self.chat_presentation_combined and (selected==Channels.linkFilter and "LINK" or selected=="LINK" and "LINK (custom)") or selected
+    button:echo("<center><b>"..safeText(caption).."</b></center>")
     if button.setToolTip then button:setToolTip("Click to view. Drag left or right to reorder.") end
     local logicalIndex; for index,value in ipairs(self.chat_filter_order) do if value==selected then logicalIndex=index; break end end
     button:setClickCallback(function(event)
@@ -2283,6 +2310,7 @@ function View:renderChatSounds(font)
 end
 function View:chatSettingsWidgets()
   local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_visibility,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close,self.chat_sound_caption,self.chat_sound_explanation,self.chat_sound_volume,self.chat_sound_volume_down,self.chat_sound_volume_up,self.chat_sound_status}
+  widgets[#widgets+1]=self.chat_settings_outgoing; widgets[#widgets+1]=self.chat_settings_links
   for _,key in ipairs(self.chat_sound_order or {}) do for _,name in ipairs(chatSoundRowControls) do widgets[#widgets+1]=self.chat_sound_rows[key][name] end end
   for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end
   return widgets
@@ -2294,6 +2322,14 @@ function View:layoutChatSettings(layout)
   place(self.chat_settings_overlay,0,0,"100%","100%"); place(self.chat_settings_panel,x,y,pw,ph); place(self.chat_settings_bg,0,0,"100%","100%"); place(self.chat_settings_title,pad,pad,pw-pad*2,title_h); place(self.chat_settings_content,pad,content_y,inner_w,content_h); place(self.chat_settings_close,math.max(pad,pw-pad-110),close_y,math.min(110,pw-pad*2),close_h)
   local control_w=listViewportWidth(self.chat_settings_content,inner_w,self.list_scrollbar_width); self.chat_settings_font=font
   local cy=0; local visibility_h=math.max(36,font+22); place(self.chat_settings_visibility,0,cy,control_w,visibility_h); cy=cy+visibility_h+gap
+  if control_w>=430 then
+    local half=(control_w-gap)/2
+    place(self.chat_settings_outgoing,0,cy,half,visibility_h)
+    place(self.chat_settings_links,half+gap,cy,half,visibility_h); cy=cy+visibility_h+gap
+  else
+    place(self.chat_settings_outgoing,0,cy,control_w,visibility_h); cy=cy+visibility_h+gap
+    place(self.chat_settings_links,0,cy,control_w,visibility_h); cy=cy+visibility_h+gap
+  end
   cy=self:layoutChatSounds(control_w,cy,font)
   local text_h=math.max(self.chat_settings_compact_copy and 100 or 88,(font+5)*(self.chat_settings_compact_copy and 8 or 6)); place(self.chat_settings_text,0,cy,control_w,text_h); cy=cy+text_h+gap; place(self.chat_settings_sources_caption,0,cy,control_w,24); cy=cy+28
   local columns=control_w>=500 and 4 or 2; local column_gap=6; local cell_w=math.max(1,(control_w-column_gap*(columns-1))/columns); local row_h=math.max(28,font+16,math.ceil(14*font*.65/cell_w)*(font+5)+8); local rows=math.ceil(#self.chat_all_source_order/columns)
@@ -2304,6 +2340,11 @@ end
 function View:renderChatSettings(font)
   if self.disposed or not self.root then return nil,"HUD view is unavailable." end
   self.chat_settings_dirty=true
+  for _,button in ipairs({self.chat_settings_outgoing,self.chat_settings_links}) do
+    button:setStyleSheet("background:#17231c;border:1px solid "..self.settings.theme.border..";border-radius:5px;color:"..self.settings.theme.text..";font-weight:700;")
+  end
+  self.chat_settings_outgoing:echo(View.withFont("<center><b>CAPTURE OUTGOING CONTACTS: "..(self.chat_capture_outgoing and "ON" or "OFF").."</b></center>",(font or 11)+1))
+  self.chat_settings_links:echo(View.withFont("<center><b>LINK TABS: "..(self.chat_combine_links and "COMBINED LINK" or "SEPARATE").."</b></center>",(font or 11)+1))
   if not self.chat_settings_visible or not self.layout or self.root.hidden or self.root.auto_hidden then return true end
   font=font or self.chat_settings_font
   self:renderChatSounds(font)
@@ -2313,6 +2354,18 @@ function View:renderChatSettings(font)
   font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. Dedicated tabs and saved history are unchanged." or "Choose which message sources appear in the ALL tab. Turning one off does not disable capture, delete history, or hide it from its dedicated tab."; self.chat_settings_text:echo(View.withFont("Hide the chatbox to expand the main console. Capture and history continue.<br><br>"..explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); self.chat_settings_dirty=false; return true
 end
 function View:setChatAllSources(sources) self.chat_all_sources=Channels.allSources(sources); if self.chat_settings_visible then self:renderChatSettings() end; return true end
+function View:setChatPresentation(outgoing,combined)
+  self.chat_capture_outgoing=outgoing~=false; self.chat_combine_links=combined==true
+  if self.chat_output and self.chat_entries then self:renderChatTabs(self.chat_categories,self.chat_active_filter) end
+  if self.chat_settings_outgoing then self:renderChatSettings() end
+  return true
+end
+function View:setVisibilityDisplay(enabled)
+  self.settings.display=self.settings.display or {}; self.settings.display.visibility_status=enabled~=false
+  local button=self.option_action_buttons and self.option_action_buttons.visibility_status
+  if button then button.option_text="HIDDEN / VISIBLE: "..(enabled~=false and "ON" or "OFF"); button:echo("<center><b>"..button.option_text.."</b></center>") end
+  return enabled~=false
+end
 function View:showChatSettings()
   self:hideSkillSettings()
   if self.disposed or not self.root then return nil,"HUD view is unavailable." end
@@ -3363,7 +3416,7 @@ end
 function View:update(s)
   self.last_state=s; local t=self.settings.theme; local v=s.vitals; local layout=self.layout or {mode="wide",heading_font=20}; local ready=function(x) return x and "<span style='color:"..t.jade.."'><b>READY</b></span>" or "<span style='color:"..t.hp.."'><b>NOT READY</b></span>" end
   self.header:echo(View.headerContent(layout,t,s.character.full_name)); self:updateClock(s.clock); self.attribute_strip:echo(View.attributeStripContent(s.attributes,t,layout))
-  self.identity:echo(View.identityContent(s.character,t,layout,s.needs))
+  self.identity:echo(View.identityContent(s.character,t,layout,s.needs,not (self.settings.display and self.settings.display.visibility_status==false) and s.visibility or nil))
   self.equipment:echo(View.equipmentContent(v,s.equipment.items,t,layout))
   self:updateRoundtime(v.roundtime)
   local activeBars=2+(v.psi.visible and 1 or 0)+(v.web.visible and 1 or 0)
@@ -3381,6 +3434,7 @@ function View:updateClock(clock)
   return true
 end
 local reusableWidgetNames={
+  "chat_settings_outgoing","chat_settings_links",
   "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
   "color_settings_groups_tab","color_settings_styles_tab","color_settings_custom_tab","color_settings_status","color_style_catalog","color_style_content","color_style_catalog_help","color_style_heading","color_style_help","color_style_status","color_style_preview","color_style_reset","color_style_cancel","color_style_save",
@@ -3558,6 +3612,8 @@ function View:prepareForReuse(settings)
   if type(self.root.show)=="function" then pcall(self.root.show,self.root) end
   self:hideSkillSettings()
   self:setChatVisible(self.settings.chat and self.settings.chat.visible)
+  self:setChatPresentation(not (self.settings.chat and self.settings.chat.capture_outgoing==false),self.settings.chat and self.settings.chat.combine_links==true)
+  self:setVisibilityDisplay(not (self.settings.display and self.settings.display.visibility_status==false))
   self.chat_sound_status_text=nil
   self:setChatSounds(self.settings.chat and self.settings.chat.sounds)
   return true

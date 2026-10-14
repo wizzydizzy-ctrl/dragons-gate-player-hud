@@ -1,4 +1,92 @@
 local Needs=require("needs_tracker")
+test("independent self identity guards direct and wrapped foreign INFO needs",function()
+  local parser=require("command_parser")
+  local own=[[You are Synthetic Tester, a light boned and muscular bodied 57 year old Entropic Male young Elder. You are 7'7" and weigh 239 lbs.]]
+  for _,identity in ipairs({"Synthetic","Synthetic Tester",{name="Synthetic",full_name="Synthetic Tester"},
+      {name="Synthetic",surname="Tester"}}) do
+    local changes=0
+    local n=Needs.new({epoch=function() return 42 end},function() changes=changes+1 end,function() return identity end)
+    assert(n:onLine("You are ravenous. You are parched.")); local before=n:status()
+    local foreign={own:gsub("Synthetic Tester","Other Tester"),"You are satiated.","Your thirst is quenched.",">"}
+    assert(parser.parseInfo(foreign)); eq(n:onInfo(parser.parseInfo(foreign)),false)
+    for index,line in ipairs(foreign) do eq(n:onLine("\27[32m"..(index==1 and "> " or "")..line.."\27[0m"),false) end
+    for _,need in ipairs({"hunger","thirst"}) do
+      for _,field in ipairs({"status","timestamp","source","raw"}) do eq(n:status()[need][field],before[need][field]) end
+    end
+    eq(changes,1)
+    n:onLine(own); n:onLine("You are satiated. Your thirst is quenched.")
+    eq(n:status().hunger.status,"ravenous"); assert(n:onLine(">"))
+    eq(n:status().hunger.status,"satiated"); eq(n:status().thirst.status,"quenched")
+    assert(n:onInfo(parser.parseInfo({own,">"})))
+    eq(n:status().hunger.status,"ok"); eq(n:status().thirst.status,"ok")
+  end
+end)
+
+test("foreign wrapped biography and collector-owned lines never leak standalone need updates",function()
+  local own="Synthetic Tester"
+  local n=Needs.new({epoch=function() return 42 end},nil,function() return own end)
+  n:onLine("You are ravenous. You are parched.")
+  for _,line in ipairs({"You are Other Tester, a light boned and muscular bodied",
+    [[57 year old Entropic Male young Elder. You are 7'7" and weigh 239 lbs. You are]],
+    "satiated. Your thirst is", "quenched.","You are hungry. You are thirsty.",">"}) do
+    eq(n:onLine(line),false); eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+  end
+  for _,line in ipairs({"You are Other Tester, a young Elder.",
+      "You are satiated. Your thirst is quenched.",">"}) do eq(n:onLine(line,"output",false),false) end
+  eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+  -- Unowned standalone game notices still belong to the active character.
+  assert(n:onLine("You are hungry.")); assert(n:onLine("Your thirst is quenched."))
+  eq(n:status().hunger.status,"hungry"); eq(n:status().thirst.status,"quenched")
+end)
+
+test("known self rejects identity-less conditions and matching-prefix foreign full names",function()
+  local n=Needs.new({epoch=function() return 10 end},nil,function() return {name="Synthetic",full_name="Synthetic Tester"} end)
+  n:onLine("You are hungry. You are thirsty.")
+  for _,parsed in ipairs({{condition_text=""},
+    {character={full_name="Synthetic Other"},condition_text=""},
+    {character={full_name="SyntheticTester"},condition_text=""},
+    {character={full_name="Synthetic Tester"}}}) do eq(n:onInfo(parsed),false) end
+  eq(n:status().hunger.status,"hungry"); eq(n:status().thirst.status,"thirsty")
+  -- Retained attributes or biography elsewhere cannot turn a delta into healthy needs.
+  eq(n:onInfo({attributes={STR="Good"}}),false)
+end)
+
+test("needs character changes and disconnect clear conditions and pending biography",function()
+  local identity="Synthetic"
+  local n=Needs.new({epoch=function() return 10 end},nil,function() return identity end)
+  n:onLine("You are hungry. You are thirsty."); n:onLine("You are Synthetic Tester, a young Elder.")
+  identity="Other"; eq(n:status().hunger.status,"unknown"); eq(n:status().thirst.status,"unknown"); eq(n.pending_info,nil)
+  eq(n:onLine("You are satiated. Your thirst is quenched."),false); eq(n:onLine(">"),false)
+  eq(n:status().hunger.status,"unknown")
+  eq(n:onInfo({character={full_name="Synthetic Tester"},condition_text=""}),false)
+  n:onLine("You are hungry."); identity=nil
+  eq(n:status().hunger.status,"unknown"); eq(n:status().hunger.timestamp,nil)
+  eq(n:onInfo({character={full_name="Other Tester"},condition_text=""}),false)
+  assert(n:reset()); eq(n:status().thirst.status,"unknown")
+end)
+
+test("needs reset preserves quarantine for a pending biography until the prompt",function()
+  local n=Needs.new({epoch=function() return 10 end},nil,function() return "Synthetic" end)
+  n:onLine("You are Other Tester, a young Elder."); n:reset()
+  eq(n:onLine("You are satiated. Your thirst is quenched."),false); eq(n:onLine(">"),false)
+  eq(n:status().hunger.status,"unknown"); eq(n:status().thirst.status,"unknown")
+  assert(n:onLine("You are hungry.")); eq(n:status().hunger.status,"hungry")
+end)
+
+test("needs overflow and stale biographies quarantine healthy continuations",function()
+  for _,mode in ipairs({"lines","bytes","stale"}) do
+    local stamp=10
+    local n=Needs.new({epoch=function() return stamp end},nil,function() return "Synthetic" end)
+    n:onLine("You are ravenous. You are parched.")
+    n:onLine([[You are Other Tester, a muscular bodied 57 year old Entropic Male young Elder. You are 7'7" and weigh 239 lbs.]])
+    if mode=="lines" then for _=1,64 do n:onLine("Harmless INFO detail.") end
+    elseif mode=="bytes" then n:onLine(string.rep("x",16385)) else stamp=311 end
+    eq(n:onLine("You are satiated. Your thirst is quenched."),false); eq(n:onLine(">"),false)
+    eq(n:status().hunger.status,"ravenous"); eq(n:status().thirst.status,"parched")
+    assert(n:onLine("You are hungry.")); eq(n:status().hunger.status,"hungry")
+  end
+end)
+
 local function eq(a,b) assert(a==b,tostring(a).." ~= "..tostring(b)) end
 
 local Parser=require("command_parser")

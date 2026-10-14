@@ -1639,3 +1639,327 @@ test("handoff family values are whitelisted and clear cannot restore stale trans
     assert(restored:shutdown())
   end
 end)
+
+local function outgoingAdapter(entries)
+  local f=fake(entries); f.events={}; f.active=true; f.eventAdds=0; f.eventKills=0; f.sideEffects=0
+  function f:isCharacterActive()
+    if self.activeFailure then error("synthetic active guard failure") end
+    return self.active
+  end
+  function f:addEvent(name,fn)
+    if self.eventFailure then return nil,"synthetic observer failure" end
+    self.next=self.next+1; local id=self.next
+    self.events[id]={name=name,fn=fn}; self.eventAdds=self.eventAdds+1; return id
+  end
+  function f:killEvent(id) self.events[id]=nil; self.eventKills=self.eventKills+1; return true end
+  function f:outgoing(command)
+    for _,event in pairs(self.events) do
+      eq(event.name,"sysDataSendRequest"); event.fn(event.name,command)
+    end
+  end
+  local function sideEffect() f.sideEffects=f.sideEffects+1 end
+  f.send=sideEffect; f.sendCommand=sideEffect; f.gag=sideEffect; f.deleteLine=sideEffect
+  return f
+end
+
+test("outgoing observer defaults on registers once and cleans up on disable shutdown and restart",function()
+  local f=outgoingAdapter(); local controller=makeController(f)
+  eq(controller.captureOutgoing,true); eq(f.eventAdds,0)
+  assert(controller:start()); assert(controller:start()); eq(f.eventAdds,1); eq(f:count(f.events),1)
+  local stale=f.events[controller.outgoingEvent].fn
+  f:outgoing("contact all hello"); eq(f.storageAppends,1)
+  assert(controller:setCaptureOutgoing(false)); eq(f:count(f.events),0); eq(#controller.outgoing.pending,0)
+  stale("sysDataSendRequest","contact all ignored"); eq(f.storageAppends,1)
+  assert(controller:setCaptureOutgoing(true)); assert(controller:setCaptureOutgoing(true)); eq(f.eventAdds,2)
+  stale("sysDataSendRequest","contact all ignored after reenable"); eq(f.storageAppends,1)
+  f:outgoing("contact room second"); eq(f.storageAppends,2)
+  local retired=f.events[controller.outgoingEvent].fn
+  assert(controller:shutdown()); eq(f:count(f.events),0); eq(f:count(f.triggers),0)
+  eq(#controller.outgoing.pending,0); retired("sysDataSendRequest","contact all ignored after shutdown")
+  assert(controller:start()); retired("sysDataSendRequest","contact all ignored after restart")
+  eq(f.storageAppends,2); f:outgoing("contact Aerin fresh"); eq(f.storageAppends,3)
+  eq(f.sideEffects,0); assert(controller:shutdown()); eq(f.eventKills,3)
+end)
+
+test("outgoing can start disabled and remains optional for adapters without events",function()
+  local f=outgoingAdapter()
+  local controller=Controller.new(f,Parser,History.new(1000,3),f.storage,nil,function() return f.character end,nil,nil,false)
+  assert(controller:start()); eq(controller.captureOutgoing,false); eq(f.eventAdds,0)
+  eq(controller:onOutgoing("contact all ignored"),false)
+  eq(controller:setCaptureOutgoing("true"),nil); eq(controller.captureOutgoing,false)
+  assert(controller:setCaptureOutgoing(true)); eq(f.eventAdds,1); assert(controller:shutdown())
+  f=fake(); controller=makeController(f)
+  assert(controller:start()); eq(controller.outgoingEvent,nil)
+  f:line('[GM] Keeper: Incoming still works.'); eq(f.storageAppends,1)
+  eq(controller:onOutgoing("contact all no active guard"),false); assert(controller:shutdown())
+end)
+
+test("outgoing event registration failure rolls back owned trigger and can retry",function()
+  local f=outgoingAdapter(); f.eventFailure=true
+  local controller=makeController(f); local ok,err=controller:start()
+  eq(ok,nil); assert(type(err)=="string"); eq(controller.started,false)
+  eq(f:count(f.triggers),0); eq(f:count(f.events),0)
+  f.eventFailure=false; assert(controller:start()); eq(f:count(f.events),1); assert(controller:shutdown())
+end)
+
+test("outgoing requires strictly active adapter and confirmed self provider before any transcript",function()
+  local f=outgoingAdapter(); local controller=makeController(f); assert(controller:start())
+  for _,active in ipairs({false,"true",1,{}}) do
+    f.active=active; f:outgoing("contact all synthetic auth input"); eq(f.storageAppends,0)
+  end
+  f.active=nil; f:outgoing("contact all synthetic auth input"); eq(f.storageAppends,0)
+  f.activeFailure=true; f:outgoing("contact all synthetic auth input"); eq(f.storageAppends,0)
+  f.activeFailure=false; f.active=true
+  for _,character in ipairs({"Unknown"," unknown ","",false,1,{}}) do
+    f.character=character; f:outgoing("contact all synthetic auth input"); eq(f.storageAppends,0)
+  end
+  f.character=nil; f:outgoing("contact all synthetic auth input"); eq(f.storageAppends,0)
+  controller.characterProvider=function() error("synthetic provider failure") end
+  f:outgoing("contact all synthetic auth input"); eq(f.storageAppends,0)
+  controller.characterProvider=function() return "Dace Alterac" end
+  f:outgoing("password synthetic-placeholder"); f:outgoing("contact"); f:outgoing("contact help syntax")
+  f:outgoing("psi all ignored"); f:outgoing("contact all first\ncontact room second"); eq(f.storageAppends,0)
+  f:outgoing("CONTACT Aerin hello"); eq(f.storageAppends,1)
+  eq(f.appendedEntries[1].speaker,"Dace Alterac"); eq(f.sideEffects,0); eq(f.errors,0)
+  assert(controller:shutdown())
+end)
+
+test("outgoing transcripts stay silent hidden sources still retain them and rapid repeats survive dedupe",function()
+  local f=outgoingAdapter(); local alerts=0
+  local controller=makeController(f,nil,function() alerts=alerts+1 end,allSources({MENTAL=false}))
+  assert(controller:start())
+  for _,target in ipairs({"all","all","room","Aerin","Aerin","Beren"}) do f:outgoing("contact "..target.." Exact body") end
+  eq(f.storageAppends,6); eq(#controller.history.items,6); eq(#controller:entries(),0); eq(alerts,0)
+  assert(controller:setFilter("MENTAL")); eq(#controller:entries(),6)
+  assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),6)
+  for index,entry in ipairs(controller.history.items) do
+    eq(entry.category,"MENTAL"); eq(entry.source,"outgoing"); eq(entry.character,f.character)
+    eq(entry.speaker,f.character); eq(entry.message,"Exact body")
+    eq(entry.line,"You -> "..entry.target.." (outgoing request): Exact body")
+    eq(entry.skipDedupe,nil); eq(entry.pending,nil); eq(entry.delivered,nil)
+    eq(f.appendedEntries[index],entry)
+  end
+  eq(f.sideEffects,0); assert(controller:shutdown())
+end)
+
+test("outgoing broadcast reconciliation matches one pending request and leaves uncertain incoming visible",function()
+  local f=outgoingAdapter(); f.character="Nera_O'Vale"; local alerts=0
+  local controller=makeController(f,nil,function() alerts=alerts+1 end); assert(controller:start())
+  f:outgoing("contact all Same body"); f:outgoing("contact all Same body")
+  f:outgoing("contact room Same body"); f:outgoing("contact Aerin Same body")
+  f:outgoing("contact Beren Same body"); eq(f.storageAppends,5)
+  local all='You pick up Nera_O\'Vale\'s thoughts, "Same body" [r-1]'
+  local room='You pick up Nera_O\'Vale\'s thoughts echoing through the area, "Same body"'
+  f:line(room); f:line(all); f:line(all); eq(f.storageAppends,5); eq(alerts,0)
+  eq(#controller.outgoing.pending,2)
+  f:line(all); eq(f.storageAppends,6); eq(alerts,1)
+  f:line('Someone thinks to you, "Same body"'); eq(f.storageAppends,7); eq(alerts,2)
+  f:line('Nera_O\'Vale thinks to you, "Same body"'); eq(f.storageAppends,8); eq(alerts,3)
+  f:line('Nera (ESP): "Same body"'); eq(f.storageAppends,9); eq(alerts,4)
+  f:line(room); eq(f.storageAppends,10); eq(alerts,5)
+  eq(f.sideEffects,0); assert(controller:shutdown())
+end)
+
+test("outgoing pending requests expire clear on identity loss and never enter handoff or replay",function()
+  local f=outgoingAdapter(); f.character="Lark"; local controller=makeController(f); assert(controller:start())
+  f:outgoing("contact all expiry"); f.epochValue=106
+  f:line('You pick up Lark\'s thoughts, "expiry"'); eq(f.storageAppends,2)
+  f:outgoing("contact all identity"); f.active=false; f:outgoing("contact all ignored")
+  f.active=true; f:line('You pick up Lark\'s thoughts, "identity"'); eq(f.storageAppends,4)
+  f:outgoing("contact room handoff"); local snapshot=controller:handoff()
+  eq(#controller.outgoing.pending,0); eq(snapshot.pending,nil); eq(snapshot.outgoing,nil)
+  assert(controller:shutdown())
+  local second=outgoingAdapter(); second.character="Lark"; local restored=makeController(second)
+  assert(restored:restoreHandoff(snapshot)); assert(restored:start(true))
+  eq(second.storageAppends,0); eq(second.sideEffects,0); eq(#restored.outgoing.pending,0)
+  second:line('You pick up Lark\'s thoughts echoing through the area, "handoff"')
+  eq(second.storageAppends,1); eq(second.sideEffects,0); assert(restored:shutdown())
+end)
+
+test("clearing history discards only transient outgoing matches and leaves capture enabled",function()
+  for _,mode in ipairs({"visible","saved"}) do
+    local f=outgoingAdapter(); f.character="Lark"; local controller=makeController(f); assert(controller:start())
+    f:outgoing("contact all before clear"); eq(#controller.outgoing.pending,1)
+    if mode=="saved" then assert(controller:clearSavedHistory(true)) else assert(controller:clearVisibleHistory()) end
+    eq(#controller.outgoing.pending,0); eq(controller.captureOutgoing,true); eq(f:count(f.events),1)
+    f:line('You pick up Lark\'s thoughts, "before clear"'); eq(f.storageAppends,2)
+    f:outgoing("contact all after clear"); eq(f.storageAppends,3); assert(controller:shutdown())
+  end
+end)
+
+test("outgoing CONTACT flushes an earlier wrapped STAFF message without attaching its own text",function()
+  local f=outgoingAdapter(); local alerts=0
+  local controller=makeController(f,nil,function() alerts=alerts+1 end); assert(controller:start())
+  f:line("[GM] Keeper [sample-user] submits an idea: Earlier staff text")
+  eq(f.storageAppends,0); assert(controller.pendingStaffMessage)
+  f:outgoing("contact all New contact text")
+  eq(f.storageAppends,2); eq(alerts,1); eq(controller.pendingStaffMessage,nil)
+  eq(f.appendedEntries[1].category,"STAFF"); eq(f.appendedEntries[2].source,"outgoing")
+  assert(not f.appendedEntries[1].message:find("New contact text",1,true))
+  eq(next(f.timers),nil); assert(controller:shutdown())
+end)
+
+test("outgoing short own server broadcasts reconcile only with matching full GMCP identity",function()
+  local f=outgoingAdapter(); f.character="Wizzy Dizzy"
+  f.gmcp={Char={Status={name="Wizzy",surname="Dizzy"}}}
+  function f:getGMCP() return self.gmcp end
+  local alerts=0; local controller=makeController(f,nil,function() alerts=alerts+1 end)
+  assert(controller:start())
+  f:outgoing("contact all Same body"); f:outgoing("contact room Same body")
+  eq(f.storageAppends,2)
+  f:line('You pick up Other\'s thoughts, "Same body"')
+  f:line('You pick up Wizzy Other\'s thoughts, "Same body"')
+  eq(f.storageAppends,4); eq(alerts,2); eq(#controller.outgoing.pending,2)
+  f:line('You pick up Wizzy\'s thoughts, "Same body" [r-1]')
+  f:line('You pick up Wizzy\'s thoughts echoing through the area, "Same body"')
+  eq(f.storageAppends,4); eq(alerts,2); eq(#controller.outgoing.pending,0)
+  eq(f.appendedEntries[1].speaker,"Wizzy Dizzy"); eq(f.appendedEntries[2].speaker,"Wizzy Dizzy")
+  eq(f.appendedEntries[3].speaker,"Other"); eq(f.appendedEntries[4].speaker,"Wizzy Other")
+  f:outgoing("contact Nera Direct body")
+  f:line('Wizzy thinks to you, "Direct body"')
+  eq(f.storageAppends,6); eq(alerts,3); eq(#controller.outgoing.pending,1)
+  for _,entry in ipairs(controller.history.items) do eq(entry.delivered,nil) end
+  eq(f.sideEffects,0); assert(controller:shutdown())
+end)
+
+test("outgoing never guesses short prefixes or trusts stale missing or failed GMCP",function()
+  for _,data in ipairs({
+    {}, {Char={Status={name="Wizzy"}}},
+    {Char={Status={name="Wizzy",surname="Other"}}},
+    {Char={Status={name="Other",surname="Dizzy"}}},
+    {Char={Status={name="Wizzy",surname="Dizzy\n"}}}, false,
+  }) do
+    local f=outgoingAdapter(); f.character="Wizzy Dizzy"; f.gmcp=data
+    function f:getGMCP() return self.gmcp end
+    local controller=makeController(f); assert(controller:start())
+    f:outgoing("contact all Same body")
+    f:line('You pick up Wizzy\'s thoughts, "Same body"')
+    eq(f.storageAppends,2); eq(#controller.outgoing.pending,1); assert(controller:shutdown())
+  end
+  local f=outgoingAdapter(); f.character="Wizzy Dizzy"
+  function f:getGMCP() error("synthetic GMCP failure") end
+  local controller=makeController(f); assert(controller:start())
+  f:outgoing("contact room Same body")
+  f:line('You pick up Wizzy\'s thoughts echoing through the area, "Same body"')
+  eq(f.storageAppends,2); assert(controller:shutdown())
+end)
+
+test("outgoing short identity is verified at send and again when the echo arrives",function()
+  for _,change in ipairs({"lost","arrived"}) do
+    local f=outgoingAdapter(); f.character="Wizzy Dizzy"
+    local verified={Char={Status={name="Wizzy",surname="Dizzy"}}}
+    f.gmcp=change=="lost" and verified or {}
+    function f:getGMCP() return self.gmcp end
+    local controller=makeController(f); assert(controller:start())
+    f:outgoing("contact all Same body")
+    f.gmcp=change=="lost" and {Char={Status={name="Wizzy",surname="Other"}}} or verified
+    f:line('You pick up Wizzy\'s thoughts, "Same body"')
+    eq(f.storageAppends,2); eq(#controller.outgoing.pending,1); assert(controller:shutdown())
+  end
+end)
+
+test("outgoing intentional repeats keep unique bounded IDs across same-second reloads and handoffs",function()
+  local f=outgoingAdapter(); local controller=makeController(f); assert(controller:start())
+  for index=1,3 do f:outgoing("contact all Same body") end
+  local snapshot=controller:handoff(); eq(#snapshot.entries,3); assert(controller:shutdown())
+  for _,mode in ipairs({"reload","handoff"}) do
+    local second=outgoingAdapter(mode=="reload" and snapshot.entries or nil)
+    local restored=makeController(second)
+    if mode=="handoff" then assert(restored:restoreHandoff(snapshot)) end
+    assert(restored:start(true)); eq(#restored.history.items,3)
+    second:outgoing("contact all Same body"); second:outgoing("contact all Same body")
+    eq(#restored.history.items,5); eq(second.storageAppends,2)
+    local seen={}
+    for _,entry in ipairs(restored.history.items) do
+      assert(type(entry.outgoing_id)=="string" and #entry.outgoing_id<=64)
+      assert(not seen[entry.outgoing_id]); seen[entry.outgoing_id]=true
+    end
+    assert(restored:shutdown())
+  end
+end)
+
+test("combined link controller passes its flag and restores constituent filters on disable",function()
+  for _,filter in ipairs({"MENTAL","DRAGON","PSYCIAN","SECIAN","ESP","CONTACT"}) do
+    local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter(filter))
+    local expected=Channels.category(filter); local originalEntries=controller.history.entries; local seen
+    function controller.history:entries(selected,sources,combined)
+      seen={selected=selected,sources=sources,combined=combined}
+      return originalEntries(self,selected,sources,combined)
+    end
+    eq(controller.linkCombined,false); assert(controller:setLinkCombined(true))
+    eq(controller.filter,"LINK VIEW"); eq(controller.linkPriorFilter,expected)
+    controller:entries(); eq(seen.selected,"LINK VIEW"); eq(seen.combined,true); eq(seen.sources,controller.allSources)
+    assert(controller:setLinkCombined(false)); eq(controller.filter,expected); eq(controller.linkPriorFilter,nil)
+    controller:entries(); eq(seen.combined,false); assert(controller:shutdown())
+  end
+end)
+
+test("combined link mode leaves ALL STAFF and personal LINK selection and content unchanged",function()
+  for _,filter in ipairs({"ALL","STAFF","LINK","PERSONAL"}) do
+    local f=fake(); local controller=makeController(f); assert(controller:start())
+    assert(controller:capture("LINK","Personal LINK fixture",{speaker="Synthetic"}))
+    assert(controller:setFilter(filter)); assert(controller:setLinkCombined(true)); eq(controller.filter,filter)
+    eq(controller.history.items[1].category,"LINK"); eq(controller.history.items[1].message,"Personal LINK fixture")
+    assert(controller:setLinkCombined(false)); eq(controller.filter,filter)
+    eq(controller:setLinkCombined("true"),nil); eq(controller.linkCombined,false)
+    assert(controller:shutdown())
+  end
+  local controller=makeController(fake()); assert(controller:start()); assert(controller:setFilter("MENTAL"))
+  assert(controller:setLinkCombined(true)); assert(controller:setFilter("STAFF"))
+  assert(controller:setLinkCombined(false)); eq(controller.filter,"STAFF"); assert(controller:shutdown())
+end)
+
+test("combined link mode redirects constituent selection and remembers the selected constituent",function()
+  local controller=makeController(fake()); assert(controller:start()); assert(controller:setLinkCombined(true))
+  assert(controller:setFilter("PSYCIAN")); eq(controller.filter,"LINK VIEW"); eq(controller.linkPriorFilter,"PSYCIAN")
+  assert(controller:setFilter("LINK VIEW")); assert(controller:setLinkCombined(false)); eq(controller.filter,"PSYCIAN")
+  eq(controller:setFilter("not\nvalid"),nil); eq(controller:setFilter(string.rep("A",33)),nil)
+  assert(controller:shutdown())
+end)
+
+test("a stored custom LINK VIEW prevents combined mode and future custom captures disable before append",function()
+  local f=fake({{category="LINK VIEW",message="Existing custom",source="custom"}})
+  local controller=makeController(f); assert(controller:start()); local ok,err=controller:setLinkCombined(true)
+  eq(ok,nil); assert(err:find("custom",1,true)); eq(controller.linkCombined,false)
+  assert(controller:setFilter("LINK VIEW")); eq(controller:entries()[1].message,"Existing custom"); assert(controller:shutdown())
+  f=fake(); controller=makeController(f); assert(controller:start()); assert(controller:setFilter("DRAGON"))
+  assert(controller:setLinkCombined(true)); local append=controller.history.append
+  function controller.history:append(entry,epoch,options)
+    if entry.category=="LINK VIEW" then eq(controller.linkCombined,false); eq(controller.filter,"DRAGON") end
+    return append(self,entry,epoch,options)
+  end
+  assert(controller:capture("LINK VIEW","Future real custom",{speaker="Synthetic"}))
+  eq(controller.linkCombined,false); eq(f.storageAppends,1)
+  eq(f.appendedEntries[1].category,"LINK VIEW"); eq(f.appendedEntries[1].source,"custom")
+  assert(controller:setFilter("LINK VIEW")); eq(controller:entries()[1].message,"Future real custom")
+  eq(controller:setLinkCombined(true),nil); assert(controller:shutdown())
+end)
+
+test("disabling combined links preserves a personal LINK VIEW selection including after restore",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start())
+  assert(controller:capture("LINK VIEW","Personal virtual-name fixture",{speaker="Synthetic"}))
+  assert(controller:setFilter("LINK VIEW"))
+  assert(controller:setLinkCombined(false)); eq(controller.filter,"LINK VIEW")
+  eq(controller:entries()[1].message,"Personal virtual-name fixture")
+  local snapshot=controller:handoff(); assert(controller:shutdown())
+  local restored=makeController(fake()); assert(restored:restoreHandoff(snapshot))
+  assert(restored:setLinkCombined(false)); assert(restored:start(true))
+  eq(restored.filter,"LINK VIEW"); eq(restored:entries()[1].message,"Personal virtual-name fixture")
+  eq(restored:setLinkCombined(true),nil); eq(restored.filter,"LINK VIEW")
+  assert(restored:shutdown())
+end)
+
+test("combined link handoff carries only bounded prior filter and mode applies after restore",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("SECIAN"))
+  assert(controller:setLinkCombined(true)); local snapshot=controller:handoff()
+  eq(snapshot.filter,"LINK VIEW"); eq(snapshot.previous_link_filter,"SECIAN"); eq(snapshot.linkCombined,nil)
+  assert(controller:shutdown())
+  local restored=makeController(fake()); assert(restored:restoreHandoff(snapshot)); assert(restored:setLinkCombined(true))
+  assert(restored:start(true)); eq(restored.filter,"LINK VIEW")
+  assert(restored:setLinkCombined(false)); eq(restored.filter,"SECIAN"); assert(restored:shutdown())
+  for _,value in ipairs({string.rep("A",33),"bad\nfilter",{},"LINK VIEW",false,12}) do
+    snapshot.previous_link_filter=value; restored=makeController(fake())
+    assert(restored:restoreHandoff(snapshot)); eq(restored.linkPriorFilter,nil)
+    assert(restored:setLinkCombined(false)); eq(restored.filter,"MENTAL"); assert(restored:shutdown())
+  end
+end)

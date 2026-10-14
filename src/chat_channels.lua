@@ -4,6 +4,28 @@ Channels.sourceOrder={"ROOM","WHISPER","MENTAL","DRAGON","PSYCIAN","SECIAN","STA
 local aliases={ESP="MENTAL",CONTACT="MENTAL"}
 local linkCategories={ESP=true,CONTACT=true,MENTAL=true,DRAGON=true,PSYCIAN=true,SECIAN=true}
 local activeName="([%w_%-'][%w_%-%' ]*)"
+Channels.linkFilter="LINK VIEW"
+Channels.linkMembers={MENTAL=true,DRAGON=true,PSYCIAN=true,SECIAN=true}
+
+function Channels.combinedOrder(order,categories,preferred)
+  local available,result,seen={}, {}, {}
+  for _,value in ipairs(order or {}) do
+    local category=Channels.category(value)
+    available[Channels.linkMembers[category] and Channels.linkFilter or category]=true
+  end
+  -- A custom category with the internal filter's name must stay independent.
+  for _,value in ipairs(categories or {}) do
+    if Channels.category(value)==Channels.linkFilter then return Channels.tabOrder(order),false end
+  end
+  local function add(value)
+    local category=Channels.category(value)
+    if Channels.linkMembers[category] then category=Channels.linkFilter end
+    if available[category] and not seen[category] then result[#result+1]=category; seen[category]=true end
+  end
+  for _,value in ipairs(preferred or {}) do add(value) end
+  for _,value in ipairs(order or {}) do add(value) end
+  return result,true
+end
 
 function Channels.category(value)
   local key=tostring(value or ""):upper():match("^%s*(.-)%s*$")

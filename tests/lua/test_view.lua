@@ -441,6 +441,44 @@ local function chatWidgets(view)
   for _,button in ipairs(view.chat_buttons or {}) do widgets[#widgets+1]=button end
   return widgets
 end
+
+test("combined LINK layout remains usable at small widths and keeps separate order",function()
+  for _,width in ipairs({280,420,1000}) do
+    local view=chatView()
+    view.layout={chat_width=width,chat_font=13}
+    view.settings.chat.tab_order={"STAFF","PSYCIAN","ALL","MENTAL","DRAGON","ROOM"}
+    view:setChatPresentation(false,true)
+    view:renderChat({},{ "MENTAL","DRAGON","PSYCIAN","SECIAN","LINK","QUEST" },"LINK VIEW")
+    eq(view.chat_presentation_combined,true)
+    local count=0
+    for _,category in ipairs(view.chat_filter_order) do if category=="LINK VIEW" then count=count+1 end end
+    eq(count,1)
+    local active=false
+    for _,button in ipairs(view.chat_buttons) do
+      if button.category=="LINK VIEW" then active=true; assert(button.message:find("LINK",1,true)) end
+    end
+    eq(active,true)
+    view:setChatOrderCallback(function() return true end)
+    assert(view:reorderChatTab("LINK VIEW",1))
+    eq(view.settings.chat.combined_tab_order[1],"LINK VIEW")
+    eq(view.settings.chat.tab_order[1],"STAFF"); eq(view.settings.chat.tab_order[2],"PSYCIAN")
+    view:setChatPresentation(false,false)
+    eq(view.chat_filter_order[2],"PSYCIAN"); eq(view.chat_capture_outgoing,false)
+  end
+end)
+
+test("visibility row is explicit unknown hidden visible and stale without changing old content",function()
+  local theme={accent="#d8ae53",jade="#72bd82",muted="#91a098"}
+  local character={full_name="Synthetic Tester",race="Human",class="Fighter"}
+  local layout={body_font=20,heading_font=25}
+  for _,row in ipairs({{"unknown","Unknown"},{"hidden","Hidden"},{"visible","Visible"}}) do
+    local html=View.identityContent(character,theme,layout,nil,{status=row[1],stale=false})
+    assert(html:find("Visibility:",1,true)); assert(html:find(row[2],1,true))
+  end
+  local stale=View.identityContent(character,theme,layout,nil,{status="hidden",stale=true})
+  assert(stale:find("last confirmed",1,true))
+  eq(View.identityContent(character,theme,layout):find("Visibility:",1,true),nil)
+end)
 local function checkChatVisible(view,wanted)
   for _,widget in ipairs(chatWidgets(view)) do eq(widget.visible,wanted) end
 end
@@ -1183,7 +1221,7 @@ test("color options menu exposes current and future feature toggles",function()
   view:setColorOptions({enabled=true,notice=true,room=true,exits=false,currency=true,races=true,classes=true,portal=true,attack=true,damage=true,danger=true,recovery=true,upkeep=true,spell=true,discovery=true,illumination=true})
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(view.color_menu_visible,true); eq(view.color_menu.visible,true); eq(view.color_menu_scrim.visible,true)
-  eq(#view.option_action_order,16); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
+eq(#view.option_action_order,17); view:setAutoUpdateEnabled(false); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: OFF"); view:setAutoUpdateEnabled(true); eq(view.option_action_buttons.auto_update.option_text,"AUTOMATIC UPDATES: ON"); eq(view:setDisplayTextSize("small"),"small"); eq(view.option_action_buttons.text_size.option_text,"HUD TEXT: SMALL"); eq(view:setMainConsoleAutoWrap(false),false); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: OFF"); eq(view:setMainConsoleAutoWrap(true),true); eq(view.option_action_buttons.auto_main_wrap.option_text,"AUTO MAIN WRAP: ON"); view.option_action_buttons.color_settings.click(); eq(view.color_settings_visible,true)
   for _,key in ipairs(view.color_option_order) do eq(view.color_option_buttons[key].visible,true) end
   eq(view.color_option_buttons.room.message:find("ROOM TITLES",1,true)~=nil,true)
   eq(view.color_option_buttons.exits.message:find("OFF",1,true)~=nil,true)
@@ -1200,7 +1238,7 @@ test("main input alignment defaults off immediately after automatic main wrap",f
   local view=chatView(); local button=view.option_action_buttons.align_main_input
   eq(view.main_input_aligned,false); eq(button.option_text,"ALIGN INPUT: OFF")
   eq(button.tooltip,"Align input with main display (left edge only). Input ends before Mudlet's native Search/status controls, which stay visible on the right. Your normal input, draft, history, and aliases remain available. OFF restores the previous input style and compact-input preference."); eq(button.parent,view.options_scroll)
-  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,combine_skills_runes,auto_main_wrap,align_main_input,main_skills,skill_settings,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
+  eq(table.concat(view.option_action_order,","),"command_help,refresh_data,auto_update,base_ui_toggle,text_size,combine_skills_runes,auto_main_wrap,align_main_input,visibility_status,main_skills,skill_settings,chat_settings,keybindings_settings,color_settings,map_settings,roller_settings,support")
   view:applyLayout(require("layout").compute(1200,800)); view.color_toggle.click()
   eq(button.visible,true); assert(button.message:find("ALIGN INPUT: OFF",1,true))
   local wrap=view.option_action_buttons.auto_main_wrap

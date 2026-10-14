@@ -35,7 +35,7 @@ function History:restoreDedupe(lastKey,lastEpoch,lastMentalKind)
 end
 
 local function identity(entry,projectedOverlap)
-  local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source"}
+  local fields={"schema","timestamp","character","category","speaker","target","language","message","line","source","outgoing_id"}
   local values={}
   for index,name in ipairs(fields) do
     local value=entry[name]
@@ -91,14 +91,14 @@ function History.new(limit,dedupeSeconds)
 end
 function History:newSibling() return History.new(self.limit,self.dedupeSeconds) end
 
-function History:append(entry,epoch)
+function History:append(entry,epoch,force)
   if type(entry)~="table" then return false end
   epoch=tonumber(epoch) or os.time()
   local entryKey=key(entry)
   local mentalKind=Channels.mentalKind(entry)
   local elapsed=epoch-(self.lastEpoch or epoch)
   local compatible=self.lastMentalKind==nil or mentalKind==nil or self.lastMentalKind==mentalKind
-  if self.lastKey==entryKey and compatible and elapsed>=0 and elapsed<=self.dedupeSeconds then
+  if force~=true and self.lastKey==entryKey and compatible and elapsed>=0 and elapsed<=self.dedupeSeconds then
     self.lastMentalKind=self.lastMentalKind or mentalKind
     return false
   end
@@ -147,12 +147,14 @@ function History:hydrate(entries,projectedOverlap)
   return true
 end
 
-function History:entries(filter,allSources)
+function History:entries(filter,allSources,combinedLinks)
   filter=Channels.category(filter or "ALL")
   local entries={}
   for _,entry in ipairs(self.items) do
     local category=Channels.entryCategory(entry)
-    if (filter=="ALL" and Channels.inAll(category,allSources)) or category==filter or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=Channels.project(entry) end
+    if (filter==Channels.linkFilter and combinedLinks==true and Channels.linkMembers[category])
+      or (filter=="ALL" and Channels.inAll(category,allSources)) or category==filter
+      or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=Channels.project(entry) end
   end
   return entries
 end

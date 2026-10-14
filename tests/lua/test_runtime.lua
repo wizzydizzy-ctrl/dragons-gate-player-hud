@@ -81,7 +81,7 @@ local function fake()
   }; view.map_library_actions={browse={clickCallback=function() return view.map_library_action_callback("browse") end}}; return view end
   function f:adoptView(view,settings) self.viewAdoptions=(self.viewAdoptions or 0)+1; view.adoptedSettings=settings; return view end
   function f:addEvent(name,fn)
-    self.next=self.next+1; local id="event-"..self.next
+    self.next=self.next+1; local id=self.next
     self.events[id]=name; self.eventFns=self.eventFns or {}; self.eventFns[id]=fn
     self.eventOrder=self.eventOrder or {}; self.eventOrder[#self.eventOrder+1]=id
     self.callbacks[name]=function(...)
@@ -930,6 +930,47 @@ test("chat sounds route live staff messages once and options persist without cha
   end)
 end)
 
+test("outgoing and LINK preferences survive other chat saves reloads and failed saves",function()
+  withChatVisibilityRuntime({chat={capture_outgoing=false,combine_links=false,all_sources={MENTAL=false,STAFF=true}}},function(f,hud)
+    eq(hud.chat.captureOutgoing,false)
+    assert(hud.chat:setFilter("PSYCIAN"))
+    eq(f.optionsActionCallback("chat_combine_links",nil,true),true)
+    eq(hud.chat.filter,"LINK VIEW"); eq(hud.chat.linkCombined,true)
+    assert(f.chatOrderCallback({"LINK VIEW","STAFF","ALL"}))
+    eq(f.savedChatSettings.combined_tab_order[1],"LINK VIEW")
+    eq(f.optionsActionCallback("chat_visibility",nil,false),false)
+    eq(f.optionsActionCallback("chat_all_source","ROOM",false),false)
+    eq(f.optionsActionCallback("chat_sound_enabled","STAFF",false),false)
+    eq(f.savedChatSettings.capture_outgoing,false); eq(f.savedChatSettings.combine_links,true)
+    eq(f.savedChatSettings.all_sources.MENTAL,false)
+    eq(f.optionsActionCallback("chat_combine_links",nil,false),false)
+    eq(hud.chat.filter,"PSYCIAN")
+    eq(f.optionsActionCallback("chat_combine_links",nil,true),true)
+    assert(hud:reload())
+    eq(hud.chat.captureOutgoing,false); eq(hud.chat.linkCombined,true)
+    f.failChatSettingsSave="disk full"
+    local ok,err=f.optionsActionCallback("chat_outgoing",nil,true)
+    eq(ok,nil); assert(err:find("disk full",1,true))
+    eq(hud.chat.captureOutgoing,false); eq(hud.settings.chat.capture_outgoing,false)
+    f.failChatSettingsSave=nil
+    eq(f.optionsActionCallback("chat_combine_links",nil,false),false)
+    eq(hud.chat.filter,"ALL")
+  end)
+end)
+
+test("outgoing observation stops at character exit even when GMCP still has a name",function()
+  withChatVisibilityRuntime({},function(f,hud)
+    function f:isCharacterActive() return true end
+    hud:onCharacterEntry("Test")
+    local before=#hud.chat.history.items
+    assert(hud.chat:onOutgoing("contact Rath synthetic request"))
+    eq(#hud.chat.history.items,before+1)
+    hud:onCharacterExit("menu")
+    eq(hud.chat:onOutgoing("contact Rath must not capture"),false)
+    eq(#hud.chat.history.items,before+1)
+  end)
+end)
+
 local function assertChatRuntimeUnchanged(f,hud,before)
   eq(hud.chat,before.chat); eq(hud.chat.history,before.history); eq(hud.chat.storage,before.storage)
   eq(hud.chat.trigger,before.trigger); eq(f.triggers[before.trigger],before.callback); eq(hud.chat.started,true)
@@ -1276,7 +1317,7 @@ test("controller merges collector snapshots and removes owned trigger runtime",f
 end)
 test("registered raw and collector callbacks apply a no-condition INFO exactly once in either order",function()
   for _,collectorFirst in ipairs({false,true}) do
-    local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+    local f=fake(); f.gmcp={Char={Status={name="Synthetic",surname="Tester"},Vitals={}}}
     local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
     local collector=assert(f.triggers[hud.collector.runtime.triggers[1]])
     local raw=assert(f.triggers[hud.runtime.triggers[#hud.runtime.triggers]])
@@ -1311,7 +1352,7 @@ test("tracked prompt-prefixed wrapped INFO waits for a real prompt and applies m
         {lines={"You are","satiated. Your thirst is","quenched."},hunger="satiated",thirst="quenched"},
         {lines={"You are hungry. You are","thirsty."},hunger="hungry",thirst="thirsty"},
       }) do
-        local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+        local f=fake(); f.gmcp={Char={Status={name="Synthetic",surname="Tester"},Vitals={}}}
         local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
         local collector=assert(f.triggers[hud.collector.runtime.triggers[1]])
         local raw=assert(f.triggers[hud.runtime.triggers[#hud.runtime.triggers]])
@@ -1336,7 +1377,7 @@ test("tracked prompt-prefixed wrapped INFO waits for a real prompt and applies m
 end)
 test("both INFO callback orders replace complete needs and ignore retained stale conditions on partial refresh",function()
   for _,collectorFirst in ipairs({false,true}) do
-    local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+    local f=fake(); f.gmcp={Char={Status={name="Dace",surname="Alterac"},Vitals={}}}
     local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
     local function deliver(line)
       if collectorFirst then hud.collector:onLine(line); hud.needs:onLine(line)
@@ -1365,7 +1406,7 @@ test("both INFO callback orders replace complete needs and ignore retained stale
   end
 end)
 test("unsolicited prompt-prefixed wrapped ANSI INFO resets rendered needs without an outgoing command",function()
-  local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+  local f=fake(); f.gmcp={Char={Status={name="Dace",surname="Alterac"},Vitals={}}}
   local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
   local function emit(line) for _,fn in pairs(f.triggers) do fn(line) end end
   for _,prefix in ipairs({"","> ","[199] 301/301 hp, 173/173 ftg > "}) do
@@ -1390,7 +1431,7 @@ test("supplied healthy INFO reaches runtime and rendered state through the colle
     {"\27[32mYou are Dace Alterac, a delicate boned and skinny bodied 28 year old Entropic Male young Monitanian.\27[0m",
       [[You are 7'0" and weigh 247 lbs. You are]],"satiated. Your thirst is","quenched.",">"},
   }) do
-    local f=fake(); f.gmcp={Char={Status={},Vitals={}}}
+    local f=fake(); f.gmcp={Char={Status={name="Dace",surname="Alterac"},Vitals={}}}
     local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}}); assert(hud:start())
     hud.collector:onOutgoing("info"); eq(hud.collector.active.command,"info")
     for _,line in ipairs(lines) do hud.collector:onLine(line) end
@@ -1403,7 +1444,7 @@ test("supplied healthy INFO reaches runtime and rendered state through the colle
   end
 end)
 test("wrapped INFO output updates identity needs vitals and expanded attributes",function()
-  local f=fake(); f.gmcp={Char={Status={},Vitals={}}}; local hud=Main.new(f,{layout={}}); assert(hud:start()); hud.collector:onOutgoing("info")
+  local f=fake(); f.gmcp={Char={Status={name="Deklan",surname="Marrowen"},Vitals={}}}; local hud=Main.new(f,{layout={}}); assert(hud:start()); hud.collector:onOutgoing("info")
   for _,line in ipairs({"You are Deklan Marrowen, a delicate boned and skinny bodied 21 year old Entropic Male 1st stage Dragon. You are 7'6\" and weigh 292 lbs. You are hungry. You are","thirsty.","HP: 213 of 213 Ftg: 81 of 81 Carry: 174.4 of 354.0 lbs.","Str Int Wis Dex Agi Con Cha Wil Voi Per App","Godly Super Excel Super Super Super Super Super Super Super Super",">"}) do hud.collector:onLine(line) end
   eq(hud.last_state.character.full_name,"Deklan Marrowen"); eq(hud.last_state.character.physical.life_stage,"1st stage"); eq(hud.last_state.needs.hunger.status,"hungry"); eq(hud.last_state.needs.thirst.status,"thirsty")
   eq(hud.last_state.vitals.hp.current,213); eq(hud.last_state.vitals.carry.maximum,354); eq(hud.last_state.attributes.STR,"Godly"); eq(hud.last_state.attributes.WIS,"Excel")
@@ -1474,7 +1515,7 @@ test("a different character welcome performs another opted-in update without dis
   eq(checks,2); eq(#completions,2)
 end)
 test("reload leaves one command collector",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:reload(); eq(f:count(f.triggers),6); local outgoing=0; for _,name in pairs(f.events) do if name=="sysDataSendRequest" then outgoing=outgoing+1 end end; eq(outgoing,2)
+  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:reload(); eq(f:count(f.triggers),6); local outgoing=0; for _,name in pairs(f.events) do if name=="sysDataSendRequest" then outgoing=outgoing+1 end end; eq(outgoing,3)
 end)
 
 test("runtime wires one automapper handler per event and cleans it exactly",function()
@@ -1482,8 +1523,8 @@ test("runtime wires one automapper handler per event and cleans it exactly",func
   local personal=f:addEvent("gmcp.Room.Info",function() end); local hud=Main.new(f,{layout={}}); assert(hud:start())
   eq(f.createdMaps,1); eq(hud.automapper:currentRoom(),100)
   local function count(name) local n=0; for _,value in pairs(f.events) do if value==name then n=n+1 end end; return n end
-  eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),3); eq(count("sysDataSendRequest"),2)
-  hud:reload(); eq(f.createdMaps,2); eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDataSendRequest"),2)
+  eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),3); eq(count("sysDataSendRequest"),3)
+  hud:reload(); eq(f.createdMaps,2); eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDataSendRequest"),3)
   hud:shutdown(); eq(f.events[personal],"gmcp.Room.Info"); eq(count("gmcp.Room.Info"),1); eq(count("gmcp.Room.WrongDir"),0); eq(count("sysDataSendRequest"),0)
 end)
 

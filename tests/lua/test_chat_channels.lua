@@ -1,6 +1,17 @@
 local Channels=require("chat_channels")
 local function entry(category,line) return {category=category,line=line,message="hello",speaker="Tester"} end
 
+test("combined LINK is reversible presentation with independent custom LINK",function()
+  local separate={"ALL","STAFF","PSYCIAN","ROOM","MENTAL","DRAGON","SECIAN","LINK","QUEST"}
+  local combined,ok=Channels.combinedOrder(separate,{"LINK","QUEST"})
+  eq(ok,true); eq(table.concat(combined,","),"ALL,STAFF,LINK VIEW,ROOM,LINK,QUEST")
+  eq(table.concat(separate,","),"ALL,STAFF,PSYCIAN,ROOM,MENTAL,DRAGON,SECIAN,LINK,QUEST")
+  local reordered=Channels.combinedOrder(separate,{"LINK","QUEST"},{"QUEST","LINK VIEW","ALL"})
+  eq(table.concat(reordered,","),"QUEST,LINK VIEW,ALL,STAFF,ROOM,LINK")
+  local collision,allowed=Channels.combinedOrder(separate,{"LINK VIEW"})
+  eq(allowed,false); eq(table.concat(collision,","),table.concat(separate,","))
+end)
+
 test("MENTAL wire families stay distinct without guessing from message bodies",function()
   for _,row in ipairs({
     {'Tester (ESP): "hello"',"esp"},

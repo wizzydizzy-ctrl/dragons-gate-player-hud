@@ -5,6 +5,7 @@ local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
 local ChatChannels=require("chat_channels")
+local VisibilityTracker=require("visibility_tracker")
 local RollerAudio=require("autoroller_audio")
 local RollerAlerts=require("autoroller_alerts")
 local SkillDisplay=require("skill_display")
@@ -328,6 +329,10 @@ function Main:refreshClock()
   local clock=self:clockDisplay()
   if self.last_state then self.last_state.clock=clock end
   if self.view and type(self.view.updateClock)=="function" then self.view:updateClock(clock) end
+  if self.visibility and self.last_state and self.last_state.visibility then
+    local visibility=self.visibility:status()
+    if visibility.stale~=self.last_state.visibility.stale then self:refresh() end
+  end
   return clock
 end
 function Main:refresh()
@@ -336,6 +341,7 @@ function Main:refresh()
   if not posture and self.adapter.getPostureVariables then local ok,value=pcall(self.adapter.getPostureVariables,self.adapter); if ok and type(value)=="table" then posture=value end end
   if type(posture)=="table" then normalized.vitals.standing=posture.standing; normalized.vitals.sitting=posture.sitting; normalized.vitals.unconscious=posture.unconscious end
   if self.needs then normalized.needs=self.needs:status() end
+  if self.visibility then normalized.visibility=self.visibility:status() end
   if self.roundtime_display~=nil then normalized.vitals.roundtime=self.roundtime_display end; normalized.clock=self:clockDisplay()
   if not Main.syncRunesApi(normalized) then normalized.runes={items={}} end
   local signature=(normalized.vitals.psi.visible and "1" or "0")..(normalized.vitals.web.visible and "1" or "0")
@@ -366,7 +372,7 @@ function Main:displayPreferences(overrides)
   local display=type(self.settings.display)=="table" and self.settings.display or {}
   local result={side_text_scale=tonumber(display.side_text_scale) or 1,
     auto_wrap=self:mainConsoleAutoWrapEnabled(),align_input=self:mainInputAligned(),
-    main_skills=self:mainSkillsEnabled(),skill_filter=self:skillFilterEnabled(),
+    main_skills=self:mainSkillsEnabled(),skill_filter=self:skillFilterEnabled(),visibility_status=display.visibility_status~=false,
     shoprenew=self:quickActionEnabled("shoprenew"),shoprenewall=self:quickActionEnabled("shoprenewall"),trainall=self:quickActionEnabled("trainall"),
     combine_skills_runes=self:combinedSkillsRunesEnabled(),skills_runes_tab=self:skillsRunesTab(),
     main_skill_sort=SkillSort.normalize(display.main_skill_sort),
@@ -709,10 +715,14 @@ function Main:roundtimeHandoff()
 end
 function Main:onCharacterEntry(name)
   name=tostring(name or ""):match("^%s*(.-)%s*$")
-  if self.character_entry_started and (name=="" or name==self.character_entry_name) then return false end
+  if self.character_entry_started and (name=="" or name==self.character_entry_name) then
+    if name~="" then self.outgoing_session_confirmed=true end
+    return false
+  end
   local previousName=self.character_entry_name or self.roundtime_character
   if name~="" and previousName and name~=previousName then self:onCharacterExit() end
   self.character_entry_started=true; self.character_entry_name=name~="" and name or self.character_entry_name
+  if name~="" then self.outgoing_session_confirmed=true end
   self.roundtime_character=self.character_entry_name or self.roundtime_character
   if self.chat then self.chat:syncCharacter() end
   local function refreshCommands()
@@ -727,6 +737,8 @@ function Main:onCharacterEntry(name)
   return ok,err
 end
 function Main:onCharacterExit(reason)
+  self.outgoing_session_confirmed=false
+  if self.visibility then self.visibility:reset() end
   if self.quick_actions then self.quick_actions:cancel(reason or "Character changed.") end
   if self.rune_variables then self.rune_variables:clear() end
   if self.collector then self.collector.snapshot.runes={items={}} end
@@ -755,7 +767,11 @@ function Main:startChat()
     end
   end)
   local restored=false
+  self.chat.sessionActive=function() return self.character_entry_started==true and self.outgoing_session_confirmed==true end
   if type(self.chat_handoff)=="table" then restored=self.chat:restoreHandoff(self.chat_handoff)==true end
+  if self.chat.setCaptureOutgoing then self.chat:setCaptureOutgoing(settings.capture_outgoing~=false) end
+  if self.chat.setLinkCombined then self.chat:setLinkCombined(settings.combine_links==true) end
+  if self.view and self.view.setChatPresentation then self.view:setChatPresentation(settings.capture_outgoing~=false,self.chat.linkCombined==true) end
   if self.view and self.view.setChatFilterCallback then
     self.view:setChatFilterCallback(function(category)
       local chat=self.chat
@@ -766,10 +782,11 @@ function Main:startChat()
   if self.view and self.view.setChatOrderCallback then
     self.view:setChatOrderCallback(function(order)
       order=ChatChannels.tabOrder(order)
-      local candidate={tab_order=order,all_sources=self.settings.chat and self.settings.chat.all_sources,visible=not (self.settings.chat and self.settings.chat.visible==false),sounds=self.settings.chat and self.settings.chat.sounds}
+      local field=self.chat and self.chat.linkCombined==true and "combined_tab_order" or "tab_order"
+      local candidate=self:chatPreferences({[field]=order})
       if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
-      self.settings.chat=self.settings.chat or {}; self.settings.chat.tab_order=order
-      local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat.tab_order=order end
+      self.settings.chat=self.settings.chat or {}; self.settings.chat[field]=order
+      local root=rawget(_G,"DGHUD"); if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat[field]=order end
       return true
     end)
   end
@@ -808,10 +825,62 @@ function Main:clearSavedChat(confirmed)
   local ok,count=self.chat:clearSavedHistory(true); if not ok then return nil,count end
   if self.adapter.reportChatClear then self.adapter:reportChatClear("saved",count) end; return true,count
 end
+function Main:chatPreferences(overrides)
+  local candidate=Settings.merge({},self.settings.chat or {})
+  candidate.tab_order=ChatChannels.tabOrder(candidate.tab_order or ChatChannels.order)
+  candidate.visible=candidate.visible~=false
+  candidate.capture_outgoing=candidate.capture_outgoing~=false
+  candidate.combine_links=candidate.combine_links==true
+  for key,value in pairs(overrides or {}) do candidate[key]=value end
+  return candidate
+end
+function Main:setChatPreference(key,wanted)
+  if (key~="capture_outgoing" and key~="combine_links") or type(wanted)~="boolean" then return nil,"Invalid chat preference." end
+  if key=="combine_links" and wanted and self.chat and self.chat.history.knownCategories[ChatChannels.linkFilter] then
+    return nil,"A personal LINK VIEW tab already exists. Keep separate link tabs."
+  end
+  local candidate=self:chatPreferences({[key]=wanted})
+  if not self.adapter.saveChatSettings then return nil,"Chat settings cannot be saved in this profile." end
+  local priorCapture
+  if key=="capture_outgoing" then
+    if not self.chat or not self.chat.setCaptureOutgoing then return nil,"Outgoing capture is not ready. Run dghud reload." end
+    priorCapture=self.chat.captureOutgoing
+    local active,activationErr=self.chat:setCaptureOutgoing(wanted)
+    if not active then
+      self.chat:setCaptureOutgoing(priorCapture)
+      return nil,"Could not enable outgoing capture: "..tostring(activationErr or "observer unavailable")
+    end
+  end
+  local saved,err=self.adapter:saveChatSettings(candidate)
+  if not saved then
+    if priorCapture~=nil then self.chat:setCaptureOutgoing(priorCapture) end
+    return nil,"Could not save chat settings: "..tostring(err)
+  end
+  self.settings.chat=self.settings.chat or {}; self.settings.chat[key]=wanted
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat[key]=wanted end
+  if self.chat then
+    if key=="combine_links" and self.chat.setLinkCombined then self.chat:setLinkCombined(wanted) end
+  end
+  if self.view and self.view.setChatPresentation then self.view:setChatPresentation(candidate.capture_outgoing,candidate.combine_links) end
+  return wanted
+end
+function Main:setVisibilityDisplay(wanted)
+  if type(wanted)~="boolean" then return nil,"Visibility display must be ON or OFF." end
+  local candidate=self:displayPreferences({visibility_status=wanted})
+  if not self.adapter.saveDisplaySettings then return nil,"Display settings cannot be saved in this profile." end
+  local saved,err=self.adapter:saveDisplaySettings(candidate)
+  if not saved then return nil,"Could not save visibility display: "..tostring(err) end
+  self.settings.display=self.settings.display or {}; self.settings.display.visibility_status=wanted
+  local root=rawget(_G,"DGHUD")
+  if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.display=type(root.user_settings.display)=="table" and root.user_settings.display or {}; root.user_settings.display.visibility_status=wanted end
+  if self.view.setVisibilityDisplay then self.view:setVisibilityDisplay(wanted) end
+  self:refresh(); return wanted
+end
 function Main:setChatVisible(visible)
   if type(visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local chatSettings=self.settings.chat or {}
-  local candidate={visible=visible,tab_order=ChatChannels.tabOrder(chatSettings.tab_order or ChatChannels.order),all_sources=chatSettings.all_sources,sounds=chatSettings.sounds}
+  local candidate=self:chatPreferences({visible=visible})
   if self.adapter.saveChatSettings then
     local saved,err=self.adapter:saveChatSettings(candidate)
     if not saved then return nil,"Could not save chat visibility: "..tostring(err) end
@@ -836,7 +905,7 @@ function Main:setChatAllSource(category,enabled)
   enabled=enabled==true
   local chatSettings=self.settings.chat or {}; local sources=ChatChannels.allSources(chatSettings.all_sources)
   sources[category]=enabled
-  local candidate={tab_order=ChatChannels.tabOrder(chatSettings.tab_order or ChatChannels.order),all_sources=sources,visible=chatSettings.visible~=false,sounds=chatSettings.sounds}
+  local candidate=self:chatPreferences({all_sources=sources})
   if self.adapter.saveChatSettings then local saved,err=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save ALL tab sources: "..tostring(err) end end
   self.settings.chat=chatSettings; chatSettings.all_sources=sources
   local root=rawget(_G,"DGHUD")
@@ -1349,6 +1418,11 @@ function Main:removeMapClickHook()
 end
 function Main:start()
   if self.started then return true end
+  self.outgoing_session_confirmed=false
+  if self.adapter.hasConfirmedCharacterPrompt then
+    local ok,confirmed=pcall(self.adapter.hasConfirmedCharacterPrompt,self.adapter)
+    self.outgoing_session_confirmed=ok and confirmed==true
+  end
   self.input_alignment_suspended=false
   if self.original_main_console_wrap==nil and self.adapter.getMainConsoleWrap then
     local read,current=pcall(self.adapter.getMainConsoleWrap,self.adapter)
@@ -1451,7 +1525,15 @@ function Main:start()
   end) end
   self:presentMapCollections()
   self.posture=PostureTracker.new(self.adapter,function() if self.started then self:refresh() end end)
-  self.needs=NeedsTracker.new(self.adapter,function() if self.started then self:refresh() end end)
+  local selfIdentity=function()
+    local data=self.adapter:getGMCP(); local status=data and data.Char and data.Char.Status
+    if type(status)=="table" and type(status.name)=="string" and status.name~="" then
+      return status.name..(type(status.surname)=="string" and status.surname~="" and (" "..status.surname) or "")
+    end
+    return self.character_entry_name
+  end
+  self.needs=NeedsTracker.new(self.adapter,function() if self.started then self:refresh() end end,selfIdentity)
+  self.visibility=VisibilityTracker.new(self.adapter,function() if self.started then self:refresh() end end,selfIdentity)
   local audioBase=self.adapter.dataBase and self.adapter.dataBase() or nil
   self.roller_alerts=RollerAlerts.new(self.adapter,RollerAudio.new({base=audioBase}),self.view,function()
     return (self.settings.roller or {}).alerts
@@ -1506,6 +1588,9 @@ function Main:start()
     if action=="chat_clear_saved" then return self:clearSavedChat(true) end
     if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
     if action=="chat_visibility" then return self:setChatVisible(wanted) end
+    if action=="chat_outgoing" then return self:setChatPreference("capture_outgoing",wanted) end
+    if action=="chat_combine_links" then return self:setChatPreference("combine_links",wanted) end
+    if action=="visibility_status" then return self:setVisibilityDisplay(self.settings.display and self.settings.display.visibility_status==false or false) end
     if action=="chat_sound_enabled" then return self:setChatSound(key,"enabled",wanted) end
     if action=="chat_sound_choice" then return self:setChatSound(key,"sound",wanted) end
     if action=="chat_sound_volume" then return self:setChatSoundVolume(wanted) end
@@ -1537,6 +1622,8 @@ function Main:start()
   if self.view.setChatAllSources then self.view:setChatAllSources(self.settings.chat and self.settings.chat.all_sources or {}) end
   if self.view.setChatSounds then self.view:setChatSounds(self.settings.chat and self.settings.chat.sounds) end
   if self.view.setChatVisible then self.view:setChatVisible(not (self.settings.chat and self.settings.chat.visible==false)) end
+  if self.view.setChatPresentation then self.view:setChatPresentation(not (self.settings.chat and self.settings.chat.capture_outgoing==false),self.settings.chat and self.settings.chat.combine_links==true) end
+  if self.view.setVisibilityDisplay then self.view:setVisibilityDisplay(not (self.settings.display and self.settings.display.visibility_status==false)) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   self:syncBaseUI()
   if self.view.setDisplayTextSize then self.view:setDisplayTextSize(displayTextPresetName(self.settings.display and self.settings.display.side_text_scale)) end
@@ -1636,9 +1723,15 @@ function Main:start()
       end
     end
     if key=="time" then self:onClockSync(snapshot.time); return end
-    if key=="info" and self.needs and self.needs:onInfo(parsed) then return end
+    if key=="info" then
+      local identity=VisibilityTracker.selfIdentity(selfIdentity)
+      if type(parsed)=="table" and type(parsed.condition_text)=="string" and VisibilityTracker.infoOwned(parsed,identity,false) then self.outgoing_session_confirmed=true end
+      if self.visibility then self.visibility:onInfo(parsed) end
+      if self.needs and self.needs:onInfo(parsed) then return end
+    end
     self:refresh()
   end,function(value,metadata) self:onRoundtime(value,metadata) end,function(name) self:onCharacterEntry(name) end,function() self:onCharacterExit() end)
+  self.collector.selfProvider=selfIdentity
   self.collector.native_skill_arguments=not self:skillFilterEnabled()
   self.rune_variables=RuneVariables.new(rawget(_G,"DGHUD"))
   self.collector.onCaptureBegin=function(command)
@@ -1797,9 +1890,13 @@ function Main:start()
   self.runtime.triggers[#self.runtime.triggers+1]=self.adapter:addLineTrigger(function(line)
     -- These consumers are independent. One optional tracker must never stop
     -- the autoroller from receiving the same game output.
+    if line and tostring(line):gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>") then
+      self.outgoing_session_confirmed=true
+    end
     pcall(self.posture.onLine,self.posture,line)
     local collectingInfo=self.collector and self.collector.active and self.collector.active.command=="info"
     pcall(self.needs.onLine,self.needs,line,"output",not collectingInfo)
+    if self.visibility then pcall(self.visibility.onLine,self.visibility,line,"output",not collectingInfo) end
     local ok,err=pcall(self.roller.onLine,self.roller,line)
     if not ok then self:captureFailure("autoroller",err,{operation="line_capture"}) end
     if self.roundtime_check then pcall(self.roundtime_check.onLine,self.roundtime_check,line) end
@@ -1866,6 +1963,10 @@ end
 function Main:reload() self:shutdown(); return self:start() end
 function Main:healthCheck()
   local chatEnabled=not (self.settings.chat and self.settings.chat.enabled==false)
+  if chatEnabled and not (self.settings.chat and self.settings.chat.capture_outgoing==false)
+    and self.chat and (type(self.chat.outgoingEvent)~="number" or self.chat.outgoingEvent<1 or self.chat.outgoingEvent~=math.floor(self.chat.outgoingEvent)) then
+    return nil,"Outgoing chat observer is unavailable"
+  end
   local function validRegistrations(items) if type(items)~="table" or #items<1 then return false end; for _,id in ipairs(items) do if id==nil or id==false then return false end end; return true end
   if not self.started or not self.runtime_registration_complete or not self.view or not self.view.root or not self.collector or not self.collector.started or not self.colorizer or not self.colorizer.started or not self.colorizer.trigger or not self.roller or not self.automapper or not self.special_transition or not self.map_transfer or (chatEnabled and (not self.chat or not self.chat.started or not self.chat.trigger)) or not validRegistrations(self.runtime.events) or not validRegistrations(self.runtime.aliases) or not validRegistrations(self.runtime.triggers) then return nil,"HUD is not healthy" end
   local validator=self.view and self.view.validateReusable

@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.102**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.103**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,16 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.102
+## What's new in v0.3.103
+
+- Outgoing CONTACT requests are saved locally in MENTAL after a confirmed character session. They are labeled as requests, not proof of delivery; matching own broadcast echoes are not duplicated.
+- **OPTIONS → CHAT SETTINGS** can turn outgoing capture off or combine the mental/racial link tabs into one **LINK** view. Separate tabs remain the default. History, original channels, sound choices, and Show in ALL rules stay intact.
+- **Visibility: Hidden / Visible / Unknown** appears under Food and Water, based on confirmed self messages and your own INFO. Old confirmations are marked stale; failed hide attempts and other characters' INFO do not change your status.
+- Turn the visibility row off with **OPTIONS → HIDDEN / VISIBLE**. These features add no periodic INFO or SPELLS requests.
+
+See [Chatbox](CHATBOX.md#outgoing-contact-messages) and [Visibility](HUD_SCREEN_AND_CHARACTER_DATA.md#hidden-visible-and-unknown). Effects and Tactical views remain pending representative output and a defined source.
+
+## Previous changes in v0.3.102
 
 - **MENTAL** combines ESP, contact thoughts, and generic mental links.
 - Explicit **Psycian links** now have a dedicated **PSYCIAN** tab. Named **DRAGON** and **SECIAN** links keep their own tabs.

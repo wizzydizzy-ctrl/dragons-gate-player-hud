@@ -55,6 +55,20 @@ local function bucketCounts(entries)
   return counts
 end
 
+test("same-second outgoing requests remain distinct after disk history reload",function()
+  local api=fakeStorageApi()
+  api.listed={"2026-10-14.jsonl"}
+  api.files["/chat/profile/2026-10-14.jsonl"]="one\ntwo\n"
+  api.decoded={
+    one={schema=1,timestamp="2026-10-14T09:00:00-04:00",character="Synthetic Tester",category="MENTAL",speaker="Synthetic Tester",target="room",message="same",line="You -> room (outgoing request): same",source="outgoing",outgoing_id="100:1"},
+    two={schema=1,timestamp="2026-10-14T09:00:00-04:00",character="Synthetic Tester",category="MENTAL",speaker="Synthetic Tester",target="room",message="same",line="You -> room (outgoing request): same",source="outgoing",outgoing_id="100:2"},
+  }
+  local entries=Storage.new(api,"/chat",1000):loadRecent()
+  eq(#entries,2)
+  local history=History.new(1000,3); history:hydrate(entries)
+  eq(#history.items,2)
+end)
+
 local function withNativeLogs(logs,run)
   local originalLfs,originalIo,originalYajl=lfs,io,yajl
   local trace={opened=0,closed=0,reads=0,reports={}}

@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.102.
+Applies to DGHUD v0.3.103.
 
 ## Feedback and feature requests
 
@@ -68,6 +68,8 @@ These files are local profile data, not encrypted private storage: anyone with a
 ## Chat privacy
 
 The top chatbox saves recognized communication locally, including private categories such as whispers, MENTAL (ESP/contact/generic links), Dragon links, Psycian links, and Secian links. Older saved categories are displayed under the updated tabs without rewriting the original records.
+
+**CAPTURE OUTGOING CONTACTS** defaults ON after a confirmed character session. Complete CONTACT requests are saved locally with their target and message, labeled as outgoing requests rather than delivery confirmations. It does not record arbitrary commands or authentication input. Turn it OFF in Chat Settings to stop new outgoing records; previously saved entries remain until you explicitly clear saved history. Combining tabs into LINK does not change what is stored or uploaded.
 
 Default location:
 

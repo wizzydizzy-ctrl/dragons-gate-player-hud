@@ -21,8 +21,8 @@ do
 end
 local function copyChatEntries(entries,partial)
   -- Capture before replacing loaded modules. A full controller snapshot carries
-  -- eleven bounded source histories; a view-only fallback carries one visible tab.
-  local limit=partial==true and 1000 or 11000
+  -- All thirteen bounded source histories; a view-only fallback carries one visible tab.
+  local limit=partial==true and 1000 or 13000
   local source=type(entries)=="table" and entries or {}; local result={}; local first=math.max(1,#source-limit+1)
   for index=first,#source do
     local entry=source[index]
@@ -47,7 +47,7 @@ local function captureChatHandoff(hud)
   if not handoff and type(hud._chat_handoff)=="table" then handoff=hud._chat_handoff end
   if not handoff and controller and controller.view and type(controller.view.chat_entries)=="table" then handoff={schema=1,partial=true,character_key="unknown",filter=controller.view.chat_active_filter,entries=controller.view.chat_entries} end
   if type(handoff)~="table" then return nil end
-  return {schema=1,partial=handoff.partial==true,character_key=handoff.character_key,filter=handoff.filter,entries=copyChatEntries(handoff.entries,handoff.partial),last_key=handoff.last_key,last_epoch=handoff.last_epoch}
+  return {schema=1,partial=handoff.partial==true,character_key=handoff.character_key,filter=handoff.filter,entries=copyChatEntries(handoff.entries,handoff.partial),last_key=handoff.last_key,last_epoch=handoff.last_epoch,last_mental_kind=handoff.last_mental_kind,previous_link_filter=handoff.previous_link_filter}
 end
 local chatHandoff=captureChatHandoff(previous)
 if updateReinstallPending and previous and type(previous.controller)=="table" then
@@ -72,6 +72,7 @@ moduleNames[#moduleNames+1]="roundtime_check"
 moduleNames[#moduleNames+1]="autoroller_audio"; moduleNames[#moduleNames+1]="autoroller_alerts"
 moduleNames[#moduleNames+1]="quick_actions"; moduleNames[#moduleNames+1]="rune_variables"
 moduleNames[#moduleNames+1]="chat_channels"
+moduleNames[#moduleNames+1]="chat_outgoing"; moduleNames[#moduleNames+1]="visibility_tracker"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")

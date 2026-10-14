@@ -1,5 +1,5 @@
 local Needs={}; Needs.__index=Needs
-local Parser=require("command_parser")
+local Visibility=require("visibility_tracker")
 local function clean(line) return tostring(line or ""):gsub("\27%[[%d;]*m",""):gsub("\27%[[%d;]*[A-Za-z]",""):gsub("\7","") end
 local function notice(text,phrase)
   -- Accept game sentences, including prompt-prefixed/combined output, but
@@ -35,7 +35,24 @@ local function detected(line)
   elseif text:find("you are thirsty",1,true) or text:find("starting to feel thirsty",1,true) then thirst="thirsty" end
   return hunger,thirst,raw
 end
-function Needs.new(adapter,onChange) return setmetatable({adapter=adapter,onChange=onChange,state={hunger={status="unknown"},thirst={status="unknown"}}},Needs) end
+function Needs.new(adapter,onChange,selfProvider)
+  return setmetatable({adapter=adapter,onChange=onChange,selfProvider=selfProvider,
+    identity=Visibility.selfIdentity(selfProvider),state={hunger={status="unknown"},thirst={status="unknown"}}},Needs)
+end
+function Needs:reset()
+  local discard=self.pending_info~=nil or self.info_discard
+  self.pending_info=nil; self.info_discard=discard or nil
+  self.state={hunger={status="unknown"},thirst={status="unknown"}}
+  self.identity=Visibility.selfIdentity(self.selfProvider)
+  if self.onChange then self.onChange(self:status()) end
+  return true
+end
+function Needs:syncSelf()
+  local identity=Visibility.selfIdentity(self.selfProvider)
+  if not Visibility.sameSelf(self.identity,identity) then
+    self:reset()
+  else self.identity=identity end
+end
 function Needs:apply(hunger,thirst,raw,source)
   if not hunger and not thirst then return false end
   local stamp=(self.adapter and self.adapter.epoch and self.adapter:epoch()) or os.time()
@@ -46,35 +63,20 @@ end
 function Needs:onInfo(parsed,source)
   -- An empty condition string is meaningful only on a complete biography.
   -- Attribute-only INFO refreshes and ordinary output must not clear warnings.
-  if type(parsed)~="table" or type(parsed.condition_text)~="string" then return false end
-  self.pending_info=nil
+  self:syncSelf()
+  if type(parsed)~="table" or type(parsed.condition_text)~="string"
+      or #parsed.condition_text>16384 or not Visibility.infoOwned(parsed,self.identity,self.selfProvider==nil) then return false end
+  self.pending_info=nil; self.info_discard=nil
   local hunger,thirst,raw=detected(parsed.condition_text)
   return self:apply(hunger or "ok",thirst or "ok",raw,source or "info")
 end
 function Needs:onLine(line,source,observeInfo)
-  local plain=clean(line):match("^%s*(.-)%s*$")
-  local content=plain:gsub("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>%s*",""):gsub("^>%s*","")
-  if observeInfo==false then
-    -- The command collector owns this response and will apply one full snapshot.
-    self.pending_info=nil
-  elseif content:match('^You are %a[^,%."]-,') then
-    self.pending_info=#content<=16384 and {lines={content},bytes=#content} or nil
-  elseif self.pending_info then
-    local pending=self.pending_info
-    if #pending.lines>=64 or pending.bytes+#plain>16384 then
-      self.pending_info=nil
-    else
-      pending.lines[#pending.lines+1]=plain; pending.bytes=pending.bytes+#plain
-      if Parser.isPrompt(plain) then
-        self.pending_info=nil
-        local parsed=Parser.parseInfo(pending.lines)
-        if self:onInfo(parsed,source or "output") then return true end
-      end
-    end
-  end
+  self:syncSelf()
+  local handled,parsed,infoSource=Visibility.observeInfo(self,line,source,observeInfo)
+  if handled then return parsed and self:onInfo(parsed,infoSource) or false end
   local hunger,thirst,raw=detected(line)
   return self:apply(hunger,thirst,raw,source)
 end
-function Needs:status() local function c(v) return {status=v.status,timestamp=v.timestamp,source=v.source,raw=v.raw} end; return {hunger=c(self.state.hunger),thirst=c(self.state.thirst)} end
+function Needs:status() self:syncSelf(); local function c(v) return {status=v.status,timestamp=v.timestamp,source=v.source,raw=v.raw} end; return {hunger=c(self.state.hunger),thirst=c(self.state.thirst)} end
 Needs.detected=detected
 return Needs

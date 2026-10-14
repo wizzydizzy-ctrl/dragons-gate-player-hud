@@ -1017,6 +1017,8 @@ function Adapter.displaySettingsSnapshot(config)
   if mainSkills==nil then mainSkills=true elseif type(mainSkills)~="boolean" then return nil,"main skills display must be a boolean" end
   local skillFilter=config.skill_filter
   if skillFilter==nil then skillFilter=true elseif type(skillFilter)~="boolean" then return nil,"skill filters must be a boolean" end
+  local visibilityStatus=config.visibility_status
+  if visibilityStatus==nil then visibilityStatus=true elseif type(visibilityStatus)~="boolean" then return nil,"Visibility display must be ON or OFF" end
   local combineSkillsRunes=config.combine_skills_runes
   if combineSkillsRunes==nil then combineSkillsRunes=true elseif type(combineSkillsRunes)~="boolean" then return nil,"Combined Skills / Runes must be ON or OFF" end
   local skillsRunesTab=config.skills_runes_tab
@@ -1034,7 +1036,7 @@ function Adapter.displaySettingsSnapshot(config)
     if not value then return nil,err end
     sorts[key]=value
   end
-  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput,main_skills=mainSkills,skill_filter=skillFilter,
+  return {side_text_scale=scale,auto_wrap=autoWrap,align_input=alignInput,main_skills=mainSkills,skill_filter=skillFilter,visibility_status=visibilityStatus,
     shoprenew=quick.shoprenew,shoprenewall=quick.shoprenewall,trainall=quick.trainall,
     combine_skills_runes=combineSkillsRunes,skills_runes_tab=skillsRunesTab,
     main_skill_sort=sorts.main_skill_sort,sidebar_skill_sort=sorts.sidebar_skill_sort}
@@ -1048,7 +1050,7 @@ function Adapter:saveDisplaySettings(config)
     return string.format("{primary=%q,direction=%q,secondary=%q,secondary_direction=%q}",
       value.primary,value.direction,value.secondary,value.secondary_direction)
   end
-  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s, skill_filter=%s, shoprenew=%s, shoprenewall=%s, trainall=%s, combine_skills_runes=%s, skills_runes_tab=%q, main_skill_sort=%s, sidebar_skill_sort=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills),tostring(snapshot.skill_filter),tostring(snapshot.shoprenew),tostring(snapshot.shoprenewall),tostring(snapshot.trainall),tostring(snapshot.combine_skills_runes),snapshot.skills_runes_tab,sortSource(snapshot.main_skill_sort),sortSource(snapshot.sidebar_skill_sort))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write(string.format("return { side_text_scale=%.3f, auto_wrap=%s, align_input=%s, main_skills=%s, skill_filter=%s, visibility_status=%s, shoprenew=%s, shoprenewall=%s, trainall=%s, combine_skills_runes=%s, skills_runes_tab=%q, main_skill_sort=%s, sidebar_skill_sort=%s }\n",snapshot.side_text_scale,tostring(snapshot.auto_wrap),tostring(snapshot.align_input),tostring(snapshot.main_skills),tostring(snapshot.skill_filter),tostring(snapshot.visibility_status),tostring(snapshot.shoprenew),tostring(snapshot.shoprenewall),tostring(snapshot.trainall),tostring(snapshot.combine_skills_runes),snapshot.skills_runes_tab,sortSource(snapshot.main_skill_sort),sortSource(snapshot.sidebar_skill_sort))); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
@@ -1070,6 +1072,16 @@ function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
   if config.visible~=nil and type(config.visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local result={tab_order={},visible=config.visible~=false}; local seen={}
+  for _,field in ipairs({"capture_outgoing","combine_links"}) do
+    if config[field]~=nil and type(config[field])~="boolean" then return nil,"Chat preferences must be ON or OFF" end
+  end
+  result.capture_outgoing=config.capture_outgoing~=false
+  result.combine_links=config.combine_links==true
+  if config.combined_tab_order~=nil then
+    if type(config.combined_tab_order)~="table" then return nil,"Combined link tab order must be a table" end
+    result.combined_tab_order=ChatChannels.tabOrder(config.combined_tab_order)
+    while #result.combined_tab_order>require("chat_sounds").MAX_TABS do table.remove(result.combined_tab_order) end
+  end
   local tabLimit=require("chat_sounds").MAX_TABS
   for index,value in ipairs(order) do
     if index>tabLimit then break end
@@ -1100,6 +1112,12 @@ function Adapter:saveChatSettings(config)
   local sourceValues={}; for _,category in ipairs(chatAllSourceOrder) do if snapshot.all_sources then sourceValues[#sourceValues+1]="["..string.format("%q",category).."]="..tostring(snapshot.all_sources[category]==true) end end
   local sources=#sourceValues>0 and ", all_sources={"..table.concat(sourceValues,",").."}" or ""
   local sounds=""
+  local presentation=", capture_outgoing="..tostring(snapshot.capture_outgoing)..", combine_links="..tostring(snapshot.combine_links)
+  if snapshot.combined_tab_order then
+    local combined={}
+    for _,value in ipairs(snapshot.combined_tab_order) do combined[#combined+1]=string.format("%q",value) end
+    presentation=presentation..", combined_tab_order={"..table.concat(combined,",").."}"
+  end
   if snapshot.sounds then
     local tabs,order={},{}
     for category in pairs(snapshot.sounds.tabs) do order[#order+1]=category end
@@ -1110,7 +1128,7 @@ function Adapter:saveChatSettings(config)
     end
     sounds=string.format(", sounds={volume=%d,tabs={%s}}",snapshot.sounds.volume,table.concat(tabs,","))
   end
-  local wrote,writeErr=file:write("return { visible="..tostring(snapshot.visible)..", tab_order={"..table.concat(values,",").."}"..sources..sounds.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
+  local wrote,writeErr=file:write("return { visible="..tostring(snapshot.visible)..", tab_order={"..table.concat(values,",").."}"..sources..sounds..presentation.." }\n"); if not wrote then file:close(); os.remove(temp); return nil,writeErr end
   local closed,closeErr=file:close(); if closed==nil then os.remove(temp); return nil,closeErr end
   local backup=destination..".bak"; os.remove(backup); local existing=io.open(destination,"rb"); if existing then existing:close(); local moved,moveErr=os.rename(destination,backup); if not moved then os.remove(temp); return nil,moveErr end end
   local ok,renameErr=os.rename(temp,destination); if not ok then os.rename(backup,destination); return nil,renameErr end; os.remove(backup); return true
@@ -1275,6 +1293,10 @@ function Adapter:isCharacterActive()
   if type(status)=="table" and type(status.name)=="string" and status.name~="" then return true end
   local controller=DGHUD and DGHUD.controller
   return controller and controller.character_entry_started==true or false
+end
+function Adapter:hasConfirmedCharacterPrompt()
+  local line=tostring(getCurrentLine and getCurrentLine() or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%s*(.-)%s*$")
+  return line:match("^%[%d+%]%s+%d+/%d+%s+hp,%s+%d+/%d+%s+ftg%s*>")~=nil
 end
 function Adapter:mudletVersion()
   if type(getMudletVersion)~="function" then return nil end

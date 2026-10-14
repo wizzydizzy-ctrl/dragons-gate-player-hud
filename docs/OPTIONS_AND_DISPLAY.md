@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.102**.
+Applies to DGHUD **v0.3.103**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -17,6 +17,14 @@ If that starter package is not installed in the profile, the option reports that
 Open **OPTIONS → CHAT SETTINGS → SHOW CHATBOX** to show or completely hide the top-center chatbox. It starts **ON**. Turning it **OFF** expands the main display without deleting history or stopping chat capture. You can reopen Chat Settings through OPTIONS even while chat is hidden. This preference survives character changes, restarts, and HUD updates.
 
 The same window controls which sources appear in ALL, provides separate history-clearing buttons, and offers per-tab sound alerts. Under **SOUND ALERTS**, choose each tab's sound, turn it on or off, or click **PREVIEW**. Staff alerts start on; the other tabs start off. See the [Chatbox Guide](CHATBOX.md).
+
+**CAPTURE OUTGOING CONTACTS** starts ON and records complete CONTACT requests in MENTAL only after a confirmed character session. Turn it OFF to stop new outgoing records without deleting old history. Requests are not delivery confirmations and do not play self-alert sounds.
+
+**LINK TABS** starts SEPARATE. Select COMBINED LINK for one mental/racial-link view without changing individual channels, Show in ALL choices, sound settings, or history. Returning to SEPARATE restores its previous tab order. See [outgoing requests and combined LINK](CHATBOX.md#outgoing-contact-messages).
+
+## Hidden / Visible
+
+**OPTIONS → HIDDEN / VISIBLE** starts ON. It shows a compact visibility row below Food and Water, using confirmed self hide/reveal messages and own INFO. Unknown and stale observations are explicitly labeled. Turn it OFF to hide the row; the setting saves independently of other display choices. It does not enable periodic INFO requests. See [Visibility](HUD_SCREEN_AND_CHARACTER_DATA.md#hidden-visible-and-unknown).
 
 ## Keybindings
 
