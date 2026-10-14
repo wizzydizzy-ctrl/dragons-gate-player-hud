@@ -57,8 +57,10 @@ function Settings.resolve(defaults,input)
   local resolved=Settings.merge(defaults,migrated)
   if type(resolved.chat)=="table" then
     if type(resolved.chat.capture_outgoing)~="boolean" then resolved.chat.capture_outgoing=true end
-    if type(resolved.chat.combine_links)~="boolean" then resolved.chat.combine_links=false end
-    if type(resolved.chat.combined_tab_order)=="table" then resolved.chat.combined_tab_order=Channels.tabOrder(resolved.chat.combined_tab_order) end
+    -- LINK is standard even for profiles saved as separate in v0.3.103.
+    -- Raw channel history, ALL inclusion, and alert choices stay unchanged.
+    resolved.chat.combine_links=true
+    if type(resolved.chat.combined_tab_order)=="table" then resolved.chat.combined_tab_order=Channels.combinedTabOrder(resolved.chat.combined_tab_order) end
   end
   if type(resolved.chat)=="table" and type(resolved.chat.tab_order)=="table" then resolved.chat.tab_order=Channels.tabOrder(resolved.chat.tab_order) end
   resolved.display=type(resolved.display)=="table" and resolved.display or {}

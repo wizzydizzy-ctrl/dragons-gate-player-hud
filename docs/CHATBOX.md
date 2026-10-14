@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.103.
+Applies to DGHUD v0.3.104.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
@@ -12,11 +12,11 @@ Chat history belongs to the Mudlet profile, not to one character. Switching char
 
 Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanently remove all saved DGHUD chat history. Permanent deletion requires two clicks; the command-line equivalent requires the full `dghud chat clear saved confirm` phrase.
 
-The same settings window has a **SHOW IN ALL** section. Toggle any source to control whether it appears in the combined **ALL** tab. `COMBAT` starts off there; every other source starts on. This changes only the combined view—dedicated tabs continue to work, capture continues, and saved history is untouched. The choices persist through profile restarts and HUD updates.
+The same settings window has a **SHOW IN ALL** section. Toggle any source to control whether it appears in **ALL**. `COMBAT` starts off there; every other source starts on. Turning a source off only excludes it from ALL: LINK and the other chat views still capture and save its messages. Choices persist through profile restarts and HUD updates.
 
 ## Outgoing CONTACT messages
 
-Open **OPTIONS → CHAT SETTINGS → CAPTURE OUTGOING CONTACTS**. It starts **ON** and your saved choice survives updates and restarts. After the HUD confirms a character session, a complete `contact <target> <message>` request is copied into **MENTAL**:
+Open **OPTIONS → CHAT SETTINGS → CAPTURE OUTGOING CONTACTS**. It starts **ON** and your saved choice survives updates and restarts. After the HUD confirms a character session, a complete `contact <target> <message>` request appears in **LINK**, retaining MENTAL as its source:
 
 ```text
 You -> recipient (outgoing request): Hello!
@@ -28,21 +28,23 @@ An exact, recent, matching own broadcast echo is not added a second time to the 
 
 Outgoing entries follow MENTAL's **SHOW IN ALL** choice, remain visible in PRIVATE, and save in the same local profile history even while the chatbox is hidden. They are not uploaded. Turn the setting **OFF** if you do not want outgoing requests saved; this does not delete existing history.
 
-## One LINK tab or separate link tabs
+## The LINK tab
 
-Open **OPTIONS → CHAT SETTINGS → LINK TABS**. **SEPARATE** is the default: MENTAL, DRAGON, PSYCIAN, and SECIAN retain their own tabs. Choose **COMBINED LINK** to see their messages together in one **LINK** tab.
+**LINK is the standard tab** for mental/ESP/contact messages and Dragon, Psycian, and Secian links. It appears automatically, including when upgrading a profile saved with separate tabs in v0.3.103. There is no separate/combined switch to enable.
 
-This changes only the displayed filters. Every message retains its original channel, saved history, and per-channel sound settings. **SHOW IN ALL** continues to use the individual source choices, not the combined label. PRIVATE is unchanged.
+Every message retains its original source channel, saved history, and per-source sound settings. **SHOW IN ALL** continues to use the individual source choices, not the combined label. Turning PSYCIAN off there, for example, keeps Psycian messages in LINK but excludes them from ALL. PRIVATE is unchanged.
 
-The LINK tab initially takes the first constituent tab's position. Drag it to your preferred position; its combined order is remembered separately. Returning to SEPARATE restores your separate tab order. If you combine while viewing one constituent, LINK is selected; ALL, PRIVATE, STAFF, and personal filters remain selected normally. A profile restart or ordinary reload starts on ALL as before.
+LINK initially takes the first constituent tab's position, unless you already saved a combined order. Drag it to your preferred position; that order is remembered. The older source-tab order remains saved for compatibility. Upgrading while viewing a constituent selects LINK; ALL, PRIVATE, STAFF, and personal filters stay selected normally. A profile restart or ordinary reload starts on ALL as before.
 
-Personal categories are not merged: an existing custom LINK appears as **LINK (custom)** alongside the combined tab. A personal **LINK VIEW** category conflicts with the internal combined filter, so the HUD keeps separate tabs instead of hiding that category.
+Personal categories are not merged: a custom LINK appears as **LINK (custom)** alongside the built-in tab, and a personal LINK VIEW remains its own category. Neither can disable the standard LINK tab or consume another category's messages.
 
 ## Sound alerts
 
 Open **OPTIONS → CHAT SETTINGS → SOUND ALERTS**. Each tab has an **ON/OFF** control, a choice of twelve short sounds, and a **PREVIEW** button. Each built-in tab starts with a different sound. **STAFF starts ON; all other alerts start OFF** in a new profile. Existing alert choices migrate during updates. You can change the shared alert volume too. Changes save immediately for this Mudlet profile and survive restarts, character changes, and HUD updates.
 
 Preview lets you hear a sound even when that tab's alerts are OFF; it does not turn the alert on. The sounds are created locally from tones included in the HUD—no external media download or account is required. Mudlet's **Mute all media** and your computer's audio settings still apply.
+
+MENTAL, DRAGON, PSYCIAN, and SECIAN remain independent **source controls** here for messages inside LINK; they are no longer separate visible tabs.
 
 Only newly captured messages alert. Loading saved history, scrolling, switching tabs, changing characters, and updating the HUD do not replay old alerts. Rapid messages are limited to one alert per second per selected tab.
 
@@ -53,10 +55,7 @@ A message can appear in more than one filter, but plays only one sound: its spec
 - **ALL** — Captured categories enabled under **SHOW IN ALL**, plus skill improvements, skill-training readiness, stat increases, and fatigue gains from diligent training.
 - **ROOM** — Nearby speech and your own speech.
 - **PRIVATE** — Whispers and all mental, Dragon, Psycian, and Secian communication together.
-- **MENTAL** — ESP messages, direct contact thoughts, thoughts echoing through the area, and generic mental links.
-- **DRAGON** — Explicitly named Dragon links only.
-- **PSYCIAN** — Explicitly named Psycian links only.
-- **SECIAN** — Secian link messages; this filter becomes available after a Secian message is captured. These messages also appear in PRIVATE.
+- **LINK** — ESP, direct contacts, thoughts echoing through the area, generic mental links, and named Dragon, Psycian, and Secian links. Original source labels and source-specific settings remain available inside this combined view. Outgoing CONTACT requests appear here too.
 - **STAFF** — Recognized Guide, GM, Elder, sends, voice, and referral list, handling, and detail formats.
 - **COMBAT** — Your attacks, incoming weapon attacks, hit/miss results, damage, movement blocks, spell threats, upkeep, and recovery. This tab keeps capturing and saving messages even when **SHOW IN ALL → COMBAT** is OFF.
 - **WORLD** — Character arrivals (green) and departures (red), including unexpected departures. It starts included in ALL. Turn **SHOW IN ALL → WORLD** OFF to keep these messages only in WORLD; capture and saved history continue. WORLD sound alerts start OFF. Customize the two colors independently in **Color Settings → Text Styles → World arrivals / World departures**.
@@ -65,7 +64,7 @@ Drag any chat tab left or right to arrange the filters in the order you prefer. 
 
 ### Older tabs and saved messages
 
-ESP and CONTACT now share MENTAL. It takes the first position occupied by either old tab in your saved order; the duplicate is removed. PSYCIAN is available independently. Saved messages with explicit Psycian, Dragon, or Secian link wording display in the matching tab, while generic mental links display in MENTAL. Original saved categories and message text are not rewritten.
+ESP and CONTACT share the MENTAL source. Named Psycian, Dragon, and Secian links keep their matching sources, while generic mental links remain MENTAL. All four sources display together in LINK. Original saved categories and message text are not rewritten.
 
 MENTAL remains included in ALL if either previous ESP or CONTACT source was included. PSYCIAN initially inherits the previous ESP inclusion choice. An explicit saved MENTAL or PSYCIAN choice always wins, including OFF.
 

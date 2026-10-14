@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.103**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.104**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,15 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.103
+## What's new in v0.3.104
+
+- **LINK is the standard combined tab** for mental/ESP/contact and Dragon, Psycian, and Secian link messages. No setting needs to be enabled.
+- Existing profiles upgrade automatically. History, original message channels, per-source sounds, Show in ALL choices, and outgoing capture preferences are preserved.
+- Drag LINK into the position you prefer. Custom categories named LINK or LINK VIEW remain separate and cannot hide the built-in tab.
+
+See [the LINK tab](CHATBOX.md#the-link-tab).
+
+## Previous changes in v0.3.103
 
 - Outgoing CONTACT requests are saved locally in MENTAL after a confirmed character session. They are labeled as requests, not proof of delivery; matching own broadcast echoes are not duplicated.
 - **OPTIONS → CHAT SETTINGS** can turn outgoing capture off or combine the mental/racial link tabs into one **LINK** view. Separate tabs remain the default. History, original channels, sound choices, and Show in ALL rules stay intact.

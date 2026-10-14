@@ -4,7 +4,8 @@ Channels.sourceOrder={"ROOM","WHISPER","MENTAL","DRAGON","PSYCIAN","SECIAN","STA
 local aliases={ESP="MENTAL",CONTACT="MENTAL"}
 local linkCategories={ESP=true,CONTACT=true,MENTAL=true,DRAGON=true,PSYCIAN=true,SECIAN=true}
 local activeName="([%w_%-'][%w_%-%' ]*)"
-Channels.linkFilter="LINK VIEW"
+-- This presentation-only token cannot be created by Parser.custom.
+Channels.linkFilter="@LINK"
 Channels.linkMembers={MENTAL=true,DRAGON=true,PSYCIAN=true,SECIAN=true}
 
 function Channels.combinedOrder(order,categories,preferred)
@@ -13,16 +14,12 @@ function Channels.combinedOrder(order,categories,preferred)
     local category=Channels.category(value)
     available[Channels.linkMembers[category] and Channels.linkFilter or category]=true
   end
-  -- A custom category with the internal filter's name must stay independent.
-  for _,value in ipairs(categories or {}) do
-    if Channels.category(value)==Channels.linkFilter then return Channels.tabOrder(order),false end
-  end
   local function add(value)
     local category=Channels.category(value)
     if Channels.linkMembers[category] then category=Channels.linkFilter end
     if available[category] and not seen[category] then result[#result+1]=category; seen[category]=true end
   end
-  for _,value in ipairs(preferred or {}) do add(value) end
+  for _,value in ipairs(Channels.combinedTabOrder(preferred)) do add(value) end
   for _,value in ipairs(order or {}) do add(value) end
   return result,true
 end
@@ -84,11 +81,23 @@ function Channels.tabOrder(values)
   local result,seen={},{}
   for _,value in ipairs(type(values)=="table" and values or {}) do
     local key=Channels.category(value)
-    if key~="" and #key<=32 and key:match("^[A-Z][A-Z0-9 _%-]*$") and key~="OWN" and key~="WHISPER" and not seen[key] then
+    if key~="" and #key<=32 and (key==Channels.linkFilter or key:match("^[A-Z][A-Z0-9 _%-]*$")) and key~="OWN" and key~="WHISPER" and not seen[key] then
       result[#result+1]=key; seen[key]=true
     end
   end
   return result
+end
+
+function Channels.combinedTabOrder(values)
+  local order=Channels.tabOrder(values)
+  local legacy=true
+  for _,value in ipairs(order) do if value==Channels.linkFilter then legacy=false; break end end
+  -- Only old combined orders used LINK VIEW as the virtual tab. Once @LINK
+  -- is present, a LINK VIEW entry is an independent personal tab.
+  if legacy then
+    for index,value in ipairs(order) do if value=="LINK VIEW" then order[index]=Channels.linkFilter end end
+  end
+  return order
 end
 
 function Channels.allSources(values)

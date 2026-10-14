@@ -1,6 +1,22 @@
 local Adapter=require("mudlet_adapter")
 local Settings=require("settings")
 
+test("chat snapshots retire the legacy LINK switch without changing independent preferences",function()
+  for _,legacy in ipairs({false,true,"false",0,{}}) do
+    local config={combine_links=legacy,capture_outgoing=false,visible=false,
+      tab_order={"STAFF","MENTAL","DRAGON","ALL"},combined_tab_order={"LINK VIEW","STAFF","ALL"},
+      all_sources={MENTAL=false,PSYCIAN=false,COMBAT=true},sounds={volume=27,tabs={STAFF={enabled=false,sound="staff"}}}}
+    local saved=assert(Adapter.chatSettingsSnapshot(config))
+    eq(saved.combine_links,true); eq(saved.capture_outgoing,false); eq(saved.visible,false)
+    eq(saved.all_sources.MENTAL,false); eq(saved.all_sources.PSYCIAN,false); eq(saved.all_sources.COMBAT,true)
+    eq(saved.sounds.volume,27); eq(saved.sounds.tabs.STAFF.enabled,false); eq(saved.sounds.tabs.STAFF.sound,"staff")
+    eq(saved.tab_order[2],"MENTAL"); eq(saved.combined_tab_order[1],require("chat_channels").linkFilter)
+    eq(config.combine_links,legacy); eq(config.combined_tab_order[1],"LINK VIEW")
+    local cold=assert(Adapter.chatSettingsSnapshot(saved))
+    eq(cold.combine_links,true); eq(cold.capture_outgoing,false); eq(cold.combined_tab_order[1],require("chat_channels").linkFilter)
+  end
+end)
+
 test("quick command snapshots default ON and preserve independent explicit OFF values",function()
   local legacy=assert(Adapter.displaySettingsSnapshot({side_text_scale=1}))
   for _,key in ipairs({"shoprenew","shoprenewall","trainall"}) do

@@ -1887,8 +1887,8 @@ test("combined link controller passes its flag and restores constituent filters 
       return originalEntries(self,selected,sources,combined)
     end
     eq(controller.linkCombined,false); assert(controller:setLinkCombined(true))
-    eq(controller.filter,"LINK VIEW"); eq(controller.linkPriorFilter,expected)
-    controller:entries(); eq(seen.selected,"LINK VIEW"); eq(seen.combined,true); eq(seen.sources,controller.allSources)
+    eq(controller.filter,Channels.linkFilter); eq(controller.linkPriorFilter,expected)
+    controller:entries(); eq(seen.selected,Channels.linkFilter); eq(seen.combined,true); eq(seen.sources,controller.allSources)
     assert(controller:setLinkCombined(false)); eq(controller.filter,expected); eq(controller.linkPriorFilter,nil)
     controller:entries(); eq(seen.combined,false); assert(controller:shutdown())
   end
@@ -1911,28 +1911,31 @@ end)
 
 test("combined link mode redirects constituent selection and remembers the selected constituent",function()
   local controller=makeController(fake()); assert(controller:start()); assert(controller:setLinkCombined(true))
-  assert(controller:setFilter("PSYCIAN")); eq(controller.filter,"LINK VIEW"); eq(controller.linkPriorFilter,"PSYCIAN")
-  assert(controller:setFilter("LINK VIEW")); assert(controller:setLinkCombined(false)); eq(controller.filter,"PSYCIAN")
+  assert(controller:setFilter("PSYCIAN")); eq(controller.filter,Channels.linkFilter); eq(controller.linkPriorFilter,"PSYCIAN")
+  assert(controller:setFilter(Channels.linkFilter)); assert(controller:setLinkCombined(false)); eq(controller.filter,"PSYCIAN")
   eq(controller:setFilter("not\nvalid"),nil); eq(controller:setFilter(string.rep("A",33)),nil)
   assert(controller:shutdown())
 end)
 
-test("a stored custom LINK VIEW prevents combined mode and future custom captures disable before append",function()
+test("a stored custom LINK VIEW and future personal captures leave combined mode enabled",function()
   local f=fake({{category="LINK VIEW",message="Existing custom",source="custom"}})
-  local controller=makeController(f); assert(controller:start()); local ok,err=controller:setLinkCombined(true)
-  eq(ok,nil); assert(err:find("custom",1,true)); eq(controller.linkCombined,false)
+  local controller=makeController(f); assert(controller:setLinkCombined(true)); assert(controller:start())
+  eq(controller.linkCombined,true)
   assert(controller:setFilter("LINK VIEW")); eq(controller:entries()[1].message,"Existing custom"); assert(controller:shutdown())
   f=fake(); controller=makeController(f); assert(controller:start()); assert(controller:setFilter("DRAGON"))
   assert(controller:setLinkCombined(true)); local append=controller.history.append
   function controller.history:append(entry,epoch,options)
-    if entry.category=="LINK VIEW" then eq(controller.linkCombined,false); eq(controller.filter,"DRAGON") end
+    if entry.category=="LINK VIEW" or entry.category=="LINK" then eq(controller.linkCombined,true); eq(controller.filter,Channels.linkFilter) end
     return append(self,entry,epoch,options)
   end
   assert(controller:capture("LINK VIEW","Future real custom",{speaker="Synthetic"}))
-  eq(controller.linkCombined,false); eq(f.storageAppends,1)
+  assert(controller:capture("LINK","Future LINK custom",{speaker="Synthetic"}))
+  eq(controller.linkCombined,true); eq(f.storageAppends,2)
   eq(f.appendedEntries[1].category,"LINK VIEW"); eq(f.appendedEntries[1].source,"custom")
-  assert(controller:setFilter("LINK VIEW")); eq(controller:entries()[1].message,"Future real custom")
-  eq(controller:setLinkCombined(true),nil); assert(controller:shutdown())
+  eq(#controller:entries(),0)
+  assert(controller:setFilter("LINK VIEW")); eq(#controller:entries(),1); eq(controller:entries()[1].message,"Future real custom")
+  assert(controller:setFilter("LINK")); eq(#controller:entries(),1); eq(controller:entries()[1].message,"Future LINK custom")
+  assert(controller:setLinkCombined(true)); assert(controller:shutdown())
 end)
 
 test("disabling combined links preserves a personal LINK VIEW selection including after restore",function()
@@ -1945,21 +1948,128 @@ test("disabling combined links preserves a personal LINK VIEW selection includin
   local restored=makeController(fake()); assert(restored:restoreHandoff(snapshot))
   assert(restored:setLinkCombined(false)); assert(restored:start(true))
   eq(restored.filter,"LINK VIEW"); eq(restored:entries()[1].message,"Personal virtual-name fixture")
-  eq(restored:setLinkCombined(true),nil); eq(restored.filter,"LINK VIEW")
+  assert(restored:setLinkCombined(true)); eq(restored.filter,"LINK VIEW")
   assert(restored:shutdown())
 end)
 
 test("combined link handoff carries only bounded prior filter and mode applies after restore",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("SECIAN"))
   assert(controller:setLinkCombined(true)); local snapshot=controller:handoff()
-  eq(snapshot.filter,"LINK VIEW"); eq(snapshot.previous_link_filter,"SECIAN"); eq(snapshot.linkCombined,nil)
+  eq(snapshot.filter,Channels.linkFilter); eq(snapshot.previous_link_filter,"SECIAN"); eq(snapshot.linkCombined,nil)
   assert(controller:shutdown())
   local restored=makeController(fake()); assert(restored:restoreHandoff(snapshot)); assert(restored:setLinkCombined(true))
-  assert(restored:start(true)); eq(restored.filter,"LINK VIEW")
+  assert(restored:start(true)); eq(restored.filter,Channels.linkFilter)
   assert(restored:setLinkCombined(false)); eq(restored.filter,"SECIAN"); assert(restored:shutdown())
-  for _,value in ipairs({string.rep("A",33),"bad\nfilter",{},"LINK VIEW",false,12}) do
+  for _,value in ipairs({string.rep("A",33),"bad\nfilter",{},"LINK VIEW",Channels.linkFilter,"STAFF",false,12}) do
     snapshot.previous_link_filter=value; restored=makeController(fake())
     assert(restored:restoreHandoff(snapshot)); eq(restored.linkPriorFilter,nil)
     assert(restored:setLinkCombined(false)); eq(restored.filter,"MENTAL"); assert(restored:shutdown())
   end
+end)
+
+test("reserved LINK stays independent through cold full and partial handoffs with outgoing OFF and saved sounds",function()
+  local Sounds=require("chat_sounds")
+  local saved={}
+  for index,category in ipairs({"MENTAL","DRAGON","PSYCIAN","SECIAN","LINK","LINK VIEW","QUEST","STAFF"}) do
+    saved[index]={schema=1,timestamp="2026-10-14T12:00:0"..index.."Z",character="Synthetic Alpha",
+      category=category,speaker="Tester",target="Synthetic Alpha",language="Common",message="Saved "..category,
+      line="Raw "..category,source=index<=4 and "builtin" or "custom"}
+  end
+  local raw=copyRetentionValue(saved)
+  local sources=allSources({MENTAL=false,DRAGON=false,PSYCIAN=false,SECIAN=false,STAFF=false})
+  local sourceBefore=copyRetentionValue(sources)
+  local config={volume=27,tabs={MENTAL={enabled=true,sound="contact"},DRAGON={enabled=false,sound="dragon"},
+    LINK={enabled=true,sound="room"},["LINK VIEW"]={enabled=false,sound="private"}}}
+  local configBefore=copyRetentionValue(config)
+  for _,mode in ipairs({"cold","handoff","legacy","partial"}) do
+    local f=outgoingAdapter(saved); f.played={}
+    function f:playChatSound(id,volume) self.played[#self.played+1]={id=id,volume=volume}; return true end
+    local sounds=assert(Sounds.new(f,config)); local soundBefore=copyRetentionValue(sounds.config); local accepted=0
+    local controller=makeController(f,nil,function(entry) accepted=accepted+1; sounds:onEntry(entry,sources) end,sources)
+    assert(controller:setCaptureOutgoing(false))
+    if mode~="cold" then
+      assert(controller:restoreHandoff({schema=1,filter=mode=="handoff" and Channels.linkFilter or "LINK VIEW",
+        previous_link_filter="DRAGON",entries=mode=="partial" and {saved[5]} or saved,partial=mode=="partial"}))
+    end
+    assert(controller:setLinkCombined(true)); assert(controller:start())
+    eq(controller.filter,mode=="cold" and "ALL" or mode=="handoff" and Channels.linkFilter or "LINK VIEW")
+    eq(controller.linkCombined,true); eq(controller.captureOutgoing,false); eq(f.eventAdds,0)
+    eq(f.loadRecentCalls,(mode=="cold" or mode=="partial") and 1 or 0)
+    eq(f.storageAppends,0); eq(accepted,0); eq(#f.played,0)
+    sameEntries(controller.history.items,raw)
+    assert(controller:setFilter("ALL")); sameEntries(controller:entries(),{saved[5],saved[6],saved[7]})
+    assert(controller:setFilter(Channels.linkFilter)); sameEntries(controller:entries(),{saved[1],saved[2],saved[3],saved[4]})
+    assert(controller:capture("LINK","Later personal LINK",{speaker="Synthetic"}))
+    assert(controller:capture(" link view ","Later personal LINK VIEW",{speaker="Synthetic"}))
+    eq(controller.linkCombined,true); eq(controller.filter,Channels.linkFilter)
+    eq(f.storageAppends,2); eq(accepted,2); eq(#f.played,1); eq(f.played[1].id,"room"); eq(f.played[1].volume,27)
+    sameEntries(controller:entries(),{saved[1],saved[2],saved[3],saved[4]})
+    for index,category in ipairs({"LINK","LINK VIEW"}) do
+      assert(controller:setFilter(category)); eq(#controller:entries(),2)
+      eq(controller:entries()[1].message,"Saved "..category); eq(controller:entries()[2].category,category)
+      eq(f.appendedEntries[index].category,category); eq(f.appendedEntries[index].source,"custom")
+    end
+    f:outgoing("contact all Must remain ignored"); eq(f.storageAppends,2); eq(f.eventAdds,0)
+    assert(controller:setFilter(Channels.linkFilter))
+    local snapshot=controller:handoff(); eq(snapshot.filter,Channels.linkFilter); sameEntries(snapshot.entries,controller.history.items)
+    local second=outgoingAdapter(); local restored=makeController(second,nil,nil,sources)
+    assert(restored:setCaptureOutgoing(false)); assert(restored:restoreHandoff(snapshot)); assert(restored:setLinkCombined(true))
+    assert(restored:start(true)); eq(restored.filter,Channels.linkFilter); eq(restored.captureOutgoing,false)
+    sameEntries(restored.history.items,snapshot.entries); sameEntries(restored:entries(),{saved[1],saved[2],saved[3],saved[4]})
+    eq(second.loadRecentCalls,0); eq(second.storageAppends,0); eq(second.eventAdds,0)
+    sameRetentionValue(sources,sourceBefore); sameRetentionValue(config,configBefore); sameRetentionValue(sounds.config,soundBefore)
+    sameRetentionValue(saved,raw); eq(f.storageClears,0); eq(f.sideEffects,0)
+    assert(restored:shutdown()); assert(controller:shutdown())
+  end
+end)
+
+test("legacy LINK VIEW virtual handoffs migrate when combined mode applies before or after restore",function()
+  for _,applyFirst in ipairs({false,true}) do
+    local saved={category="SECIAN",message="Saved Secian",source="builtin"}
+    local handoff={schema=1,filter="LINK VIEW",previous_link_filter="SECIAN",entries={saved}}
+    local original=copyRetentionValue(handoff)
+    local f=fake(); local controller=makeController(f)
+    if applyFirst then assert(controller:setLinkCombined(true)) end
+    assert(controller:restoreHandoff(handoff))
+    eq(controller.filter,applyFirst and Channels.linkFilter or "LINK VIEW")
+    assert(controller:setLinkCombined(true)); assert(controller:start(true))
+    eq(controller.filter,Channels.linkFilter); eq(controller:entries()[1].message,"Saved Secian")
+    eq(controller:handoff().filter,Channels.linkFilter); eq(controller.history.items[1].category,"SECIAN")
+    sameRetentionValue(handoff,original); eq(f.storageAppends,0); eq(f.storageClears,0)
+    assert(controller:setLinkCombined(false)); eq(controller.filter,"SECIAN"); assert(controller:shutdown())
+  end
+  local controller=makeController(fake())
+  assert(controller:restoreHandoff({schema=1,filter="LINK VIEW",previous_link_filter="DRAGON",entries={}}))
+  assert(controller:setLinkCombined(false)); eq(controller.filter,"DRAGON"); assert(controller:shutdown())
+end)
+
+test("personal LINK VIEW selection stays literal even when empty or captured after legacy restore",function()
+  for _,capture in ipairs({false,true}) do
+    local controller=makeController(fake())
+    assert(controller:restoreHandoff({schema=1,filter="LINK VIEW",entries={}})); assert(controller:start(true))
+    if capture then assert(controller:capture("LINK VIEW","New personal history")) end
+    assert(controller:setFilter("LINK VIEW")); assert(controller:setLinkCombined(true))
+    eq(controller.filter,"LINK VIEW"); eq(controller.linkCombined,true); eq(#controller:entries(),capture and 1 or 0)
+    assert(controller:setLinkCombined(false)); eq(controller.filter,"LINK VIEW"); assert(controller:shutdown())
+  end
+end)
+
+test("reserved LINK is accepted only as a filter and never as a custom message category",function()
+  local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setLinkCombined(true))
+  for _,category in ipairs({Channels.linkFilter," @link ","@OTHER"}) do
+    eq(Parser.custom(category,"Rejected fixture"),nil)
+    eq(controller:capture(category,"Rejected fixture"),nil)
+  end
+  eq(#controller.history.items,0); eq(f.storageAppends,0)
+  assert(controller:setFilter(" @link ")); eq(controller.filter,Channels.linkFilter)
+  eq(controller:setFilter("@OTHER"),nil)
+  -- Even a malformed old record cannot make the reserved filter a raw category.
+  local history=History.new(1000,3)
+  assert(history:hydrate({{category="@LINK",message="Malformed raw token"},
+    {category="LINK VIEW",message="Personal fixture"},{category="DRAGON",message="Dragon fixture"}}))
+  eq(#history:entries(Channels.linkFilter,nil,false),0)
+  local combined=history:entries(Channels.linkFilter,nil,true)
+  eq(#combined,1); eq(combined[1].category,"DRAGON")
+  eq(history:entries("LINK VIEW",nil,true)[1].message,"Personal fixture")
+  eq(history.items[1].category,"@LINK"); assert(controller:shutdown())
 end)

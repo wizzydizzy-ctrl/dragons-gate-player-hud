@@ -8,13 +8,14 @@ local HANDOFF_SCHEMA=1
 local STAFF_MESSAGE_FLUSH_DELAY=.4
 local STAFF_MESSAGE_MAX_LINES=20
 local STAFF_MESSAGE_MAX_CHARS=4000
-local LINK_VIEW=Channels.linkFilter
+local LINK_FILTER=Channels.linkFilter
+local CUSTOM_LINK_VIEW="LINK VIEW"
 local linkConstituents=Channels.linkMembers
 
 local function boundedCategory(value)
   if type(value)~="string" or #value>32 then return nil end
   value=Channels.category(value)
-  if value==LINK_VIEW then return value end
+  if value==LINK_FILTER or value==CUSTOM_LINK_VIEW then return value end
   return value:match("^[A-Z][A-Z0-9_%-]*$") and value or nil
 end
 
@@ -80,27 +81,20 @@ end
 function Controller:setLinkCombined(enabled)
   if type(enabled)~="boolean" then return nil,"combined link mode must be a boolean" end
   if enabled and not self.currentCharacterKey then self:syncCharacter() end
-  local customLinkView=false
-  if enabled or self.filter==LINK_VIEW then
-    for _,entry in ipairs(self.history.items or {}) do
-      if Channels.category(entry.category)==LINK_VIEW then
-        customLinkView=true; break
-      end
-    end
-  end
-  if enabled and customLinkView then
-    if self.linkCombined then self:setLinkCombined(false) end
-    return nil,"LINK VIEW is already a custom chat category"
-  end
-  local wasCombined=self.linkCombined
   self.linkCombined=enabled
+  -- A v0.3.103 handoff used the personal name for its virtual filter. Defer
+  -- its interpretation until the current mode is applied, after hydration.
+  if self.legacyLinkFilterPending then
+    if self.filter==CUSTOM_LINK_VIEW and not self.history.knownCategories[CUSTOM_LINK_VIEW] then self.filter=LINK_FILTER end
+    self.legacyLinkFilterPending=nil
+  end
   if enabled and linkConstituents[self.filter] then
     self.linkPriorFilter=self.filter
-    self.filter=LINK_VIEW
+    self.filter=LINK_FILTER
   elseif not enabled then
-    if self.filter==LINK_VIEW and (wasCombined or not customLinkView) then
+    if self.filter==LINK_FILTER then
       local prior=boundedCategory(self.linkPriorFilter)
-      self.filter=prior and prior~=LINK_VIEW and prior or "MENTAL"
+      self.filter=linkConstituents[prior] and prior or "MENTAL"
     end
     self.linkPriorFilter=nil
   end
@@ -122,8 +116,6 @@ function Controller:status()
 end
 
 function Controller:accept(entry,suppressAlert,force)
-  -- A real custom category always wins over the virtual combined view.
-  if self.linkCombined and Channels.category(entry.category)==LINK_VIEW then self:setLinkCombined(false) end
   local added=self.history:append(entry,call(self.adapter,"epoch"),force==true and entry.source=="outgoing")
   if not added then return false end
   local ok,err=call(self.storage,"append",entry)
@@ -240,7 +232,7 @@ function Controller:restoreHandoff(handoff)
   self.outgoing:clear()
   local filter=boundedCategory(handoff.filter) or "ALL"
   local prior=boundedCategory(handoff.previous_link_filter)
-  self.linkPriorFilter=prior~=LINK_VIEW and prior or nil
+  self.linkPriorFilter=linkConstituents[prior] and prior or nil
   local key="profile"
   self.history:hydrate(copyEntries(handoff.entries))
   if handoff.partial==true then
@@ -253,9 +245,11 @@ function Controller:restoreHandoff(handoff)
   end
   self.history:restoreDedupe(handoff.last_key,handoff.last_epoch,handoff.last_mental_kind)
   self.filter=filter
+  self.legacyLinkFilterPending=filter==CUSTOM_LINK_VIEW and not self.history.knownCategories[CUSTOM_LINK_VIEW] or nil
   self.currentCharacterKey=key
   self.historiesByCharacter[key]=self.history
   self.restoredFromHandoff=true
+  if self.linkCombined then self:setLinkCombined(true) end
   return true
 end
 
@@ -392,10 +386,11 @@ end
 
 function Controller:capture(category,text,metadata)
   if not self.started then return nil,"chatbox is not running" end
-  local customLinkView=Channels.category(category)==LINK_VIEW
+  if Channels.category(category)==LINK_FILTER then return nil,"reserved chat filter cannot be captured" end
+  local customLinkView=Channels.category(category)==CUSTOM_LINK_VIEW
   local entry,err=self.parser.custom(customLinkView and "LINK_VIEW" or category,text,metadata,self:character(),call(self.adapter,"timestamp"))
   if not entry then return nil,err end
-  if customLinkView then entry.category=LINK_VIEW end
+  if customLinkView then entry.category=CUSTOM_LINK_VIEW end
   local accepted=self:accept(entry)
   return accepted==false and true or accepted
 end
@@ -404,7 +399,8 @@ function Controller:setFilter(filter)
   if not self.started then return nil,"chatbox is not running" end
   filter=boundedCategory(filter)
   if not filter then return nil,"invalid chat category" end
-  if self.linkCombined and linkConstituents[filter] then self.linkPriorFilter=filter; filter=LINK_VIEW end
+  self.legacyLinkFilterPending=nil
+  if self.linkCombined and linkConstituents[filter] then self.linkPriorFilter=filter; filter=LINK_FILTER end
   self.filter=filter
   self:notify()
   return true

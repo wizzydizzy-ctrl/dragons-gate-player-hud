@@ -770,7 +770,7 @@ function Main:startChat()
   self.chat.sessionActive=function() return self.character_entry_started==true and self.outgoing_session_confirmed==true end
   if type(self.chat_handoff)=="table" then restored=self.chat:restoreHandoff(self.chat_handoff)==true end
   if self.chat.setCaptureOutgoing then self.chat:setCaptureOutgoing(settings.capture_outgoing~=false) end
-  if self.chat.setLinkCombined then self.chat:setLinkCombined(settings.combine_links==true) end
+  if self.chat.setLinkCombined then self.chat:setLinkCombined(true) end
   if self.view and self.view.setChatPresentation then self.view:setChatPresentation(settings.capture_outgoing~=false,self.chat.linkCombined==true) end
   if self.view and self.view.setChatFilterCallback then
     self.view:setChatFilterCallback(function(category)
@@ -783,6 +783,7 @@ function Main:startChat()
     self.view:setChatOrderCallback(function(order)
       order=ChatChannels.tabOrder(order)
       local field=self.chat and self.chat.linkCombined==true and "combined_tab_order" or "tab_order"
+      if field=="combined_tab_order" then order=ChatChannels.combinedTabOrder(order) end
       local candidate=self:chatPreferences({[field]=order})
       if self.adapter.saveChatSettings then local saved,saveErr=self.adapter:saveChatSettings(candidate); if not saved then return nil,"Could not save chat tab order: "..tostring(saveErr) end end
       self.settings.chat=self.settings.chat or {}; self.settings.chat[field]=order
@@ -830,15 +831,12 @@ function Main:chatPreferences(overrides)
   candidate.tab_order=ChatChannels.tabOrder(candidate.tab_order or ChatChannels.order)
   candidate.visible=candidate.visible~=false
   candidate.capture_outgoing=candidate.capture_outgoing~=false
-  candidate.combine_links=candidate.combine_links==true
+  candidate.combine_links=true
   for key,value in pairs(overrides or {}) do candidate[key]=value end
   return candidate
 end
 function Main:setChatPreference(key,wanted)
-  if (key~="capture_outgoing" and key~="combine_links") or type(wanted)~="boolean" then return nil,"Invalid chat preference." end
-  if key=="combine_links" and wanted and self.chat and self.chat.history.knownCategories[ChatChannels.linkFilter] then
-    return nil,"A personal LINK VIEW tab already exists. Keep separate link tabs."
-  end
+  if key~="capture_outgoing" or type(wanted)~="boolean" then return nil,"Invalid chat preference. LINK is the standard combined tab." end
   local candidate=self:chatPreferences({[key]=wanted})
   if not self.adapter.saveChatSettings then return nil,"Chat settings cannot be saved in this profile." end
   local priorCapture
@@ -859,9 +857,6 @@ function Main:setChatPreference(key,wanted)
   self.settings.chat=self.settings.chat or {}; self.settings.chat[key]=wanted
   local root=rawget(_G,"DGHUD")
   if root then root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}; root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}; root.user_settings.chat[key]=wanted end
-  if self.chat then
-    if key=="combine_links" and self.chat.setLinkCombined then self.chat:setLinkCombined(wanted) end
-  end
   if self.view and self.view.setChatPresentation then self.view:setChatPresentation(candidate.capture_outgoing,candidate.combine_links) end
   return wanted
 end
@@ -1589,7 +1584,6 @@ function Main:start()
     if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
     if action=="chat_visibility" then return self:setChatVisible(wanted) end
     if action=="chat_outgoing" then return self:setChatPreference("capture_outgoing",wanted) end
-    if action=="chat_combine_links" then return self:setChatPreference("combine_links",wanted) end
     if action=="visibility_status" then return self:setVisibilityDisplay(self.settings.display and self.settings.display.visibility_status==false or false) end
     if action=="chat_sound_enabled" then return self:setChatSound(key,"enabled",wanted) end
     if action=="chat_sound_choice" then return self:setChatSound(key,"sound",wanted) end
@@ -1622,7 +1616,7 @@ function Main:start()
   if self.view.setChatAllSources then self.view:setChatAllSources(self.settings.chat and self.settings.chat.all_sources or {}) end
   if self.view.setChatSounds then self.view:setChatSounds(self.settings.chat and self.settings.chat.sounds) end
   if self.view.setChatVisible then self.view:setChatVisible(not (self.settings.chat and self.settings.chat.visible==false)) end
-  if self.view.setChatPresentation then self.view:setChatPresentation(not (self.settings.chat and self.settings.chat.capture_outgoing==false),self.settings.chat and self.settings.chat.combine_links==true) end
+  if self.view.setChatPresentation then self.view:setChatPresentation(not (self.settings.chat and self.settings.chat.capture_outgoing==false),true) end
   if self.view.setVisibilityDisplay then self.view:setVisibilityDisplay(not (self.settings.display and self.settings.display.visibility_status==false)) end
   if self.view.setAutoUpdateEnabled then self.view:setAutoUpdateEnabled(self.settings.update and self.settings.update.auto_apply==true) end
   self:syncBaseUI()

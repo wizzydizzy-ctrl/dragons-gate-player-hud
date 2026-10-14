@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.103**.
+Documentation covers **DGHUD v0.3.104**.
 
 ## Quick start
 
@@ -43,7 +43,15 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.103
+## Latest changes — v0.3.104
+
+- **LINK is now the standard chat tab**, combining mental/ESP/contact, Dragon, Psycian, and Secian messages. There is no separate/combined switch to find or enable.
+- Existing profiles upgrade automatically, including those saved with separate tabs in v0.3.103. Messages, original channels, source-specific sounds, Show in ALL choices, and outgoing-capture OFF are preserved.
+- LINK can still be dragged to your preferred position. Personal LINK and LINK VIEW categories remain independent and cannot disable the standard tab.
+
+[Read the LINK guide](docs/CHATBOX.md#the-link-tab).
+
+## Previous changes — v0.3.103
 
 - Outgoing `contact <target> <message>` requests now appear in MENTAL after a confirmed character session. Matching own broadcast echoes are shown once, without self-alert sounds. Turn capture off in **OPTIONS → CHAT SETTINGS**.
 - Prefer fewer tabs? Select **LINK TABS: COMBINED LINK** to view MENTAL, DRAGON, PSYCIAN, and SECIAN together. Separate tabs remain the default; source history, Show in ALL choices, sounds, and separate tab order are preserved.

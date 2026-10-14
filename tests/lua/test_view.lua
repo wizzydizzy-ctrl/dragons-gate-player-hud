@@ -1,4 +1,5 @@
 local View=require("view")
+local ChatChannels=require("chat_channels")
 local ColorPreferences=require("color_preferences")
 local RollerAudio=require("autoroller_audio")
 local VIEW_CONTRACT=string.rep("a",64)
@@ -422,7 +423,7 @@ local function fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
   return geyser
 end
 
-local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds,display,keepDisplayDefaults)
+local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatSounds,display,keepDisplayDefaults,chatOverrides)
   -- Legacy fixtures keep testing the separate-list layout. Combined fixtures
   -- opt into the real defaults without changing older geometry assertions.
   if not keepDisplayDefaults then
@@ -431,7 +432,9 @@ local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatS
     display=separate
   end
   local original=Geyser; Geyser=fakeGeyser(glyphWidth,scrollbarWidth,measureFails)
-  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat={timestamps=true,visible=chatVisible,sounds=chatSounds},display=display})
+  local chat={timestamps=true,visible=chatVisible,sounds=chatSounds}
+  for key,value in pairs(chatOverrides or {}) do chat[key]=value end
+  local view=View.new({version="0.3.30",view_contract=VIEW_CONTRACT,view_settings_contract=SETTINGS_CONTRACT,theme={background="#080b0a",panel="#0d1210",border="#423825",text="#d7d0bf",muted="#75857c",accent="#e0b56c",jade="#79b386",hp="#ba5147",fatigue="#8bad4e"},chat=chat,display=display})
   Geyser=original
   return view
 end
@@ -442,25 +445,48 @@ local function chatWidgets(view)
   return widgets
 end
 
+test("standard LINK has no mode switch even with saved separate settings or custom names",function()
+  for _,saved in ipairs({false,true}) do
+    local view=chatView(nil,nil,nil,nil,nil,nil,nil,{combine_links=saved,capture_outgoing=false})
+    view:applyLayout(require("layout").compute(1920,1080))
+    view:renderChat({},{"MENTAL","DRAGON","PSYCIAN","SECIAN","LINK","LINK VIEW"},ChatChannels.linkFilter)
+    eq(view.chat_settings_links,nil); eq(view.chat_combine_links,true)
+    local count,custom,personal=0,false,false
+    for _,button in ipairs(view.chat_buttons) do
+      if button.category==ChatChannels.linkFilter then count=count+1; assert(button.message:find("LINK",1,true)) end
+      if button.category=="LINK" then custom=true; assert(button.message:find("custom",1,true)) end
+      if button.category=="LINK VIEW" then personal=true end
+      assert(not tostring(button.message):find("@LINK",1,true))
+    end
+    eq(count,1); eq(custom,true); eq(personal,true)
+    view:showChatSettings()
+    eq(view.chat_settings_outgoing.visible,true)
+    eq(view.chat_capture_outgoing,false)
+    view:prepareForReuse(view.settings)
+    eq(view.chat_combine_links,true); eq(view.chat_settings_links,nil); eq(view.chat_capture_outgoing,false)
+    view:delete()
+  end
+end)
+
 test("combined LINK layout remains usable at small widths and keeps separate order",function()
   for _,width in ipairs({280,420,1000}) do
     local view=chatView()
     view.layout={chat_width=width,chat_font=13}
     view.settings.chat.tab_order={"STAFF","PSYCIAN","ALL","MENTAL","DRAGON","ROOM"}
     view:setChatPresentation(false,true)
-    view:renderChat({},{ "MENTAL","DRAGON","PSYCIAN","SECIAN","LINK","QUEST" },"LINK VIEW")
+    view:renderChat({},{ "MENTAL","DRAGON","PSYCIAN","SECIAN","LINK","QUEST" },ChatChannels.linkFilter)
     eq(view.chat_presentation_combined,true)
     local count=0
-    for _,category in ipairs(view.chat_filter_order) do if category=="LINK VIEW" then count=count+1 end end
+    for _,category in ipairs(view.chat_filter_order) do if category==ChatChannels.linkFilter then count=count+1 end end
     eq(count,1)
     local active=false
     for _,button in ipairs(view.chat_buttons) do
-      if button.category=="LINK VIEW" then active=true; assert(button.message:find("LINK",1,true)) end
+      if button.category==ChatChannels.linkFilter then active=true; assert(button.message:find("LINK",1,true)) end
     end
     eq(active,true)
     view:setChatOrderCallback(function() return true end)
-    assert(view:reorderChatTab("LINK VIEW",1))
-    eq(view.settings.chat.combined_tab_order[1],"LINK VIEW")
+    assert(view:reorderChatTab(ChatChannels.linkFilter,1))
+    eq(view.settings.chat.combined_tab_order[1],ChatChannels.linkFilter)
     eq(view.settings.chat.tab_order[1],"STAFF"); eq(view.settings.chat.tab_order[2],"PSYCIAN")
     view:setChatPresentation(false,false)
     eq(view.chat_filter_order[2],"PSYCIAN"); eq(view.chat_capture_outgoing,false)
@@ -555,7 +581,7 @@ test("hidden chat never shows widgets during resize tab rendering or full HUD up
   eq(view:setChatVisible(true),true); checkChatVisible(view,true)
   eq(view.chat_container.height,view.layout.chat_height); eq(view.chat_active_filter,"SECIAN")
   eq(view.chat_filter_order[#view.chat_filter_order],"QUEST"); eq(#view.chat_entries,2)
-  local found=false; for _,button in ipairs(view.chat_buttons) do if button.category=="SECIAN" then found=true end end
+  local found=false; for _,button in ipairs(view.chat_buttons) do if button.category==ChatChannels.linkFilter then found=true end end
   eq(found,true)
 end)
 
@@ -3963,7 +3989,8 @@ test("Secian chat entries receive their own readable category color",function()
   local view=chatView()
   view:renderChat({{category="SECIAN",timestamp="2026-08-31T20:12:00-04:00",line='You pick up Shayla\'s Secian link, "hello!" [r-1]'}},{"SECIAN"},"ALL")
   eq(view.chat_output.hechoes[1],"#75857c[20:12]#r #8fcbd4SECIAN#r")
-  eq(view.chat_filter_order[#view.chat_filter_order],"SECIAN")
+  local found=false; for _,key in ipairs(view.chat_filter_order) do if key==ChatChannels.linkFilter then found=true end end
+  eq(found,true)
 end)
 
 test("view owns a scrollable chat panel above the main console",function()
@@ -4155,7 +4182,7 @@ test("WORLD is a reserved default tab and preserves all existing custom tab orde
   local count=0; for _,key in ipairs(worldFirst) do if key=="WORLD" then count=count+1 end end; eq(count,1)
 end)
 
-test("MENTAL replaces both legacy tabs and PSYCIAN stays available across viewport sizes",function()
+test("LINK replaces every mental and racial source tab across viewport sizes",function()
   local view=chatView(); local calls={}
   view.settings.chat.tab_order={"STAFF","CONTACT","DRAGON","ESP","WORLD"}
   view:setChatFilterCallback(function(category) calls[#calls+1]=category; return true end)
@@ -4165,16 +4192,16 @@ test("MENTAL replaces both legacy tabs and PSYCIAN stays available across viewpo
     eq(view.chat_active_filter,"MENTAL")
     local count=0; local psycian=false
     for _,key in ipairs(view.chat_filter_order) do
-      if key=="MENTAL" then count=count+1 end
+      if key==ChatChannels.linkFilter then count=count+1 end
       if key=="PSYCIAN" then psycian=true end
       assert(key~="ESP" and key~="CONTACT")
     end
-    eq(count,1); eq(psycian,true); eq(view.chat_filter_order[1],"STAFF"); eq(view.chat_filter_order[2],"MENTAL")
+    eq(count,1); eq(psycian,false); eq(view.chat_filter_order[1],"STAFF"); eq(view.chat_filter_order[2],ChatChannels.linkFilter)
     view:renderChat({},{},"PSYCIAN")
     local active=false
     for _,button in ipairs(view.chat_buttons) do
       assert(button.x+button.width<=view.layout.chat_width)
-      if button.category=="PSYCIAN" then active=true; button.click(); eq(calls[#calls],"PSYCIAN") end
+      if button.category==ChatChannels.linkFilter then active=true; button.click(); eq(calls[#calls],ChatChannels.linkFilter) end
     end
     eq(active,true)
   end
@@ -4300,10 +4327,10 @@ test("WORLD can be moved first and its saved position survives wide and narrow l
   local view=chatView(); view:applyLayout(require("layout").compute(1920,1080)); local saved
   view:setChatOrderCallback(function(order) saved=table.concat(order,","); return true end)
   view:renderChat({}, {"WORLD"}, "WORLD"); assert(view:reorderChatTab("WORLD",1))
-  eq(saved,"WORLD,ALL,ROOM,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT")
+  eq(saved,"WORLD,ALL,ROOM,PRIVATE,"..ChatChannels.linkFilter..",STAFF,COMBAT")
   for _,width in ipairs({280,1200,1920}) do
     view:applyLayout(require("layout").compute(width,800))
-    eq(view.chat_filter_order[1],"WORLD"); eq(table.concat(view.settings.chat.tab_order,","),saved)
+    eq(view.chat_filter_order[1],"WORLD"); eq(table.concat(view.settings.chat.combined_tab_order,","),saved)
     eq(view.chat_active_filter,"WORLD")
   end
 end)
@@ -4339,7 +4366,8 @@ test("WORLD sound controls keep all 55 legacy custom tabs accessible without dro
   local view=chatView(nil,nil,nil,nil,config); view.settings.chat.tab_order=preferred
   view:applyLayout(require("layout").compute(320,700)); view:renderChat({},preferred,"WORLD"); view:showChatSettings()
   eq(#view.chat_sound_order,Sounds.MAX_TABS); eq(view.chat_filter_order[#view.chat_filter_order],"WORLD")
-  for index,key in ipairs(preferred) do eq(view.chat_filter_order[index],key) end
+  local combined=ChatChannels.combinedOrder(preferred,preferred)
+  for index,key in ipairs(combined) do eq(view.chat_filter_order[index],key) end
   for index=1,55 do
     local key="CUSTOM "..index; local row=view.chat_sound_rows[key]; assert(row)
     eq(view:chatSoundSetting(key).enabled,index%2==0); eq(view:chatSoundSetting(key).sound,"contact")
@@ -4377,7 +4405,7 @@ test("chat tabs stay inside narrow panels and expose deterministic overflow",fun
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)
   view:renderChat({}, {"QUEST","EVENTS","QUEST<script>","LINE\nBREAK"}, "ALL")
-  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT,WORLD,QUEST,EVENTS")
+  eq(table.concat(view.chat_filter_order,","),"ALL,ROOM,PRIVATE,"..ChatChannels.linkFilter..",STAFF,COMBAT,WORLD,QUEST,EVENTS")
   eq(#view.chat_overflow_categories>0,true)
   for _,button in ipairs(view.chat_buttons) do
     eq(button.x+button.width<=layout.chat_width,true); eq(tostring(button.message):find("<script>",1,true),nil)
@@ -4396,7 +4424,7 @@ test("chat tabs drag left and right, persist once, and keep click filtering",fun
   view:setChatOrderCallback(function(order) saved=table.concat(order,","); calls=(calls or 0)+1; return true end)
   view:renderChat({}, {}, "ALL")
   local room=view.chat_buttons[2]; room.click({button="LeftButton",globalX=100}); room.release({button="LeftButton",globalX=20})
-  eq(saved,"ROOM,ALL,PRIVATE,MENTAL,DRAGON,PSYCIAN,STAFF,COMBAT,WORLD"); eq(calls,1); eq(view.chat_active_filter,"ALL")
+  eq(saved,"ROOM,ALL,PRIVATE,"..ChatChannels.linkFilter..",STAFF,COMBAT,WORLD"); eq(calls,1); eq(view.chat_active_filter,"ALL")
   local all=view.chat_buttons[2]; all.click({button="LeftButton",globalX=100}); all.release({button="LeftButton",globalX=101})
   eq(selected,"ALL"); eq(calls,1)
 end)

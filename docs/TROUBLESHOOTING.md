@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.103**.
+Applies to DGHUD **v0.3.104**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 

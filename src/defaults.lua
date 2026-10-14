@@ -7,7 +7,7 @@ return {
   view_contract = "__DGHUD_VIEW_CONTRACT__",
   edition = "player",
   package_name = "DragonsGateHUD",
-  version = "0.3.103",
+  version = "0.3.104",
   layout = { left_width = 190, right_width = 270, min_console_width = 520 },
   display = { side_text_scale = 1.0, auto_wrap = true, align_input = false, main_skills = true, skill_filter = true,
     shoprenew = true, shoprenewall = true, trainall = true, visibility_status = true,
@@ -15,7 +15,7 @@ return {
     main_skill_sort = {primary="level",direction="desc",secondary="uses",secondary_direction="asc"},
     sidebar_skill_sort = {primary="level",direction="desc",secondary="uses",secondary_direction="asc"} },
   keybindings = { enabled=false, commands={ ["8"]="north",["9"]="northeast",["6"]="east",["3"]="southeast",["2"]="south",["1"]="southwest",["4"]="west",["7"]="northwest",["5"]="look",Plus="up",Minus="down",["0"]="",Period="",Asterisk="",Slash="",Enter="" } },
-  chat = { enabled=true, visible=true, capture_outgoing=true, combine_links=false, height_percent=.21, target_height=240, min_height=160, max_height=320, visible_limit=1000, dedupe_seconds=3, timestamps=true, tab_order=Channels.tabOrder(Channels.order), all_sources=Channels.allSources(), sounds=require("chat_sounds").defaults() },
+  chat = { enabled=true, visible=true, capture_outgoing=true, combine_links=true, height_percent=.21, target_height=240, min_height=160, max_height=320, visible_limit=1000, dedupe_seconds=3, timestamps=true, tab_order=Channels.tabOrder(Channels.order), all_sources=Channels.allSources(), sounds=require("chat_sounds").defaults() },
   colorization = {
     enabled=true,
     room_enabled=true,

@@ -822,8 +822,8 @@ test("chat tab reorder persists once without changing the active filter",functio
   DGHUD={user_settings={}}
   local f=fake(); local hud=Main.new(f,{layout={},chat={visible_limit=1000,dedupe_seconds=3}}); hud:start()
   eq(type(f.chatOrderCallback),"function"); local order={"STAFF","ALL","ROOM","PRIVATE","ESP","DRAGON","CONTACT","COMBAT"}
-  assert(f.chatOrderCallback(order)); eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.tab_order[1],"STAFF")
-  eq(DGHUD.user_settings.chat.tab_order[1],"STAFF"); eq(hud.chat.filter,"ALL")
+  assert(f.chatOrderCallback(order)); eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.combined_tab_order[1],"STAFF")
+  eq(DGHUD.user_settings.chat.combined_tab_order[1],"STAFF"); eq(hud.chat.filter,"ALL")
   DGHUD=nil
 end)
 test("ALL source toggles persist and never disable capture or dedicated tabs",function()
@@ -930,22 +930,21 @@ test("chat sounds route live staff messages once and options persist without cha
   end)
 end)
 
-test("outgoing and LINK preferences survive other chat saves reloads and failed saves",function()
+test("standard LINK overrides legacy separate mode and preserves other chat preferences",function()
   withChatVisibilityRuntime({chat={capture_outgoing=false,combine_links=false,all_sources={MENTAL=false,STAFF=true}}},function(f,hud)
-    eq(hud.chat.captureOutgoing,false)
+    eq(hud.chat.captureOutgoing,false); eq(hud.chat.linkCombined,true)
     assert(hud.chat:setFilter("PSYCIAN"))
-    eq(f.optionsActionCallback("chat_combine_links",nil,true),true)
-    eq(hud.chat.filter,"LINK VIEW"); eq(hud.chat.linkCombined,true)
-    assert(f.chatOrderCallback({"LINK VIEW","STAFF","ALL"}))
-    eq(f.savedChatSettings.combined_tab_order[1],"LINK VIEW")
+    eq(hud.chat.filter,require("chat_channels").linkFilter); eq(hud.chat.linkCombined,true)
+    assert(f.chatOrderCallback({require("chat_channels").linkFilter,"STAFF","ALL"}))
+    eq(f.savedChatSettings.combined_tab_order[1],require("chat_channels").linkFilter)
     eq(f.optionsActionCallback("chat_visibility",nil,false),false)
     eq(f.optionsActionCallback("chat_all_source","ROOM",false),false)
     eq(f.optionsActionCallback("chat_sound_enabled","STAFF",false),false)
     eq(f.savedChatSettings.capture_outgoing,false); eq(f.savedChatSettings.combine_links,true)
     eq(f.savedChatSettings.all_sources.MENTAL,false)
-    eq(f.optionsActionCallback("chat_combine_links",nil,false),false)
-    eq(hud.chat.filter,"PSYCIAN")
-    eq(f.optionsActionCallback("chat_combine_links",nil,true),true)
+    local changed,why=hud:setChatPreference("combine_links",false)
+    eq(changed,nil); assert(why:find("standard",1,true))
+    eq(hud.chat.filter,require("chat_channels").linkFilter); eq(hud.chat.linkCombined,true)
     assert(hud:reload())
     eq(hud.chat.captureOutgoing,false); eq(hud.chat.linkCombined,true)
     f.failChatSettingsSave="disk full"
@@ -953,8 +952,30 @@ test("outgoing and LINK preferences survive other chat saves reloads and failed 
     eq(ok,nil); assert(err:find("disk full",1,true))
     eq(hud.chat.captureOutgoing,false); eq(hud.settings.chat.capture_outgoing,false)
     f.failChatSettingsSave=nil
-    eq(f.optionsActionCallback("chat_combine_links",nil,false),false)
-    eq(hud.chat.filter,"ALL")
+    eq(hud.chat.filter,"ALL"); eq(hud.chat.linkCombined,true)
+  end)
+end)
+
+test("default LINK retains source settings custom categories and raw history across reload",function()
+  withChatVisibilityRuntime({chat={capture_outgoing=false,combine_links=false,
+    all_sources={MENTAL=false,PSYCIAN=false},sounds={volume=27,tabs={STAFF={enabled=false,sound="staff"}}}}},function(f,hud)
+    local categories={"MENTAL","DRAGON","PSYCIAN","SECIAN","LINK","LINK VIEW"}
+    for _,category in ipairs(categories) do assert(hud.chat:capture(category,"Synthetic "..category,{speaker="Tester"})) end
+    eq(hud.chat.linkCombined,true); eq(#hud.chat.history.items,6)
+    assert(hud.chat:setFilter(require("chat_channels").linkFilter)); eq(#hud.chat:entries(),4)
+    assert(hud.chat:setFilter("LINK")); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].category,"LINK")
+    assert(hud.chat:setFilter("LINK VIEW")); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].category,"LINK VIEW")
+    assert(hud.chat:setFilter("ALL")); eq(#hud.chat:entries(),4)
+    eq(hud.settings.chat.capture_outgoing,false); eq(hud.settings.chat.sounds.volume,27)
+    eq(hud.settings.chat.sounds.tabs.STAFF.enabled,false)
+    eq(f.optionsActionCallback("chat_visibility",nil,false),false)
+    eq(f.savedChatSettings.capture_outgoing,false); eq(f.savedChatSettings.combine_links,true)
+    assert(hud:reload())
+    eq(hud.chat.linkCombined,true); eq(hud.chat.captureOutgoing,false); eq(#hud.chat.history.items,6)
+    assert(hud.chat:setFilter(require("chat_channels").linkFilter)); eq(#hud.chat:entries(),4)
+    assert(hud.chat:capture("LINK VIEW","Later personal message",{speaker="Tester"}))
+    eq(hud.chat.linkCombined,true); eq(#hud.chat:entries(),4); eq(#hud.chat.history.items,7)
+    for index,category in ipairs(categories) do eq(hud.chat.history.items[index].category,category) end
   end)
 end)
 
@@ -1045,16 +1066,16 @@ test("hidden chat tab reorders and ALL source saves retain visibility and reject
     assert(hud.chat:capture("ROOM","kept while hidden"))
     local before=chatRuntimeSnapshot(f,hud); local layout=hud.current_layout; local layouts=#f.layouts
     local order={"STAFF","ALL","ROOM"}; assert(f.chatOrderCallback(order))
-    eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,false)
+    eq(f.chatSettingsSaves,1); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.combined_tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,false)
     eq(f.optionsActionCallback("chat_all_source","COMBAT",true),true)
-    eq(f.chatSettingsSaves,2); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,true)
+    eq(f.chatSettingsSaves,2); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.combined_tab_order[1],"STAFF"); eq(f.savedChatSettings.all_sources.COMBAT,true)
     eq(f.optionsActionCallback("chat_all_source","ROOM",false),false)
     eq(f.chatSettingsSaves,3); eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.all_sources.ROOM,false)
-    local saved=f.savedChatSettings; local sources=hud.settings.chat.all_sources; local acceptedOrder=hud.settings.chat.tab_order
+    local saved=f.savedChatSettings; local sources=hud.settings.chat.all_sources; local acceptedOrder=hud.settings.chat.combined_tab_order
     eq(table.concat(acceptedOrder,","),table.concat(order,","))
     f.failChatSettingsSave="disk full"
     local result,err=f.chatOrderCallback({"ROOM","ALL","STAFF"})
-    eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.tab_order,acceptedOrder); eq(DGHUD.user_settings.chat.tab_order,acceptedOrder)
+    eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.combined_tab_order,acceptedOrder); eq(DGHUD.user_settings.chat.combined_tab_order,acceptedOrder)
     result,err=f.optionsActionCallback("chat_all_source","ROOM",true)
     eq(result,nil); assert(tostring(err):find("disk full",1,true)); eq(hud.settings.chat.all_sources,sources); eq(sources.ROOM,false)
     eq(DGHUD.user_settings.chat.all_sources.ROOM,false); eq(f.viewChatAllSources.ROOM,false); eq(f.savedChatSettings,saved)

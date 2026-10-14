@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.103**.
+Applies to DGHUD **v0.3.104**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -20,7 +20,7 @@ The same window controls which sources appear in ALL, provides separate history-
 
 **CAPTURE OUTGOING CONTACTS** starts ON and records complete CONTACT requests in MENTAL only after a confirmed character session. Turn it OFF to stop new outgoing records without deleting old history. Requests are not delivery confirmations and do not play self-alert sounds.
 
-**LINK TABS** starts SEPARATE. Select COMBINED LINK for one mental/racial-link view without changing individual channels, Show in ALL choices, sound settings, or history. Returning to SEPARATE restores its previous tab order. See [outgoing requests and combined LINK](CHATBOX.md#outgoing-contact-messages).
+**LINK** automatically combines mental/ESP/contact and Dragon, Psycian, and Secian messages. There is no separate/combined setting. Individual source channels, Show in ALL choices, sounds, and history are retained. See [the LINK tab](CHATBOX.md#the-link-tab).
 
 ## Hidden / Visible
 

@@ -7,12 +7,12 @@ test("new chat and visibility choices survive repeat resolution without changing
       display={visibility_status=value,auto_wrap=false},update={auto_apply=true}}
     local resolved,migrated=Settings.resolve(defaults,user)
     local cold=Settings.resolve(defaults,migrated)
-    eq(cold.chat.capture_outgoing,value); eq(cold.chat.combine_links,value); eq(cold.display.visibility_status,value)
+    eq(cold.chat.capture_outgoing,value); eq(cold.chat.combine_links,true); eq(cold.display.visibility_status,value)
     eq(cold.display.auto_wrap,false); eq(cold.update.auto_apply,true)
-    eq(table.concat(cold.chat.combined_tab_order,","),"STAFF,LINK VIEW,ALL")
+    eq(table.concat(cold.chat.combined_tab_order,","),"STAFF,"..require("chat_channels").linkFilter..",ALL")
     eq(table.concat(user.chat.combined_tab_order,","),"STAFF,LINK VIEW,ALL")
   end
-  eq(defaults.chat.capture_outgoing,true); eq(defaults.chat.combine_links,false); eq(defaults.display.visibility_status,true)
+  eq(defaults.chat.capture_outgoing,true); eq(defaults.chat.combine_links,true); eq(defaults.display.visibility_status,true)
 end)
 
 test("mental tab migration preserves unrelated choices and explicit OFF on repeated loads",function()

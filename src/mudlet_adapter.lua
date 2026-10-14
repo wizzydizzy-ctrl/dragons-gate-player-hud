@@ -1072,14 +1072,14 @@ function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
   if config.visible~=nil and type(config.visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local result={tab_order={},visible=config.visible~=false}; local seen={}
-  for _,field in ipairs({"capture_outgoing","combine_links"}) do
+  for _,field in ipairs({"capture_outgoing"}) do
     if config[field]~=nil and type(config[field])~="boolean" then return nil,"Chat preferences must be ON or OFF" end
   end
   result.capture_outgoing=config.capture_outgoing~=false
-  result.combine_links=config.combine_links==true
+  result.combine_links=true
   if config.combined_tab_order~=nil then
     if type(config.combined_tab_order)~="table" then return nil,"Combined link tab order must be a table" end
-    result.combined_tab_order=ChatChannels.tabOrder(config.combined_tab_order)
+    result.combined_tab_order=ChatChannels.combinedTabOrder(config.combined_tab_order)
     while #result.combined_tab_order>require("chat_sounds").MAX_TABS do table.remove(result.combined_tab_order) end
   end
   local tabLimit=require("chat_sounds").MAX_TABS

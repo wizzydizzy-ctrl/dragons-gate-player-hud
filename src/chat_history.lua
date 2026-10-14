@@ -149,12 +149,16 @@ end
 
 function History:entries(filter,allSources,combinedLinks)
   filter=Channels.category(filter or "ALL")
+  local virtualLink=filter==Channels.linkFilter
   local entries={}
   for _,entry in ipairs(self.items) do
     local category=Channels.entryCategory(entry)
-    if (filter==Channels.linkFilter and combinedLinks==true and Channels.linkMembers[category])
-      or (filter=="ALL" and Channels.inAll(category,allSources)) or category==filter
-      or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category]) then entries[#entries+1]=Channels.project(entry) end
+    local matches=virtualLink and combinedLinks==true and Channels.linkMembers[category]
+    if not virtualLink then
+      matches=(filter=="ALL" and Channels.inAll(category,allSources)) or category==filter
+        or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category])
+    end
+    if matches then entries[#entries+1]=Channels.project(entry) end
   end
   return entries
 end

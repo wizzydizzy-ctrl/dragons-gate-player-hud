@@ -1,15 +1,29 @@
 local Channels=require("chat_channels")
 local function entry(category,line) return {category=category,line=line,message="hello",speaker="Tester"} end
 
-test("combined LINK is reversible presentation with independent custom LINK",function()
-  local separate={"ALL","STAFF","PSYCIAN","ROOM","MENTAL","DRAGON","SECIAN","LINK","QUEST"}
-  local combined,ok=Channels.combinedOrder(separate,{"LINK","QUEST"})
-  eq(ok,true); eq(table.concat(combined,","),"ALL,STAFF,LINK VIEW,ROOM,LINK,QUEST")
-  eq(table.concat(separate,","),"ALL,STAFF,PSYCIAN,ROOM,MENTAL,DRAGON,SECIAN,LINK,QUEST")
-  local reordered=Channels.combinedOrder(separate,{"LINK","QUEST"},{"QUEST","LINK VIEW","ALL"})
-  eq(table.concat(reordered,","),"QUEST,LINK VIEW,ALL,STAFF,ROOM,LINK")
-  local collision,allowed=Channels.combinedOrder(separate,{"LINK VIEW"})
-  eq(allowed,false); eq(table.concat(collision,","),table.concat(separate,","))
+test("combined LINK uses a reserved filter alongside personal LINK and LINK VIEW",function()
+  local separate={"ALL","STAFF","PSYCIAN","ROOM","MENTAL","DRAGON","SECIAN","LINK","LINK VIEW","QUEST"}
+  local combined,ok=Channels.combinedOrder(separate,{"LINK","LINK VIEW","QUEST"})
+  eq(Channels.linkFilter,"@LINK"); eq(ok,true)
+  eq(table.concat(combined,","),"ALL,STAFF,@LINK,ROOM,LINK,LINK VIEW,QUEST")
+  eq(table.concat(separate,","),"ALL,STAFF,PSYCIAN,ROOM,MENTAL,DRAGON,SECIAN,LINK,LINK VIEW,QUEST")
+  local reordered=Channels.combinedOrder(separate,{"LINK","LINK VIEW","QUEST"},{"QUEST","LINK VIEW","ALL"})
+  eq(table.concat(reordered,","),"QUEST,@LINK,ALL,STAFF,ROOM,LINK,LINK VIEW")
+  local current=Channels.combinedOrder(separate,{"LINK","LINK VIEW","QUEST"},{"LINK VIEW","QUEST","@LINK","ALL"})
+  eq(table.concat(current,","),"LINK VIEW,QUEST,@LINK,ALL,STAFF,ROOM,LINK")
+end)
+
+test("only combined order migration maps the legacy virtual name and remains idempotent",function()
+  local legacy={"STAFF","LINK VIEW","ALL","CONTACT","LINK","LINK VIEW"}
+  eq(table.concat(Channels.tabOrder(legacy),","),"STAFF,LINK VIEW,ALL,MENTAL,LINK")
+  local migrated=Channels.combinedTabOrder(legacy)
+  eq(table.concat(migrated,","),"STAFF,@LINK,ALL,MENTAL,LINK")
+  eq(table.concat(Channels.combinedTabOrder(migrated),","),table.concat(migrated,","))
+  eq(table.concat(legacy,","),"STAFF,LINK VIEW,ALL,CONTACT,LINK,LINK VIEW")
+  local current={"LINK VIEW"," @link ","LINK","ALL"}
+  eq(table.concat(Channels.combinedTabOrder(current),","),"LINK VIEW,@LINK,LINK,ALL")
+  eq(table.concat(Channels.tabOrder({"@LINK","@OTHER","LINK VIEW","@link","OWN","WHISPER"}),","),"@LINK,LINK VIEW")
+  eq(Channels.category("LINK VIEW"),"LINK VIEW")
 end)
 
 test("MENTAL wire families stay distinct without guessing from message bodies",function()
