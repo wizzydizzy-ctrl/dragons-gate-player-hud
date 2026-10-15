@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.104**.
+Documentation covers **DGHUD v0.3.105**.
 
 ## Quick start
 
@@ -43,7 +43,17 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.104
+## Latest changes — v0.3.105
+
+- **PRIVATE** now shows whispers and one-to-one mental contacts, including outgoing named CONTACT requests. Direct contacts no longer appear in LINK as well.
+- **LINK** keeps mental/ESP, room/global contact broadcasts, and Dragon, Psycian, and Secian links together. Existing saved history is retained; the views change, not the original messages.
+- PRIVATE sound alerts apply only to direct conversations. Source-specific sounds and Show in ALL choices are preserved; outgoing requests remain silent.
+- Identical words sent privately and as a broadcast are kept separately rather than mistakenly discarded as duplicates.
+- Visibility now recognizes **You are now invisible.** and **You are no longer invisible.** immediately. Command echoes, quoted chat, and other characters' INFO cannot falsely change your status.
+
+[Read the chat filters](docs/CHATBOX.md#built-in-filters) and [visibility guide](docs/HUD_SCREEN_AND_CHARACTER_DATA.md#hidden-visible-and-unknown).
+
+## Previous changes — v0.3.104
 
 - **LINK is now the standard chat tab**, combining mental/ESP/contact, Dragon, Psycian, and Secian messages. There is no separate/combined switch to find or enable.
 - Existing profiles upgrade automatically, including those saved with separate tabs in v0.3.103. Messages, original channels, source-specific sounds, Show in ALL choices, and outgoing-capture OFF are preserved.
@@ -268,7 +278,7 @@ The HUD owns only the package named `DragonsGateHUD`, runtime IDs it creates, an
 
 ## Persistent top chatbox
 
-The top-center chatbox (shown by default) records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry history, active filter, and reading position into the replacement HUD. Its recognized categories are `ROOM`, `OWN`, `WHISPER`, `MENTAL`, `DRAGON`, `PSYCIAN`, `SECIAN`, `STAFF`, `COMBAT`, and `WORLD`. MENTAL combines ESP, contact thoughts, and generic mental links; named Dragon, Psycian, and Secian links stay separate. ROOM includes nearby and outgoing speech, including direct forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. STAFF includes GUIDE/GM messages, staff voice/sends output, assistance notices, and referrals. PRIVATE combines WHISPER, MENTAL, DRAGON, PSYCIAN, and SECIAN. Older saved messages display under the correct tabs without rewriting their original records; old ESP/CONTACT filter and capture API names remain compatible.
+The top-center chatbox (shown by default) records approved communication formats without gagging, replacing, or otherwise changing normal game output. Its history belongs to the Mudlet profile, so changing characters never swaps or clears it. Package upgrades carry history, active filter, and reading position into the replacement HUD. Its recognized source categories are `ROOM`, `OWN`, `WHISPER`, `MENTAL`, `DRAGON`, `PSYCIAN`, `SECIAN`, `STAFF`, `COMBAT`, and `WORLD`. MENTAL combines ESP, contact thoughts, and generic mental links; named Dragon, Psycian, and Secian links retain their separate sources. PRIVATE shows whispers, one-to-one incoming contacts, and outgoing named CONTACT requests. LINK combines mental/ESP, room/global contact broadcasts, and named racial links; direct conversations are not duplicated there. ROOM includes nearby and outgoing speech, including addressed forms such as `Eilan asks Atrax, "..."` and `You ask Atrax, "..."`. STAFF includes GUIDE/GM messages, staff voice/sends output, assistance notices, and referrals. Older saved messages display under the correct tabs without rewriting their original records; old ESP/CONTACT filter and capture API names remain compatible.
 
 The `WORLD` tab captures character arrivals and departures, such as `** Obatalla Ogoun just arrived in the world.` and `** Obatalla Ogoun has left the world.`. It also recognizes unexpected departures. Arrivals are green and departures are red in both WORLD chat and the main display; customize them under **OPTIONS → Color Settings → Text Styles → World arrivals / World departures**. WORLD starts included in ALL; turn it off under **OPTIONS → Chat Settings → Show in ALL** to keep those notices only in WORLD. Its own history remains saved, and WORLD sound alerts start off.
 

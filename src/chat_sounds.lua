@@ -124,8 +124,9 @@ function Sounds.wav(id)
   return "RIFF"..little(36+#data,4).."WAVEfmt "..little(16,4)..little(1,2)..little(1,2)..little(rate,4)..little(rate*2,4)..little(2,2)..little(16,2).."data"..little(#data,4)..data
 end
 
-local private={MENTAL=true,PSYCIAN=true,DRAGON=true,SECIAN=true}
 function Sounds.choose(config,category,allSources)
+  local entry=type(category)=="table" and category or {category=category}
+  category=Channels.entryCategory(entry)
   local key=Sounds.tabKey(category)
   if not key or type(config)~="table" or type(config.tabs)~="table" then return nil end
   local function enabled(tab)
@@ -134,7 +135,7 @@ function Sounds.choose(config,category,allSources)
   end
   local sound,tab=enabled(key)
   if sound then return sound,tab end
-  if private[key] then sound,tab=enabled("PRIVATE"); if sound then return sound,tab end end
+  if Channels.inPrivate(entry) then sound,tab=enabled("PRIVATE"); if sound then return sound,tab end end
   if Channels.inAll(category,allSources) then return enabled("ALL") end
 end
 function Sounds.new(adapter,config)
@@ -155,7 +156,7 @@ function Sounds:play(id)
 end
 function Sounds:onEntry(entry,allSources)
   if type(entry)~="table" then return false end
-  local id,tab=Sounds.choose(self.config,Channels.entryCategory(entry),allSources)
+  local id,tab=Sounds.choose(self.config,entry,allSources)
   if not id then return false end
   local now=os.time()
   local clock=self.adapter and (self.adapter.chatSoundTime or self.adapter.epoch)

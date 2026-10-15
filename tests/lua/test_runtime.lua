@@ -1336,6 +1336,95 @@ end)
 test("controller merges collector snapshots and removes owned trigger runtime",function()
   local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),6); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
+local function visibilityRuntime(collectorFirst)
+  local f=fake(); f.gmcp={Char={Status={name="Synthetic",surname="Tester"},Vitals={}}}
+  local createView=f.createView
+  function f:createView(settings)
+    local view=createView(self,settings); local update=view.update
+    function view:update(state)
+      self.last_state=state
+      self.identity_html=require("view").identityContent(state.character,settings.theme,f.layouts[#f.layouts],state.needs,state.visibility)
+      return update(self,state)
+    end
+    return view
+  end
+  local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false},theme={muted="#888",accent="#da5",jade="#7b8"}})
+  assert(hud:start())
+  local collector=assert(f.triggers[hud.collector.runtime.triggers[1]])
+  local raw=assert(f.triggers[hud.runtime.triggers[#hud.runtime.triggers]])
+  local function deliver(line)
+    if collectorFirst then collector(line); raw(line) else raw(line); collector(line) end
+  end
+  return f,hud,deliver
+end
+local function assertVisibilityRuntimeState(hud,status,label)
+  eq(hud.view.last_state,hud.last_state); eq(hud.view.state,hud.last_state)
+  for _,state in ipairs({hud.visibility:status(),hud.last_state.visibility,hud.view.last_state.visibility,hud.view.state.visibility}) do
+    eq(state.status,status); eq(state.stale,false)
+  end
+  assert(hud.view.identity_html:find("<b>"..label.."</b>",1,true))
+end
+test("registered invisibility confirmations immediately render Hidden then Visible without echo updates or polling",function()
+  for _,collectorFirst in ipairs({false,true}) do
+    local f,hud,deliver=visibilityRuntime(collectorFirst)
+    local scheduled=f:count(f.timer_delays)
+    assertVisibilityRuntimeState(hud,"unknown","Unknown")
+    for _,prefix in ipairs({"",">","[9006] 299/299 hp, 188/188 ftg >"}) do
+      for _,case in ipairs({
+        {command="set invis on",notice="You are now invisible.",status="hidden",label="Hidden"},
+        {command="set invis off",notice="You are no longer invisible.",status="visible",label="Visible"},
+      }) do
+        f.epochValue=(f.epochValue or 100)+1
+        local before,updates=hud.last_state,f.viewUpdates
+        f:emit("sysDataSendRequest","sysDataSendRequest",case.command)
+        deliver(prefix..case.command)
+        eq(hud.last_state,before); eq(hud.view.last_state,before); eq(hud.view.state,before); eq(f.viewUpdates,updates)
+        eq(hud.collector.active,nil); eq(#(f.sentCommands or {}),0); eq(f:count(f.timer_delays),scheduled)
+        deliver(prefix..case.notice)
+        assertVisibilityRuntimeState(hud,case.status,case.label)
+        eq(hud.last_state.visibility.timestamp,f.epochValue); eq(hud.last_state.visibility.source,"output")
+        eq(f.viewUpdates,updates+1); eq(hud.collector.active,nil); eq(hud.collector.snapshot.info,nil)
+        eq(#(f.sentCommands or {}),0); eq(f:count(f.timer_delays),scheduled)
+      end
+    end
+    assert(hud:shutdown())
+  end
+end)
+test("registered visibility runtime rejects quoted confirmations and targeted other INFO in either callback order",function()
+  for _,collectorFirst in ipairs({false,true}) do
+    for _,hidden in ipairs({true,false}) do
+      local f,hud,deliver=visibilityRuntime(collectorFirst)
+      local notice=hidden and "You are no longer invisible." or "You are now invisible."
+      local status,label=hidden and "hidden" or "visible",hidden and "Hidden" or "Visible"
+      deliver(hidden and "You are now invisible." or "You are no longer invisible.")
+      local before,updates,scheduled=hud.last_state,f.viewUpdates,f:count(f.timer_delays)
+      f.epochValue=101
+      for _,line in ipairs({'"'..notice..'"','Other says, "'..notice..'"','Other says, "',notice,'"',">"}) do
+        deliver(line); assertVisibilityRuntimeState(hud,status,label)
+        eq(hud.last_state,before); eq(f.viewUpdates,updates)
+        eq(#(f.sentCommands or {}),0); eq(f:count(f.timer_delays),scheduled)
+      end
+      for _,interrupted in ipairs({false,true}) do
+        if interrupted then
+          f:emit("sysDataSendRequest","sysDataSendRequest","info")
+          eq(hud.collector.active.command,"info")
+        end
+        f:emit("sysDataSendRequest","sysDataSendRequest","info Other")
+        scheduled=f:count(f.timer_delays)
+        for _,line in ipairs({"[9006] 299/299 hp, 188/188 ftg >info Other",
+          "You are Other Observer, a stocky bodied 28 year old Entropic Male young Human.",
+          [[You are 6'0" and weigh 180 lbs.]],notice,"[9006] 299/299 hp, 188/188 ftg >"}) do
+          deliver(line); assertVisibilityRuntimeState(hud,status,label)
+          eq(hud.last_state,before); eq(f.viewUpdates,updates)
+          eq(#(f.sentCommands or {}),0); eq(f:count(f.timer_delays),scheduled)
+        end
+        eq(hud.collector.active,nil); eq(hud.collector.snapshot.info,nil)
+        eq(hud.last_state.character.full_name,"Synthetic Tester")
+      end
+      assert(hud:shutdown())
+    end
+  end
+end)
 test("registered raw and collector callbacks apply a no-condition INFO exactly once in either order",function()
   for _,collectorFirst in ipairs({false,true}) do
     local f=fake(); f.gmcp={Char={Status={name="Synthetic",surname="Tester"},Vitals={}}}

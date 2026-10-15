@@ -23,11 +23,43 @@ test("visibility exact confirmed self notices accept ANSI BEL and game prompts",
     local v,f=fixture(); eq(v:status().status,"unknown"); eq(v:status().stale,false)
     for _,step in ipairs({{"You slip into the shadows!","hidden"},
       {"You are already unable to be seen!","hidden"},{"You reveal yourself!","visible"},
+      {"You are now invisible.","hidden"},{"You are no longer invisible.","visible"},
       {"You are hidden.","hidden"},{"You are visible.","visible"}}) do
       assert(v:onLine(decorate(step[1]),"game")); local s=v:status()
       eq(s.status,step[2]); eq(s.timestamp,10); eq(s.source,"game"); eq(s.stale,false)
     end
-    eq(f.changes,5)
+    eq(f.changes,7)
+  end
+end)
+
+test("visibility set invis replay updates only on exact confirmations",function()
+  local v,f=fixture(); local initial=v:status(); local confirmations=0
+  eq(initial.status,"unknown"); eq(initial.timestamp,nil); eq(initial.source,nil); eq(initial.stale,false)
+  eq(f.changes,0)
+  for _,step in ipairs({{">set invis on",false},{"You are now invisible.","hidden"},
+      {"[9006] 299/299 hp, 188/188 ftg >set invis off",false},
+      {"You are no longer invisible.","visible"},{"[9006] 299/299 hp, 188/188 ftg >",false}}) do
+    f.stamp=f.stamp+1; local before=v:status()
+    eq(v:onLine(step[1],"game"),step[2]~=false)
+    if step[2] then
+      confirmations=confirmations+1; local s=v:status()
+      eq(s.status,step[2]); eq(s.timestamp,f.stamp); eq(s.source,"game"); eq(s.stale,false)
+    else unchanged(v,before) end
+    eq(f.changes,confirmations)
+  end
+  eq(confirmations,2)
+end)
+
+test("visibility invisibility confirmations refresh stale timestamps even when status is unchanged",function()
+  for _,step in ipairs({{"You are now invisible.","hidden","You slip into the shadows!"},
+      {"You are no longer invisible.","visible","You reveal yourself!"}}) do
+    local v,f=fixture(); assert(v:onLine(step[3],"old")); f.stamp=310
+    local before=v:status(); eq(before.timestamp,10); eq(before.stale,true)
+    for _,line in ipairs({">set invis on",">set invis off","[9006] 299/299 hp, 188/188 ftg >"}) do
+      eq(v:onLine(line,"game"),false); unchanged(v,before); eq(f.changes,1)
+    end
+    f.stamp=311; assert(v:onLine(step[1],"game")); local s=v:status()
+    eq(s.status,step[2]); eq(s.timestamp,311); eq(s.source,"game"); eq(s.stale,false); eq(f.changes,2)
   end
 end)
 
@@ -78,7 +110,8 @@ end)
 test("visibility quoted chat NPC and room prose cannot spoof self notices",function()
   local v=fixture(); v:onLine("You reveal yourself!"); local before=v:status()
   for _,phrase in ipairs({"You slip into the shadows!","You are already unable to be seen!",
-      "You are hidden.","You are invisible.","You reveal yourself!","You are visible."}) do
+      "You are hidden.","You are invisible.","You are now invisible.","You are no longer invisible.",
+      "You reveal yourself!","You are visible."}) do
     for _,line in ipairs({'Synthetic Guard says, "'..phrase..'"',
       "Synthetic Guard tells you, '"..phrase.."'",'[CHAT] Synthetic: '..phrase,
       'You say, "'..phrase..'"',"A plaque reads. "..phrase,
@@ -110,7 +143,10 @@ test("visibility wrapped quoted speech and chat cannot spoof standalone or INFO 
       {"Synthetic Guard says, “Listen:","”"},{"[CHAT] Synthetic: Listen:",">"}}) do
     local v=fixture(); v:onLine("You reveal yourself!"); local before=v:status()
     eq(v:onLine(frame[1]),false)
-    eq(v:onLine("You are hidden."),false); eq(v:onLine("You slip into the shadows!"),false)
+    for _,phrase in ipairs({"You are hidden.","You slip into the shadows!",
+        "You are now invisible.","You are no longer invisible."}) do
+      eq(v:onLine(phrase),false); unchanged(v,before)
+    end
     eq(v:onLine("You're still listening."),false)
     eq(v:onLine(biography.." You are hidden."),false)
     eq(v:onLine(frame[2]),false); unchanged(v,before)
@@ -119,14 +155,28 @@ test("visibility wrapped quoted speech and chat cannot spoof standalone or INFO 
 end)
 
 test("visibility wrapped own INFO waits for its prompt and ignores foreign continuations",function()
-  for _,foreign in ipairs({false,true}) do
-    local v=fixture(); local full=foreign and "Other Tester" or "Synthetic Tester"
-    local lines={"You are "..full..", a light boned and muscular bodied",
-      [[57 year old Entropic Male young Elder. You are 7'7" and weigh 239 lbs. You are]],
-      "hidden. You are satiated.","Your thirst is quenched.","",
-      "HP: 299 of 299 Ftg: 188 of 188",">"}
-    for index=1,#lines-1 do eq(v:onLine("\7\27[32m"..lines[index].."\27[0m"),false); eq(v:status().status,"unknown") end
-    eq(v:onLine(">"),not foreign); eq(v:status().status,foreign and "unknown" or "hidden")
+  for _,step in ipairs({{"hidden.","hidden"},{"now invisible.","hidden"},{"no longer invisible.","visible"}}) do
+    for _,foreign in ipairs({false,true}) do
+      local v,f=fixture(); local before=v:status(); local full=foreign and "Other Tester" or "Synthetic Tester"
+      local lines={"You are "..full..", a light boned and muscular bodied",
+        [[57 year old Entropic Male young Elder. You are 7'7" and weigh 239 lbs. You are]],
+        step[1].." You are satiated.","Your thirst is quenched.","",
+        "HP: 299 of 299 Ftg: 188 of 188",">"}
+      for index=1,#lines-1 do
+        eq(v:onLine("\7\27[32m"..lines[index].."\27[0m"),false); unchanged(v,before); eq(f.changes,0)
+      end
+      f.stamp=11; eq(v:onLine(">"),not foreign); eq(f.changes,foreign and 0 or 1)
+      if foreign then unchanged(v,before)
+      else
+        local s=v:status(); eq(s.status,step[2]); eq(s.timestamp,11); eq(s.source,"output"); eq(s.stale,false)
+      end
+      local direct,df=fixture(); eq(direct:onInfo(assert(Parser.parseInfo(lines)),"collector"),not foreign)
+      eq(df.changes,foreign and 0 or 1)
+      if foreign then unchanged(direct,before)
+      else
+        local s=direct:status(); eq(s.status,step[2]); eq(s.timestamp,10); eq(s.source,"collector"); eq(s.stale,false)
+      end
+    end
   end
 end)
 
@@ -196,7 +246,10 @@ test("visibility rejected INFO and explicit reset cannot release a pending forei
     v:onLine(biography:gsub("Synthetic Tester","Other Tester"))
     if reset then v:reset()
     else eq(v:onInfo({character={full_name="Other Tester"},condition_text="You are hidden."}),false) end
-    eq(v:onLine("You are hidden."),false); eq(v:onLine(">"),false)
+    for _,phrase in ipairs({"You are hidden.","You are now invisible.","You are no longer invisible."}) do
+      eq(v:onLine(phrase),false); eq(v:status().status,"unknown")
+    end
+    eq(v:onLine(">"),false)
     eq(v:status().status,"unknown"); assert(v:onLine("You slip into the shadows!"))
   end
 end)

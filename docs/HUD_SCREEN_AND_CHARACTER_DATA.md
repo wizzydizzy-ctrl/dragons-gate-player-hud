@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.104.
+Applies to DGHUD v0.3.105.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -88,7 +88,7 @@ Identity and characteristics come from GMCP plus `info` and `info religion`. Whe
 
 The row below Food and Water shows **Visibility: Hidden**, **Visible**, or **Unknown**. It begins Unknown and resets on character changes. Hide it with **OPTIONS → HIDDEN / VISIBLE: OFF**; the saved choice survives reloads, updates, and restarts.
 
-Confirmed self notices such as `You slip into the shadows!`, `You are already unable to be seen!`, and `You are hidden.` show Hidden. `You are invisible.` also shows Hidden: this is a concealment indicator, not a distinction between hiding and magical invisibility. `You reveal yourself!` shows Visible. Quoted chat, NPC actions, failed hide attempts, and other characters' INFO do not change it.
+Confirmed self notices such as `You slip into the shadows!`, `You are already unable to be seen!`, and `You are hidden.` show Hidden. `You are invisible.` and `You are now invisible.` also show Hidden: this is a concealment indicator, not a distinction between hiding and magical invisibility. `You reveal yourself!` and `You are no longer invisible.` show Visible. Command echoes such as `set invis on` or `set invis off` do not change status before the game's confirmation. Quoted chat, NPC actions, failed hide attempts, and other characters' INFO do not change it.
 
 A complete wrapped **own** INFO description can confirm Hidden. Missing concealment wording does **not** prove Visible, so it does not erase a prior confirmed state. After five minutes the row marks **last confirmed**, rather than pretending that an old observation is current. Run `info` or **Refresh Character Data** when you want a fresh observation; a fresh response must actually confirm the state to remove that uncertainty.
 

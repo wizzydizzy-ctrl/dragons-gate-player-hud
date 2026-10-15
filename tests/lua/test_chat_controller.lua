@@ -48,12 +48,12 @@ local sourceCases={
   {category="ROOM",source="ROOM",line='Aerin says, "First room message."',nextLine='Aerin asks, "Second room message?"',combined="ROOM"},
   {category="OWN",source="ROOM",line='Dace Alterac says, "First own message."',nextLine='You ask Aerin, "Second own message?"',combined="ROOM"},
   {category="WHISPER",source="WHISPER",line='Aerin whispers to you, "First whisper."',nextLine='Aerin whispers to you, "Second whisper."',combined="PRIVATE"},
-  {category="MENTAL",source="MENTAL",line='Tekk (ESP): "First ESP message."',nextLine='Tekk (ESP): "Second ESP message."',combined="PRIVATE"},
-  {category="MENTAL",source="MENTAL",line='You pick up Losmir\'s mental link, "First dragon message."',nextLine='You pick up Losmir\'s mental link, "Second dragon message."',combined="PRIVATE"},
-  {category="SECIAN",source="SECIAN",line='You pick up Shayla\'s Secian link, "First Secian message." [r-1]',nextLine='You pick up Shayla\'s Secian link, "Second Secian message." [r-1]',combined="PRIVATE"},
+  {category="MENTAL",source="MENTAL",line='Tekk (ESP): "First ESP message."',nextLine='Tekk (ESP): "Second ESP message."',combined=Channels.linkFilter},
+  {category="MENTAL",source="MENTAL",line='You pick up Losmir\'s mental link, "First dragon message."',nextLine='You pick up Losmir\'s mental link, "Second dragon message."',combined=Channels.linkFilter},
+  {category="SECIAN",source="SECIAN",line='You pick up Shayla\'s Secian link, "First Secian message." [r-1]',nextLine='You pick up Shayla\'s Secian link, "Second Secian message." [r-1]',combined=Channels.linkFilter},
   {category="MENTAL",source="MENTAL",line='Seaux thinks to you, "First contact message."',nextLine='Seaux thinks to you, "Second contact message."',combined="PRIVATE"},
-  {category="DRAGON",source="DRAGON",line='You pick up Rook\'s Dragon link, "First named Dragon message."',nextLine='You pick up Rook\'s Dragon link, "Second named Dragon message."',combined="PRIVATE"},
-  {category="PSYCIAN",source="PSYCIAN",line='You pick up Seaux\'s Psycian link, "First Psycian message."',nextLine='You pick up Seaux\'s Psycian link, "Second Psycian message."',combined="PRIVATE"},
+  {category="DRAGON",source="DRAGON",line='You pick up Rook\'s Dragon link, "First named Dragon message."',nextLine='You pick up Rook\'s Dragon link, "Second named Dragon message."',combined=Channels.linkFilter},
+  {category="PSYCIAN",source="PSYCIAN",line='You pick up Seaux\'s Psycian link, "First Psycian message."',nextLine='You pick up Seaux\'s Psycian link, "Second Psycian message."',combined=Channels.linkFilter},
   {category="STAFF",source="STAFF",line="[GUIDE] Aerin: First staff message.",nextLine="[GM] Aerin: Second staff message."},
   {category="WORLD",source="WORLD",line="** Obatalla Ogoun just arrived in the world.",nextLine="** Xlade Vespar has left the world unexpectedly."},
 }
@@ -589,7 +589,12 @@ for _,case in ipairs(sourceCases) do
     eq(#controller:entries(),0); eq(#redraws[#redraws],0)
     eq(table.concat(controller.history:categories(),","),case.category)
     assert(controller:setFilter(case.category)); sameEntries(controller:entries(),accepted)
-    if case.combined then assert(controller:setFilter(case.combined)); sameEntries(controller:entries(),accepted) end
+    if case.combined then
+      if case.combined=="PRIVATE" or case.combined==Channels.linkFilter then assert(controller:setLinkCombined(true)) end
+      assert(controller:setFilter(case.combined)); sameEntries(controller:entries(),accepted)
+      assert(controller:setFilter(case.combined=="PRIVATE" and Channels.linkFilter or "PRIVATE"))
+      eq(#controller:entries(),0)
+    end
     eq(f.storageAppends,1); eq(#accepted,1); eq(f.loadRecentCalls,1)
     assert(controller:shutdown()); eq(f:count(f.triggers),0)
   end)
@@ -871,12 +876,14 @@ test("direct thoughts flow through the owned trigger into contact and private fi
   eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),1)
 end)
 
-test("ranked Psycian links flow through the owned trigger into PSYCIAN and private filters",function()
+test("ranked Psycian links flow through the owned trigger into PSYCIAN and LINK only",function()
   local f=fake(); local controller=makeController(f); assert(controller:start()); assert(controller:setFilter("PSYCIAN"))
   f:line('You pick up Seaux\'s Psycian link, "Hello." [r-1]')
   local entries=controller:entries()
   eq(#entries,1); eq(entries[1].category,"PSYCIAN"); eq(entries[1].speaker,"Seaux"); eq(entries[1].message,"Hello.")
-  eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),1)
+  eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),0)
+  assert(controller:setLinkCombined(true)); assert(controller:setFilter(Channels.linkFilter)); sameEntries(controller:entries(),entries)
+  assert(controller:shutdown())
 end)
 
 test("GUIDE assistance requests flow through the owned trigger into staff chat",function()
@@ -933,12 +940,15 @@ test("targeted asks are captured and visible in the room tab",function()
   eq(entries[2].target,"Atrax"); eq(entries[2].category,"OWN"); eq(f.storageAppends,2)
 end)
 
-test("Secian links flow through the owned trigger private filter and dedupe",function()
+test("Secian links flow through the owned trigger LINK filter and dedupe",function()
   local f=fake(); local controller=makeController(f); assert(controller:start())
   local line='You pick up Marcelline\'s Secian link, "Hello?" [r-1]'
   f:line(line); f.epochValue=101; f:line(line)
   eq(#controller:entries(),1); eq(controller:entries()[1].category,"SECIAN"); eq(controller:entries()[1].speaker,"Marcelline")
-  eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),1)
+  eq(f.storageAppends,1); assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),0)
+  assert(controller:setLinkCombined(true)); assert(controller:setFilter(Channels.linkFilter)); eq(#controller:entries(),1)
+  eq(controller:entries()[1],controller.history.items[1]); eq(#controller.history.items,1)
+  assert(controller:shutdown())
 end)
 
 test("does not start when owned trigger registration fails",function()
@@ -1148,7 +1158,7 @@ local function assertRetentionFlood(controller,conversations,combat,retained)
     assert(controller:setFilter(category)); sameEntries(controller:entries(),sourceEntries(conversations,category))
   end
   assert(controller:setFilter("PRIVATE"))
-  sameEntries(controller:entries(),{conversations[3],conversations[4],conversations[5],conversations[6],conversations[7],conversations[10],conversations[11]})
+  sameEntries(controller:entries(),{conversations[3],conversations[7]})
   assert(controller:setFilter("SYNTHETIC_QUEST")); sameEntries(controller:entries(),{conversations[12]})
   assert(controller:setFilter("COMBAT")); sameEntries(controller:entries(),combat)
   eq(combat[1].line,"Your head takes 6 points of impact damage!")
@@ -1179,6 +1189,11 @@ end)
 
 test("controller renders newest configured limit AFTER ALL source and PRIVATE filtering while history returns all matches",function()
   local saved,retained=controllerRetentionFixture(3)
+  for _,entry in ipairs(saved) do
+    if entry.category=="CONTACT" then
+      entry.line='SyntheticContact thinks to you, "'..entry.message..'"'; entry.source="builtin"
+    end
+  end
   local f=syntheticAdapter(saved); local redraw
   local sources=allSources({ROOM=false,WHISPER=false,COMBAT=false})
   local controller,settings=retentionController(f,3,sources,function(entries) redraw=entries end)
@@ -1189,7 +1204,10 @@ test("controller renders newest configured limit AFTER ALL source and PRIVATE fi
   sameEntries(redraw,controller:entries()); eq(controller:status().visible_count,3)
   assert(controller:setFilter("PRIVATE"))
   local private=controller.history:entries("PRIVATE",sources)
-  eq(#private,21); sameEntries(controller:entries(),newestRetentionEntries(private,3))
+  eq(#private,6); sameEntries(controller:entries(),newestRetentionEntries(private,3))
+  for _,entry in ipairs(private) do
+    assert(entry.category=="WHISPER" or entry.line:match('^SyntheticContact thinks to you, "'))
+  end
   sameEntries(redraw,controller:entries())
   assert(controller:setFilter("ROOM")); eq(#controller:entries(),3)
   assert(controller:setFilter("COMBAT")); eq(#controller:entries(),3)
@@ -1205,7 +1223,7 @@ test("full update handoff copies every retained bucket up to thirteen thousand e
   local controller,settings=retentionController(f,1000,allSources(),nil,function() accepted=accepted+1 end)
   local settingsBefore=copyRetentionValue(settings)
   assert(controller:start()); assert(controller:setFilter("PRIVATE"))
-  eq(#controller:entries(),1000); eq(#controller.history:entries("PRIVATE"),7000)
+  eq(#controller:entries(),1000); eq(#controller.history:entries("PRIVATE"),1000)
   local handoff=controller:handoff()
   eq(handoff.schema,1); eq(handoff.filter,"PRIVATE"); eq(handoff.partial,nil)
   eq(#handoff.entries,13000); sameEntries(handoff.entries,retained)
@@ -1228,7 +1246,7 @@ for _,limit in ipairs({3,1000}) do
     assert(controller:restoreHandoff(handoff)); assert(controller:start(true))
     sameViewEntries(controller.history:entries("ALL"),expected)
     eq(#controller.history.items,13*limit); assert(#controller.history.items<=13000)
-    eq(#controller.history:entries("PRIVATE"),7*limit)
+    eq(#controller.history:entries("PRIVATE"),limit)
     sameEntries(controller:entries(),newestRetentionEntries(controller.history:entries("PRIVATE"),limit))
     eq(controller.filter,"PRIVATE"); eq(controller.history.limit,limit)
     eq(redraws,0); eq(accepted,0); eq(f.loadRecentCalls,0); eq(f.storageAppends,0); eq(f.storageClears,0)
@@ -1387,10 +1405,11 @@ test("all mental formats capture while hidden in ALL and share dedicated and leg
     eq(accepted[index].category,"MENTAL"); eq(accepted[index].line,line)
     eq(controller.history.items[index],f.appendedEntries[index])
   end
-  for _,filter in ipairs({"MENTAL"," esp ","CONTACT","PRIVATE"}) do
+  for _,filter in ipairs({"MENTAL"," esp ","CONTACT"}) do
     assert(controller:setFilter(filter)); sameEntries(controller:entries(),accepted)
-    eq(controller.filter,filter=="PRIVATE" and "PRIVATE" or "MENTAL")
+    eq(controller.filter,"MENTAL")
   end
+  assert(controller:setFilter("PRIVATE")); sameEntries(controller:entries(),{accepted[2]})
   assert(controller:setFilter("PSYCIAN")); eq(#controller:entries(),0)
   assert(controller:setFilter("ALL")); assert(controller:setAllSources({ESP=false,CONTACT=true,PSYCIAN=false}))
   sameEntries(controller:entries(),accepted)
@@ -1404,9 +1423,11 @@ test("all mental formats capture while hidden in ALL and share dedicated and leg
     local restored=makeController(second,nil,function() alerts=alerts+1 end,sources)
     if mode=="handoff" then assert(restored:restoreHandoff(handoff)) end
     assert(restored:start(true)); eq(#restored:entries(),0); eq(alerts,0); eq(second.storageAppends,0)
-    for _,filter in ipairs({"MENTAL","ESP","CONTACT","PRIVATE"}) do
+    for _,filter in ipairs({"MENTAL","ESP","CONTACT"}) do
       assert(restored:setFilter(filter)); sameEntries(restored:entries(),accepted)
     end
+    assert(restored:setFilter("PRIVATE")); sameEntries(restored:entries(),{accepted[2]})
+    assert(restored:setFilter("MENTAL"))
     if mode=="handoff" then second:line(lines[#lines]); eq(second.storageAppends,0); eq(alerts,0) end
     second.epochValue=second.epochValue+4; second:line('Lark (ESP): "Fresh fixture."')
     eq(second.storageAppends,1); eq(alerts,1); eq(#restored:entries(),#lines+1)
@@ -1428,7 +1449,7 @@ test("hidden named Psycian Dragon and Secian links remain separate through reloa
     sameEntries(controller:entries(),{accepted[index]}); assert(controller:setFilter("ALL"))
   end
   assert(controller:setFilter("MENTAL")); eq(#controller:entries(),0)
-  assert(controller:setFilter("PRIVATE")); sameEntries(controller:entries(),accepted)
+  assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),0)
   assert(controller:shutdown())
   local second=fake(f.appendedEntries); local alerts=0
   local restored=makeController(second,nil,function() alerts=alerts+1 end,sources); assert(restored:start())
@@ -1462,14 +1483,14 @@ test("legacy history reload and full handoff project views while preserving ever
     sameViewEntries(controller:entries(),{saved[2],saved[3],saved[4]})
   end
   assert(controller:setFilter("DRAGON")); sameEntries(controller:entries(),{saved[5]})
-  assert(controller:setFilter("PRIVATE")); sameViewEntries(controller:entries(),saved)
+  assert(controller:setFilter("PRIVATE")); sameViewEntries(controller:entries(),{saved[3]})
   sameRetentionValue(saved,expectedRaw); sameEntries(controller.history.items,expectedRaw)
   local handoff=controller:handoff(); sameEntries(handoff.entries,expectedRaw)
   for index,entry in ipairs(handoff.entries) do assert(entry~=saved[index]) end
   assert(controller:shutdown())
   local second=fake(); local restored=makeController(second,nil,function() alerts=alerts+1 end,sources)
   assert(restored:restoreHandoff(handoff)); assert(restored:start(true))
-  sameEntries(restored.history.items,expectedRaw); sameViewEntries(restored:entries(),expectedRaw)
+  sameEntries(restored.history.items,expectedRaw); sameViewEntries(restored:entries(),{saved[3]})
   sameEntries(restored:handoff().entries,expectedRaw)
   eq(second.loadRecentCalls,0); eq(second.storageAppends,0); eq(alerts,0)
   eq(second.storageClears,0); sameRetentionValue(saved,expectedRaw); assert(restored:shutdown())
@@ -1731,7 +1752,10 @@ test("outgoing transcripts stay silent hidden sources still retain them and rapi
   for _,target in ipairs({"all","all","room","Aerin","Aerin","Beren"}) do f:outgoing("contact "..target.." Exact body") end
   eq(f.storageAppends,6); eq(#controller.history.items,6); eq(#controller:entries(),0); eq(alerts,0)
   assert(controller:setFilter("MENTAL")); eq(#controller:entries(),6)
-  assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),6)
+  assert(controller:setFilter("PRIVATE"))
+  sameEntries(controller:entries(),{controller.history.items[4],controller.history.items[5],controller.history.items[6]})
+  assert(controller:setLinkCombined(true)); assert(controller:setFilter(Channels.linkFilter))
+  sameEntries(controller:entries(),{controller.history.items[1],controller.history.items[2],controller.history.items[3]})
   for index,entry in ipairs(controller.history.items) do
     eq(entry.category,"MENTAL"); eq(entry.source,"outgoing"); eq(entry.character,f.character)
     eq(entry.speaker,f.character); eq(entry.message,"Exact body")
@@ -2072,4 +2096,211 @@ test("reserved LINK is accepted only as a filter and never as a custom message c
   eq(#combined,1); eq(combined[1].category,"DRAGON")
   eq(history:entries("LINK VIEW",nil,true)[1].message,"Personal fixture")
   eq(history.items[1].category,"@LINK"); assert(controller:shutdown())
+end)
+
+for _,mode in ipairs({"cold","full","legacy","partial"}) do
+  test(mode.." restore partitions direct PRIVATE and broadcast LINK with default v104 mode and custom names intact",function()
+    local saved={
+      {category="ESP",line='Lark (ESP): "Synthetic global."'},
+      {category="CONTACT",speaker="Metadata differs",message="Different saved body.",
+        line='Nera O\'Vale thinks to you, "Synthetic direct."'},
+      {category="ESP",line='You pick up Lark\'s Psycian link, "Synthetic racial." [r-1]'},
+      {category="CONTACT",line='You pick up Lark\'s thoughts, "Synthetic global thoughts." [r-1]'},
+      {category="MENTAL",source="outgoing",target="Nera_O'Vale",message="Synthetic direct request."},
+      {category="MENTAL",source="outgoing",target="all",message="Synthetic global request."},
+      {category="MENTAL",source="outgoing",target="room",message="Synthetic room request."},
+      {category="WHISPER",message="Synthetic whisper."},
+      {category="LINK",source="custom",message="Synthetic personal LINK."},
+      {category="LINK VIEW",source="custom",message="Synthetic personal LINK VIEW."},
+      {category="MENTAL",target="Nera",message="Synthetic unproven target."},
+    }
+    for index,entry in ipairs(saved) do
+      entry.schema=1; entry.timestamp="2026-10-15T12:00:00Z"; entry.character="Synthetic Keeper"
+      entry.message=entry.message or ("Synthetic saved "..index); entry.source=entry.source or "builtin"
+    end
+    local raw=copyRetentionValue(saved)
+    local sources=allSources({WHISPER=false,MENTAL=false,DRAGON=false,PSYCIAN=false,SECIAN=false})
+    local sourcesBefore=copyRetentionValue(sources); local f=outgoingAdapter(saved); local alerts=0
+    local controller=makeController(f,nil,function() alerts=alerts+1 end,sources)
+    local handoff
+    if mode~="cold" then
+      handoff={schema=1,filter=mode=="legacy" and "CONTACT" or "PRIVATE",entries=saved}
+      if mode=="partial" then
+        handoff.partial=true; handoff.entries={Channels.project(saved[2]),saved[9]}
+      end
+      assert(controller:restoreHandoff(handoff))
+    end
+    local defaults=require("defaults").chat
+    eq(defaults.combine_links,true)
+    assert(controller:setLinkCombined(defaults.combine_links)); assert(controller:start(true))
+    eq(controller.linkCombined,true)
+    eq(controller.filter,mode=="cold" and "ALL" or mode=="legacy" and Channels.linkFilter or "PRIVATE")
+    eq(f.loadRecentCalls,(mode=="cold" or mode=="partial") and 1 or 0)
+    eq(f.storageAppends,0); eq(f.storageClears,0); eq(alerts,0)
+    sameEntries(controller.history.items,raw)
+    assert(controller:setFilter("PRIVATE")); sameViewEntries(controller:entries(),{saved[2],saved[5],saved[8]})
+    local link={saved[1],saved[3],saved[4],saved[6],saved[7],saved[11]}
+    assert(controller:setFilter(Channels.linkFilter)); sameViewEntries(controller:entries(),link)
+    assert(controller:setFilter("ALL")); sameEntries(controller:entries(),{saved[9],saved[10]})
+    assert(controller:setAllSources(allSources({COMBAT=true}))); sameViewEntries(controller:entries(),saved)
+    assert(controller:setLinkCombined(false)); assert(controller:setFilter("MENTAL"))
+    sameViewEntries(controller:entries(),{saved[1],saved[2],saved[4],saved[5],saved[6],saved[7],saved[11]})
+    assert(controller:setLinkCombined(true)); eq(controller.filter,Channels.linkFilter)
+    sameViewEntries(controller:entries(),link)
+    for _,index in ipairs({9,10}) do
+      assert(controller:setFilter(saved[index].category)); sameEntries(controller:entries(),{saved[index]})
+    end
+    local snapshot=controller:handoff(); sameEntries(snapshot.entries,raw)
+    sameRetentionValue(saved,raw); sameRetentionValue(sources,sourcesBefore)
+    eq(f.storageAppends,0); eq(f.storageClears,0); eq(alerts,0); eq(f.sideEffects,0)
+    assert(controller:shutdown())
+  end)
+end
+
+test("live direct thoughts whispers and repeated named requests enter PRIVATE without duplicating broadcast LINK",function()
+  local f=outgoingAdapter(); f.character="Synthetic Keeper"; local alerts=0
+  local controller=makeController(f,nil,function() alerts=alerts+1 end,hiddenSources())
+  assert(controller:setLinkCombined(require("defaults").chat.combine_links)); assert(controller:start())
+  f:line('Nera thinks to you, "Synthetic direct."')
+  f:outgoing("contact all Synthetic global")
+  f:outgoing("contact room Synthetic room")
+  f:outgoing("contact Nera Synthetic repeated direct")
+  f:outgoing("contact Nera Synthetic repeated direct")
+  f:line('Lark whispers to you, "Synthetic whisper."')
+  assert(controller:capture("MENTAL","Synthetic unknown.",{target="Nera"}))
+  local raw=copyRetentionValue(f.appendedEntries)
+  eq(#raw,7); eq(#controller:entries(),0); eq(f.storageAppends,7); eq(alerts,3)
+  assert(raw[4].outgoing_id~=raw[5].outgoing_id)
+  assert(controller:setFilter("PRIVATE")); sameEntries(controller:entries(),{raw[1],raw[4],raw[5],raw[6]})
+  assert(controller:setFilter(Channels.linkFilter)); sameEntries(controller:entries(),{raw[2],raw[3],raw[7]})
+  assert(controller:setFilter("ALL")); assert(controller:setAllSources(allSources()))
+  sameEntries(controller:entries(),raw); sameEntries(controller.history.items,raw)
+  local snapshot=controller:handoff(); sameEntries(snapshot.entries,raw); assert(controller:shutdown())
+  for _,mode in ipairs({"reload","handoff"}) do
+    local second=outgoingAdapter(raw); local restoredAlerts=0
+    local restored=makeController(second,nil,function() restoredAlerts=restoredAlerts+1 end,hiddenSources())
+    if mode=="handoff" then assert(restored:restoreHandoff(snapshot)) end
+    assert(restored:setLinkCombined(true)); assert(restored:start(true))
+    assert(restored:setFilter("PRIVATE")); sameEntries(restored:entries(),{raw[1],raw[4],raw[5],raw[6]})
+    assert(restored:setFilter(Channels.linkFilter)); sameEntries(restored:entries(),{raw[2],raw[3],raw[7]})
+    sameEntries(restored:handoff().entries,raw); sameEntries(restored.history.items,raw)
+    eq(restored.history.items[4].outgoing_id,raw[4].outgoing_id)
+    eq(restored.history.items[5].outgoing_id,raw[5].outgoing_id)
+    eq(second.storageAppends,0); eq(second.storageClears,0); eq(restoredAlerts,0); eq(second.sideEffects,0)
+    assert(restored:shutdown())
+  end
+  eq(f.sideEffects,0)
+end)
+
+local contactCollisionLines={
+  direct='Lark thinks to you, "hello"',
+  global='You pick up Lark\'s thoughts, "hello" [r-1]',
+  room='You pick up Lark\'s thoughts echoing through the area, "hello"',
+}
+local contactCollisionPairs={{"direct","global"},{"global","direct"},{"direct","room"},{"room","direct"}}
+
+local function assertContactCollisionViews(controller,first,second,firstFrame)
+  local direct=firstFrame=="direct" and first or second
+  local broadcast=firstFrame=="direct" and second or first
+  assert(controller:setFilter("ALL")); eq(#controller:entries(),0)
+  assert(controller:setFilter("PRIVATE")); sameViewEntries(controller:entries(),{direct})
+  assert(controller:setFilter(Channels.linkFilter)); sameViewEntries(controller:entries(),{broadcast})
+  sameViewEntries(controller.history:entries("MENTAL"),{first,second})
+  sameEntries(controller:handoff().entries,{first,second})
+end
+
+for _,pair in ipairs(contactCollisionPairs) do
+  test("owned trigger keeps same-text "..pair[1].." then "..pair[2].." contact frames and dedupes repeats",function()
+    local f=fake(); local accepted={}
+    local controller=makeController(f,nil,function(entry) accepted[#accepted+1]=entry end,{MENTAL=false})
+    assert(controller:setLinkCombined(true)); assert(controller:start())
+    f:line(contactCollisionLines[pair[1]]); f:line(contactCollisionLines[pair[1]])
+    eq(f.storageAppends,1); eq(#accepted,1); eq(controller.history.lastEpoch,100)
+    f.epochValue=101; f:line(contactCollisionLines[pair[2]]); f:line(contactCollisionLines[pair[2]])
+    eq(f.storageAppends,2); eq(#accepted,2); eq(controller.history.lastEpoch,101)
+    eq(controller.history.lastKey,table.concat({"mental","lark","","hello",0},"\0"))
+    eq(controller.history.lastMentalKind,"contact"); eq(#controller.history.items,2)
+    for index,entry in ipairs(accepted) do
+      sameRetentionValue(entry,Parser.parse(contactCollisionLines[pair[index]],f.character,f.timestampValue))
+    end
+    sameEntries(f.appendedEntries,accepted)
+    assertContactCollisionViews(controller,accepted[1],accepted[2],pair[1])
+    local snapshot=controller:handoff()
+    eq(snapshot.schema,1); eq(snapshot.last_key,controller.history.lastKey)
+    local fields={schema=true,character_key=true,filter=true,previous_link_filter=true,entries=true,
+      last_key=true,last_epoch=true,last_mental_kind=true}
+    for field in pairs(snapshot) do assert(fields[field],"unexpected handoff field "..field) end
+    eq(f.storageClears,0); assert(controller:shutdown())
+  end)
+end
+
+for _,mode in ipairs({"full","legacy","partial"}) do
+  for _,pair in ipairs(contactCollisionPairs) do
+    test(mode.." handoff preserves same-text "..pair[1].." versus "..pair[2].." audience dedupe",function()
+      local first=fake(); local original=makeController(first,nil,nil,{MENTAL=false})
+      assert(original:start()); first:line(contactCollisionLines[pair[1]])
+      local handoff=original:handoff(); assert(original:shutdown())
+      local raw=copyRetentionValue(handoff.entries[1])
+      if mode~="full" then
+        raw.category="CONTACT"
+        handoff.last_key=table.concat({"contact","lark","","hello",0},"\0")
+        handoff.last_mental_kind=nil
+        handoff.entries={mode=="partial" and Channels.project(raw) or raw}
+      end
+      if mode=="partial" then handoff.partial=true end
+      local handoffBefore=copyRetentionValue(handoff); local rawBefore=copyRetentionValue(raw)
+      local f=fake({raw}); f.epochValue=100.5; local accepted={}
+      local restored=makeController(f,nil,function(entry) accepted[#accepted+1]=entry end,{MENTAL=false})
+      assert(restored:restoreHandoff(handoff)); assert(restored:setLinkCombined(true)); assert(restored:start(true))
+      eq(f.loadRecentCalls,mode=="partial" and 1 or 0)
+      eq(f.storageAppends,0); eq(#accepted,0); eq(#restored.history.items,1)
+      eq(restored.history.lastKey,table.concat({"mental","lark","","hello",0},"\0"))
+      eq(restored.history.lastEpoch,100); eq(restored.history.lastMentalKind,"contact")
+      sameRetentionValue(restored.history.items[1],rawBefore)
+      f:line(contactCollisionLines[pair[1]])
+      eq(f.storageAppends,0); eq(#accepted,0); eq(restored.history.lastEpoch,100)
+      f.epochValue=101; f:line(contactCollisionLines[pair[2]])
+      eq(f.storageAppends,1); eq(#accepted,1); eq(#restored.history.items,2)
+      f.epochValue=102; f:line(contactCollisionLines[pair[2]])
+      eq(f.storageAppends,1); eq(#accepted,1); eq(restored.history.lastEpoch,101)
+      sameRetentionValue(accepted[1],Parser.parse(contactCollisionLines[pair[2]],f.character,f.timestampValue))
+      assertContactCollisionViews(restored,rawBefore,accepted[1],pair[1])
+      sameRetentionValue(restored.history.items[1],rawBefore)
+      sameRetentionValue(raw,rawBefore); sameRetentionValue(handoff,handoffBefore)
+      eq(f.storageClears,0); assert(restored:shutdown())
+    end)
+  end
+end
+
+test("unknown GMCP-style originals never gain audience proof through full legacy or partial handoff",function()
+  for _,mode in ipairs({"full","legacy","partial"}) do
+    for _,frame in ipairs({"direct","global","room"}) do
+      local first=fake(); local original=makeController(first,nil,nil,{MENTAL=false})
+      assert(original:start()); assert(original:capture("MENTAL","hello",{speaker="Lark"}))
+      local unknown=copyRetentionValue(first.appendedEntries[1])
+      first.epochValue=100.5; first:line(contactCollisionLines[frame])
+      eq(first.storageAppends,1); eq(original.history.lastMentalKind,"contact")
+      local handoff=original:handoff(); assert(original:shutdown())
+      if mode~="full" then
+        unknown.category="CONTACT"; handoff.last_mental_kind=nil
+        handoff.last_key=table.concat({"contact","lark","","hello",0},"\0")
+        handoff.entries={mode=="partial" and Channels.project(unknown) or unknown}
+      end
+      if mode=="partial" then handoff.partial=true end
+      local rawBefore=copyRetentionValue(unknown); local handoffBefore=copyRetentionValue(handoff)
+      local f=fake({unknown}); f.epochValue=101; local alerts=0
+      local restored=makeController(f,nil,function() alerts=alerts+1 end,{MENTAL=false})
+      assert(restored:restoreHandoff(handoff)); assert(restored:setLinkCombined(true)); assert(restored:start(true))
+      f:line(contactCollisionLines[frame])
+      f.epochValue=102; f:line(contactCollisionLines[frame=="direct" and "global" or "direct"])
+      eq(f.storageAppends,0); eq(alerts,0); eq(#restored.history.items,1)
+      eq(restored.history.lastEpoch,100); eq(restored.history.lastMentalKind,"contact")
+      sameRetentionValue(restored.history.items[1],rawBefore)
+      assert(restored:setFilter("PRIVATE")); eq(#restored:entries(),0)
+      assert(restored:setFilter(Channels.linkFilter)); sameViewEntries(restored:entries(),{rawBefore})
+      sameRetentionValue(handoff,handoffBefore); sameRetentionValue(unknown,rawBefore)
+      eq(f.loadRecentCalls,mode=="partial" and 1 or 0); eq(f.storageClears,0)
+      assert(restored:shutdown())
+    end
+  end
 end)

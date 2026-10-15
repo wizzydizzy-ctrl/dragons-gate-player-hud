@@ -1,5 +1,54 @@
 local Channels=require("chat_channels")
 local function entry(category,line) return {category=category,line=line,message="hello",speaker="Tester"} end
+test("PRIVATE accepts only whispers and explicitly direct mental conversations",function()
+  eq(Channels.inPrivate(nil),false); eq(Channels.inPrivate("MENTAL"),false)
+  for _,category in ipairs({"MENTAL","CONTACT","ESP"}) do
+    local direct=entry(category,'Tester thinks to you, "hello"')
+    eq(Channels.inPrivate(direct),true); eq(direct.category,category)
+    eq(Channels.inPrivate(entry(category,'\27[35m\7Tester thinks to you, "hello"\27[0m')),true)
+  end
+  eq(Channels.inPrivate(entry("WHISPER",'Tester whispers to you, "hello"')),true)
+  eq(Channels.inPrivate(entry("WHISPER",'You whisper to Tester, "hello"')),true)
+  for _,category in ipairs({"ROOM","OWN","STAFF","COMBAT","WORLD","DRAGON","PSYCIAN","SECIAN"}) do
+    eq(Channels.inPrivate(entry(category,'Tester thinks to you, "hello"')),false)
+  end
+end)
+
+test("PRIVATE never guesses directness from broadcast categories targets or quoted bodies",function()
+  for _,line in ipairs({
+    'Tester (ESP): "hello"',
+    'You pick up Tester\'s thoughts, "hello" [r-1]',
+    'You pick up Tester\'s thoughts echoing through the area, "hello"',
+    'You pick up Tester\'s mental link, "hello" [r-1]',
+    'Listener picks up Tester\'s mental link, "hello"',
+    'You pick up Tester\'s Dragon link, "hello" [r-1]',
+    'You pick up Tester\'s Psycian link, "hello" [r-1]',
+    'You pick up Tester\'s Secian link, "hello" [r-1]',
+    'Say: Tester thinks to you, "hello"',
+    'Tester (ESP): "Someone thinks to you, hello"',
+    'Tester thinks to you, "hello" [r-1]',
+    'Tester thinks to you, "hello"\nAnother line',
+  }) do
+    for _,category in ipairs({"MENTAL","CONTACT","ESP"}) do
+      local value=entry(category,line); value.target="Current Character"
+      eq(Channels.inPrivate(value),false)
+    end
+  end
+  eq(Channels.inPrivate({category="CONTACT",message='Tester thinks to you, "hello"'}),false)
+end)
+
+test("outgoing named contacts are PRIVATE but all and room remain broadcasts",function()
+  for _,target in ipairs({"Tester","O'Brien","Target-Name","Player_2"}) do
+    local value={category="MENTAL",source="outgoing",target=target}
+    eq(Channels.inPrivate(value),true); eq(value.target,target)
+  end
+  for _,target in ipairs({"all","ALL","room","Room","","a b","bad\nname","bad;command",string.rep("a",65)}) do
+    eq(Channels.inPrivate({category="MENTAL",source="outgoing",target=target}),false)
+  end
+  eq(Channels.inPrivate({category="MENTAL",source="outgoing"}),false)
+  eq(Channels.inPrivate({category="MENTAL",source="gmcp",target="Tester"}),false)
+  eq(Channels.inPrivate({category="STAFF",source="outgoing",target="Tester"}),false)
+end)
 
 test("combined LINK uses a reserved filter alongside personal LINK and LINK VIEW",function()
   local separate={"ALL","STAFF","PSYCIAN","ROOM","MENTAL","DRAGON","SECIAN","LINK","LINK VIEW","QUEST"}
@@ -28,19 +77,22 @@ end)
 
 test("MENTAL wire families stay distinct without guessing from message bodies",function()
   for _,row in ipairs({
-    {'Tester (ESP): "hello"',"esp"},
-    {'Tester thinks to you, "hello"',"contact"},
+    {'Tester (ESP): "hello"',"esp","broadcast"},
+    {'Tester thinks to you, "hello"',"contact","direct"},
     {'You pick up Tester\'s thoughts, "hello" [r-1]',"contact"},
     {'You pick up Tester\'s thoughts echoing through the area, "hello"',"contact"},
     {'You pick up Tester\'s mental link, "hello" [r-1]',"link"},
     {'Listener picks up Tester\'s mental link, "hello"',"link"},
   }) do
-    eq(Channels.mentalKind(entry("MENTAL",row[1])),row[2])
-    eq(Channels.mentalKind(entry("MENTAL","\27[35m"..row[1].."\27[0m")),row[2])
+    local kind,audience=Channels.mentalKind(entry("MENTAL",row[1]))
+    eq(kind,row[2]); eq(audience,row[3] or "broadcast")
+    local coloredKind,coloredAudience=Channels.mentalKind(entry("MENTAL","\27[35m"..row[1].."\27[0m"))
+    eq(coloredKind,row[2]); eq(coloredAudience,row[3] or "broadcast")
   end
   eq(Channels.mentalKind(entry("ESP","hello")),"esp")
   eq(Channels.mentalKind(entry("CONTACT","hello")),"contact")
   eq(Channels.mentalKind(entry("MENTAL","hello")),nil)
+  local _,legacyAudience=Channels.mentalKind(entry("CONTACT","hello")); eq(legacyAudience,nil)
   eq(Channels.mentalKind(entry("MENTAL",'Say: Tester (ESP): "hello"')),nil)
   eq(Channels.mentalKind(entry("MENTAL",'Tester thinks to you, "mental link"')),"contact")
   eq(Channels.mentalKind(entry("ESP",'You pick up Tester\'s Psycian link, "hello" [r-1]')),nil)

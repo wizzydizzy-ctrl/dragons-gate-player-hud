@@ -4,7 +4,6 @@ History.__index=History
 History.MAX_ENTRIES=1000
 History.MAX_RETAINED_ENTRIES=13000
 
-local private={WHISPER=true,ESP=true,CONTACT=true,MENTAL=true,PSYCIAN=true,DRAGON=true,SECIAN=true}
 -- A busy source must not consume another source's history. Custom categories
 -- share one bounded bucket rather than allocating memory for arbitrary names.
 local retainedSources={ROOM=true,WHISPER=true,ESP=true,DRAGON=true,SECIAN=true,CONTACT=true,MENTAL=true,PSYCIAN=true,STAFF=true,COMBAT=true,WORLD=true,ALL=true}
@@ -95,9 +94,13 @@ function History:append(entry,epoch,force)
   if type(entry)~="table" then return false end
   epoch=tonumber(epoch) or os.time()
   local entryKey=key(entry)
-  local mentalKind=Channels.mentalKind(entry)
+  local mentalKind,audience=Channels.mentalKind(entry)
+  local _,previousAudience=Channels.mentalKind(self.items[#self.items])
   local elapsed=epoch-(self.lastEpoch or epoch)
   local compatible=self.lastMentalKind==nil or mentalKind==nil or self.lastMentalKind==mentalKind
+  -- Identical words sent privately and globally are two conversations, not
+  -- duplicate delivery. Unknown/GMCP frames keep the existing dedupe rules.
+  if audience and previousAudience and audience~=previousAudience then compatible=false end
   if force~=true and self.lastKey==entryKey and compatible and elapsed>=0 and elapsed<=self.dedupeSeconds then
     self.lastMentalKind=self.lastMentalKind or mentalKind
     return false
@@ -153,10 +156,11 @@ function History:entries(filter,allSources,combinedLinks)
   local entries={}
   for _,entry in ipairs(self.items) do
     local category=Channels.entryCategory(entry)
-    local matches=virtualLink and combinedLinks==true and Channels.linkMembers[category]
+    local direct=(virtualLink or filter=="PRIVATE") and Channels.inPrivate(entry)
+    local matches=virtualLink and combinedLinks==true and Channels.linkMembers[category] and not direct
     if not virtualLink then
       matches=(filter=="ALL" and Channels.inAll(category,allSources)) or category==filter
-        or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and private[category])
+        or (filter=="ROOM" and category=="OWN") or (filter=="PRIVATE" and direct)
     end
     if matches then entries[#entries+1]=Channels.project(entry) end
   end

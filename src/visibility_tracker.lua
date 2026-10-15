@@ -89,6 +89,8 @@ local notices={
   ["You are already unable to be seen!"]="hidden",
   ["You are hidden."]="hidden",
   ["You are invisible."]="hidden",
+  ["You are now invisible."]="hidden",
+  ["You are no longer invisible."]="visible",
   ["You reveal yourself!"]="visible",
   ["You are visible."]="visible",
 }

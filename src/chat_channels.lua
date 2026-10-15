@@ -57,19 +57,36 @@ function Channels.project(entry)
   return projected
 end
 
+-- PRIVATE is a direct-conversation view, not a synonym for mental traffic.
+-- Inspect the full game frame, never words inside a quoted message.
+function Channels.inPrivate(entry)
+  if type(entry)~="table" then return false end
+  local category=Channels.entryCategory(entry)
+  if category=="WHISPER" then return true end
+  if category~="MENTAL" then return false end
+  if entry.source=="outgoing" then
+    local target=type(entry.target)=="string" and entry.target or ""
+    return #target<=64 and target:match("^[A-Za-z][%w_%-']*$")~=nil
+      and target:lower()~="all" and target:lower()~="room"
+  end
+  local line=tostring(entry.line or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\7",""):match("^%s*(.-)%s*$")
+  if line:find("[\r\n%z]") then return false end
+  return line:match("^"..activeName..' thinks to you, "(.*)"$')~=nil
+end
+
 function Channels.mentalKind(entry)
   if type(entry)~="table" or Channels.entryCategory(entry)~="MENTAL" then return nil end
   local line=tostring(entry.line or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%s*(.-)%s*$")
-  if line:match("^"..activeName..' %(ESP%): "(.*)"$') then return "esp" end
-  if line:match("^"..activeName..' thinks to you, "(.*)"$') then return "contact" end
+  if line:match("^"..activeName..' %(ESP%): "(.*)"$') then return "esp","broadcast" end
+  if line:match("^"..activeName..' thinks to you, "(.*)"$') then return "contact","direct" end
   local speaker,body,tail=line:match("^You pick up "..activeName.."'s thoughts, \"(.*)\"(.*)$")
-  if speaker and body and validLinkSuffix(tail) then return "contact" end
-  if line:match("^You pick up "..activeName.."'s thoughts echoing through the area, \"(.*)\"$") then return "contact" end
+  if speaker and body and validLinkSuffix(tail) then return "contact","broadcast" end
+  if line:match("^You pick up "..activeName.."'s thoughts echoing through the area, \"(.*)\"$") then return "contact","broadcast" end
   speaker,body,tail=line:match("^You pick up "..activeName.."'s mental link, \"(.*)\"(.*)$")
-  if speaker and body and validLinkSuffix(tail) then return "link" end
+  if speaker and body and validLinkSuffix(tail) then return "link","broadcast" end
   local listener
   listener,speaker,body,tail=line:match("^"..activeName.." picks up "..activeName.."'s mental link, \"(.*)\"(.*)$")
-  if listener and speaker and body and validLinkSuffix(tail) then return "link" end
+  if listener and speaker and body and validLinkSuffix(tail) then return "link","broadcast" end
   -- Older records may identify their source without carrying the full game line.
   local raw=tostring(entry.category or ""):upper():match("^%s*(.-)%s*$")
   if raw=="ESP" then return "esp" end

@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.104**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.105**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,17 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.104
+## What's new in v0.3.105
+
+- **PRIVATE** is for direct conversations: whispers, incoming one-to-one contacts, and your outgoing named CONTACT requests.
+- **LINK** is for mental/ESP and room/global broadcasts plus Dragon, Psycian, and Secian links. Direct contacts do not also appear in LINK.
+- Saved chat history stays intact. Source-specific Show in ALL choices and sounds are preserved; PRIVATE alerts no longer fire for broadcasts.
+- A private message and a broadcast with identical words are both retained instead of being mistaken for duplicate delivery.
+- The visibility indicator now follows **You are now invisible.** and **You are no longer invisible.** without needing an INFO refresh. Command echoes alone never change it.
+
+See [chat filters](CHATBOX.md#built-in-filters) and [visibility](HUD_SCREEN_AND_CHARACTER_DATA.md#hidden-visible-and-unknown).
+
+## Previous changes in v0.3.104
 
 - **LINK is the standard combined tab** for mental/ESP/contact and Dragon, Psycian, and Secian link messages. No setting needs to be enabled.
 - Existing profiles upgrade automatically. History, original message channels, per-source sounds, Show in ALL choices, and outgoing capture preferences are preserved.
