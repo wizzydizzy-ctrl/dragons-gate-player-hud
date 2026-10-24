@@ -1,6 +1,137 @@
 local Settings = require("settings")
 local defaults = require("defaults")
 
+do
+  test("chat size choices survive migration and cold resolution without replacing unrelated preferences",function()
+    for _,schema in ipairs({0,1}) do
+      for _,choice in ipairs({{size_mode="compact"},{size_mode="normal"},{size_mode="large"},{size_mode="custom",height_pixels=417}}) do
+        local user={schema=schema,chat=Settings.merge(choice,{visible=false,capture_outgoing=false,personal_option="keep",
+          all_sources={ROOM=false,COMBAT=true},sounds={volume=30,tabs={STAFF={enabled=false,sound="staff"}}}}),
+          display={auto_wrap=false},personal="untouched"}
+        local resolved,migrated=Settings.resolve(defaults,user)
+        local cold=Settings.resolve(defaults,migrated)
+        for _,config in ipairs({resolved,cold}) do
+          eq(config.chat.size_mode,choice.size_mode); eq(config.chat.height_pixels,choice.height_pixels)
+          eq(config.chat.visible,false); eq(config.chat.capture_outgoing,false)
+          eq(config.chat.all_sources.ROOM,false); eq(config.chat.all_sources.COMBAT,true)
+          eq(config.chat.sounds.volume,30); eq(config.chat.sounds.tabs.STAFF.enabled,false)
+          eq(config.chat.personal_option,"keep"); eq(config.personal,"untouched"); eq(config.display.auto_wrap,false)
+        end
+        eq(user.chat.size_mode,choice.size_mode); eq(user.chat.height_pixels,choice.height_pixels)
+        resolved.chat.sounds.volume=60; eq(user.chat.sounds.volume,30)
+      end
+    end
+  end)
+
+  test("legacy chat geometry survives settings resolution until the user explicitly resets size",function()
+    local user={schema=1,chat={height_percent=.27,target_height=287,min_height=91,max_height=411,personal_option="keep"}}
+    local resolved,migrated=Settings.resolve(defaults,user)
+    eq(resolved.chat.size_mode,nil); eq(migrated.chat.size_mode,nil); eq(user.chat.size_mode,nil)
+    for _,config in ipairs({resolved,(Settings.resolve(defaults,migrated))}) do
+      eq(config.chat.height_percent,.27); eq(config.chat.target_height,287)
+      eq(config.chat.min_height,91); eq(config.chat.max_height,411); eq(config.chat.personal_option,"keep")
+    end
+  end)
+
+  test("malformed saved size choices normalize safely without changing other settings",function()
+    for _,choice in ipairs({{size_mode="unknown",height_pixels=417},{size_mode="custom"},
+      {size_mode="custom",height_pixels=0/0},{size_mode="custom",height_pixels=math.huge},
+      {size_mode="custom",height_pixels=-math.huge},{size_mode="custom",height_pixels=false},
+      {size_mode="normal",height_pixels=417},{height_pixels=417}}) do
+      local user={schema=1,chat=Settings.merge(choice,{visible=false,capture_outgoing=false,
+        all_sources={ROOM=false},personal_option="keep"}),display={auto_wrap=false}}
+      local resolved=Settings.resolve(defaults,user)
+      eq(resolved.chat.size_mode,"normal"); eq(resolved.chat.height_pixels,nil)
+      eq(resolved.chat.visible,false); eq(resolved.chat.capture_outgoing,false)
+      eq(resolved.chat.all_sources.ROOM,false); eq(resolved.chat.personal_option,"keep"); eq(resolved.display.auto_wrap,false)
+      eq(user.chat.size_mode,choice.size_mode)
+    end
+    for _,case in ipairs({{0,80},{999,600},{"417.5",418}}) do
+      local resolved=Settings.resolve(defaults,{chat={size_mode="custom",height_pixels=case[1],visible=false}})
+      eq(resolved.chat.size_mode,"custom"); eq(resolved.chat.height_pixels,case[2]); eq(resolved.chat.visible,false)
+    end
+  end)
+
+  local function withChatSizeFiles(run)
+    local Adapter=require("mudlet_adapter")
+    local previous={io=io,os=os,lfs=lfs,getMudletHomeDir=getMudletHomeDir,loadfile=loadfile}
+    local files={}; local stage; local writes=0
+    local path="/chat-size-test/DGHUDData/chat-settings.lua"
+    local ok,err=xpcall(function()
+      -- All IO is synthetic and constrained to this fixture, never a live profile.
+      local function allowed(name)
+        assert(name==path or name==path..".tmp" or name==path..".bak","unexpected fixture path")
+      end
+      io={open=function(name,mode)
+        allowed(name)
+        if mode=="rb" then return files[name] and {close=function() return true end} or nil,"missing" end
+        eq(mode,"wb"); if stage=="open" then return nil,"synthetic open failure" end
+        return {write=function(self,source)
+          writes=writes+1; if stage=="write" then return nil,"synthetic write failure" end
+          files[name]=source; return self
+        end,close=function() if stage=="close" then return nil,"synthetic close failure" end; return true end}
+      end}
+      os={remove=function(name) allowed(name); files[name]=nil; return true end,
+        rename=function(from,to)
+          allowed(from); allowed(to)
+          if stage=="replace" and from==path..".tmp" then return nil,"synthetic replace failure" end
+          if files[from]==nil then return nil,"missing" end
+          files[to]=files[from]; files[from]=nil; return true
+        end}
+      lfs={mkdir=function(name) eq(name,"/chat-size-test/DGHUDData"); return true end}
+      getMudletHomeDir=function() return "/chat-size-test" end
+      loadfile=function(name)
+        allowed(name); if not files[name] then return nil,"missing" end
+        -- Evaluate only the adapter's generated Lua settings in an empty environment.
+        local loader,loadErr=loadstring(files[name]); if loader then setfenv(loader,{}) end
+        return loader,loadErr
+      end
+      run(Adapter,files,path,function(value) stage=value end,function() return writes end)
+    end,debug.traceback)
+    io=previous.io; os=previous.os; lfs=previous.lfs; getMudletHomeDir=previous.getMudletHomeDir; loadfile=previous.loadfile
+    if not ok then error(err,0) end
+  end
+
+  test("chat size snapshots and serialized settings round trip presets custom pixels and reset",function()
+    withChatSizeFiles(function(Adapter,files,path)
+      local ChatSize=require("chat_size")
+      local chat={tab_order={"STAFF","ALL","ROOM"},visible=false,capture_outgoing=false,
+        all_sources={ROOM=false,COMBAT=true},sounds={volume=30,tabs={STAFF={enabled=false,sound="staff"}}}}
+      for _,wanted in ipairs({"compact","normal","large",80,"417.5",600,"reset"}) do
+        chat=assert(ChatSize.change(chat,wanted)); assert(Adapter.new():saveChatSettings(chat))
+        assert(type(files[path])=="string")
+        local loaded=assert(Adapter.loadChatSettings())
+        eq(loaded.size_mode,chat.size_mode); eq(loaded.height_pixels,chat.height_pixels)
+        eq(loaded.visible,false); eq(loaded.capture_outgoing,false)
+        eq(loaded.all_sources.ROOM,false); eq(loaded.all_sources.COMBAT,true)
+        eq(loaded.tab_order[1],"STAFF"); eq(loaded.sounds.volume,30); eq(loaded.sounds.tabs.STAFF.enabled,false)
+        local cold=Settings.resolve(defaults,{chat=loaded})
+        eq(cold.chat.size_mode,chat.size_mode); eq(cold.chat.height_pixels,chat.height_pixels)
+      end
+      local legacy=assert(Adapter.chatSettingsSnapshot({tab_order={"ALL","STAFF"},visible=false}))
+      eq(legacy.size_mode,nil); eq(legacy.height_pixels,nil)
+    end)
+  end)
+
+  test("failed serialized chat size saves keep the prior bytes and requested height",function()
+    withChatSizeFiles(function(Adapter,files,path,fail,writes)
+      local ChatSize=require("chat_size")
+      local prior={size_mode="custom",height_pixels=417,tab_order={"ALL","STAFF"},visible=false,capture_outgoing=false}
+      assert(Adapter.new():saveChatSettings(prior)); local saved=files[path]
+      local candidate=assert(ChatSize.change(prior,"large"))
+      for _,stage in ipairs({"open","write","close","replace"}) do
+        fail(stage)
+        local result,err=Adapter.new():saveChatSettings(candidate)
+        eq(result,nil); eq(type(err),"string"); eq(files[path],saved)
+        local loaded=assert(Adapter.loadChatSettings())
+        eq(loaded.size_mode,"custom"); eq(loaded.height_pixels,417); eq(loaded.visible,false); eq(loaded.capture_outgoing,false)
+      end
+      fail(nil); local before=writes()
+      eq(ChatSize.change(prior,math.huge),nil); eq(writes(),before); eq(files[path],saved)
+    end)
+  end)
+end
+
 test("new chat and visibility choices survive repeat resolution without changing update preference",function()
   for _,value in ipairs({false,true}) do
     local user={schema=1,chat={capture_outgoing=value,combine_links=value,combined_tab_order={"STAFF","LINK VIEW","ALL"}},

@@ -1,8 +1,11 @@
-# DGHUD v0.3.105 manual acceptance checklist
+# DGHUD v0.3.106 manual acceptance checklist
 
 This is a checklist for a disposable test profile, not a claim that these live checks were performed. Never use it as permission to change a live profile or publish a release.
 
-Chat/visibility acceptance for v0.3.105 (synthetic local output and a send recorder, not real messages to other players):
+Chat/visibility acceptance for v0.3.106 (synthetic local output and a send recorder, not real messages to other players):
+
+- In Chat Settings, test Compact / Normal / Large, both 20-pixel steps, and Reset Size at desktop, laptop, MultiView, and very short sizes. Height controls must stay reachable by scrolling and chat must remain aligned with the main display. Drag the bottom edge using global and local coordinates; save once on release, reject stale/invalid/hidden/disposed callbacks, and keep prior geometry on failed saves. A missing release-callback API must not break HUD startup or the settings buttons.
+- Confirm custom heights clamp to 80–600 pixels, very short panes preserve main-console space, and enlarged panes restore the saved requested size. Reload, character change, profile restart, full/partial update handoff, hidden-chat startup, source/sound saves, and tab reordering must retain size and all unrelated choices. History, active filter, scroll position, capture runtime, and command-send counts must remain unchanged. Reset only sizing; do not resize the skills/inventory cards or send game commands.
 
 - Start at Password with cached GMCP identity. CONTACT-shaped input must not enter history. Confirm only an actual welcome, numeric character prompt, or fresh completed own INFO enables capture. Disconnect/menu/logout must clear that proof even if GMCP still has a name.
 - Capture named, all, and room CONTACT requests. Verify one unchanged send, clear outgoing-request labeling, no own sounds, and no recording of bare/help/multiline/unrelated commands. Repeated identical requests must survive disk hydration and same-second handoff. Exact recent own broadcast echoes reconcile once; other speakers, foreign short names, expired pending requests, and ambiguous replies remain visible.
@@ -43,7 +46,7 @@ Input alignment acceptance: turn **OPTIONS → ALIGN INPUT** on with an unsent d
 
 Mudlet starter UI acceptance: in a disposable Mudlet 5 profile that has the `mudlet-base-ui` package, install DGHUD while the starter dock has no saved show/hide choice. Confirm only the extra dock hides, leaving main game text, input, native toolbar, and DGHUD mapper usable. Choose **OPTIONS → MUDLET UI: OFF** to show it and **ON** to hide it; resize in MultiView and verify the Options button remains reachable. Show it again, reload/update DGHUD, and restart the profile; the explicit choice must survive. Remove the starter package in the disposable profile and confirm clicking the option reports unavailability without sending a command to the game.
 
-1. Build the v0.3.105 package locally and install it only into the disposable profile. Record the profile's existing personal triggers, aliases, scripts, packages, map data, and settings before installation.
+1. Build the v0.3.106 package locally and install it only into the disposable profile. Record the profile's existing personal triggers, aliases, scripts, packages, map data, and settings before installation.
 2. Confirm Identity and optional Equipment are left, Combat plus Inventory/Runes/Skills are right, Location/mapper/compass are lower-left, and Vitals span the center immediately above the input line. Enter a character and confirm exactly one sequential startup refresh.
 3. Compare inventory, weapon/shield readiness, attributes, physical details, armor, OR/DR, movement, damage bonus, stance, and novice protection with command output. Run each command manually and confirm its HUD section refreshes.
 4. Confirm available compass directions are bright and clickable; unavailable directions are dim and inert. In a safe test room, verify `GO PORTAL`, `GO DOOR`, `GO GATE`, and `GO ARCH` send their exact commands.

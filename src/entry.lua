@@ -73,6 +73,7 @@ moduleNames[#moduleNames+1]="autoroller_audio"; moduleNames[#moduleNames+1]="aut
 moduleNames[#moduleNames+1]="quick_actions"; moduleNames[#moduleNames+1]="rune_variables"
 moduleNames[#moduleNames+1]="chat_channels"
 moduleNames[#moduleNames+1]="chat_outgoing"; moduleNames[#moduleNames+1]="visibility_tracker"
+moduleNames[#moduleNames+1]="chat_size"
 for _,name in ipairs(moduleNames) do package.loaded[name]=nil end
 local defaults=require("defaults")
 local Settings=require("settings")
@@ -116,8 +117,19 @@ if type(persistedDisplay)=="table" then
   end
 end
 local persistedChat=Adapter.loadChatSettings and Adapter.loadChatSettings()
-if type(persistedChat)=="table" then userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}; userSettings.chat.tab_order=persistedChat.tab_order; if type(persistedChat.visible)=="boolean" then userSettings.chat.visible=persistedChat.visible end; if type(persistedChat.all_sources)=="table" then userSettings.chat.all_sources=persistedChat.all_sources end end
+if type(persistedChat)=="table" then
+  userSettings.chat=type(userSettings.chat)=="table" and userSettings.chat or {}
+  userSettings.chat.tab_order=persistedChat.tab_order
+  if type(persistedChat.combined_tab_order)=="table" then userSettings.chat.combined_tab_order=persistedChat.combined_tab_order end
+  for _,key in ipairs({"visible","capture_outgoing"}) do
+    if type(persistedChat[key])=="boolean" then userSettings.chat[key]=persistedChat[key] end
+  end
+  if type(persistedChat.all_sources)=="table" then userSettings.chat.all_sources=persistedChat.all_sources end
+end
 if type(persistedChat)=="table" and type(persistedChat.sounds)=="table" then userSettings.chat.sounds=persistedChat.sounds end
+if type(persistedChat)=="table" and persistedChat.size_mode~=nil then
+  userSettings.chat.size_mode=persistedChat.size_mode; userSettings.chat.height_pixels=persistedChat.height_pixels
+end
 local persistedKeys=Adapter.loadKeybindingSettings and Adapter.loadKeybindingSettings()
 if type(persistedKeys)=="table" then userSettings.keybindings=persistedKeys end
 DGHUD.user_settings=userSettings

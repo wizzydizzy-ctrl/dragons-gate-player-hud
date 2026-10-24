@@ -2,13 +2,28 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.105.
+Applies to DGHUD v0.3.106.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
 To hide it completely, open **OPTIONS → CHAT SETTINGS** and set **SHOW CHATBOX: OFF**. The main game display expands into the freed space. Chat capture and saved history continue while hidden; this does not turn off logging. Return to the same setting and switch it **ON** to see your messages again. Your choice is saved for the profile and survives character changes, restarts, and HUD updates. It does not change your tab order or SHOW IN ALL choices.
 
 Chat history belongs to the Mudlet profile, not to one character. Switching characters in the same profile keeps the same history.
+
+## Resize the chatbox
+
+Open **OPTIONS → CHAT SETTINGS → HEIGHT** near the top of the settings window.
+
+- **COMPACT**, **NORMAL**, and **LARGE** choose responsive height presets.
+- **SMALLER −20px** and **LARGER +20px** adjust the requested height in 20-pixel steps.
+- You can also drag the narrow bottom edge of the chatbox up or down. Release the mouse button to apply and save the new size; it does not save repeatedly while you drag.
+- **RESET SIZE** restores the Normal preset. It does not clear history or change tab order, Show in ALL, sounds, or outgoing capture.
+
+Custom heights are limited to **80–600 pixels**. A short window may show less than the requested height so the main game display remains usable. The height label shows the actual size and, when different, the requested size. Enlarging the window gives the saved request room again. Presets adapt to the profile pane's height instead of promising the same pixel size at every resolution.
+
+Changes save immediately for this Mudlet profile and survive character changes, profile restarts, and HUD updates. A failed save leaves the previous size active. No game command or history reload is needed.
+
+Chat stays full-width above the main display; it is not a freely floating window. Smaller chat frees main-display space, not space in the independent right-side Skills / Runes card. **OPTIONS → HUD TEXT → Small** can fit more sidebar rows without changing the main game font. See [responsive layout](OPTIONS_AND_DISPLAY.md#resizing-and-responsive-behavior).
 
 Use **OPTIONS → CHAT SETTINGS** to clear only the visible chatbox or permanently remove all saved DGHUD chat history. Permanent deletion requires two clicks; the command-line equivalent requires the full `dghud chat clear saved confirm` phrase.
 

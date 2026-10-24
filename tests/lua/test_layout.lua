@@ -1,4 +1,98 @@
 local Layout=require("layout")
+
+do
+  local function finiteGeometry(layout,width,height)
+    for _,key in ipairs({"chat_requested_height","chat_height","chat_output_height","console_top",
+      "console_remainder","chat_width","chat_x","chat_wrap_columns","header_height","bottom",
+      "minimum_console_remainder","chat_functional_minimum"}) do
+      local value=layout[key]
+      eq(type(value),"number"); assert(value==value and value~=math.huge and value~=-math.huge,key.." must be finite")
+      assert(value>=0,key.." must not be negative")
+    end
+    eq(layout.console_top,layout.header_height+layout.chat_height)
+    eq(layout.console_top+layout.bottom+layout.console_remainder,height)
+    eq(layout.chat_x,layout.console_left); eq(layout.chat_width,layout.console_width)
+    eq(layout.console_left+layout.console_width+layout.console_right,width)
+  end
+
+  test("chat size presets use canonical geometry even when old percentage overrides exist",function()
+    for _,case in ipairs({{"compact",120},{"normal",240},{"large",320}}) do
+      local chat={size_mode=case[1],height_percent=.7,target_height=499,min_height=450,max_height=550}
+      local r=Layout.compute(1920,1080,chat)
+      eq(r.chat_size_mode,case[1]); eq(r.chat_requested_height,case[2]); eq(r.chat_height,case[2])
+      eq(r.minimum_console_remainder,120); finiteGeometry(r,1920,1080)
+      eq(chat.target_height,499); eq(chat.height_percent,.7)
+    end
+  end)
+
+  test("custom chat height rounds boundaries and stays absolute across ordinary resizes",function()
+    for _,case in ipairs({{80,80},{600,600},{239.49,239},{239.5,240},{"321.5",322}}) do
+      local chat={size_mode="custom",height_pixels=case[1]}
+      for _,size in ipairs({{1920,1080},{3840,2160},{1400,1080},{1399,1080},{800,1080},{799,1080}}) do
+        local r=Layout.compute(size[1],size[2],chat)
+        eq(r.chat_size_mode,"custom"); eq(r.chat_requested_height,case[2]); eq(r.chat_height,case[2])
+        finiteGeometry(r,size[1],size[2]); eq(chat.height_pixels,case[1])
+      end
+    end
+  end)
+
+  test("custom chat clips to preserve console space and restores the original request after short resizes",function()
+    local chat={size_mode="custom",height_pixels=600}
+    for _,size in ipairs({{1920,1080},{1399,400},{800,408},{799,300},{320,260},{760,150},{1920,1080}}) do
+      local r=Layout.compute(size[1],size[2],chat)
+      eq(r.chat_size_mode,"custom"); eq(r.chat_requested_height,600); eq(chat.height_pixels,600)
+      eq(r.chat_functional_minimum,60); eq(r.minimum_console_remainder,120)
+      assert(r.chat_height>=60 and r.chat_height<=600); assert(r.console_remainder>=1)
+      if size[2]>=1080 then eq(r.chat_height,600) else assert(r.chat_height<600) end
+      finiteGeometry(r,size[1],size[2])
+    end
+  end)
+
+  test("custom chat geometry honors the functional floor and adaptive console at exact boundaries",function()
+    for _,width in ipairs({760,1200,1920}) do
+      local baseline=Layout.compute(width,1080,{size_mode="custom",height_pixels=600})
+      local threshold=baseline.header_height+baseline.bottom+60+120
+      for _,delta in ipairs({-1,0,1}) do
+        local height=threshold+delta
+        local r=Layout.compute(width,height,{size_mode="custom",height_pixels=600})
+        eq(r.chat_requested_height,600); eq(r.chat_height,delta==1 and 61 or 60)
+        eq(r.console_remainder,delta==-1 and 119 or 120); finiteGeometry(r,width,height)
+      end
+    end
+  end)
+
+  test("hidden custom chat retains its requested size without reserving presentation space",function()
+    local chat={visible=false,size_mode="custom",height_pixels=417}
+    for _,size in ipairs({{1920,1080},{1200,200},{760,150},{320,260}}) do
+      local r=Layout.compute(size[1],size[2],chat)
+      eq(r.chat_size_mode,"custom"); eq(r.chat_requested_height,417)
+      eq(r.chat_height,0); eq(r.chat_output_height,0); eq(r.chat_functional_minimum,0)
+      finiteGeometry(r,size[1],size[2]); eq(chat.height_pixels,417)
+    end
+  end)
+
+  test("nonfinite chat size input cannot poison layout geometry",function()
+    for _,invalid in ipairs({0/0,math.huge,-math.huge,"nan","inf","bad",false,{}}) do
+      local r=Layout.compute(1920,1080,{size_mode="custom",height_pixels=invalid})
+      eq(r.chat_size_mode,"normal"); finiteGeometry(r,1920,1080)
+      for _,field in ipairs({"target_height","min_height","max_height","height_percent","minimum_console_remainder"}) do
+        local chat={[field]=invalid}
+        finiteGeometry(Layout.compute(1920,1080,chat),1920,1080)
+      end
+    end
+  end)
+
+  test("chat sizing leaves legacy layouts unchanged until a new size is chosen",function()
+    local legacy={height_percent=.25,target_height=287,min_height=91,max_height=411}
+    for _,size in ipairs({{760,700},{1200,800},{1920,1080},{3840,2160}}) do
+      local r=Layout.compute(size[1],size[2],legacy)
+      local configured=math.max(91,math.min(411,math.floor(size[2]*.25*(287/(1080*.21))+.5)))
+      eq(r.chat_size_mode,"normal"); eq(r.chat_requested_height,configured)
+      eq(r.chat_height,math.min(configured,math.max(60,size[2]-r.header_height-r.bottom-120)))
+      finiteGeometry(r,size[1],size[2])
+    end
+  end)
+end
 test("wide screens reserve seventeen percent for each HUD rail",function()
   local r=Layout.compute(1920,1080); eq(r.mode,"wide"); eq(r.left,326); eq(r.right,326); eq(r.console_gutter,10); eq(r.console_left,336); eq(r.console_width,1248); eq(r.header_height,74); eq(r.show_character_rail,true); eq(r.vitals_side,"center")
 end)

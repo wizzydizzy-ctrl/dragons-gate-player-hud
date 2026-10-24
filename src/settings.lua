@@ -1,6 +1,7 @@
 local SHA=require("sha256")
 local SkillSort=require("skill_sort")
 local Channels=require("chat_channels")
+local ChatSize=require("chat_size")
 local Settings={CURRENT_SCHEMA=1}
 local function copy(value,seen)
   if type(value)~="table" then return value end
@@ -56,6 +57,10 @@ function Settings.resolve(defaults,input)
   local migrated,changed=Settings.migrate(input)
   local resolved=Settings.merge(defaults,migrated)
   if type(resolved.chat)=="table" then
+    if resolved.chat.size_mode~=nil or resolved.chat.height_pixels~=nil then
+      resolved.chat.size_mode=ChatSize.mode(resolved.chat)
+      resolved.chat.height_pixels=resolved.chat.size_mode=="custom" and ChatSize.clamp(resolved.chat.height_pixels) or nil
+    end
     if type(resolved.chat.capture_outgoing)~="boolean" then resolved.chat.capture_outgoing=true end
     -- LINK is standard even for profiles saved as separate in v0.3.103.
     -- Raw channel history, ALL inclusion, and alert choices stay unchanged.

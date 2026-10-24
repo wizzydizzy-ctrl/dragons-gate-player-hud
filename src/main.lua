@@ -5,6 +5,7 @@ local ColorStyles=require("color_styles")
 local Settings=require("settings")
 local ChatSounds=require("chat_sounds")
 local ChatChannels=require("chat_channels")
+local ChatSize=require("chat_size")
 local VisibilityTracker=require("visibility_tracker")
 local RollerAudio=require("autoroller_audio")
 local RollerAlerts=require("autoroller_alerts")
@@ -872,6 +873,26 @@ function Main:setVisibilityDisplay(wanted)
   if self.view.setVisibilityDisplay then self.view:setVisibilityDisplay(wanted) end
   self:refresh(); return wanted
 end
+function Main:setChatHeight(wanted)
+  local candidate,err=ChatSize.change(self:chatPreferences(),wanted)
+  if not candidate then return nil,err end
+  if not self.adapter.saveChatSettings then return nil,"Chat size cannot be saved in this profile." end
+  -- Save once per completed gesture; never rebuild capture or touch chat logs.
+  local called,saved,saveErr=pcall(self.adapter.saveChatSettings,self.adapter,candidate)
+  if not called or not saved then return nil,"Could not save chat size: "..tostring(called and saveErr or saved) end
+  self.settings.chat=self.settings.chat or {}
+  self.settings.chat.size_mode=candidate.size_mode; self.settings.chat.height_pixels=candidate.height_pixels
+  local root=rawget(_G,"DGHUD")
+  if root then
+    root.user_settings=type(root.user_settings)=="table" and root.user_settings or {}
+    root.user_settings.chat=type(root.user_settings.chat)=="table" and root.user_settings.chat or {}
+    root.user_settings.chat.size_mode=candidate.size_mode; root.user_settings.chat.height_pixels=candidate.height_pixels
+  end
+  if self.view and self.view.setChatSize then self.view:setChatSize(candidate.size_mode,candidate.height_pixels) end
+  self:applyResponsiveLayout()
+  if self.view and self.view.chat_settings_visible and self.view.renderChatSettings then self.view:renderChatSettings() end
+  return true
+end
 function Main:setChatVisible(visible)
   if type(visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local chatSettings=self.settings.chat or {}
@@ -1583,6 +1604,7 @@ function Main:start()
     if action=="chat_clear_saved" then return self:clearSavedChat(true) end
     if action=="chat_all_source" then return self:setChatAllSource(key,wanted) end
     if action=="chat_visibility" then return self:setChatVisible(wanted) end
+    if action=="chat_height" then return self:setChatHeight(wanted) end
     if action=="chat_outgoing" then return self:setChatPreference("capture_outgoing",wanted) end
     if action=="visibility_status" then return self:setVisibilityDisplay(self.settings.display and self.settings.display.visibility_status==false or false) end
     if action=="chat_sound_enabled" then return self:setChatSound(key,"enabled",wanted) end

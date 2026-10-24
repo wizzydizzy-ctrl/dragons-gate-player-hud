@@ -1,5 +1,86 @@
 local Adapter=require("mudlet_adapter")
 local Settings=require("settings")
+test("chat height snapshots validate finite bounds and preserve other preferences",function()
+  local Size=require("chat_size")
+  local config={tab_order={"STAFF","ALL","ROOM"},combined_tab_order={"STAFF","@LINK","ALL"},
+    visible=false,capture_outgoing=false,all_sources={MENTAL=false,COMBAT=true},
+    sounds={volume=27,tabs={STAFF={enabled=false,sound="staff"}}}}
+  local legacy=assert(Adapter.chatSettingsSnapshot(config))
+  eq(legacy.size_mode,nil); eq(legacy.height_pixels,nil)
+  for _,wanted in ipairs({"compact","normal","large","reset",80,188,600,"250"}) do
+    local candidate=assert(Size.change(config,wanted))
+    local snapshot=assert(Adapter.chatSettingsSnapshot(candidate))
+    eq(snapshot.size_mode,candidate.size_mode); eq(snapshot.height_pixels,candidate.height_pixels)
+    eq(snapshot.visible,false); eq(snapshot.capture_outgoing,false); eq(snapshot.all_sources.MENTAL,false)
+    eq(snapshot.all_sources.COMBAT,true); eq(snapshot.sounds.volume,27); eq(snapshot.sounds.tabs.STAFF.enabled,false)
+    eq(snapshot.tab_order[1],"STAFF"); eq(snapshot.combined_tab_order[2],"@LINK")
+    local restored=assert(Adapter.chatSettingsSnapshot(snapshot))
+    eq(restored.size_mode,snapshot.size_mode); eq(restored.height_pixels,snapshot.height_pixels)
+  end
+  for _,bad in ipairs({false,true,{},math.huge,-math.huge,0/0,79,601,"large","200; error('unsafe')"}) do
+    local result,err=Adapter.chatSettingsSnapshot({tab_order={"ALL"},size_mode="custom",height_pixels=bad})
+    eq(result,nil); assert(type(err)=="string")
+  end
+  eq(Adapter.chatSettingsSnapshot({tab_order={"ALL"},size_mode="custom"}),nil)
+  for _,bad in ipairs({false,true,{},"floating","normal; error('unsafe')"}) do
+    eq(Adapter.chatSettingsSnapshot({tab_order={"ALL"},size_mode=bad,height_pixels=200}),nil)
+  end
+  eq(config.size_mode,nil); eq(config.height_pixels,nil)
+end)
+
+test("chat height saves privately per profile and survives reset and failed writes",function()
+  local Size=require("chat_size")
+  local previous={io=io,os=os,lfs=lfs,getMudletHomeDir=getMudletHomeDir,loadfile=loadfile}
+  local files,failure,writes={},nil,0
+  local home="/synthetic-chat-size-profile-a"
+  local function destination() return home.."/DGHUDData/chat-settings.lua" end
+  local ok,err=xpcall(function()
+    io={open=function(name,mode)
+      if mode=="rb" then return files[name] and {close=function() return true end} or nil,"missing" end
+      eq(name,destination()..".tmp"); eq(mode,"wb")
+      if failure=="open" then return nil,"open failed" end
+      return {write=function(self,source)
+        writes=writes+1; if failure=="write" then return nil,"write failed" end
+        files[name]=source; return self
+      end,close=function() if failure=="close" then return nil,"close failed" end; return true end}
+    end}
+    os={remove=function(name) files[name]=nil; return true end,rename=function(from,to)
+      if failure=="backup" and from==destination() then return nil,"backup failed" end
+      if failure=="replace" and from==destination()..".tmp" then return nil,"replace failed" end
+      if files[from]==nil then return nil,"missing" end
+      files[to]=files[from]; files[from]=nil; return true
+    end}
+    lfs={mkdir=function(base) eq(base,home.."/DGHUDData"); return true end}
+    getMudletHomeDir=function() return home end
+    loadfile=function(name) if not files[name] then return nil,"missing" end; return loadstring(files[name]) end
+    local config={tab_order={"STAFF","ALL","ROOM"},visible=false,capture_outgoing=false,
+      all_sources={MENTAL=false,COMBAT=true},sounds={volume=27,tabs={STAFF={enabled=false,sound="staff"}}}}
+    for _,wanted in ipairs({"compact","large",188,"normal",450,"reset",210}) do
+      config=assert(Size.change(config,wanted)); assert(Adapter.new():saveChatSettings(config))
+      local loaded=assert(Adapter.loadChatSettings())
+      eq(loaded.size_mode,config.size_mode); eq(loaded.height_pixels,config.height_pixels)
+      eq(loaded.visible,false); eq(loaded.capture_outgoing,false); eq(loaded.all_sources.MENTAL,false)
+      eq(loaded.all_sources.COMBAT,true); eq(loaded.sounds.volume,27); eq(loaded.sounds.tabs.STAFF.enabled,false)
+    end
+    local first=files[destination()]
+    home="/synthetic-chat-size-profile-b"
+    assert(Adapter.new():saveChatSettings(assert(Size.change(config,"large"))))
+    eq(assert(Adapter.loadChatSettings()).size_mode,"large")
+    home="/synthetic-chat-size-profile-a"
+    eq(files[destination()],first); eq(assert(Adapter.loadChatSettings()).height_pixels,210)
+    local changed=assert(Size.change(config,315))
+    for _,stage in ipairs({"open","write","close","backup","replace"}) do
+      failure=stage; eq(Adapter.new():saveChatSettings(changed),nil); eq(files[destination()],first)
+      eq(assert(Adapter.loadChatSettings()).height_pixels,210)
+    end
+    failure=nil; local before=writes
+    changed.height_pixels="200; error('unsafe')"
+    eq(Adapter.new():saveChatSettings(changed),nil); eq(writes,before); eq(files[destination()],first)
+  end,debug.traceback)
+  io=previous.io; os=previous.os; lfs=previous.lfs
+  getMudletHomeDir=previous.getMudletHomeDir; loadfile=previous.loadfile
+  if not ok then error(err) end
+end)
 
 test("chat snapshots retire the legacy LINK switch without changing independent preferences",function()
   for _,legacy in ipairs({false,true,"false",0,{}}) do

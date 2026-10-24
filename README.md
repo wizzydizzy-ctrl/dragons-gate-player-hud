@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.105**.
+Documentation covers **DGHUD v0.3.106**.
 
 ## Quick start
 
@@ -43,7 +43,17 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.105
+## Latest changes — v0.3.106
+
+- Resize chat through **OPTIONS → CHAT SETTINGS → HEIGHT**: choose **Compact**, **Normal**, or **Large**, or use **Smaller −20px / Larger +20px**.
+- Drag the chatbox's bottom edge and release to save a custom height. Chat stays aligned above the main display; smaller chat gives that display more room.
+- **RESET SIZE** restores Normal without changing history, tabs, sounds, Show in ALL, or outgoing-capture preferences.
+- Size is saved per Mudlet profile through character changes, restarts, and updates. Short panes limit the visible height without discarding the requested size.
+- The right-side Skills / Runes and Inventory cards keep their existing layout; chat resizing does not enlarge them.
+
+[Read chat sizing instructions](docs/CHATBOX.md#resize-the-chatbox).
+
+## Previous changes — v0.3.105
 
 - **PRIVATE** now shows whispers and one-to-one mental contacts, including outgoing named CONTACT requests. Direct contacts no longer appear in LINK as well.
 - **LINK** keeps mental/ESP, room/global contact broadcasts, and Dragon, Psycian, and Secian links together. Existing saved history is retained; the views change, not the original messages.

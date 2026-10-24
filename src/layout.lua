@@ -1,3 +1,4 @@
+local ChatSize=require("chat_size")
 local Layout={}
 function Layout.lowerPanelGeometry(layout,psiVisible,webVisible,roundtimeActive)
   local available=math.max(0,(layout.window_height or 0)-(layout.header_height or 0)-(layout.command_line_clearance or 0))
@@ -43,22 +44,29 @@ function Layout.detailsFit(rail_bottom,inventory_y,details_height,minimum_invent
   return (tonumber(rail_bottom) or 0)-(tonumber(details_height) or 0)-12-(tonumber(inventory_y) or 0)>=(tonumber(minimum_inventory_height) or 0)
 end
 local function clamp(value,minimum,maximum) return math.max(minimum,math.min(maximum,math.floor(value+0.5))) end
+local function finiteChatMetric(value,fallback,minimum,maximum)
+  local number=(type(value)=="number" or type(value)=="string") and tonumber(value) or nil
+  if not number or number~=number or number==math.huge or number==-math.huge then return fallback end
+  return math.max(minimum,math.min(maximum,number))
+end
 local function chatMetrics(width,height,layout,settings)
-  settings=type(settings)=="table" and settings or {}
+  settings=ChatSize.forLayout(type(settings)=="table" and settings or {})
   layout.chat_visible=settings.visible~=false
   local default_percent=.21
-  local target=tonumber(settings.target_height) or 240
-  local minimum=tonumber(settings.min_height) or 160
-  local maximum=tonumber(settings.max_height) or 320
-  local percent=tonumber(settings.height_percent) or default_percent
-  local minimum_console_remainder=math.max(1,math.floor(tonumber(settings.minimum_console_remainder) or 120))
+  local target=finiteChatMetric(settings.target_height,240,0,1000000)
+  local minimum=finiteChatMetric(settings.min_height,160,0,1000000)
+  local maximum=finiteChatMetric(settings.max_height,320,0,1000000)
+  local percent=finiteChatMetric(settings.height_percent,default_percent,0,1)
+  local minimum_console_remainder=math.floor(finiteChatMetric(settings.minimum_console_remainder,120,1,1000000))
   local chat_chrome_height=44
   local chat_output_minimum=16
   local chat_functional_minimum=layout.chat_visible and (chat_chrome_height+chat_output_minimum) or 0
   if maximum<minimum then maximum=minimum end
   local bottom=tonumber(layout.bottom) or 0
   layout.header_height=math.min(layout.top,math.max(0,height-bottom-chat_functional_minimum-1))
-  local configured_height=clamp(height*percent*(target/(1080*default_percent)),minimum,maximum)
+  local configured_height=settings.size_mode=="custom" and settings.height_pixels or clamp(height*percent*(target/(1080*default_percent)),minimum,maximum)
+  layout.chat_size_mode=settings.size_mode
+  layout.chat_requested_height=configured_height
   local available=math.max(0,height-layout.header_height-bottom)
   local adaptive_console_remainder=math.min(minimum_console_remainder,math.max(1,available-chat_functional_minimum))
   local available_chat=math.min(math.max(0,available-1),math.max(chat_functional_minimum,available-adaptive_console_remainder))

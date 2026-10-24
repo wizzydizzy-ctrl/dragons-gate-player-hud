@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 EXPECTED_EDITION='player'
 EXPECTED_REPOSITORY='dragons-gate-player-hud'
-EXPECTED_VERSION='0.3.105'
+EXPECTED_VERSION='0.3.106'
 class BuildTest(unittest.TestCase):
     def run_lua(self, source, cwd):
         completed=subprocess.run(['lua','-'],input=source,text=True,cwd=cwd,capture_output=True)
@@ -80,7 +80,7 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(manifest['view_schema'],5)
             self.assertRegex(manifest['view_contract'],r'^[0-9a-f]{64}$')
             expected_contract=hashlib.sha256()
-            for filename in ('view.lua','navigation.lua','skill_settings_view.lua','chat_channels.lua','chat_sounds.lua'):
+            for filename in ('view.lua','navigation.lua','skill_settings_view.lua','chat_channels.lua','chat_sounds.lua','chat_size.lua'):
                 payload=(ROOT/'src'/filename).read_bytes()
                 expected_contract.update(filename.encode('utf-8')+b'\0')
                 expected_contract.update(len(payload).to_bytes(8,'big'))
@@ -98,6 +98,7 @@ class BuildTest(unittest.TestCase):
                 self.assertNotIn('package.preload[&quot;layout&quot;]',xml)
                 self.assertIn('package.preload["layout"]',runtime)
                 self.assertIn('package.preload["chat_controller"]',runtime)
+                self.assertIn('package.preload["chat_size"]',runtime)
                 self.assertNotIn('&lt;/green&gt;',xml)
                 self.assertIn('[DGHUD Update]<reset> Installed version',runtime)
                 self.assertIn('if not SHA256 then SHA256=require("sha256") end',runtime)
@@ -131,13 +132,16 @@ getMudletHomeDir=function() return "/profile" end
 local generation=1
 package.loaded["special_transition"]={generation=0}
 package.preload["special_transition"]=function() return {generation=generation} end
+package.loaded["chat_size"]={generation=0}
+package.preload["chat_size"]=function() return {generation=generation} end
 package.preload["defaults"]=function() return {} end
 package.preload["settings"]=function() return {resolve=function(defaults,user) return defaults,user end} end
 package.preload["mudlet_adapter"]=function() return {new=function() return {} end} end
 package.preload["main"]=function()
   local special=require("special_transition")
+  local chatSize=require("chat_size")
   return {
-    new=function() return {special=special,start=function() return true end,shutdown=function() return true end} end,
+    new=function() return {special=special,chatSize=chatSize,start=function() return true end,shutdown=function() return true end} end,
     installChatApi=function() end,
   }
 end
@@ -148,10 +152,13 @@ ENTRY
 end
 run_entry()
 assert(DGHUD.controller.special.generation==1,"entry retained stale special_transition on initial load")
+assert(DGHUD.controller.chatSize.generation==1,"entry retained stale chat_size on initial load")
 generation=2
 package.preload["special_transition"]=function() return {generation=generation} end
+package.preload["chat_size"]=function() return {generation=generation} end
 run_entry()
 assert(DGHUD.controller.special.generation==2,"entry retained stale special_transition on reload")
+assert(DGHUD.controller.chatSize.generation==2,"entry retained stale chat_size on reload")
 '''.replace('ENTRY',entry)
                 self.run_lua(reload_probe,td)
 

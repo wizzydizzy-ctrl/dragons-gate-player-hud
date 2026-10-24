@@ -1072,6 +1072,18 @@ function Adapter.chatSettingsSnapshot(config)
   local order=type(config)=="table" and config.tab_order or nil; if type(order)~="table" then return nil,"chat tab order must be a table" end
   if config.visible~=nil and type(config.visible)~="boolean" then return nil,"chat visibility must be a boolean" end
   local result={tab_order={},visible=config.visible~=false}; local seen={}
+  if config.size_mode~=nil or config.height_pixels~=nil then
+    local mode=config.size_mode
+    if mode~="compact" and mode~="normal" and mode~="large" and mode~="custom" then return nil,"Invalid chat height preset." end
+    local wanted=mode
+    if mode=="custom" then
+      local value=config.height_pixels
+      wanted=(type(value)=="number" or type(value)=="string") and tonumber(value) or nil
+    end
+    local size,err=require("chat_size").change(config,wanted)
+    if not size then return nil,err end
+    result.size_mode=size.size_mode; result.height_pixels=size.height_pixels
+  end
   for _,field in ipairs({"capture_outgoing"}) do
     if config[field]~=nil and type(config[field])~="boolean" then return nil,"Chat preferences must be ON or OFF" end
   end
@@ -1113,6 +1125,10 @@ function Adapter:saveChatSettings(config)
   local sources=#sourceValues>0 and ", all_sources={"..table.concat(sourceValues,",").."}" or ""
   local sounds=""
   local presentation=", capture_outgoing="..tostring(snapshot.capture_outgoing)..", combine_links="..tostring(snapshot.combine_links)
+  if snapshot.size_mode then
+    presentation=presentation..", size_mode="..string.format("%q",snapshot.size_mode)
+    if snapshot.height_pixels then presentation=presentation..string.format(", height_pixels=%d",snapshot.height_pixels) end
+  end
   if snapshot.combined_tab_order then
     local combined={}
     for _,value in ipairs(snapshot.combined_tab_order) do combined[#combined+1]=string.format("%q",value) end

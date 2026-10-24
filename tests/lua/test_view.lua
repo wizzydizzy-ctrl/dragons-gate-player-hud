@@ -440,10 +440,256 @@ local function chatView(glyphWidth,scrollbarWidth,measureFails,chatVisible,chatS
 end
 
 local function chatWidgets(view)
-  local widgets={view.chat_container,view.chat_bg,view.chat_tabs,view.chat_output}
+  local widgets={view.chat_container,view.chat_bg,view.chat_tabs,view.chat_output,view.chat_resize_handle}
   for _,button in ipairs(view.chat_buttons or {}) do widgets[#widgets+1]=button end
   return widgets
 end
+
+local function chatHeightView(overrides,width,height)
+  local view=chatView(nil,nil,nil,nil,nil,nil,nil,overrides)
+  view:applyLayout(require("layout").compute(width or 1200,height or 800,view.settings.chat))
+  return view
+end
+local function saveChatHeightInView(view,calls)
+  view:setOptionsActionCallback(function(action,key,wanted)
+    eq(action,"chat_height"); eq(key,nil)
+    local candidate=assert(require("chat_size").change(view.settings.chat,wanted))
+    calls[#calls+1]={wanted=wanted,prior_mode=view.settings.chat.size_mode,prior_height=view.settings.chat.height_pixels}
+    -- Mirror main: persist first, update the view, then relayout.
+    assert(view:setChatSize(candidate.size_mode,candidate.height_pixels))
+    view:applyLayout(require("layout").compute(view.layout.window_width,view.layout.window_height,view.settings.chat))
+    return true
+  end)
+end
+test("chat height presets and Reset Size save immediately and preserve other preferences",function()
+  local overrides={size_mode="custom",height_pixels=240,capture_outgoing=false,timestamps=false,
+    all_sources={ROOM=true,COMBAT=false},tab_order={"STAFF","ALL"},combined_tab_order={"ROOM","ALL"}}
+  local view=chatHeightView(overrides); view:showChatSettings(); local calls={}
+  local saved={}; for key,value in pairs(view.settings.chat) do saved[key]=value end
+  view:renderChat({{category="ROOM",line="Keep this message"}},{"ROOM"},"ROOM")
+  local entries,output=view.chat_entries,view.chat_output; local clearCalls,echoes=output.clearCalls,#output.echoes
+  local filter=view.chat_active_filter; saveChatHeightInView(view,calls)
+  for index,choice in ipairs({"compact","normal","large","reset"}) do
+    local before=view.settings.chat.size_mode
+    eq(view["chat_settings_height_"..choice].click(),true)
+    eq(#calls,index); eq(calls[index].wanted,choice); eq(calls[index].prior_mode,before)
+    eq(view.settings.chat.size_mode,choice=="reset" and "normal" or choice); eq(view.settings.chat.height_pixels,nil)
+    eq(view.layout.chat_size_mode,view.settings.chat.size_mode)
+    for key,value in pairs(saved) do if key~="size_mode" and key~="height_pixels" then eq(view.settings.chat[key],value) end end
+    eq(view.chat_entries,entries); eq(view.chat_output,output); eq(output.clearCalls,clearCalls); eq(#output.echoes,echoes); eq(view.chat_active_filter,filter)
+  end
+  assert(view.chat_settings_height_normal.style:find(view.settings.theme.jade,1,true))
+end)
+test("chat height buttons step twenty pixels from requested height and clamp bounds",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=240}); local calls={}; saveChatHeightInView(view,calls); view:showChatSettings()
+  eq(view.chat_settings_height_smaller.click(),true); eq(calls[1].wanted,220); eq(calls[1].prior_height,240)
+  eq(view.chat_settings_height_larger.click(),true); eq(calls[2].wanted,240)
+  for _,case in ipairs({{80,"smaller",80},{85,"smaller",80},{590,"larger",600},{600,"larger",600}}) do
+    view:setChatSize("custom",case[1]); view:applyLayout(require("layout").compute(320,260,view.settings.chat))
+    eq(view["chat_settings_height_"..case[2]].click(),true); eq(calls[#calls].wanted,case[3]); eq(view.settings.chat.height_pixels,case[3])
+  end
+  view:setChatSize("custom",600); view:applyLayout(require("layout").compute(320,260,view.settings.chat))
+  eq(view.layout.chat_height<600,true); assert(view.chat_settings_height_caption.message:find("Requested: 600px",1,true))
+  assert(view.chat_settings_height_caption.message:find(tostring(view.layout.chat_height).."px",1,true))
+  eq(view.chat_settings_height_smaller.click(),true); eq(calls[#calls].wanted,580)
+end)
+test("chat height save failures keep the prior choice geometry and escaped status",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=260}); view:showChatSettings()
+  local layout=view.layout; local prior=view.chat_settings_height_normal.style; local calls=0
+  view:setOptionsActionCallback(function() calls=calls+1; return nil,"disk <full>" end)
+  for _,key in ipairs({"smaller","larger","compact","normal","large","reset"}) do
+    local ok,err=view["chat_settings_height_"..key].click(); eq(ok,nil); eq(err,"disk <full>")
+    eq(view.settings.chat.size_mode,"custom"); eq(view.settings.chat.height_pixels,260); eq(view.layout,layout)
+    eq(view.chat_settings_height_normal.style,prior); assert(view.chat_settings_status.message:find("disk &lt;full&gt;",1,true))
+  end
+  eq(calls,6)
+  view:setOptionsActionCallback(function() error("height save failed") end)
+  local ok,err=view.chat_settings_height_large.click(); eq(ok,nil); assert(err:find("height save failed",1,true))
+  view:setOptionsActionCallback(function() return false end); eq(view.chat_settings_height_large.click(),nil)
+  view:setOptionsActionCallback(nil); eq(view.chat_settings_height_large.click(),nil)
+  eq(view.settings.chat.height_pixels,260); eq(view.layout,layout)
+end)
+test("chat resize handle uses the existing bottom gutter and saves once per release",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=240}); local handle=view.chat_resize_handle; local calls={}
+  eq(handle.container,view.chat_container); eq(handle.y,232); eq(handle.height,8); eq(handle.width,"100%")
+  eq(view.chat_output.y,36); eq(view.chat_output.height,"100%-44")
+  assert(handle.tooltip:find("bottom edge",1,true)); assert(handle.tooltip:find("saves on release",1,true))
+  view:renderChat({{category="ROOM",line="Keep history intact"}},{"ROOM"},"ROOM")
+  local output,entries=view.chat_output,view.chat_entries; local clears,echoes=output.clearCalls,#output.echoes
+  output.currentScroll=0; local oldSend,oldSendAll,oldExpand=send,sendAll,expandAlias; local sends=0
+  send=function() sends=sends+1 end; sendAll=send; expandAlias=send
+  local ok,err=pcall(function()
+    saveChatHeightInView(view,calls)
+    eq(handle.click({button="LeftButton",globalY=100,y=10}),true); eq(#calls,0); eq(view.settings.chat.height_pixels,240)
+    eq(handle.release({button="LeftButton",globalY=140,y=-99}),true); eq(#calls,1); eq(calls[1].wanted,280)
+    eq(handle.release({button="LeftButton",globalY=160}),nil); eq(#calls,1)
+    eq(handle.y,272); eq(view.chat_output,output); eq(view.chat_entries,entries); eq(output.clearCalls,clears); eq(#output.echoes,echoes)
+    eq(output.currentScroll,0); eq(view.chat_active_filter,"ROOM"); eq(sends,0)
+  end)
+  send=oldSend; sendAll=oldSendAll; expandAlias=oldExpand; assert(ok,err)
+end)
+test("chat bottom drag rounds clamps and accepts local coordinates when global is absent",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=240}); local handle=view.chat_resize_handle; local calls={}; saveChatHeightInView(view,calls)
+  for _,case in ipairs({{100,10000,600},{100,-10000,80},{10,30.6,101}}) do
+    eq(handle.click({button="LeftButton",y=case[1]}),true)
+    eq(handle.release({button="LeftButton",y=case[2]}),true); eq(calls[#calls].wanted,case[3])
+  end
+  local short=chatHeightView({size_mode="custom",height_pixels=600},320,260); local shortCalls={}; saveChatHeightInView(short,shortCalls)
+  local actual=short.layout.chat_height; eq(actual<600,true)
+  eq(short.chat_resize_handle.click({globalY=100}),true); eq(short.chat_resize_handle.release({globalY=120}),true)
+  eq(shortCalls[1].wanted,require("chat_size").clamp(actual+20))
+end)
+test("chat bottom drag failure preserves requested and actual height",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=240}); view:showChatSettings(); local layout=view.layout; local calls=0
+  view:setOptionsActionCallback(function() calls=calls+1; return nil,"cannot <save>" end)
+  eq(view.chat_resize_handle.click({globalY=100}),true)
+  local ok,err=view.chat_resize_handle.release({globalY=130}); eq(ok,nil); eq(err,"cannot <save>"); eq(calls,1)
+  eq(view.chat_resize_drag,nil); eq(view.settings.chat.height_pixels,240); eq(view.layout,layout); eq(view.chat_resize_handle.y,232)
+  assert(view.chat_settings_status.message:find("cannot &lt;save&gt;",1,true))
+end)
+test("chat bottom drag rejects invalid buttons coordinates and stale layouts",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=240}); local handle=view.chat_resize_handle; local calls={}; saveChatHeightInView(view,calls)
+  local invalid={false,{}, {button="RightButton",globalY=100},{globalY="bad",y=100},{globalY=math.huge},{globalY=-math.huge},{globalY=0/0},{globalY={}}}
+  for _,event in ipairs(invalid) do
+    eq(handle.click(event),nil); eq(handle.release({globalY=200}),nil)
+    eq(handle.click({globalY=100}),true); eq(handle.release(event),nil); eq(view.chat_resize_drag,nil)
+  end
+  eq(handle.click(nil),nil); eq(handle.release(nil),nil)
+  eq(handle.click({globalY=100}),true); eq(handle.release({y=120}),nil)
+  eq(handle.click({globalY=100}),true); eq(handle.release({globalY=100}),nil)
+  eq(handle.click({globalY=100}),true); view:applyLayout(require("layout").compute(1200,700,view.settings.chat)); eq(handle.release({globalY=140}),nil)
+  eq(#calls,0); eq(view.settings.chat.height_pixels,240)
+end)
+test("chat height callbacks reject hidden and disposed views and clear pending drags",function()
+  for _,target in ipairs({"root","chat_container","chat_resize_handle","chat"}) do
+    local view=chatHeightView({size_mode="custom",height_pixels=240}); local handle=view.chat_resize_handle; local calls={}; saveChatHeightInView(view,calls)
+    eq(handle.click({globalY=100}),true)
+    if target=="chat" then view:setChatVisible(false) else view[target]:hide() end
+    eq(view.chat_resize_drag,nil); eq(handle.release({globalY=140}),nil); eq(handle.click({globalY=100}),nil); eq(#calls,0)
+  end
+  local view=chatHeightView(); view:showChatSettings(); local calls={}; saveChatHeightInView(view,calls)
+  local control=view.chat_settings_height_large.click; view:hideChatSettings(); eq(control(),nil)
+  view:showChatSettings(); view.root:hide(); eq(control(),nil); view.root:show()
+  local handle=view.chat_resize_handle; eq(handle.click({globalY=100}),true); view:delete()
+  eq(view.chat_resize_drag,nil); eq(handle.release({globalY=140}),nil); eq(handle.click({globalY=100}),nil); eq(control(),nil); eq(#calls,0)
+end)
+test("chat height widgets survive handoff with fresh callbacks and reject missing handles",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=240}); view:showChatSettings(); local handle=view.chat_resize_handle
+  local oldPress,oldRelease,oldControl=handle.click,handle.release,view.chat_settings_height_large.click
+  eq(oldPress({globalY=100}),true); assert(View.validateReusable(view,view.settings)); assert(view:prepareForReuse(view.settings))
+  eq(view.chat_resize_drag,nil); eq(view.chat_settings_height_large.visible,false)
+  view:showChatSettings(); local calls={}; saveChatHeightInView(view,calls)
+  eq(oldPress({globalY=100}),nil); eq(oldRelease({globalY=140}),nil); eq(oldControl(),nil); eq(#calls,0)
+  eq(handle.click({globalY=100}),true); eq(handle.release({globalY=120}),true); eq(#calls,1)
+  local names={"chat_resize_handle","chat_settings_height_caption"}
+  for _,key in ipairs({"smaller","larger","compact","normal","large","reset"}) do names[#names+1]="chat_settings_height_"..key end
+  for _,name in ipairs(names) do
+    local saved=view[name]; view[name]=nil; eq(View.validateReusable(view,view.settings),nil); view[name]=saved
+    local parent=saved.container; saved.container=view.chat_output; eq(View.validateReusable(view,view.settings),nil); saved.container=parent
+  end
+  local release=handle.setReleaseCallback; handle.setReleaseCallback=nil; eq(View.validateReusable(view,view.settings),nil); handle.setReleaseCallback=release
+  assert(View.validateReusable(view,view.settings))
+end)
+local function withLegacyChatRelease(globalRelease,releaseMethod,fn)
+  local settings=chatView().settings
+  local originalGeyser,originalGlobal=Geyser,setLabelReleaseCallback
+  local geyser=fakeGeyser(); local newLabel=geyser.Label.new
+  geyser.Label.new=function(class,cons,parent)
+    local widget=newLabel(class,cons,parent)
+    if cons.name=="DGHUD.Chat.ResizeHandle" then widget.setReleaseCallback=releaseMethod end
+    return widget
+  end
+  Geyser=geyser; setLabelReleaseCallback=globalRelease
+  local ok,err=pcall(function()
+    local view=View.new(settings)
+    view:applyLayout(require("layout").compute(1200,800,view.settings.chat))
+    fn(view)
+  end)
+  Geyser=originalGeyser; setLabelReleaseCallback=originalGlobal
+  assert(ok,err)
+end
+test("chat resize uses global release registration when the label method is missing or invalid",function()
+  for variant=1,2 do
+    local registrations={}; local method
+    if variant==2 then method=false end
+    withLegacyChatRelease(function(name,callback) registrations[#registrations+1]={name=name,callback=callback} end,method,function(view)
+      local handle=view.chat_resize_handle; local calls={}; saveChatHeightInView(view,calls)
+      eq(view.chat_resize_release_mode,"global"); eq(#registrations,1); eq(registrations[1].name,handle.name)
+      local oldPress,oldRelease=handle.click,registrations[1].callback
+      local height=view.layout.chat_height
+      eq(oldPress({globalY=100}),true); eq(#calls,0); eq(oldRelease({globalY=120}),true)
+      eq(#calls,1); eq(calls[1].wanted,height+20); eq(oldRelease({globalY=140}),nil)
+      assert(View.validateReusable(view,view.settings)); assert(view:prepareForReuse(view.settings)); eq(#registrations,2)
+      eq(view.chat_resize_release_mode,"global"); saveChatHeightInView(view,calls)
+      eq(oldPress({globalY=100}),nil); eq(oldRelease({globalY=140}),nil)
+      eq(handle.click({globalY=100}),true); eq(registrations[2].callback({globalY=120}),true); eq(#calls,2)
+      view:showChatSettings(); eq(view.chat_settings_height_compact.click(),true); eq(calls[3].wanted,"compact")
+      -- A later runtime can lose the global API and safely adopt an inert grip.
+      setLabelReleaseCallback=nil
+      assert(view:prepareForReuse(view.settings)); eq(view.chat_resize_release_mode,"inert")
+      assert(View.validateReusable(view,view.settings)); eq(handle.click({globalY=100}),nil)
+      eq(registrations[2].callback({globalY=140}),nil); eq(#calls,3)
+    end)
+  end
+end)
+test("chat resize without either release API leaves an inert reusable grip and working size buttons",function()
+  for variant=1,2 do
+    local method,globalRelease
+    if variant==2 then method=false; globalRelease="unavailable" end
+    withLegacyChatRelease(globalRelease,method,function(view)
+      local handle=view.chat_resize_handle; local calls={}; saveChatHeightInView(view,calls)
+      eq(view.chat_resize_release_mode,"inert"); eq(handle.release,nil)
+      eq(handle.click({globalY=100}),nil); eq(view.chat_resize_drag,nil); eq(#calls,0)
+      assert(handle.tooltip:find("Chat Settings > Height",1,true)); assert(View.validateReusable(view,view.settings))
+      view:showChatSettings(); eq(view.chat_settings_height_large.click(),true); eq(calls[1].wanted,"large")
+      assert(view:prepareForReuse(view.settings)); eq(view.chat_resize_release_mode,"inert"); assert(View.validateReusable(view,view.settings))
+      saveChatHeightInView(view,calls); view:showChatSettings()
+      eq(view.chat_settings_height_reset.click(),true); eq(calls[2].wanted,"reset")
+      eq(handle.click({globalY=100}),nil); eq(view.chat_resize_drag,nil)
+      view:delete(); eq(handle.click({globalY=100}),nil); eq(#calls,2)
+    end)
+  end
+end)
+test("failed chat resize release registration cannot prevent startup or size selection",function()
+  local function unavailable() error("native callback API unavailable") end
+  withLegacyChatRelease(unavailable,unavailable,function(view)
+    eq(view.chat_resize_release_mode,"inert"); assert(View.validateReusable(view,view.settings))
+    eq(view.chat_resize_handle.click({globalY=100}),nil)
+    local calls={}; saveChatHeightInView(view,calls); view:showChatSettings()
+    eq(view.chat_settings_height_compact.click(),true); eq(calls[1].wanted,"compact")
+  end)
+end)
+test("chat height controls remain scrollable within short settings panels",function()
+  local view=chatHeightView({size_mode="custom",height_pixels=600}); view:showChatSettings()
+  for _,size in ipairs({{280,240},{320,260},{400,300},{760,700},{1920,1080}}) do
+    view:applyLayout(require("layout").compute(size[1],size[2],view.settings.chat))
+    local content=view.chat_settings_content; local panel=view.chat_settings_panel
+    eq(content.y+content.height<=view.chat_settings_close.y,true); eq(view.chat_settings_close.y+view.chat_settings_close.height<=panel.height,true)
+    local previous=view.chat_settings_height_caption
+    for _,row in ipairs({{"smaller","larger"},{"compact","normal","large"},{"reset"}}) do
+      local right=0
+      for _,key in ipairs(row) do
+        local widget=view["chat_settings_height_"..key]; eq(widget.visible,true); eq(widget.parent,content)
+        eq(widget.x>=right and widget.x+widget.width<=content.width,true); eq(widget.y>=previous.y+previous.height,true)
+        eq(widget.y+widget.height<=content.content_height,true); eq(widget.height<=content.height,true); right=widget.x+widget.width
+      end
+      previous=view["chat_settings_height_"..row[#row]]
+    end
+    eq(view.chat_settings_text.y>=previous.y+previous.height,true)
+    local handle=view.chat_resize_handle; eq(handle.y+handle.height,view.layout.chat_height); eq(handle.height<=8,true)
+    view:hideChatSettings(); eq(view.chat_settings_height_caption.visible,false); eq(view.chat_settings_height_reset.visible,false); view:showChatSettings()
+  end
+end)
+test("setting chat size changes only size fields and leaves legacy overrides until a choice",function()
+  local view=chatHeightView({target_height=280,min_height=180,max_height=360,height_percent=.25}); local chat=view.settings.chat
+  eq(chat.size_mode,nil); local previous=view.layout.chat_requested_height; assert(view:prepareForReuse(view.settings)); eq(chat.size_mode,nil)
+  eq(require("layout").compute(1200,800,chat).chat_requested_height,previous)
+  local before={}; for key,value in pairs(chat) do before[key]=value end
+  assert(view:setChatSize("custom",287.6)); eq(chat.height_pixels,288); eq(chat.size_mode,"custom")
+  assert(view:setChatSize("normal")); eq(chat.height_pixels,nil); eq(chat.size_mode,"normal")
+  for key,value in pairs(before) do eq(chat[key],value) end
+  eq(view:setChatSize("invalid"),nil); eq(view:setChatSize("custom",0/0),nil); eq(chat.size_mode,"normal")
+end)
 
 test("standard LINK has no mode switch even with saved separate settings or custom names",function()
   for _,saved in ipairs({false,true}) do
@@ -1516,16 +1762,21 @@ test("all chat sound controls scroll without overlap and Close stays fixed at sm
     end
   end
 end)
-test("all ten sound rows fit without scrolling on regular desktop screens",function()
+test("chat height stays near the top before scrollable sound rows on regular desktop screens",function()
   local view=chatView(); view:showChatSettings()
   for _,size in ipairs({{1024,768},{1200,800},{1366,768},{1920,1080}}) do
     view:applyLayout(require("layout").compute(size[1],size[2]))
     local content=view.chat_settings_content
     eq(view.chat_settings_panel.height<=740,true)
+    eq(view.chat_settings_height_caption.y,view.chat_settings_outgoing.y+view.chat_settings_outgoing.height+6)
+    eq(view.chat_settings_height_reset.y+view.chat_settings_height_reset.height<=content.height,true)
+    eq(view.chat_sound_caption.y>view.chat_settings_height_reset.y+view.chat_settings_height_reset.height,true)
     for _,key in ipairs(view.chat_sound_order) do
       for _,name in ipairs({"caption","enabled","previous","choice","next","preview"}) do
         local widget=view.chat_sound_rows[key][name]
-        eq(widget.y+widget.height<=content.height,true)
+        eq(widget.y+widget.height<=content.content_height,true)
+        local scroll=math.min(widget.y,content.content_height-content.height)
+        eq(widget.y-scroll>=0 and widget.y+widget.height-scroll<=content.height,true)
       end
     end
     eq(view.chat_settings_close.y>=content.y+content.height,true)

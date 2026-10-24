@@ -1,6 +1,6 @@
 # Complete DGHUD Guide
 
-Applies to DGHUD **v0.3.105**. Older screenshots and messages may use different labels.
+Applies to DGHUD **v0.3.106**. Older screenshots and messages may use different labels.
 
 DGHUD is a Mudlet HUD for Dragons Gate. It organizes important character information, communication, navigation, and utility tools around the normal game display. It does not replace Dragons Gate commands, and it does not require you to edit Lua scripts for ordinary use.
 
@@ -24,7 +24,16 @@ dghud check
 
 To install a newer release, run `dghud update`. If it reports that you are already current, nothing is reinstalled. Use `dghud refresh` for stale character information instead.
 
-## What's new in v0.3.105
+## What's new in v0.3.106
+
+- **OPTIONS → CHAT SETTINGS → HEIGHT** offers Compact, Normal, and Large presets plus smaller/larger 20-pixel steps.
+- Drag the chatbox's bottom edge, then release to save. It stays docked above the main display and remembers your size for the profile.
+- **RESET SIZE** restores Normal without changing conversations, tab order, sounds, or Show in ALL choices.
+- Short windows safely limit chat's visible height; enlarging the window restores room for the saved request. The right-side skills layout is independent.
+
+See [chat sizing](CHATBOX.md#resize-the-chatbox).
+
+## Previous changes in v0.3.105
 
 - **PRIVATE** is for direct conversations: whispers, incoming one-to-one contacts, and your outgoing named CONTACT requests.
 - **LINK** is for mental/ESP and room/global broadcasts plus Dragon, Psycian, and Secian links. Direct contacts do not also appear in LINK.

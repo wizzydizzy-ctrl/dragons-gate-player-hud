@@ -6,6 +6,8 @@ local ColorPreferences=require("color_preferences")
 local MAX_CUSTOM_RULES=ColorPreferences.MAX_CUSTOM_RULES
 local Sounds=require("chat_sounds")
 local Channels=require("chat_channels")
+local ChatSize=require("chat_size")
+local chatSizeControls={"smaller","larger","compact","normal","large","reset"}
 local RollerAudio=require("autoroller_audio")
 local SkillSort=require("skill_sort")
 local SkillSettingsView=require("skill_settings_view")
@@ -534,6 +536,8 @@ function View.new(settings)
   local available={}; if type(rawget(_G,"getAvailableFonts"))=="function" then local ok,value=pcall(getAvailableFonts); if ok and type(value)=="table" then available=value end end
   self.list_font_family=View.monospaceFont(available)
   self.root=Geyser.Container:new({name="DGHUD.Root",x=0,y=0,width="100%",height="100%"})
+  local rootHide=self.root.hide
+  self.root.hide=function(root,...) self.chat_resize_drag=nil; return rootHide(root,...) end
   local rootShow=self.root.show
   self.root.show=function(root,...)
     if self.disposed or root~=self.root then return nil,"HUD view is unavailable." end
@@ -608,11 +612,20 @@ function View.new(settings)
   self.chat_output=Geyser.MiniConsole:new({name="DGHUD.Chat.Output",x=8,y=36,width="100%-16",height="100%-44"},self.chat_container)
   self.chat_output:enableScrollBar()
   self.chat_output:disableHorizontalScrollBar()
+  self.chat_resize_handle=label("DGHUD.Chat.ResizeHandle",self.chat_container,"background:transparent;border-bottom:2px solid "..t.border..";")
+  if self.chat_resize_handle.setToolTip then self.chat_resize_handle:setToolTip("Drag the bottom edge to resize chat; saves on release.") end
+  for _,widget in ipairs({self.chat_container,self.chat_resize_handle}) do
+    local hide=widget.hide
+    widget.hide=function(item,...) self.chat_resize_drag=nil; return hide(item,...) end
+  end
   self.chat_settings_overlay=label("DGHUD.ChatSettings.Overlay",self.root,"background:rgba(0,0,0,0.72);")
   self.chat_settings_panel=Geyser.Container:new({name="DGHUD.ChatSettings.Panel",x=0,y=0,width=580,height=500},self.root)
   self.chat_settings_bg=label("DGHUD.ChatSettings.Background",self.chat_settings_panel,"background:"..t.panel..";border:2px solid "..t.accent..";border-radius:8px;")
   self.chat_settings_title=label("DGHUD.ChatSettings.Title",self.chat_settings_panel,"background:transparent;color:"..t.accent..";font-weight:700;")
   self.chat_settings_content=Geyser.ScrollBox:new({name="DGHUD.ChatSettings.Content",x=12,y=46,width=556,height=406},self.chat_settings_panel)
+  self.chat_settings_height_caption=label("DGHUD.ChatSettings.Height",self.chat_settings_content,"background:transparent;color:"..t.accent..";font-weight:700;")
+  for _,key in ipairs(chatSizeControls) do self["chat_settings_height_"..key]=label("DGHUD.ChatSettings.Height."..key,self.chat_settings_content) end
+  self:bindChatSizeCallbacks()
   self:createChatSoundControls()
   self.chat_settings_visibility=label("DGHUD.ChatSettings.Visibility",self.chat_settings_content)
   self.chat_settings_outgoing=label("DGHUD.ChatSettings.Outgoing",self.chat_settings_content)
@@ -898,7 +911,7 @@ function View:isChatVisible()
 end
 function View:applyChatVisibility()
   local layout=self.layout
-  local widgets={self.chat_container,self.chat_bg,self.chat_tabs,self.chat_output}
+  local widgets={self.chat_container,self.chat_bg,self.chat_tabs,self.chat_output,self.chat_resize_handle}
   if not self:isChatVisible() then
     self.chat_drag=nil; self.chat_tabs_refresh_pending=true
     for _,widget in ipairs(widgets) do widget:hide() end
@@ -912,10 +925,13 @@ function View:applyChatVisibility()
     place(self.chat_bg,0,0,"100%","100%")
     place(self.chat_tabs,0,0,"100%",32)
     place(self.chat_output,layout.chat_padding or 8,36,"100%-"..((layout.chat_padding or 8)*2),"100%-44")
+    place(self.chat_resize_handle,0,math.max(0,(layout.chat_height or 240)-8),"100%",math.min(8,layout.chat_height or 240))
   else
     self.chat_container:resize("100%",240); self.chat_output:resize("100%-16","100%-44")
+    place(self.chat_resize_handle,0,232,"100%",8)
     for _,widget in ipairs(widgets) do widget:show() end
   end
+  self.chat_resize_handle:raise()
   for _,button in ipairs(self.chat_buttons or {}) do button:show() end
   if self.chat_tabs_refresh_pending then self:renderChatTabs(self.chat_categories,self.chat_active_filter) end
   return true
@@ -925,6 +941,94 @@ function View:setChatVisible(visible)
   self:applyChatVisibility()
   if self.chat_settings_visibility then self:renderChatSettings() end
   return self.chat_visible
+end
+local function chatWidgetAvailable(widget)
+  return type(widget)=="table" and not widget.deleted and widget.visible~=false and not widget.hidden and not widget.auto_hidden
+end
+local function chatResizeY(event,coordinate)
+  if type(event)~="table" or (event.button~=nil and event.button~="LeftButton") then return nil end
+  coordinate=coordinate or (event.globalY~=nil and "globalY" or "y")
+  local value=tonumber(event[coordinate])
+  -- Native callbacks may carry malformed or non-finite coordinates.
+  if not value or value~=value or math.abs(value)==math.huge then return nil end
+  return value,coordinate
+end
+function View:setChatSize(mode,height_pixels)
+  if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+  mode=mode or "normal"
+  local height=mode=="custom" and ChatSize.clamp(height_pixels) or nil
+  if mode=="custom" and not height or not ({normal=true,compact=true,large=true,custom=true})[mode] then return nil,"Invalid chat height." end
+  self.settings.chat=self.settings.chat or {}
+  self.settings.chat.size_mode=mode; self.settings.chat.height_pixels=height
+  self.chat_resize_drag=nil
+  if self.chat_settings_height_caption then self:renderChatSettings() end
+  return true
+end
+function View:changeChatHeight(wanted)
+  if self.disposed or not chatWidgetAvailable(self.root) then return nil,"HUD view is unavailable." end
+  local candidate,err=ChatSize.change(self.settings.chat,wanted)
+  if candidate and self.options_action_callback then
+    local ok,saved,message=pcall(self.options_action_callback,"chat_height",nil,wanted)
+    if self.disposed or not self.root then return nil,"HUD view is unavailable." end
+    if ok and saved==true then
+      self:setChatSize(ChatSize.mode(candidate),candidate.height_pixels)
+      self.chat_settings_status_text="Chat height saved."
+      self:renderChatSettings(); return true
+    end
+    err=ok and message or saved
+  elseif candidate then err="Chat height settings are unavailable." end
+  self.chat_settings_status_text=tostring(err or "Could not save chat height.")
+  self:renderChatSettings(); return nil,self.chat_settings_status_text
+end
+function View:bindChatSizeCallbacks()
+  local binding={}; self.chat_size_binding=binding; self.chat_resize_drag=nil
+  self.chat_resize_release_mode="inert"
+  for _,key in ipairs(chatSizeControls) do
+    local button=self["chat_settings_height_"..key]
+    button:setClickCallback(function()
+      if self.chat_size_binding~=binding or self.disposed or not self.chat_settings_visible or not chatWidgetAvailable(self.root) or not chatWidgetAvailable(button) then return nil,"Chat settings are unavailable." end
+      local wanted=key
+      if key=="smaller" or key=="larger" then
+        local height=self.layout and (self.layout.chat_requested_height or self.layout.chat_height) or self.settings.chat and self.settings.chat.height_pixels
+        wanted=ChatSize.clamp((tonumber(height) or 240)+(key=="smaller" and -20 or 20))
+      end
+      return self:changeChatHeight(wanted)
+    end)
+  end
+  local handle=self.chat_resize_handle
+  local function active()
+    return self.chat_size_binding==binding and self.chat_resize_release_mode~="inert" and self.chat_resize_handle==handle and not self.disposed and self:isChatVisible() and chatWidgetAvailable(self.root) and chatWidgetAvailable(self.chat_container) and chatWidgetAvailable(handle)
+  end
+  handle:setClickCallback(function(event)
+    if self.chat_size_binding~=binding then return nil end
+    self.chat_resize_drag=nil
+    local y,coordinate=chatResizeY(event)
+    local height=self.layout and tonumber(self.layout.chat_height)
+    if not active() or not y or not height or height<=0 or height~=height or height==math.huge then return nil end
+    self.chat_resize_drag={binding=binding,layout=self.layout,start_y=y,coordinate=coordinate,height=height}
+    return true
+  end)
+  local release=function(event)
+    if self.chat_size_binding~=binding then return nil end
+    local drag=self.chat_resize_drag; self.chat_resize_drag=nil
+    if not drag or drag.binding~=binding or not active() or drag.layout~=self.layout or drag.height~=self.layout.chat_height then return nil end
+    local y=chatResizeY(event,drag.coordinate)
+    if not y or y==drag.start_y then return nil end
+    local wanted=ChatSize.clamp(drag.height+y-drag.start_y)
+    if not wanted then return nil end
+    return self:changeChatHeight(wanted)
+  end
+  -- Older Geyser labels expose only Mudlet's global release registration API.
+  -- Without either API the grip stays inert; settings buttons still work.
+  if type(handle.setReleaseCallback)=="function" and pcall(handle.setReleaseCallback,handle,release) then
+    self.chat_resize_release_mode="method"
+  elseif type(setLabelReleaseCallback)=="function" and pcall(setLabelReleaseCallback,handle.name,release) then
+    self.chat_resize_release_mode="global"
+  end
+  if type(handle.setToolTip)=="function" then
+    local tooltip=self.chat_resize_release_mode=="inert" and "Use Chat Settings > Height to resize chat. Dragging is unavailable in this Mudlet version." or "Drag the bottom edge to resize chat; saves on release."
+    pcall(handle.setToolTip,handle,tooltip)
+  end
 end
 local default_chat_filters=Channels.order
 local reserved_chat_filters={ALL=true,ROOM=true,PRIVATE=true,MENTAL=true,DRAGON=true,PSYCIAN=true,STAFF=true,COMBAT=true,WORLD=true,OWN=true,WHISPER=true}
@@ -2311,6 +2415,8 @@ end
 function View:chatSettingsWidgets()
   local widgets={self.chat_settings_overlay,self.chat_settings_panel,self.chat_settings_bg,self.chat_settings_title,self.chat_settings_content,self.chat_settings_visibility,self.chat_settings_text,self.chat_settings_sources_caption,self.chat_settings_clear_visible,self.chat_settings_clear_saved,self.chat_settings_status,self.chat_settings_close,self.chat_sound_caption,self.chat_sound_explanation,self.chat_sound_volume,self.chat_sound_volume_down,self.chat_sound_volume_up,self.chat_sound_status}
   widgets[#widgets+1]=self.chat_settings_outgoing
+  widgets[#widgets+1]=self.chat_settings_height_caption
+  for _,key in ipairs(chatSizeControls) do widgets[#widgets+1]=self["chat_settings_height_"..key] end
   for _,key in ipairs(self.chat_sound_order or {}) do for _,name in ipairs(chatSoundRowControls) do widgets[#widgets+1]=self.chat_sound_rows[key][name] end end
   for _,button in pairs(self.chat_all_source_buttons or {}) do widgets[#widgets+1]=button end
   return widgets
@@ -2323,6 +2429,14 @@ function View:layoutChatSettings(layout)
   local control_w=listViewportWidth(self.chat_settings_content,inner_w,self.list_scrollbar_width); self.chat_settings_font=font
   local cy=0; local visibility_h=math.max(36,font+22); place(self.chat_settings_visibility,0,cy,control_w,visibility_h); cy=cy+visibility_h+gap
   place(self.chat_settings_outgoing,0,cy,control_w,visibility_h); cy=cy+visibility_h+gap
+  local height_h=math.max(30,font*2+10); place(self.chat_settings_height_caption,0,cy,control_w,height_h); cy=cy+height_h+gap
+  local size_row_h=math.max(30,font+18)
+  local size_rows={{"smaller","larger"},{"compact","normal","large"},{"reset"}}
+  for _,row in ipairs(size_rows) do
+    local cell=math.max(1,(control_w-gap*(#row-1))/#row)
+    for index,key in ipairs(row) do place(self["chat_settings_height_"..key],(index-1)*(cell+gap),cy,cell,size_row_h) end
+    cy=cy+size_row_h+gap
+  end
   cy=self:layoutChatSounds(control_w,cy,font)
   local text_h=math.max(self.chat_settings_compact_copy and 100 or 88,(font+5)*(self.chat_settings_compact_copy and 8 or 6)); place(self.chat_settings_text,0,cy,control_w,text_h); cy=cy+text_h+gap; place(self.chat_settings_sources_caption,0,cy,control_w,24); cy=cy+28
   local columns=control_w>=500 and 4 or 2; local column_gap=6; local cell_w=math.max(1,(control_w-column_gap*(columns-1))/columns); local row_h=math.max(28,font+16,math.ceil(14*font*.65/cell_w)*(font+5)+8); local rows=math.ceil(#self.chat_all_source_order/columns)
@@ -2340,10 +2454,26 @@ function View:renderChatSettings(font)
   if not self.chat_settings_visible or not self.layout or self.root.hidden or self.root.auto_hidden then return true end
   font=font or self.chat_settings_font
   self:renderChatSounds(font)
+  self:renderChatHeight(font or 11)
   local visible=self.chat_visible~=false; local t=self.settings.theme
   self.chat_settings_visibility:setStyleSheet("background:"..(visible and "#173526" or "#252b28")..";border:2px solid "..t.accent..";border-radius:5px;color:"..(visible and "#c8f2d5" or t.text)..";font-weight:700;")
   self.chat_settings_visibility:echo(View.withFont("<center><b>SHOW CHATBOX: "..(visible and "ON" or "OFF").."</b></center>",(font or 11)+2))
   font=font or (self.layout and math.max(10,math.min(14,(self.layout.body_font or 14)-2)) or 11); self.chat_settings_title:echo(View.withFont("<b>CHAT SETTINGS</b>",font+3)); local explanation=self.chat_settings_compact_copy and "Choose what appears in ALL. LINK and other chat views keep their messages." or "Choose which sources appear in ALL. Turning one off only excludes it from ALL; LINK and other chat views still capture and save its messages."; self.chat_settings_text:echo(View.withFont("Hide the chatbox to expand the main console. Capture and history continue.<br><br>"..explanation,font)); self.chat_settings_sources_caption:echo(View.withFont("<b>SHOW IN ALL</b>",font+1)); for _,key in ipairs(self.chat_all_source_order or {}) do local button=self.chat_all_source_buttons[key]; local enabled=self.chat_all_sources[key]~=false; button:setStyleSheet("background:"..(enabled and "#173526" or "#2a1d1b")..";border:1px solid "..(enabled and "#4fa772" or "#72504b")..";border-radius:5px;color:"..(enabled and "#c8f2d5" or "#c7aaa5")..";font-weight:700;"); button:echo(View.withFont("<center><b>"..button.option_text..": "..(enabled and "ON" or "OFF").."</b></center>",font)) end; self.chat_settings_clear_visible:echo(View.withFont("<center><b>CLEAR CHATBOX NOW</b></center>",font)); self.chat_settings_clear_saved:echo(View.withFont("<center><b>"..(self.chat_settings_clear_pending and "WARNING: CLICK AGAIN TO DELETE SAVED HISTORY" or "PERMANENTLY CLEAR SAVED HISTORY…").."</b></center>",font)); self.chat_settings_status:echo(View.withFont(safeText(self.chat_settings_status_text or "Combat is hidden from ALL by default. Its COMBAT tab remains available."),font)); self.chat_settings_close:echo(View.withFont("<center><b>CLOSE</b></center>",font)); self.chat_settings_dirty=false; return true
+end
+function View:renderChatHeight(font)
+  local chat=self.settings.chat or {}; local mode=ChatSize.mode(chat); local layout=self.layout or {}
+  local actual=tonumber(layout.chat_height) or 0
+  local requested=tonumber(layout.chat_requested_height) or chat.height_pixels or actual
+  local caption="<b>HEIGHT: "..safeText(actual).."px · "..mode:upper().."</b>"
+  if requested~=actual then caption=caption.."<br>Requested: "..safeText(requested).."px" end
+  self.chat_settings_height_caption:echo(View.withFont(caption,font))
+  local captions={smaller="SMALLER −20px",larger="LARGER +20px",compact="COMPACT",normal="NORMAL",large="LARGE",reset="RESET SIZE"}
+  local t=self.settings.theme
+  for _,key in ipairs(chatSizeControls) do
+    local button=self["chat_settings_height_"..key]; local selected=key==mode
+    button:setStyleSheet("background:"..(selected and "#173526" or "#17231c")..";border:1px solid "..(selected and t.jade or t.border)..";border-radius:5px;color:"..(selected and t.jade or t.text)..";font-weight:700;")
+    button:echo(View.withFont("<center><b>"..captions[key].."</b></center>",font))
+  end
 end
 function View:setChatAllSources(sources) self.chat_all_sources=Channels.allSources(sources); if self.chat_settings_visible then self:renderChatSettings() end; return true end
 function View:setChatPresentation(outgoing,combined)
@@ -3426,6 +3556,7 @@ function View:updateClock(clock)
   return true
 end
 local reusableWidgetNames={
+  "chat_resize_handle","chat_settings_height_caption","chat_settings_height_smaller","chat_settings_height_larger","chat_settings_height_compact","chat_settings_height_normal","chat_settings_height_large","chat_settings_height_reset",
   "chat_settings_outgoing",
   "header","color_toggle","clock_header","attribute_strip","color_menu_scrim","color_menu","color_menu_bg","options_scroll",
   "color_settings_overlay","color_settings_panel","color_settings_bg","color_settings_title","color_settings_content","color_settings_close",
@@ -3474,6 +3605,14 @@ function View.validateReusable(candidate,settings)
     elseif plainReusableWidgets[name] then valid=reusableWidget(candidate[name])
     else valid=reusableLabel(candidate[name]) end
     if not valid then return nil,"preserved HUD view is missing "..name end
+  end
+  if candidate.chat_resize_handle.container~=candidate.chat_container or type(candidate.chat_resize_handle.setClickCallback)~="function" then return nil,"preserved HUD chat_resize_handle is incomplete" end
+  local releaseMode=candidate.chat_resize_release_mode
+  if not ({method=true,global=true,inert=true})[releaseMode] or releaseMode=="method" and type(candidate.chat_resize_handle.setReleaseCallback)~="function" then return nil,"preserved HUD chat_resize_handle release binding is incomplete" end
+  if candidate.chat_settings_height_caption.container~=candidate.chat_settings_content then return nil,"preserved HUD chat height caption parent is invalid" end
+  for _,key in ipairs(chatSizeControls) do
+    local button=candidate["chat_settings_height_"..key]
+    if button.container~=candidate.chat_settings_content or type(button.setClickCallback)~="function" then return nil,"preserved HUD chat height control is incomplete" end
   end
   for _,name in ipairs({"hp","fatigue","carry","psi","web","roundtime_bar"}) do local gauge=candidate[name]; if type(gauge.setValue)~="function" or not reusableStyledWidget(gauge.front) or not reusableStyledWidget(gauge.back) or not reusableStyledWidget(gauge.text) then return nil,"preserved HUD gauge is incomplete: "..name end end
   if type(candidate.color_options)~="table" then return nil,"preserved HUD color state is incomplete" end
@@ -3569,6 +3708,7 @@ function View.validateReusable(candidate,settings)
 end
 function View:prepareForReuse(settings)
   local valid,why=View.validateReusable(self,settings); if not valid then return nil,why end
+  self:bindChatSizeCallbacks()
   self:hideRollerSettings(); self:hideRollerResultAlert()
   self.roller_alert_action_callback=nil
   self.settings=settings or self.settings
@@ -3616,7 +3756,7 @@ function View:delete()
   if self.disposed and not root then return true end
   -- Native deletion may deliver callbacks before it returns. Retire this view
   -- first so retained closures cannot save preferences or repaint old labels.
-  self.disposed=true; self.chat_settings_visible=false
+  self.disposed=true; self.chat_settings_visible=false; self.chat_resize_drag=nil; self.chat_size_binding=nil
   pcall(self.stopRollerAlertPreview,self)
   pcall(self.hideRollerResultAlert,self)
   self.roller_settings_visible=false; self.roller_draft=nil; self.roller_alert_status=nil

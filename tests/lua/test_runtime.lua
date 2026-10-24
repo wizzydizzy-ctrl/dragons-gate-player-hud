@@ -61,6 +61,7 @@ local function fake()
     setSkillSortPreferences=function(self,config) f.viewSkillSettings=Settings.merge({},config); f.skillSortUpdates=(f.skillSortUpdates or 0)+1 end,
     setChatAllSources=function(self,sources) f.viewChatAllSources=sources; return true end,
     setChatVisible=function(self,visible) self.chat_visible=visible; f.viewChatVisible=visible; f.chatVisibilitySets=(f.chatVisibilitySets or 0)+1; return visible end,
+    setChatSize=function(self,mode,pixels) self.chat_size_mode=mode; self.chat_height_pixels=pixels; f.viewChatSize={mode=mode,pixels=pixels}; return true end,
     setFeedbackCallback=function(self,callback) f.feedbackCallback=callback end,
     setMapLibraryActionCallback=function(self,callback) self.map_library_action_callback=callback; f.mapLibraryActionCallback=callback end,
     showMapLibrary=function(self) f.mapLibraryShown=true; return true end,
@@ -1136,6 +1137,183 @@ local function withChatVisibilityEntry(persisted,run)
   if not ok then error(err,0) end
 end
 
+
+do
+  local function sameSizeState(actual,expected)
+    eq(type(actual),type(expected))
+    if type(expected)~="table" then eq(actual,expected); return end
+    for key,value in pairs(expected) do sameSizeState(actual[key],value) end
+    for key in pairs(actual) do assert(expected[key]~=nil,"unexpected state key "..tostring(key)) end
+  end
+  local function sizeActivity(f,hud)
+    return {runtime=chatRuntimeSnapshot(f,hud),next=f.next,timers=Settings.merge({},f.timers),
+      clockTimers=Settings.merge({},f.clockTimers),events=Settings.merge({},f.events),aliases=Settings.merge({},f.aliases),
+      killed=Settings.merge({},f.killed),history=Settings.merge({},hud.chat.history.items),appends=f.chatStorageAppends,
+      sends=#(f.sentCommands or {}),sounds=f.sizeSounds or 0,outgoing=hud.chat.outgoing,outgoingEvent=hud.chat.outgoingEvent,
+      capture=hud.chat.captureOutgoing,allSources=Settings.merge({},hud.chat.allSources),soundConfig=Settings.merge({},hud.chat_sounds.config)}
+  end
+  local function sameSizeActivity(f,hud,before)
+    assertChatRuntimeUnchanged(f,hud,before.runtime)
+    eq(f.next,before.next); sameSizeState(f.timers,before.timers); sameSizeState(f.clockTimers,before.clockTimers)
+    sameSizeState(f.events,before.events); sameSizeState(f.aliases,before.aliases); sameSizeState(f.killed,before.killed)
+    sameSizeState(hud.chat.history.items,before.history); eq(f.chatStorageAppends,before.appends)
+    eq(#(f.sentCommands or {}),before.sends); eq(f.sizeSounds or 0,before.sounds)
+    eq(hud.chat.outgoing,before.outgoing); eq(hud.chat.outgoingEvent,before.outgoingEvent); eq(hud.chat.captureOutgoing,before.capture)
+    sameSizeState(hud.chat.allSources,before.allSources); sameSizeState(hud.chat_sounds.config,before.soundConfig)
+  end
+
+  for _,route in ipairs({"Main API","Options callback"}) do
+    test("chat size "..route.." saves before presentation changes and preserves capture history and preferences",function()
+      for _,capture in ipairs({false,true}) do
+        withChatVisibilityRuntime({chat={capture_outgoing=capture,all_sources={ROOM=false,COMBAT=true},
+          sounds={volume=30,tabs={STAFF={enabled=false,sound="staff"}}},personal_option="keep"},personal="untouched"},function(f,hud)
+          function f:playChatSound() self.sizeSounds=(self.sizeSounds or 0)+1; return true end
+          assert(hud.chat:capture("ROOM","synthetic retained room"))
+          assert(hud.chat:capture("COMBAT","synthetic retained combat")); assert(hud.chat:setFilter("ROOM"))
+          local before=sizeActivity(f,hud)
+          local change=route=="Main API" and function(wanted) return hud:setChatHeight(wanted) end
+            or function(wanted) return f.optionsActionCallback("chat_height",nil,wanted) end
+          local saves=f.chatSettingsSaves or 0
+          for index,wanted in ipairs({"compact","large",80,"417.5",600,"normal","reset"}) do
+            local priorChat=Settings.merge({},hud.settings.chat)
+            local priorUser=Settings.merge({},DGHUD.user_settings)
+            local priorLayout=hud.current_layout; local layouts=#f.layouts; local priorView=f.viewChatSize and Settings.merge({},f.viewChatSize)
+            f.onChatSettingsSave=function(candidate)
+              sameSizeState(hud.settings.chat,priorChat); sameSizeState(DGHUD.user_settings,priorUser)
+              eq(hud.current_layout,priorLayout); eq(#f.layouts,layouts); sameSizeState(f.viewChatSize,priorView)
+              eq(candidate.personal_option,"keep"); eq(candidate.capture_outgoing,capture)
+              eq(candidate.all_sources.ROOM,false); eq(candidate.all_sources.COMBAT,true)
+            end
+            local result,err=change(wanted)
+            assert(result,err); eq(result,true); eq(err,nil); eq(f.chatSettingsSaves,saves+index)
+            local mode=tonumber(wanted) and "custom" or (wanted=="reset" and "normal" or wanted)
+            local pixels=mode=="custom" and require("chat_size").clamp(wanted) or nil
+            eq(hud.settings.chat.size_mode,mode); eq(hud.settings.chat.height_pixels,pixels)
+            eq(DGHUD.user_settings.chat.size_mode,mode); eq(DGHUD.user_settings.chat.height_pixels,pixels)
+            eq(f.savedChatSettings.size_mode,mode); eq(f.savedChatSettings.height_pixels,pixels)
+            eq(f.viewChatSize.mode,mode); eq(f.viewChatSize.pixels,pixels)
+            eq(hud.current_layout.chat_size_mode,mode)
+            eq(hud.current_layout.chat_height,pixels or ({compact=120,normal=240,large=320})[mode])
+            eq(f.set_borders[2],hud.current_layout.console_top); assert(#f.layouts>layouts)
+            eq(hud.settings.chat.personal_option,"keep"); eq(DGHUD.user_settings.personal,"untouched")
+            sameSizeActivity(f,hud,before); eq(hud.chat:entries()[1].message,"synthetic retained room")
+          end
+        end)
+      end
+    end)
+
+    test("chat size "..route.." contains unavailable false nil and throwing persistence without changing state",function()
+      for _,failure in ipairs({"missing","false","nil","throw"}) do
+        for _,prior in ipairs({{size_mode="custom",height_pixels=321},{size_mode="large"}}) do
+          withChatVisibilityRuntime({chat=Settings.merge(prior,{visible=false,capture_outgoing=false,
+            all_sources={ROOM=false,COMBAT=true},personal_option="keep"})},function(f,hud)
+            assert(f:saveChatSettings(hud.settings.chat)); assert(hud.chat:capture("ROOM","synthetic failure history"))
+            assert(hud.chat:setFilter("ROOM"))
+            local before=sizeActivity(f,hud)
+            local chat,user,saved=hud.settings.chat,DGHUD.user_settings,f.savedChatSettings
+            local values,userValues=Settings.merge({},chat),Settings.merge({},user)
+            local layout,layouts,renders=hud.current_layout,#f.layouts,f.chatRenders
+            local viewSize=f.viewChatSize and Settings.merge({},f.viewChatSize); local borders=table.concat(f.set_borders,",")
+            if failure=="missing" then f.saveChatSettings=nil
+            else
+              f.saveChatSettings=function()
+                if failure=="throw" then error("synthetic save failure") end
+                if failure=="false" then return false,"synthetic save failure" end
+                return nil,"synthetic save failure"
+              end
+            end
+            local result,err
+            if route=="Main API" then result,err=hud:setChatHeight("normal")
+            else result,err=f.optionsActionCallback("chat_height",nil,"normal") end
+            eq(result,nil); eq(type(err),"string"); assert(#err>0)
+            eq(hud.settings.chat,chat); sameSizeState(chat,values); eq(DGHUD.user_settings,user); sameSizeState(user,userValues)
+            eq(f.savedChatSettings,saved); eq(hud.current_layout,layout); eq(#f.layouts,layouts); eq(f.chatRenders,renders)
+            sameSizeState(f.viewChatSize,viewSize); eq(table.concat(f.set_borders,","),borders)
+            sameSizeActivity(f,hud,before); eq(hud.chat:entries()[1].message,"synthetic failure history")
+          end)
+        end
+      end
+    end)
+  end
+
+  test("invalid runtime chat sizes are rejected before persistence or presentation changes",function()
+    withChatVisibilityRuntime({chat={size_mode="custom",height_pixels=321}},function(f,hud)
+      local before=sizeActivity(f,hud); local layout=hud.current_layout
+      local settings=Settings.merge({},hud.settings); local user=Settings.merge({},DGHUD.user_settings)
+      local saves=f.chatSettingsSaves or 0; local renders=f.chatRenders; local layouts=#f.layouts
+      for _,invalid in ipairs({79.9,600.1,math.huge,-math.huge,0/0,"80px","bad",false,{}}) do
+        local result,err=f.optionsActionCallback("chat_height",nil,invalid)
+        eq(result,nil); eq(type(err),"string")
+      end
+      eq(hud:setChatHeight(nil),nil); eq(f.chatSettingsSaves or 0,saves); eq(f.chatRenders,renders); eq(#f.layouts,layouts)
+      eq(hud.current_layout,layout); sameSizeState(hud.settings,settings); sameSizeState(DGHUD.user_settings,user)
+      sameSizeActivity(f,hud,before)
+    end)
+  end)
+
+  test("custom runtime height survives short window resizing hidden capture and other chat settings saves",function()
+    withChatVisibilityRuntime({chat={visible=false,capture_outgoing=false}},function(f,hud)
+      assert(hud:setChatHeight(577)); local saves=f.chatSettingsSaves
+      for _,size in ipairs({{320,260},{760,150},{800,408},{1399,700},{1920,1080}}) do
+        f.width,f.height=size[1],size[2]; f.callbacks.sysWindowResizeEvent()
+        eq(hud.current_layout.chat_requested_height,577); eq(hud.current_layout.chat_height,0)
+        eq(hud.settings.chat.height_pixels,577); eq(f.savedChatSettings.height_pixels,577); eq(f.chatSettingsSaves,saves)
+      end
+      assert(hud.chat:capture("ROOM","synthetic hidden resize")); eq(hud:setChatVisible(true),true)
+      eq(hud.current_layout.chat_height,577); eq(hud.chat:entries()[1].message,"synthetic hidden resize")
+      eq(hud:setChatAllSource("COMBAT",true),true); eq(f.savedChatSettings.height_pixels,577)
+      assert(f.chatOrderCallback({"STAFF","ALL","ROOM"})); eq(f.savedChatSettings.height_pixels,577)
+      eq(hud:setChatSoundVolume(35),35); eq(f.savedChatSettings.height_pixels,577)
+      eq(hud:setChatPreference("capture_outgoing",true),true); eq(f.savedChatSettings.height_pixels,577)
+      eq(hud:setChatVisible(false),false); eq(f.savedChatSettings.height_pixels,577)
+      assert(hud:setChatHeight("reset"))
+      eq(f.savedChatSettings.size_mode,"normal"); eq(f.savedChatSettings.height_pixels,nil)
+      eq(f.savedChatSettings.visible,false); eq(f.savedChatSettings.capture_outgoing,true)
+      eq(f.savedChatSettings.all_sources.COMBAT,true); eq(f.savedChatSettings.sounds.volume,35)
+      eq(f.savedChatSettings.combined_tab_order[1],"STAFF")
+    end)
+  end)
+
+  test("custom chat size persists through entry reload character changes update handoff and a cold start",function()
+    local combinedOrder={"ROOM",require("chat_channels").linkFilter,"STAFF","ALL"}
+    withChatVisibilityEntry({tab_order={"STAFF","ALL","ROOM"},size_mode="custom",height_pixels=417,
+      combined_tab_order=combinedOrder,all_sources={COMBAT=false},capture_outgoing=false},function(f,defaults)
+      local function assertCombinedOrder()
+        local expected=table.concat(combinedOrder,",")
+        eq(table.concat(DGHUD.settings.chat.combined_tab_order,","),expected)
+        eq(table.concat(DGHUD.user_settings.chat.combined_tab_order,","),expected)
+        eq(table.concat(f.savedChatSettings.combined_tab_order,","),expected)
+      end
+      dofile("src/entry.lua")
+      assertCombinedOrder()
+      local controller=DGHUD.controller
+      eq(controller.current_layout.chat_requested_height,417); eq(controller.current_layout.chat_height,417)
+      assert(controller.chat:capture("ROOM","synthetic survives sizing")); assert(controller.chat:setFilter("ROOM"))
+      assert(controller:setChatHeight(577)); eq(DGHUD.user_settings.chat.height_pixels,577)
+      assertCombinedOrder()
+      f.gmcp={Char={Status={name="Synthetic",surname="Resize"},Vitals={hp=1,hp_max=1}}}
+      f.callbacks["gmcp.Char.Status"]()
+      eq(controller.settings.chat.height_pixels,577); eq(f.savedChatSettings.height_pixels,577)
+      assert(DGHUD.reload()); eq(DGHUD.controller,controller); eq(controller.current_layout.chat_requested_height,577)
+      assertCombinedOrder()
+      assert(controller.chat:setFilter("ROOM")); eq(controller.chat:entries()[1].message,"synthetic survives sizing")
+      local appends=f.chatStorageAppends
+      assert(MudletAdapter.markUpdateHandoff(DGHUD,defaults.view_schema,defaults.view_contract))
+      dofile("src/entry.lua")
+      local replacement=DGHUD.controller; assert(replacement~=controller)
+      assertCombinedOrder()
+      eq(replacement.settings.chat.height_pixels,577); eq(replacement.current_layout.chat_height,577)
+      eq(replacement.chat.filter,"ROOM"); eq(replacement.chat:entries()[1].message,"synthetic survives sizing")
+      eq(f.chatStorageAppends,appends)
+      assert(DGHUD.shutdown()); DGHUD=nil
+      dofile("src/entry.lua")
+      eq(DGHUD.settings.chat.size_mode,"custom"); eq(DGHUD.settings.chat.height_pixels,577)
+      eq(DGHUD.controller.current_layout.chat_height,577); eq(f.chatStorageAppends,appends)
+      eq(DGHUD.settings.chat.capture_outgoing,false)
+      assertCombinedOrder()
+    end)
+  end)
+end
 
 test("MENTAL settings snapshot round trips canonical tabs and independent OFF choices",function()
   local old={visible=false,tab_order={"STAFF","CONTACT","ESP","ALL","DRAGON"},all_sources={ESP=false,CONTACT=false,COMBAT=true}}

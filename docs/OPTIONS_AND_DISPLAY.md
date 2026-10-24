@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.105**.
+Applies to DGHUD **v0.3.106**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -18,9 +18,15 @@ Open **OPTIONS → CHAT SETTINGS → SHOW CHATBOX** to show or completely hide t
 
 The same window controls which sources appear in ALL, provides separate history-clearing buttons, and offers per-tab sound alerts. Under **SOUND ALERTS**, choose each tab's sound, turn it on or off, or click **PREVIEW**. Staff alerts start on; the other tabs start off. See the [Chatbox Guide](CHATBOX.md).
 
-**CAPTURE OUTGOING CONTACTS** starts ON and records complete CONTACT requests in MENTAL only after a confirmed character session. Turn it OFF to stop new outgoing records without deleting old history. Requests are not delivery confirmations and do not play self-alert sounds.
+**CAPTURE OUTGOING CONTACTS** starts ON and records complete CONTACT requests only after a confirmed character session: named requests appear in PRIVATE and room/global requests in LINK. Turn it OFF to stop new outgoing records without deleting old history. Requests are not delivery confirmations and do not play self-alert sounds.
 
 **LINK** automatically combines mental/ESP, room/global contact broadcasts, and Dragon, Psycian, and Secian links. **PRIVATE** holds whispers and one-to-one contacts, including outgoing named requests; these are not duplicated in LINK. There is no separate/combined setting. Individual source channels, Show in ALL choices, sounds, and history are retained. See [the LINK tab](CHATBOX.md#the-link-tab).
+
+### Chatbox height
+
+Use **CHAT SETTINGS → HEIGHT** for **Compact / Normal / Large**, **Smaller −20px / Larger +20px**, and **Reset Size**. You can also drag the chatbox's bottom edge and release to save a custom height. Chat remains aligned above the main display; shrinking it expands that display.
+
+Sizing is saved per profile and survives restarts, character changes, and updates without altering chat history or other preferences. Custom requests are bounded to 80–600 pixels; short panes may display less to protect the main console, while remembering your request for a larger window. Reset Size restores Normal only. The right-side Skills / Runes and Inventory layout is independent. See [chat sizing](CHATBOX.md#resize-the-chatbox).
 
 ## Hidden / Visible
 
