@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 EXPECTED_EDITION='player'
 EXPECTED_REPOSITORY='dragons-gate-player-hud'
-EXPECTED_VERSION='0.3.107'
+EXPECTED_VERSION='0.3.108'
 class BuildTest(unittest.TestCase):
     def run_lua(self, source, cwd):
         completed=subprocess.run(['lua','-'],input=source,text=True,cwd=cwd,capture_output=True)
@@ -99,6 +99,7 @@ class BuildTest(unittest.TestCase):
                 self.assertIn('package.preload["layout"]',runtime)
                 self.assertIn('package.preload["chat_controller"]',runtime)
                 self.assertIn('package.preload["chat_size"]',runtime)
+                self.assertIn('package.preload["wealth_display"]',runtime)
                 self.assertNotIn('&lt;/green&gt;',xml)
                 self.assertIn('[DGHUD Update]<reset> Installed version',runtime)
                 self.assertIn('if not SHA256 then SHA256=require("sha256") end',runtime)
@@ -134,14 +135,17 @@ package.loaded["special_transition"]={generation=0}
 package.preload["special_transition"]=function() return {generation=generation} end
 package.loaded["chat_size"]={generation=0}
 package.preload["chat_size"]=function() return {generation=generation} end
+package.loaded["wealth_display"]={generation=0}
+package.preload["wealth_display"]=function() return {generation=generation} end
 package.preload["defaults"]=function() return {} end
 package.preload["settings"]=function() return {resolve=function(defaults,user) return defaults,user end} end
 package.preload["mudlet_adapter"]=function() return {new=function() return {} end} end
 package.preload["main"]=function()
   local special=require("special_transition")
   local chatSize=require("chat_size")
+  local wealth=require("wealth_display")
   return {
-    new=function() return {special=special,chatSize=chatSize,start=function() return true end,shutdown=function() return true end} end,
+    new=function() return {special=special,chatSize=chatSize,wealth=wealth,start=function() return true end,shutdown=function() return true end} end,
     installChatApi=function() end,
   }
 end
@@ -153,12 +157,15 @@ end
 run_entry()
 assert(DGHUD.controller.special.generation==1,"entry retained stale special_transition on initial load")
 assert(DGHUD.controller.chatSize.generation==1,"entry retained stale chat_size on initial load")
+assert(DGHUD.controller.wealth.generation==1,"entry retained stale wealth_display on initial load")
 generation=2
+package.preload["wealth_display"]=function() return {generation=generation} end
 package.preload["special_transition"]=function() return {generation=generation} end
 package.preload["chat_size"]=function() return {generation=generation} end
 run_entry()
 assert(DGHUD.controller.special.generation==2,"entry retained stale special_transition on reload")
 assert(DGHUD.controller.chatSize.generation==2,"entry retained stale chat_size on reload")
+assert(DGHUD.controller.wealth.generation==2,"entry retained stale wealth_display on reload")
 '''.replace('ENTRY',entry)
                 self.run_lua(reload_probe,td)
 

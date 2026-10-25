@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.107.
+Applies to DGHUD v0.3.108.
 
 Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
@@ -30,6 +30,12 @@ Most features are also available through **OPTIONS**. Destructive map commands c
 `dghud purge` may appear in older built-in command text. Do not use it for routine repair or map cleanup; use `dghud recover` or the specific map commands below.
 
 For setup and repair steps, see [Installation and First Start](INSTALLATION_AND_FIRST_START.md) and [Updates and Recovery](UPDATES_AND_RECOVERY.md). For text sizing and display controls, see [Options and Display](OPTIONS_AND_DISPLAY.md).
+
+## Wealth report formatting (v0.3.108)
+
+When you run the game's `breakd wealth` (or `breakdown wealth`) command, DGHUD formats a complete response in the main console as two columns: **Name** and **Silver**. Names are left-aligned; silver amounts are right-aligned with comma thousands separators and sorted from highest to lowest. Zero balances are included, and tied balances keep the game's original order.
+
+This only changes the main-display layout of that requested report. It adds no game queries, separate wealth storage, chat forwarding, or access to the command. The game's permissions still apply. Incomplete responses remain unchanged; malformed or stale source rows fail validation before any replacement.
 
 ## Rune renewal and training shortcuts
 

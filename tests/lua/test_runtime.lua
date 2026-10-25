@@ -113,6 +113,14 @@ local function fake()
     self.next=self.next+1; local id="skill-trigger-"..self.next
     self.triggers[id]=fn; return id
   end
+  function f:addWealthDisplayTrigger(fn)
+    if self.failWealthTrigger then return nil,"synthetic wealth trigger failure" end
+    self.next=self.next+1; local id="wealth-trigger-"..self.next
+    self.triggers[id]=fn; self.wealthTrigger=id; return id
+  end
+  function f:replaceWealthOutput(rows)
+    self.wealthBatches=self.wealthBatches or {}; self.wealthBatches[#self.wealthBatches+1]=rows; return true
+  end
   function f:replaceSkillOutput(rows) self.replacedSkills=rows; return true end
   function f:reportColorizerStatus(enabled) self.reportedColorizer=enabled; return true end
   function f:saveColorSettings(config)
@@ -1512,7 +1520,7 @@ test("resize preserves chat controller history and trigger ownership",function()
   eq(f.layouts[#f.layouts].chat_height>160,true); eq(f.set_borders[2],f.layouts[#f.layouts].console_top)
 end)
 test("controller merges collector snapshots and removes owned trigger runtime",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),6); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
+  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud.collector.snapshot.info={attributes={STR="Good"}}; hud:refresh(); eq(hud.last_state.attributes.STR,"Good"); eq(f:count(f.triggers),7); hud:shutdown(); eq(f:count(f.triggers),0); eq(f:count(f.timers),0)
 end)
 local function visibilityRuntime(collectorFirst)
   local f=fake(); f.gmcp={Char={Status={name="Synthetic",surname="Tester"},Vitals={}}}
@@ -1803,7 +1811,7 @@ test("a different character welcome performs another opted-in update without dis
   eq(checks,2); eq(#completions,2)
 end)
 test("reload leaves one command collector",function()
-  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:reload(); eq(f:count(f.triggers),6); local outgoing=0; for _,name in pairs(f.events) do if name=="sysDataSendRequest" then outgoing=outgoing+1 end end; eq(outgoing,3)
+  local f=fake(); local hud=Main.new(f,{layout={}}); hud:start(); hud:reload(); eq(f:count(f.triggers),7); local outgoing=0; for _,name in pairs(f.events) do if name=="sysDataSendRequest" then outgoing=outgoing+1 end end; eq(outgoing,4)
 end)
 
 test("runtime wires one automapper handler per event and cleans it exactly",function()
@@ -1811,8 +1819,8 @@ test("runtime wires one automapper handler per event and cleans it exactly",func
   local personal=f:addEvent("gmcp.Room.Info",function() end); local hud=Main.new(f,{layout={}}); assert(hud:start())
   eq(f.createdMaps,1); eq(hud.automapper:currentRoom(),100)
   local function count(name) local n=0; for _,value in pairs(f.events) do if value==name then n=n+1 end end; return n end
-  eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),3); eq(count("sysDataSendRequest"),3)
-  hud:reload(); eq(f.createdMaps,2); eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDataSendRequest"),3)
+  eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDisconnectionEvent"),4); eq(count("sysDataSendRequest"),4)
+  hud:reload(); eq(f.createdMaps,2); eq(count("gmcp.Room.Info"),2); eq(count("gmcp.Room.WrongDir"),1); eq(count("sysDataSendRequest"),4)
   hud:shutdown(); eq(f.events[personal],"gmcp.Room.Info"); eq(count("gmcp.Room.Info"),1); eq(count("gmcp.Room.WrongDir"),0); eq(count("sysDataSendRequest"),0)
 end)
 
@@ -2543,10 +2551,10 @@ test("chat trigger registration failure rolls back partial HUD runtime",function
 end)
 test("chat runtime has one owned trigger and cached personal API survives reload safely",function()
   local f=fake(); local unrelated=f:addLineTrigger(function() end); local hud=Main.new(f,{layout={}}); hud:start()
-  eq(hud.chat.started,true); eq(f:count(f.triggers),7)
+  eq(hud.chat.started,true); eq(f:count(f.triggers),8)
   DGHUD={controller=hud}; Main.installChatApi(DGHUD); local capture=DGHUD.chat.capture
   assert(capture("QUEST","before reload")); hud:reload(); DGHUD={controller=hud}; Main.installChatApi(DGHUD)
-  eq(f:count(f.triggers),7); eq(f.loadRecentCalls,2); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"before reload")
+  eq(f:count(f.triggers),8); eq(f.loadRecentCalls,2); eq(#hud.chat:entries(),1); eq(hud.chat:entries()[1].message,"before reload")
   assert(capture("QUEST","after reload")); eq(#hud.chat:entries(),2); eq(hud.chat:entries()[2].message,"after reload")
   hud:shutdown(); eq(f:count(f.triggers),1); eq(f.triggers[unrelated]~=nil,true)
   local result,err=capture("QUEST","during shutdown"); eq(result,nil); eq(err,"chatbox is not running"); DGHUD=nil
@@ -4130,6 +4138,139 @@ test("Skill Settings filter toggle remains draft only until save and Cancel Rese
       eq(hud:skillFilterEnabled(),true); eq(view.settings.display.skill_filter,true)
     end)
   end)
+end)
+
+-- Wealth reports are observed native output. The fake only records replacement
+-- plans; test_wealth_adapter.lua exercises the actual console mutations.
+local function flushWealthRuntime(f)
+  for _=1,20 do
+    local chosen
+    for id in pairs(f.timers) do if f.timer_delays[id]==0 then chosen=id; break end end
+    if not chosen then return end
+    local callback=f.timers[chosen]; f.timers[chosen]=nil; callback()
+  end
+  error("unbounded deferred runtime timers")
+end
+local function runtimeWealthLines(f,first)
+  local trigger=assert(f.triggers[f.wealthTrigger],"missing wealth trigger")
+  first=first or 20
+  trigger("Synthetic Low has 0 silver",first)
+  trigger("Synthetic High has 1200 silver",first+1)
+  trigger("Done.",first+2)
+end
+local function startWealthRuntime()
+  local f=fake(); local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}})
+  assert(hud:start()); assert(hud.wealth_display and hud.wealth_display.started)
+  return f,hud
+end
+local function wealthLateCallback(f,hud,phase)
+  f:emit("sysDataSendRequest","sysDataSendRequest","breakd wealth")
+  if phase=="collecting" then f.triggers[f.wealthTrigger]("Synthetic has 1 silver",20)
+  elseif phase=="pending" then runtimeWealthLines(f) end
+  return assert(f.timers[assert(hud.wealth_display.timer)])
+end
+
+test("wealth runtime startup is passive and observes each exact outgoing command once",function()
+  local f,hud=startWealthRuntime()
+  eq(f.sentCommands,nil); eq(f.wealthBatches,nil); eq(hud.wealth_display.response,nil)
+  local observed,calls,rollerCommand=nil,0,nil
+  local outgoing=hud.wealth_display.onOutgoing
+  hud.wealth_display.onOutgoing=function(self,command) calls=calls+1; observed=command; return outgoing(self,command) end
+  hud.roller.onOutgoing=function(_,command) rollerCommand=command end
+  local command=" \tBrEaKd \t WeAlTh\t "
+  f:emit("sysDataSendRequest","sysDataSendRequest",command)
+  eq(calls,1); eq(observed,command); eq(rollerCommand,command); eq(f.sentCommands,nil)
+  runtimeWealthLines(f); eq(f.wealthBatches,nil); flushWealthRuntime(f)
+  eq(#f.wealthBatches,1); eq(#f.wealthBatches[1],3)
+  assert(f.wealthBatches[1][1].display_text:match("^Name%s%s+Silver$"))
+  assert(f.wealthBatches[1][2].display_text:match("^Synthetic High%s+1,200$"))
+  assert(f.wealthBatches[1][3].display_text:match("^Synthetic Low%s+0$"))
+  eq(f.sentCommands,nil)
+  for _,alias in pairs(f.aliases) do
+    assert(not (alias.pattern or ""):lower():find("wealth",1,true),"wealth must not add an alias")
+  end
+  hud:shutdown(); eq(next(f.timers),nil)
+end)
+
+test("wealth runtime never arms from unsolicited rows and never changes other command sends",function()
+  local f,hud=startWealthRuntime(); runtimeWealthLines(f); flushWealthRuntime(f)
+  eq(f.wealthBatches,nil); eq(hud.wealth_display.response,nil)
+  for _,command in ipairs({"look","skill","info","breakd wealth;look","breakdown wealth extra","say breakd wealth"}) do
+    f:emit("sysDataSendRequest","sysDataSendRequest",command); runtimeWealthLines(f); flushWealthRuntime(f)
+    eq(f.wealthBatches,nil); eq(hud.wealth_display.response,nil); eq(f.sentCommands,nil)
+  end
+  local send=f.sendCommand
+  function f:sendCommand(command)
+    send(self,command); self:emit("sysDataSendRequest","sysDataSendRequest",command); return true
+  end
+  for _,command in ipairs({"look","skill","info","inventory"}) do f:sendCommand(command) end
+  eq(table.concat(f.sentCommands,"|"),"look|skill|info|inventory")
+  eq(f.wealthBatches,nil); hud:shutdown()
+end)
+
+test("wealth runtime normal character startup keeps its existing inventory command",function()
+  local f=fake(); f.character_active=true
+  local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false},update={auto_apply=false}})
+  assert(hud:start()); eq(#f.sentCommands,1); eq(f.sentCommands[1],"inventory")
+  assert(hud.wealth_display and hud.wealth_display.started)
+  eq(hud.wealth_display.response,nil); eq(f.wealthBatches,nil); hud:shutdown()
+end)
+
+test("wealth runtime outgoing interrupt invalidates pending output without duplicate sends",function()
+  local f,hud=startWealthRuntime(); local late=wealthLateCallback(f,hud,"pending")
+  f:emit("sysDataSendRequest","sysDataSendRequest","look"); late(); flushWealthRuntime(f)
+  eq(f.wealthBatches,nil); eq(hud.wealth_display.pending,nil); eq(hud.wealth_display.timer,nil); eq(f.sentCommands,nil)
+  f:emit("sysDataSendRequest","sysDataSendRequest","breakdown wealth"); runtimeWealthLines(f,40)
+  flushWealthRuntime(f); eq(#f.wealthBatches,1); eq(f.wealthBatches[1][1].line_number,40)
+  hud:shutdown()
+end)
+
+test("wealth runtime disconnect character exit and entry cancel every capture generation",function()
+  for _,phase in ipairs({"waiting","collecting","pending"}) do
+    for _,boundary in ipairs({"disconnect","exit","entry"}) do
+      local f,hud=startWealthRuntime(); local display=hud.wealth_display
+      local late=wealthLateCallback(f,hud,phase)
+      if boundary=="disconnect" then f:emit("sysDisconnectionEvent")
+      elseif boundary=="exit" then hud:onCharacterExit("menu")
+      else hud:onCharacterEntry("Synthetic") end
+      late(); flushWealthRuntime(f)
+      eq(f.wealthBatches,nil); eq(display.response,nil); eq(display.pending,nil); eq(display.timer,nil)
+      hud:shutdown()
+    end
+  end
+end)
+
+test("wealth runtime shutdown reload and update handoff retire callbacks and owned handlers",function()
+  for _,operation in ipairs({"shutdown","reload","update"}) do
+    local f,hud=startWealthRuntime(); local personal=f:addEvent("personal-wealth-test",function() end)
+    local display=hud.wealth_display; local trigger=display.trigger
+    local late=wealthLateCallback(f,hud,"pending")
+    if operation=="reload" then assert(hud:reload())
+    else if operation=="update" then hud.update_handoff=true; hud.update_preserve_view=true end; assert(hud:shutdown()) end
+    late(); flushWealthRuntime(f)
+    eq(f.wealthBatches,nil); eq(display.started,false); eq(display.pending,nil); eq(display.timer,nil)
+    eq(f.triggers[trigger],nil); assert(f.events[personal])
+    if operation=="reload" then
+      assert(hud.wealth_display and hud.wealth_display~=display); eq(hud.wealth_display.started,true)
+      f:emit("sysDataSendRequest","sysDataSendRequest","breakd wealth"); runtimeWealthLines(f,40)
+      flushWealthRuntime(f); eq(#f.wealthBatches,1); hud:shutdown()
+    else eq(hud.wealth_display,nil) end
+    eq(next(f.timers),nil)
+  end
+end)
+
+test("wealth runtime missing hooks and trigger failure retain a working raw-output HUD",function()
+  for _,mode in ipairs({"missing-trigger","missing-replace","trigger-failure"}) do
+    local f=fake()
+    if mode=="missing-trigger" then f.addWealthDisplayTrigger=nil
+    elseif mode=="missing-replace" then f.replaceWealthOutput=nil
+    else f.failWealthTrigger=true end
+    local hud=Main.new(f,{layout={},chat={enabled=false},mapper={enabled=false}})
+    assert(hud:start()); eq(hud.wealth_display,nil); eq(f.sentCommands,nil)
+    f:emit("sysDataSendRequest","sysDataSendRequest","breakd wealth"); flushWealthRuntime(f)
+    eq(f.wealthBatches,nil); assert(hud.started); hud:shutdown()
+    eq(next(f.events),nil); eq(next(f.triggers),nil); eq(next(f.timers),nil)
+  end
 end)
 
 test("Skill Settings failed save keeps filter draft open without changing runtime or applied view",function()

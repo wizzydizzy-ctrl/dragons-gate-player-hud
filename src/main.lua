@@ -10,6 +10,7 @@ local VisibilityTracker=require("visibility_tracker")
 local RollerAudio=require("autoroller_audio")
 local RollerAlerts=require("autoroller_alerts")
 local SkillDisplay=require("skill_display")
+local WealthDisplay=require("wealth_display")
 local SkillSort=require("skill_sort")
 local Roundtime=require("roundtime")
 local RoundtimeCheck=require("roundtime_check")
@@ -721,6 +722,7 @@ function Main:onCharacterEntry(name)
     return false
   end
   local previousName=self.character_entry_name or self.roundtime_character
+  if self.wealth_display then self.wealth_display:cancel() end
   if name~="" and previousName and name~=previousName then self:onCharacterExit() end
   self.character_entry_started=true; self.character_entry_name=name~="" and name or self.character_entry_name
   if name~="" then self.outgoing_session_confirmed=true end
@@ -738,6 +740,7 @@ function Main:onCharacterEntry(name)
   return ok,err
 end
 function Main:onCharacterExit(reason)
+  if self.wealth_display then self.wealth_display:cancel() end
   self.outgoing_session_confirmed=false
   if self.visibility then self.visibility:reset() end
   if self.quick_actions then self.quick_actions:cancel(reason or "Character changed.") end
@@ -1766,6 +1769,14 @@ function Main:start()
     self.skill_display:shutdown(); self.skill_display=nil
     if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,"Main skills display is unavailable; keeping the original skill output.") end
   end
+  if self.adapter.addWealthDisplayTrigger and self.adapter.replaceWealthOutput then
+    self.wealth_display=WealthDisplay.new(self.adapter,self.settings.package_name)
+    local wealthCalled,wealthOk=pcall(self.wealth_display.start,self.wealth_display)
+    if not wealthCalled or not wealthOk then
+      self.wealth_display:shutdown(); self.wealth_display=nil
+      if self.adapter.reportCommandError then pcall(self.adapter.reportCommandError,self.adapter,"Wealth formatting is unavailable; keeping the original output.") end
+    end
+  end
   self.colorizer=OutputColorizer.new(self.adapter,self.colorizer_enabled==true,self.settings.colorization); local colorizerOk,colorizerErr=self.colorizer:start(); if not colorizerOk then error(colorizerErr,0) end
   if self.adapter.isCharacterActive and self.adapter:isCharacterActive() then self:onCharacterEntry() end
   for _,name in ipairs(Events.gmcp) do local eventName=name; self.runtime.events[#self.runtime.events+1]=self.adapter:addEvent(eventName,function()
@@ -1930,6 +1941,7 @@ function Main:restoreMainInputAlignment()
   return restored,err
 end
 function Main:shutdown()
+  local wealthDisplay=self.wealth_display; self.wealth_display=nil; if wealthDisplay then wealthDisplay:shutdown() end
   if self.quick_actions then self.quick_actions:shutdown(); self.quick_actions=nil end
   if self.rune_variables then self.rune_variables:clear(); self.rune_variables=nil end
   local skillDisplay=self.skill_display; self.skill_display=nil; if skillDisplay then skillDisplay:shutdown() end

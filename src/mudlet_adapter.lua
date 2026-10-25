@@ -488,6 +488,106 @@ function Adapter:addColorizerTrigger(fn)
   end)
 end
 function Adapter:addSkillDisplayTrigger(fn) return self:addColorizerTrigger(fn) end
+function Adapter:addWealthDisplayTrigger(fn) return self:addColorizerTrigger(fn) end
+function Adapter:replaceWealthOutput(rows,api)
+  api=api or _G
+  if type(api)~="table" then return nil,"Mudlet wealth replacement API is unavailable" end
+  local required={"getLines","getLineNumber","getColumnNumber","getBackgroundColor","moveCursor",
+    "selectSection","replace","setFgColor","setBgColor","setBold","setUnderline","deselect","resetFormat"}
+  for _,key in ipairs(required) do
+    if type(api[key])~="function" then return nil,"Mudlet wealth replacement API "..key.." is unavailable" end
+  end
+  local function integer(value)
+    return type(value)=="number" and value>=0 and value<math.huge and value%1==0
+  end
+  local function plain(value) return type(value)=="table" and getmetatable(value)==nil end
+  local function text(value,limit,source)
+    return type(value)=="string" and #value>0 and #value<=limit
+      and not value:find(source and "[^\t -~]" or "[^ -~]") and not value:find("[<>]")
+  end
+  local segments,byLine={},{}
+  local originalLine,originalColumn
+  local ready,why=pcall(function()
+    assert(plain(rows) and #rows>=2 and #rows<=513,"invalid wealth output rows")
+    local count=0
+    for key in pairs(rows) do
+      assert(integer(key) and key>=1 and key<=#rows,"invalid wealth output index")
+      count=count+1
+    end
+    assert(count==#rows,"wealth output rows must be dense")
+    local previous=-1
+    for index,row in ipairs(rows) do
+      assert(plain(row),"invalid wealth output row")
+      for key in pairs(row) do
+        assert(key=="line_number" or key=="source_line" or key=="display_text","invalid wealth output field")
+      end
+      assert(integer(row.line_number) and row.line_number>previous,"invalid wealth output coordinate")
+      assert(text(row.source_line,512,true),"invalid wealth source line")
+      assert(text(row.display_text,256),"invalid wealth display text")
+      local trimmed=row.source_line:match("^[ \t]*(.-)[ \t]*$")
+      if index==#rows then
+        assert(trimmed=="Done.","wealth output requires its final Done. row")
+      else
+        assert(require("wealth_display").parseRow(row.source_line),"invalid wealth source syntax")
+      end
+      local segment={start=1,line_number=row.line_number,source_line=row.source_line,
+        display_text=row.display_text,color={220,224,220},bold=false,underline=false}
+      segments[index]=segment; byLine[row.line_number]=segment
+      previous=row.line_number
+    end
+    originalLine=api.getLineNumber(); originalColumn=api.getColumnNumber()
+    assert(integer(originalLine) and integer(originalColumn),"current console coordinate is unavailable")
+    local r,g,b=api.getBackgroundColor("main")
+    assert(integer(r) and r<=255 and integer(g) and g<=255 and integer(b) and b<=255,
+      "main console background is unavailable")
+    for _,segment in ipairs(segments) do
+      local current=api.getLines(segment.line_number,segment.line_number+1)
+      local source=type(current)=="table" and current[1]
+      -- Only native trailing space padding may differ. Select the actual full
+      -- buffer line so shorter replacements cannot leave an old silver tail.
+      assert(text(source,512,true) and source:gsub(" +$","")==segment.source_line:gsub(" +$",""),
+        "wealth source row changed")
+      segment.source_line=source; segment.length=#source; segment.background={r,g,b}
+    end
+  end)
+  if not ready then return nil,tostring(why) end
+
+  -- Keep skill/colorizer semantics intact. Wealth replacements must report
+  -- skipped rows and failed setters rather than claim a partial table succeeded.
+  local guarded={}
+  local failure
+  local function checked(key,...)
+    local called,value,err=pcall(api[key],...)
+    if not called or value==false or (value==nil and err~=nil) or (key=="moveCursor" and value~=true) then
+      failure="Mudlet wealth replacement API "..key.." failed"
+      error(failure)
+    end
+    return value,err
+  end
+  for _,key in ipairs(required) do
+    local name=key
+    guarded[name]=function(...) return checked(name,...) end
+  end
+  guarded.getLines=function(first,last)
+    local current=api.getLines(first,last)
+    local segment=byLine[first]
+    assert(segment and type(current)=="table" and current[1]==segment.source_line,
+      "wealth source row changed during replacement")
+    return current
+  end
+  local called,result,err=pcall(self.applyLineColors,self,segments,guarded)
+  -- Always restore the cursor, including when the replaced slot was already
+  -- current. No echo, deletion, insertion, logging, or command dispatch occurs.
+  local clean,cleanupErr=pcall(function() checked("deselect") end)
+  local restored,restoreErr=pcall(function() checked("moveCursor",originalColumn,originalLine) end)
+  local reset,resetErr=pcall(function() checked("resetFormat") end)
+  if not called then return nil,tostring(result) end
+  if not result then return nil,tostring(err or failure or "wealth replacement failed") end
+  if failure or not clean or not restored or not reset then
+    return nil,tostring(failure or cleanupErr or restoreErr or resetErr)
+  end
+  return true
+end
 function Adapter:replaceSkillOutput(rows,api)
   api=api or _G
   for _,key in ipairs({"getLines","getLineNumber","getColumnNumber","moveCursor","selectSection","replace","setFgColor","deselect"}) do

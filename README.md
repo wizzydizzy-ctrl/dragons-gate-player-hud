@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.107**.
+Documentation covers **DGHUD v0.3.108**.
 
 ## Quick start
 
@@ -43,7 +43,15 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.107
+## Latest changes — v0.3.108
+
+- Manually requested `breakd wealth` / `breakdown wealth` reports display in the main console as **Name** / **Silver**, sorted highest to lowest. Names align left; silver uses commas and aligns right.
+- Zero balances remain included; equal balances keep the game's original order.
+- Formatting adds no game queries, permissions, chat forwarding, or separate wealth storage.
+
+[Read about wealth report formatting](docs/COMMAND_REFERENCE.md#wealth-report-formatting-v03108).
+
+## Previous changes — v0.3.107
 
 - **PRIVATE** keeps direct conversations; **LINK** keeps shared mental/ESP broadcasts and Dragon, Psycian, and Secian links. Updating older versions applies this separation without clearing history.
 - Recognized link frames previously captured with a PRIVATE or WHISPER label now display in LINK and do not trigger PRIVATE alerts. Original records remain unchanged; unrelated personal categories are preserved.
