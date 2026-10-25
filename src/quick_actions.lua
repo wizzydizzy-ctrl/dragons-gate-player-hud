@@ -2,7 +2,7 @@
 -- capture, connection events and rune variables; this module owns no globals.
 local QuickActions={}; QuickActions.__index=QuickActions
 local SkillSort=require("skill_sort")
-local REQUESTS={shoprenew="info mag",shoprenewall="info mag",trainall="skill"}
+local REQUESTS={shoprenew="info magic",shoprenewall="info magic",trainall="skill"}
 local MAX_ITEMS,MAX_RUNE_NAME,MAX_SKILL_NAME=256,80,2048
 local MAX_INTEGER=9007199254740991
 local BUSY="A shortcut is already running. Use shoprenewstop or trainallstop to stop it."

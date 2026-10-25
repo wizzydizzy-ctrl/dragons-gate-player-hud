@@ -105,18 +105,20 @@ test("collector current character switches prevent previous self INFO from retur
   eq(c.snapshot.info.character.full_name,"Other Tester"); c:shutdown(); eq(f:owned(),0)
 end)
 
-test("owned fresh requests publish parsed data once and suppress their outgoing echo",function()
-  local f=fake(); local changes=0; local c=Collector.new(f,Parser,function() changes=changes+1 end)
-  c:start()
-  local originalSend=f.sendCommand
-  function f:sendCommand(command) originalSend(self,command); self:outgoing(command); return true end
-  local begun,done,result=0,0,nil
-  c.onCaptureBegin=function(command) eq(command,"info magic"); begun=begun+1 end
-  assert(c:request("info mag",function(value,err) done=done+1; result=value; eq(err,nil) end))
-  eq(f.sent[1],"info mag"); eq(c.active.command,"info magic"); eq(begun,1)
-  eq(c:request("skill",function() error("must not run") end),nil)
-  f:lines(runes); eq(done,1); eq(changes,1); eq(result.items[1].name,"Healing")
-  c:cancelActive(); c:shutdown(); eq(done,1)
+test("owned fresh rune requests send exact info magic once and suppress their outgoing echo",function()
+  for _,command in ipairs({"info mag","info magic"," INFO MAG "," INFO MAGIC "}) do
+    local f=fake(); local changes=0; local c=Collector.new(f,Parser,function() changes=changes+1 end)
+    c:start()
+    local originalSend=f.sendCommand
+    function f:sendCommand(sent) originalSend(self,sent); self:outgoing(sent); return true end
+    local begun,done,result=0,0,nil
+    c.onCaptureBegin=function(sent) eq(sent,"info magic"); begun=begun+1 end
+    assert(c:request(command,function(value,err) done=done+1; result=value; eq(err,nil) end))
+    eq(#f.sent,1); eq(f.sent[1],"info magic"); eq(c.active.command,"info magic"); eq(begun,1); eq(done,0)
+    eq(c:request("skill",function() error("must not run") end),nil)
+    f:lines(runes); eq(done,1); eq(changes,1); eq(result.items[1].name,"Healing")
+    c:cancelActive(); c:shutdown(); eq(done,1); eq(begun,1); eq(#f.sent,1); eq(f:owned(),0)
+  end
 end)
 test("owned requests report cancellation interruption incomplete output and send failure",function()
   for _,mode in ipairs({"cancel","interrupt","incomplete","send"}) do
@@ -743,7 +745,7 @@ local function ownedActionFixture(command)
       eq(prior.items[1].name,"Previously Saved"); eq(prior.items[1].remaining,77)
       eq(prior.items[1].remain,99); eq(prior.items[1].level,4)
     end
-    eq(c.active,nil); eq(#f.sent,1); eq(f.sent[1],command)
+    eq(c.active,nil); eq(#f.sent,1); eq(f.sent[1],command=="info mag" and "info magic" or command)
     assert(c:shutdown()); eq(calls,1); eq(f:owned(),0)
   end
 end
@@ -961,11 +963,11 @@ test("rune renewal uses only eleven elementals and waits for the final prompt af
   local q=require("quick_actions").new(f,c,{enabled=function() return true end})
   assert(q:start("shoprenewall")); f:lines(tailElementals); f:lines(runeTail)
   eq(changes,1); assertTailElementals(c.snapshot.runes); assertNoTailVariables(environment)
-  eq(#f.sent,1); eq(f.sent[1],"info mag"); eq(f:fireDelay(1),false); eq(q:busy(),true)
+  eq(#f.sent,1); eq(f.sent[1],"info magic"); eq(f:fireDelay(1),false); eq(q:busy(),true)
   f:line(">"); eq(changes,1); eq(#f.sent,1)
   for index=1,11 do assert(f:fireDelay(1)) end
   eq(f:fireDelay(1),false); eq(q:busy(),false)
-  eq(table.concat(f.sent,","),"info mag,shop renew aegis,shop renew barrier,shop renew blending,shop renew dexterity,shop renew disruption,shop renew force,shop renew holy,shop renew movement,shop renew strength,shop renew translocation,shop renew vigor")
+  eq(table.concat(f.sent,","),"info magic,shop renew aegis,shop renew barrier,shop renew blending,shop renew dexterity,shop renew disruption,shop renew force,shop renew holy,shop renew movement,shop renew strength,shop renew translocation,shop renew vigor")
   assertNoTailVariables(environment); assert(c:shutdown()); variables:clear(); eq(f:owned(),0)
 end)
 test("unsafe or numeric rune tails stop renewal after the confirmed sidebar preview",function()
@@ -1035,7 +1037,7 @@ test("conflicting rune counts and unsafe duplicate suffixes never schedule renew
     eq(c.active,nil); eq(q:busy(),false); eq(c.timeout,nil); eq(c.prompt_nudge,nil)
     eq(changes,0); eq(c.snapshot.runes,prior); eq(prior.items[1].remaining,77)
     eq(f:fireDelay(1),false); eq(f:fireDelay(2.5),false); eq(f:fireDelay(.15),false)
-    eq(#f.sent,1); eq(f.sent[1],"info mag")
+    eq(#f.sent,1); eq(f.sent[1],"info magic")
     f:line(">"); eq(changes,0); eq(#f.sent,1)
     assert(c:shutdown()); eq(f:owned(),0)
   end
@@ -1142,7 +1144,7 @@ test("owned repeated elemental headers abort renewal before or after vetted prev
       f:line(prompt)
       eq(c.active,nil); eq(q:busy(),false); eq(f:fireDelay(1),false)
       eq(changes,afterPreview and 1 or 0); eq(c.snapshot.runes,published)
-      eq(#f.sent,1); eq(f.sent[1],"info mag")
+      eq(#f.sent,1); eq(f.sent[1],"info magic")
       eq(c.timeout,nil); eq(c.prompt_nudge,nil)
       assert(c:shutdown()); eq(f:owned(),0)
     end

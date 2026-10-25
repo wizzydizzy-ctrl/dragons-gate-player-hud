@@ -1,6 +1,6 @@
 # DGHUD Options and Display Settings
 
-Applies to DGHUD **v0.3.106**.
+Applies to DGHUD **v0.3.107**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -124,7 +124,7 @@ Turn **AUTO MAIN WRAP: OFF** when you want to control Mudlet's main-window wrap 
 
 Open **OPTIONS → SKILLS & RUNES** for skill display/filter/sort choices and the **Quick Commands** switches. `shoprenew`, `shoprenewall`, and `trainall` each default **ON** and can be turned off independently. **Save** keeps your choices across restarts and updates; **Cancel** discards this draft. Disabling a running shortcut stops its remaining queue only after Save.
 
-`shoprenew` checks fresh runes and renews those below 20 weaves; `shoprenewall` renews them all. `trainall` checks fresh skills and sends `train raise <game ID>` for zero-use skills. Each sends one command per second. Be at the appropriate shop/trainer, with the required currency/resources. `shoprenewstop` or `trainallstop` stops the active queue. [Full command details](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
+The renewal shortcuts request fresh `info magic`: `shoprenew` renews runes below 20 weaves; `shoprenewall` renews them all. `trainall` checks fresh skills and sends `train raise <game ID>` for zero-use skills. Each sends one command per second. Be at the appropriate shop/trainer, with the required currency/resources. `shoprenewstop` or `trainallstop` stops the active queue. [Full command details](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
 
 **SKILL FILTERS: ON/OFF** is a control in **OPTIONS → Skills & Runes**. It defaults **ON** when no choice is saved (the boolean `display.skill_filter`). ON enables the HUD's group and name-prefix searches. Turn it **OFF** and click **Save** to send native staff commands such as `skill Rath` to the game.
 

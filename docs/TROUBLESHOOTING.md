@@ -1,6 +1,6 @@
 # DGHUD Troubleshooting
 
-Applies to DGHUD **v0.3.106**.
+Applies to DGHUD **v0.3.107**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
@@ -11,6 +11,7 @@ Start with the smallest action that matches the problem. A data refresh is safer
 | Problem | First action |
 | --- | --- |
 | One character panel is stale or empty | `dghud refresh` |
+| PRIVATE and LINK both show shared links | Check the version beside OPTIONS, then `dghud update`; do not clear chat history |
 | Layout looks wrong after resizing | `dghud reload` |
 | Unsure whether an update exists | `dghud check` |
 | A newer release exists | `dghud update` |

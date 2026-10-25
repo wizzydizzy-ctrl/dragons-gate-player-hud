@@ -1,4 +1,66 @@
 local Channels=require("chat_channels")
+
+test("PRIVATE and WHISPER labels recover complete broadcast and direct frames without mutating records",function()
+  local rows={
+    {[[Tester (ESP): "Synthetic broadcast."]],"MENTAL",false},
+    {[=[You pick up Tester's thoughts, "Synthetic global." [r-1]]=],"MENTAL",false},
+    {[[You pick up Tester's thoughts echoing through the area, "Synthetic room."]],"MENTAL",false},
+    {[=[You pick up Tester's mental link, "Synthetic generic." [r-2]]=],"MENTAL",false},
+    {[[Listener picks up Tester's mental link, "Synthetic observed."]],"MENTAL",false},
+    {[=[You pick up Tester's Psycian link, "Synthetic racial." [r-1]]=],"PSYCIAN",false},
+    {[[You pick up Tester's Dragon link, "Synthetic racial."]],"DRAGON",false},
+    {[[You pick up Tester's Secian link, "Synthetic racial."]],"SECIAN",false},
+    {[[Tester thinks to you, "Synthetic direct."]],"MENTAL",true},
+    {[[Tester whispers to you, "Synthetic whisper."]],"WHISPER",true},
+  }
+  for _,category in ipairs({"PRIVATE","WHISPER"}) do
+    for _,source in ipairs({"builtin","gmcp","custom"}) do
+      for _,row in ipairs(rows) do
+        for _,line in ipairs({row[1],"\27[35m\7"..row[1].."\27[0m"}) do
+          local value={category=category,source=source,line=line,message="Synthetic metadata.",speaker="Fixture",
+            target="Synthetic Listener",schema=1,timestamp="2026-10-24T12:00:00Z",character="Synthetic Keeper"}
+          local original={}; for key,item in pairs(value) do original[key]=item end
+          eq(Channels.entryCategory(value),row[2]); eq(Channels.inPrivate(value),row[3])
+          local projected=Channels.project(value)
+          eq(projected.category,row[2])
+          for key,item in pairs(original) do
+            eq(value[key],item)
+            if key~="category" then eq(projected[key],item) end
+          end
+          for key,item in pairs(value) do eq(original[key],item) end
+        end
+      end
+    end
+  end
+end)
+
+test("PRIVATE recovery requires complete framing and never guesses from metadata quoted or malformed text",function()
+  for _,line in ipairs({
+    [[Tester says, "You pick up Other's Psycian link, 'Quoted.'"]],
+    [[Report: You pick up Tester's Dragon link, "Synthetic."]],
+    [=[You pick up Tester's Psycian link, "Synthetic." [r-x]]=],
+    [[You pick up Tester's mental link, "Synthetic." extra]],
+    "You pick up Tester's Dragon link, \"Synthetic.\nSecond line.\"",
+    "You pick up Tester's Dragon link, \"Synthetic.\rSecond line.\"",
+    "You pick up Tester's Dragon link, \"Synthetic.\0Hidden.\"",
+    [[Tester (ESP): "Synthetic." trailing]],
+    [=[Tester thinks to you, "Synthetic." [r-1]]=],
+    "Unrecognized intentional custom message.",
+  }) do
+    for _,category in ipairs({"PRIVATE","WHISPER"}) do
+      local value={category=category,source="custom",line=line,target="Synthetic Listener",
+        message=[[You pick up Tester's Psycian link, "Metadata is not framing."]]}
+      eq(Channels.entryCategory(value),category)
+      eq(Channels.project(value),value)
+    end
+  end
+  for _,category in ipairs({"ROOM","STAFF","QUEST","LINK","LINK VIEW"}) do
+    eq(Channels.entryCategory({category=category,line=[[You pick up Tester's Psycian link, "Synthetic."]]}),category)
+  end
+  eq(Channels.entryCategory({category="PRIVATE",source="gmcp",target="Tester",
+    message=[[Tester (ESP): "Metadata only."]]}),"PRIVATE")
+end)
+
 local function entry(category,line) return {category=category,line=line,message="hello",speaker="Tester"} end
 test("PRIVATE accepts only whispers and explicitly direct mental conversations",function()
   eq(Channels.inPrivate(nil),false); eq(Channels.inPrivate("MENTAL"),false)

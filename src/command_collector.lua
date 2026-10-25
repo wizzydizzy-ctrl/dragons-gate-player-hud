@@ -86,7 +86,10 @@ function Collector:request(command,done)
   if not self:begin(canonical,false) then return nil,"Another data request is running." end
   local active=self.active; active.onComplete=done
   self.sending_requested_command=canonical
-  local called,sent,err=pcall(self.adapter.sendCommand,self.adapter,command)
+  -- HUD-owned rune requests always use the full command, including callers
+  -- that still pass the old abbreviation. Manual command sends are untouched.
+  local requested=canonical=="info magic" and canonical or command
+  local called,sent,err=pcall(self.adapter.sendCommand,self.adapter,requested)
   self.sending_requested_command=nil
   if not called or sent==false or (sent==nil and err~=nil) then
     if self.active==active then self:cancelActive("Could not request fresh data. Try again.") end

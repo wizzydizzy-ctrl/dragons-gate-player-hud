@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.106.
+Applies to DGHUD v0.3.107.
 
 The chatbox appears above the normal game display by default. It copies recognized communication into a separate readable history without gagging, replacing, or changing the original game line.
 
@@ -79,6 +79,8 @@ Drag any chat tab left or right to arrange the filters in the order you prefer. 
 
 ### Older tabs and saved messages
 
+If PRIVATE and LINK both show shared link traffic, check the version beside OPTIONS and run `dghud update` in that profile. Older versions grouped whole link channels into PRIVATE. Complete shared-link frames saved or captured under PRIVATE or WHISPER are now corrected for display and alerts; you do not need to clear chat. Unrecognized intentional custom PRIVATE entries remain available there.
+
 ESP and CONTACT share the MENTAL source. Named Psycian, Dragon, and Secian links keep their matching sources, while generic mental links remain MENTAL. Broadcasts display together in LINK; recognizable direct contacts display in PRIVATE, including older saved messages with the full direct-contact frame. A legacy CONTACT category alone does not prove a message was private. Original saved categories and message text are not rewritten or deleted.
 
 MENTAL remains included in ALL if either previous ESP or CONTACT source was included. PSYCIAN initially inherits the previous ESP inclusion choice. An explicit saved MENTAL or PSYCIAN choice always wins, including OFF.
@@ -97,16 +99,21 @@ Eilan asks Atrax, "Ready?"
 You say I'm new.
 ```
 
-Private communication includes forms such as:
+Direct communication in PRIVATE includes:
 
 ```text
 Xarus whispers, "I do not know."
+Tekk thinks to you, "hello"
+```
+
+Shared communication in LINK includes:
+
+```text
 Tekk (ESP): "hello"
 You pick up Losmir's mental link, "test"
 You pick up Tekk's Psycian link, "hello" [r-1]
 You pick up Tekk's Dragon link, "hello" [r-1]
 You pick up Marcelline's Secian link, "Hello?" [r-1]
-Tekk thinks to you, "hello"
 You pick up Faolann's thoughts echoing through the area, "leave me be"
 ```
 

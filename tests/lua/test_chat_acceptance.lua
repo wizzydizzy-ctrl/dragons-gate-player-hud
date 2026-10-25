@@ -93,6 +93,107 @@ test("restored adopted chat skips repaint only for a verified matching display",
   end
 end)
 
+local function partitionAcceptanceRows()
+  return {
+    {category="CONTACT",line='Sable thinks to you, "Synthetic direct."'},
+    {category="PRIVATE",line='Sable thinks to you, "Synthetic legacy direct."'},
+    {category="WHISPER",line='Sable whispers to you, "Synthetic whisper."'},
+    {category="PRIVATE",line='You pick up Sable\'s mental link, "Synthetic legacy shared." [r-1]'},
+    {category="WHISPER",line='You pick up Sable\'s Dragon link, "Synthetic mislabeled shared." [r-1]'},
+    {category="ESP",line='Sable (ESP): "Synthetic broadcast."'},
+    {category="LINK",line="Synthetic personal LINK."},
+    {category="LINK VIEW",line="Synthetic personal LINK VIEW."},
+  }
+end
+local function partitionAcceptanceView()
+  local view={repaints=0,chat_output={lastLine=0,lines={}},
+    chatDisplayMatches=require("view").chatDisplayMatches}
+  function view.chat_output:getLastLineNumber() return self.lastLine end
+  function view:setChatFilterCallback(callback) self.filter_callback=callback end
+  function view:setChatPresentation(_,combined) self.combined=combined end
+  function view:renderChat(entries,categories,filter)
+    self.repaints=self.repaints+1
+    self.chat_entries={}; self.chat_categories={}; self.chat_line_ranges={}
+    self.chat_active_filter=filter; self.chat_output.lines={}
+    for index,entry in ipairs(entries) do
+      self.chat_entries[index]=entry; self.chat_output.lines[index]=entry.line
+      self.chat_line_ranges[index]={entry=entry,first=index,last=index}
+    end
+    for index,category in ipairs(categories) do self.chat_categories[index]=category end
+    self.chat_last_line=#entries; self.chat_output.lastLine=#entries
+  end
+  return view
+end
+local function assertPartitionAcceptance(view,hud,rows,filter)
+  local expected=filter=="PRIVATE" and {1,2,3}
+    or filter==require("chat_channels").linkFilter and {4,5,6}
+    or filter=="LINK" and {7} or {8}
+  eq(hud:chatStatus().active_filter,filter); eq(view.chat_active_filter,filter)
+  eq(#view.chat_entries,#expected); eq(#view.chat_output.lines,#expected)
+  for index,source in ipairs(expected) do
+    eq(view.chat_entries[index].line,rows[source].line)
+    eq(view.chat_output.lines[index],rows[source].line)
+  end
+  eq(rows[2].category,"PRIVATE"); eq(rows[4].category,"PRIVATE"); eq(rows[5].category,"WHISPER")
+  eq(view:chatDisplayMatches(hud.chat:entries(),hud.chat.history:categories(),filter),true)
+end
+
+test("main PRIVATE LINK callbacks partition cold and handed off legacy records without storage writes",function()
+  local link=require("chat_channels").linkFilter
+  for _,mode in ipairs({"cold","handoff"}) do
+    local runtime=fakeChatRuntimeWithPersonalTrigger(); local rows=partitionAcceptanceRows()
+    local appends=0
+    runtime.chatEntries=rows
+    function runtime:createChatStorage()
+      return {loadRecent=function() return rows end,
+        append=function() appends=appends+1; error("selection must not persist synthetic history") end,
+        close=function() return true end}
+    end
+    local view=partitionAcceptanceView()
+    local hud=Main.new(runtime,{chat={enabled=true,combine_links=false,visible_limit=1000}})
+    hud.view=view
+    if mode=="handoff" then hud.chat_handoff={schema=1,character_key="profile",filter="PRIVATE",entries=rows} end
+    assert(hud:startChat()); eq(view.combined,true)
+    for _,filter in ipairs({"PRIVATE",link,"PRIVATE",link,"LINK","LINK VIEW","PRIVATE"}) do
+      local paints=view.repaints
+      assert(view.filter_callback(filter)); eq(view.repaints,paints+1)
+      assertPartitionAcceptance(view,hud,rows,filter)
+    end
+    eq(appends,0); eq(#hud.chat:handoff().entries,#rows); assert(hud.chat:shutdown())
+  end
+end)
+
+test("main adopted PRIVATE LINK display verification repairs equal count stale output and rebinds selection",function()
+  local link=require("chat_channels").linkFilter
+  for _,filter in ipairs({"PRIVATE",link}) do
+    for _,mode in ipairs({"matching","opposite","cleared"}) do
+      local runtime=fakeChatRuntimeWithPersonalTrigger(); local rows=partitionAcceptanceRows()
+      runtime.chatEntries=rows
+      local view=partitionAcceptanceView()
+      local settings={chat={enabled=true,visible_limit=1000}}
+      local old=Main.new(runtime,settings); old.view=view
+      assert(old:startChat()); assert(view.filter_callback(filter))
+      local handoff=old.chat:handoff(); assert(old.chat:shutdown())
+      if mode=="opposite" then
+        local opposite=filter=="PRIVATE" and link or "PRIVATE"
+        view:renderChat(old.chat.history:entries(opposite,nil,true),old.chat.history:categories(),opposite)
+        eq(#view.chat_entries,3) -- Equal counts cannot establish a matching display.
+      elseif mode=="cleared" then
+        view.chat_output.lastLine=0; view.chat_output.lines={}
+      end
+      local paints=view.repaints
+      local hud=Main.new(runtime,settings); hud.view=view; hud.view_adopted=true; hud.chat_handoff=handoff
+      assert(hud:startChat()); eq(view.repaints,paints+(mode=="matching" and 0 or 1))
+      assertPartitionAcceptance(view,hud,rows,filter)
+      for _,nextFilter in ipairs({link,"PRIVATE",link}) do
+        assert(view.filter_callback(nextFilter)); assertPartitionAcceptance(view,hud,rows,nextFilter)
+      end
+      eq(old.chat.filter,filter); eq(old.chat.started,false)
+      eq(#runtime.chatEntries,8); assert(hud.chat:shutdown())
+    end
+  end
+end)
+
 test("disabled chat leaves personal trigger runtime untouched",function()
   local runtime=fakeChatRuntimeWithPersonalTrigger()
   local personal=runtime:addLineTrigger(function() runtime.personalTrigger=true end)

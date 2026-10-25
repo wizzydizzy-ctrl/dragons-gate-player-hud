@@ -4652,6 +4652,173 @@ test("reusable sound views require the reserved WORLD row",function()
   ok,err=View.validateReusable(view,view.settings); eq(ok,nil); assert(err:find("sound tabs",1,true))
 end)
 
+-- Exercise the registered UI callbacks through Main, Controller and the native
+-- console double. All records and storage are synthetic; no profile is opened.
+local function partitionedChatView(order)
+  local rows={
+    {category="CONTACT",line='Sable thinks to you, "Synthetic direct."'},
+    {category="WHISPER",line='Sable whispers to you, "Synthetic whisper."'},
+    {category="MENTAL",source="outgoing",target="Sable",line="Synthetic named contact."},
+    {category="ESP",line='Sable (ESP): "Synthetic global."'},
+    {category="PRIVATE",line='You pick up Sable\'s Dragon link, "Synthetic legacy shared." [r-1]'},
+    {category="WHISPER",line='You pick up Sable\'s mental link, "Synthetic mislabeled shared." [r-1]'},
+    {category="PRIVATE",line='Sable thinks to you, "Synthetic legacy direct."'},
+    {category="MENTAL",source="outgoing",target="all",line="Synthetic outgoing global."},
+    {category="SECIAN",line='You pick up Sable\'s Secian link, "Synthetic racial." [r-1]'},
+    {category="LINK",source="custom",line="Synthetic personal LINK."},
+    {category="LINK VIEW",source="custom",line="Synthetic personal LINK VIEW."},
+  }
+  for index,entry in ipairs(rows) do
+    entry.message="synthetic-ui-"..index; entry.source=entry.source or "test"
+    entry.timestamp="2026-10-24T12:00:00Z"
+  end
+  local adapter={next=0,appends=0}
+  function adapter:epoch() return 100 end
+  function adapter:addLineTrigger() self.next=self.next+1; return self.next end
+  function adapter:killTrigger() end
+  function adapter:addEvent() self.next=self.next+1; return self.next end
+  function adapter:killEvent() end
+  function adapter:createChatStorage()
+    return {loadRecent=function() return rows end,
+      append=function() adapter.appends=adapter.appends+1; return true end,
+      close=function() return true end}
+  end
+  local view=chatView(nil,nil,nil,nil,nil,nil,nil,{combined_tab_order=order})
+  view:applyLayout(require("layout").compute(1920,1080))
+  local hud=require("main").new(adapter,view.settings); hud.view=view
+  assert(hud:startChat())
+  return view,hud,adapter,rows
+end
+
+local partitionedChatExpected={
+  PRIVATE={1,2,3,7}, [ChatChannels.linkFilter]={4,5,6,8,9},
+  LINK={10}, ["LINK VIEW"]={11},
+}
+local function assertPartitionedChat(view,hud,rows,filter)
+  eq(hud.chat.filter,filter); eq(view.chat_active_filter,filter)
+  local expected=partitionedChatExpected[filter]
+  eq(#view.chat_entries,#expected); eq(#view.chat_output.echoes,#expected)
+  for index,source in ipairs(expected) do
+    eq(view.chat_entries[index].message,rows[source].message)
+    local _,text=View.chatLine(view.chat_entries[index],view.settings.theme,view.settings.chat.timestamps,
+      view.color_styles_config or {},view.color_options)
+    eq(view.chat_output.echoes[index],text)
+  end
+  local active=0
+  for _,button in ipairs(view.chat_buttons) do
+    if tostring(button.style):find("background:#26382d;",1,true) then
+      active=active+1; eq(button.category,filter)
+    end
+  end
+  eq(active,1)
+  -- Projection must not relabel persisted/handoff records.
+  eq(rows[5].category,"PRIVATE"); eq(rows[6].category,"WHISPER"); eq(rows[7].category,"PRIVATE")
+  eq(view:chatDisplayMatches(hud.chat:entries(),hud.chat.history:categories(),filter),true)
+end
+local function partitionedChatButton(view,filter)
+  for _,button in ipairs(view.chat_buttons) do if button.category==filter then return button end end
+  error("synthetic tab is not visible: "..filter)
+end
+local function clickPartitionedChat(view,hud,rows,filter,release)
+  local button=partitionedChatButton(view,filter); local clears=view.chat_output.clearCalls
+  if release then
+    local before=hud.chat.filter
+    button.click({button="LeftButton",globalX=100})
+    eq(hud.chat.filter,before); eq(view.chat_output.clearCalls,clears)
+    button.release({button="LeftButton",globalX=101})
+  else assert(button.click()) end
+  eq(view.chat_output.clearCalls,clears+1)
+  assertPartitionedChat(view,hud,rows,filter)
+end
+
+test("PRIVATE and reserved LINK click and release callbacks repaint distinct synthetic histories",function()
+  local view,hud,adapter,rows=partitionedChatView()
+  for _,release in ipairs({false,true}) do
+    for _,filter in ipairs({"PRIVATE",ChatChannels.linkFilter,"PRIVATE",ChatChannels.linkFilter,"LINK","LINK VIEW"}) do
+      clickPartitionedChat(view,hud,rows,filter,release)
+    end
+  end
+  eq(adapter.appends,0); assert(hud.chat:shutdown())
+end)
+
+test("sorted and dragged PRIVATE LINK tabs keep their category callbacks and output",function()
+  local view,hud,adapter,rows=partitionedChatView(
+    {"ALL","COMBAT","LINK","LINK VIEW","PRIVATE","ROOM","STAFF","WORLD",ChatChannels.linkFilter})
+  for _,filter in ipairs({"PRIVATE",ChatChannels.linkFilter,"LINK","PRIVATE"}) do
+    clickPartitionedChat(view,hud,rows,filter,true)
+  end
+  for _,filter in ipairs({ChatChannels.linkFilter,"PRIVATE"}) do
+    local button=partitionedChatButton(view,filter); local before=hud.chat.filter
+    local clears=view.chat_output.clearCalls
+    button.click({button="LeftButton",globalX=1000})
+    button.release({button="LeftButton",globalX=0})
+    eq(view.chat_filter_order[1],filter); eq(view.settings.chat.combined_tab_order[1],filter)
+    eq(hud.chat.filter,before); eq(view.chat_output.clearCalls,clears)
+    for _,nextFilter in ipairs({ChatChannels.linkFilter,"PRIVATE","LINK","LINK VIEW"}) do
+      clickPartitionedChat(view,hud,rows,nextFilter,true)
+    end
+  end
+  eq(adapter.appends,0); assert(hud.chat:shutdown())
+end)
+
+test("overflow selection promotes PRIVATE and reserved LINK without stale displayed output",function()
+  local view,hud,adapter,rows=partitionedChatView(
+    {"ALL","ROOM","STAFF","COMBAT","WORLD","PRIVATE",ChatChannels.linkFilter,"LINK","LINK VIEW"})
+  view:applyLayout(require("layout").compute(280,700))
+  local seen={}
+  for index=1,40 do
+    local hidden=view.chat_overflow_categories; assert(#hidden>0)
+    local expected=hidden[((view.chat_overflow_cursor or 0)%#hidden)+1]
+    view.chat_overflow_button.click({button="LeftButton"})
+    eq(hud.chat.filter,expected); eq(view.chat_active_filter,expected)
+    if partitionedChatExpected[expected] then
+      assertPartitionedChat(view,hud,rows,expected); seen[expected]=(seen[expected] or 0)+1
+      -- The promoted active tab must still work through its release callback.
+      clickPartitionedChat(view,hud,rows,expected,true)
+    end
+  end
+  assert((seen.PRIVATE or 0)>1); assert((seen[ChatChannels.linkFilter] or 0)>1)
+  eq(adapter.appends,0); assert(hud.chat:shutdown())
+end)
+
+test("chat refresh between PRIVATE press and release keeps the pending selection",function()
+  local view,hud,adapter,rows=partitionedChatView()
+  clickPartitionedChat(view,hud,rows,ChatChannels.linkFilter,true)
+  local button=partitionedChatButton(view,"PRIVATE")
+  button.click({button="LeftButton",globalX=100})
+  hud.chat:notify()
+  eq(view.chat_tabs_refresh_pending,true); eq(hud.chat.filter,ChatChannels.linkFilter)
+  button.release({button="LeftButton",globalX=100})
+  assertPartitionedChat(view,hud,rows,"PRIVATE"); eq(view.chat_tabs_refresh_pending,nil)
+  eq(adapter.appends,0); assert(hud.chat:shutdown())
+end)
+
+test("adopted PRIVATE LINK displays rebind callbacks and repair the opposite or cleared console",function()
+  for _,filter in ipairs({"PRIVATE",ChatChannels.linkFilter}) do
+    for _,mode in ipairs({"matching","opposite","cleared"}) do
+      local view,old,adapter,rows=partitionedChatView()
+      clickPartitionedChat(view,old,rows,filter,true)
+      local handoff=old.chat:handoff(); assert(old.chat:shutdown())
+      if mode=="opposite" then
+        local opposite=filter=="PRIVATE" and ChatChannels.linkFilter or "PRIVATE"
+        view:renderChat(old.chat.history:entries(opposite,nil,true),old.chat.history:categories(),opposite)
+      elseif mode=="cleared" then view.chat_output:clear() end
+      assert(view:prepareForReuse(view.settings))
+      local clears=view.chat_output.clearCalls
+      local hud=require("main").new(adapter,view.settings); hud.view=view
+      hud.chat_handoff=handoff; hud.view_adopted=true
+      assert(hud:startChat())
+      eq(view.chat_output.clearCalls,clears+(mode=="matching" and 0 or 1))
+      assertPartitionedChat(view,hud,rows,filter)
+      for _,nextFilter in ipairs({ChatChannels.linkFilter,"PRIVATE",ChatChannels.linkFilter}) do
+        clickPartitionedChat(view,hud,rows,nextFilter,true)
+      end
+      eq(old.chat.filter,filter); eq(old.chat.started,false)
+      eq(adapter.appends,0); assert(hud.chat:shutdown())
+    end
+  end
+end)
+
 test("chat tabs stay inside narrow panels and expose deterministic overflow",function()
   local layout=require("layout").compute(280,700); local view=chatView(); view:applyLayout(layout); local selected
   view:setChatFilterCallback(function(category) selected=category end)

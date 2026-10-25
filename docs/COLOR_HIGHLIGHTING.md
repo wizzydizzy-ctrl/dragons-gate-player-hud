@@ -1,6 +1,6 @@
 # DGHUD Color Highlighting Guide
 
-Applies to DGHUD **v0.3.106**.
+Applies to DGHUD **v0.3.107**.
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 

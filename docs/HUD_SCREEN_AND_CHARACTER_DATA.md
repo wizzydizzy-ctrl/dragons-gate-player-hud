@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.106.
+Applies to DGHUD v0.3.107.
 
 DGHUD combines live GMCP information with complete responses to ordinary Dragons Gate commands. GMCP is preferred when the same value is available from both sources.
 
@@ -154,7 +154,7 @@ In the normal combined layout, click **Runes** in the Skills / Runes card below 
 
 Long rune names such as **Translocation** expand the scrollable content to fit the full name and weave count. In narrow windows, use the horizontal scrollbar rather than shrinking the text.
 
-`info magic` (or `info mag`) fills the Runes list. The display has **Runes** and **Weaves Remain** columns: names on the left, all counts right-aligned in one column. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
+`info magic` fills the Runes list. The shorter `info mag` remains supported when entered manually. The display has **Runes** and **Weaves Remain** columns: names on the left, all counts right-aligned in one column. DGHUD retains every elemental rune and sorts the list by the fewest weaves remaining first, then by name. The list scrolls when it is longer than the visible space.
 
 This puts the runes closest to needing renewal at the top.
 
@@ -162,7 +162,7 @@ The counts refresh as soon as a recognized modifier, shape, or corridor section 
 
 Each new rune request clears the old exported values before saving the complete fresh list. Scripts can read `DGHUD.runes.values.disruption`, `DGHUD.runes.remaining.disruption`, or `DGHUD.runes.getRemaining("disruption")`. Simple rune names also become individual Lua variables, such as `disruption = 3`, unless that name belongs to an existing unrelated global. Multiword names use underscores in the direct variables. Missing/unknown values are `nil`, not zero. The existing `items`, `by_name`, `get`, and `all` rune APIs remain supported. Rune values clear on disconnect/character exit and must be refreshed for the next character.
 
-Use `shoprenew` to renew only runes below 20 weaves, or `shoprenewall` for every rune, after a fresh `info mag` response. `trainall` likewise requests fresh skills and raises known zero-use skills by their game numbers. Commands run one second apart and can spend game resources. Turn each shortcut off or on in **OPTIONS → Skills & Runes → Quick Commands**, then **Save**. See [shortcut commands and stopping rules](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
+Use `shoprenew` to renew only runes below 20 weaves, or `shoprenewall` for every rune. Both request fresh `info magic` before renewing. `trainall` likewise requests fresh skills and raises known zero-use skills by their game numbers. Commands run one second apart and can spend game resources. Turn each shortcut off or on in **OPTIONS → Skills & Runes → Quick Commands**, then **Save**. See [shortcut commands and stopping rules](COMMAND_REFERENCE.md#rune-renewal-and-training-shortcuts).
 
 ## Skills
 

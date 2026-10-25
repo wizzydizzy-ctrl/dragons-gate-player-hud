@@ -2,7 +2,7 @@
 
 [Back to the Complete DGHUD Guide](DGHUD_GUIDE.md)
 
-Applies to DGHUD v0.3.106.
+Applies to DGHUD v0.3.107.
 
 Use the lowercase commands shown below. Skill filters ignore case; other HUD aliases may require the exact lowercase spelling.
 
@@ -37,8 +37,8 @@ These shortcuts start **ON**. Change each independently under **OPTIONS → Skil
 
 | Command | What it does |
 | --- | --- |
-| `shoprenew` | Request fresh `info mag`, then send `shop renew <rune>` for each rune with **fewer than 20** weaves. A rune at exactly 20 is not renewed. |
-| `shoprenewall` | Request fresh `info mag`, then renew every rune in that response. |
+| `shoprenew` | Request fresh `info magic`, then send `shop renew <rune>` for each rune with **fewer than 20** weaves. A rune at exactly 20 is not renewed. |
+| `shoprenewall` | Request fresh `info magic`, then renew every rune in that response. |
 | `trainall` | Request fresh `skill`, then send `train raise <skill number>` for each known skill with **0 uses**. |
 | `shoprenewstop` | Stop the current renewal or training queue. |
 | `trainallstop` | Also stop the current renewal or training queue. |
@@ -224,7 +224,7 @@ skill
 time
 ```
 
-DGHUD observes their complete responses and refreshes the matching panel. `info mag` is also recognized as a shortened form of `info magic`. The skills forms with an argument are DGHUD aliases described [above](#skills-commands).
+DGHUD observes their complete responses and refreshes the matching panel. HUD-generated rune requests always use exact `info magic`; manually entered `info mag` remains recognized for compatibility. The skills forms with an argument are DGHUD aliases described [above](#skills-commands).
 
 ## Chat history commands
 

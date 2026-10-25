@@ -2,7 +2,7 @@
 
 The independently versioned Player edition of the bronze-and-jade Mudlet 5 HUD for Dragons Gate. It displays confirmed `Char.Status`, `Char.Vitals`, and `Room` GMCP values, including `weapon_readied` and `shield_readied`.
 
-Documentation covers **DGHUD v0.3.106**.
+Documentation covers **DGHUD v0.3.107**.
 
 ## Quick start
 
@@ -43,7 +43,15 @@ dghud update
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Clear next steps for common problems. |
 | [Support, privacy, and saved files](docs/SUPPORT_PRIVACY_AND_FILES.md) | Feedback, debug reports, local files, and backups. |
 
-## Latest changes — v0.3.106
+## Latest changes — v0.3.107
+
+- **PRIVATE** keeps direct conversations; **LINK** keeps shared mental/ESP broadcasts and Dragon, Psycian, and Secian links. Updating older versions applies this separation without clearing history.
+- Recognized link frames previously captured with a PRIVATE or WHISPER label now display in LINK and do not trigger PRIVATE alerts. Original records remain unchanged; unrelated personal categories are preserved.
+- Every HUD-generated rune refresh uses **`info magic`**, including login, `shoprenew`, and `shoprenewall`. Manually typed `info mag` still works.
+
+[Read the chat routing guide](docs/CHATBOX.md#the-link-tab).
+
+## Previous changes — v0.3.106
 
 - Resize chat through **OPTIONS → CHAT SETTINGS → HEIGHT**: choose **Compact**, **Normal**, or **Large**, or use **Smaller −20px / Larger +20px**.
 - Drag the chatbox's bottom edge and release to save a custom height. Chat stays aligned above the main display; smaller chat gives that display more room.

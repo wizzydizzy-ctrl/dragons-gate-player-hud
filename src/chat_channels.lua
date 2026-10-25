@@ -34,8 +34,11 @@ local function validLinkSuffix(value)
 end
 function Channels.entryCategory(entry)
   local raw=tostring(type(entry)=="table" and entry.category or ""):upper():match("^%s*(.-)%s*$")
-  if linkCategories[raw] then
-    local line=tostring(entry.line or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):match("^%s*(.-)%s*$")
+  local legacyPrivate=raw=="PRIVATE" or raw=="WHISPER"
+  if linkCategories[raw] or legacyPrivate then
+    local line=tostring(entry.line or ""):gsub("\27%[[0-?]*[ -/]*[@-~]",""):gsub("\7","")
+    if line:find("[\r\n%z]") then return Channels.category(raw) end
+    line=line:match("^%s*(.-)%s*$")
     local _,kind,_,suffix=line:match("^You pick up "..activeName.."'s (%a+) link, \"(.*)\"(.*)$")
     if kind and validLinkSuffix(suffix) then
       local named={Dragon="DRAGON",Secian="SECIAN",Psycian="PSYCIAN",mental="MENTAL"}
@@ -43,6 +46,19 @@ function Channels.entryCategory(entry)
     end
     local listener,speaker,message,tail=line:match("^"..activeName.." picks up "..activeName.."'s mental link, \"(.*)\"(.*)$")
     if listener and speaker and message and validLinkSuffix(tail) then return "MENTAL" end
+    if legacyPrivate then
+      -- Older/custom captures may have labelled every mental message PRIVATE.
+      -- Recover only complete game frames; never inspect the quoted body or
+      -- relabel unrelated channels, and leave stored records unchanged.
+      if line:match("^"..activeName..' %(ESP%): "(.*)"$')
+          or line:match("^"..activeName..' thinks to you, "(.*)"$')
+          or line:match("^You pick up "..activeName.."'s thoughts echoing through the area, \"(.*)\"$") then return "MENTAL" end
+      speaker,message,tail=line:match("^You pick up "..activeName.."'s thoughts, \"(.*)\"(.*)$")
+      if speaker and message and validLinkSuffix(tail) then return "MENTAL" end
+      if line:match("^"..activeName..' whispers to you, "(.*)"$')
+          or line:match("^"..activeName..' whispers, "(.*)"$')
+          or line:match('^You whisper to '..activeName..', "(.*)"$') then return "WHISPER" end
+    end
   end
   return Channels.category(raw)
 end

@@ -215,6 +215,70 @@ local function soundController(saved,config,sources)
   return controller,adapter,sounds
 end
 
+
+test("mislabeled PRIVATE broadcasts select only their effective source or ALL and never consume PRIVATE cooldown",function()
+  local rows={
+    {[[Tester (ESP): "Synthetic ESP."]],"MENTAL"},
+    {[=[You pick up Tester's thoughts, "Synthetic global." [r-1]]=],"MENTAL"},
+    {[[You pick up Tester's thoughts echoing through the area, "Synthetic room."]],"MENTAL"},
+    {[[You pick up Tester's mental link, "Synthetic generic."]],"MENTAL"},
+    {[[Listener picks up Tester's mental link, "Synthetic observed."]],"MENTAL"},
+    {[=[You pick up Tester's Psycian link, "Synthetic racial." [r-1]]=],"PSYCIAN"},
+    {[[You pick up Tester's Dragon link, "Synthetic racial."]],"DRAGON"},
+    {[[You pick up Tester's Secian link, "Synthetic racial."]],"SECIAN"},
+  }
+  for _,category in ipairs({"PRIVATE","WHISPER"}) do
+    for _,source in ipairs({"builtin","gmcp","custom"}) do
+      for _,row in ipairs(rows) do
+        local entry={category=category,source=source,line=row[1]}
+        local config=Sounds.defaults(); config.tabs.STAFF.enabled=false; config.tabs.PRIVATE.enabled=true
+        local adapter=soundAdapter(); local sounds=assert(Sounds.new(adapter,config))
+        eq(Sounds.choose(config,entry,{}),nil); eq(sounds:onEntry(entry,{}),false)
+        eq(#adapter.played,0); eq(next(sounds.lastPlayed),nil)
+        local direct={category="CONTACT",line=[[Tester thinks to you, "Synthetic direct."]]}
+        assert(sounds:onEntry(direct,{})); eq(#adapter.played,1); eq(adapter.played[1][1],"private")
+        config.tabs[row[2]].enabled=true
+        local id,tab=Sounds.choose(config,entry,{[row[2]]=false})
+        eq(id,row[2]:lower()); eq(tab,row[2])
+        config.tabs[row[2]].enabled=false; config.tabs.ALL.enabled=true
+        eq(Sounds.choose(config,entry,{[row[2]]=false}),nil)
+        id,tab=Sounds.choose(config,entry,{[row[2]]=true})
+        eq(id,"all"); eq(tab,"ALL")
+        eq(entry.category,category); eq(entry.source,source); eq(entry.line,row[1])
+      end
+    end
+  end
+end)
+
+test("restored and live PRIVATE captures isolate broadcasts from direct alerts without replay or raw history rewrites",function()
+  local Channels=require("chat_channels")
+  local saved={
+    {category="PRIVATE",source="gmcp",line=[[You pick up Tester's Dragon link, "Saved synthetic broadcast."]],message="Saved broadcast."},
+    {category="PRIVATE",source="custom",line=[[Tester thinks to you, "Saved synthetic direct."]],message="Saved direct."},
+  }
+  local config=Sounds.defaults(); config.tabs.STAFF.enabled=false; config.tabs.PRIVATE.enabled=true
+  local controller,adapter,sounds=soundController(saved,config,{MENTAL=false,DRAGON=false,PSYCIAN=false,WHISPER=false})
+  assert(controller:setLinkCombined(true)); assert(controller:start())
+  eq(#adapter.played,0); eq(adapter.accepted,0); eq(adapter.appends,0)
+  assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),1)
+  assert(controller:setFilter(Channels.linkFilter)); eq(#controller:entries(),1)
+  assert(controller:capture("PRIVATE","Live synthetic broadcast.",{
+    line=[=[You pick up Tester's Psycian link, "Live synthetic broadcast." [r-1]]=]}))
+  eq(#adapter.played,0); eq(next(sounds.lastPlayed),nil)
+  assert(controller:onLine([[You pick up Tester's mental link, "Live synthetic generic."]]))
+  eq(#adapter.played,0)
+  assert(controller:capture("PRIVATE","Live synthetic direct.",{line=[[Tester thinks to you, "Live synthetic direct."]]}))
+  eq(#adapter.played,1); eq(adapter.played[1][1],"private")
+  assert(controller:setFilter("PRIVATE")); eq(#controller:entries(),2)
+  assert(controller:setFilter(Channels.linkFilter)); eq(#controller:entries(),3)
+  eq(#controller.history.items,5); eq(adapter.appends,3)
+  eq(saved[1].category,"PRIVATE"); eq(saved[2].category,"PRIVATE")
+  eq(controller.history.items[3].category,"PRIVATE"); eq(controller.history.items[3].source,"custom")
+  eq(controller.history.items[5].category,"PRIVATE"); eq(controller.history.items[5].source,"custom")
+  eq(saved[1].line,[[You pick up Tester's Dragon link, "Saved synthetic broadcast."]])
+  assert(controller:shutdown())
+end)
+
 test("PRIVATE alone alerts on whispers and exact direct frames including legacy CONTACT without target metadata",function()
   local config=Sounds.defaults(); config.tabs.STAFF.enabled=false; config.tabs.PRIVATE.enabled=true
   local sources={MENTAL=false,PSYCIAN=false,ESP=false,CONTACT=false,DRAGON=false,SECIAN=false,WHISPER=false,ROOM=false}

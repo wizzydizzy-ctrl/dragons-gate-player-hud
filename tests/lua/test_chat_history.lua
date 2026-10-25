@@ -1,6 +1,68 @@
 local History=require("chat_history")
 local Channels=require("chat_channels")
 
+for _,mode in ipairs({"append","hydrate"}) do
+  test(mode.." partitions mislabeled PRIVATE broadcasts from direct contacts and preserves raw history",function()
+    local rows={
+      {[[Tester (ESP): "Synthetic ESP."]],"MENTAL"},
+      {[=[You pick up Tester's thoughts, "Synthetic global." [r-1]]=],"MENTAL"},
+      {[[You pick up Tester's thoughts echoing through the area, "Synthetic room."]],"MENTAL"},
+      {[[You pick up Tester's mental link, "Synthetic generic."]],"MENTAL"},
+      {[[Listener picks up Tester's mental link, "Synthetic observed."]],"MENTAL"},
+      {[=[You pick up Tester's Psycian link, "Synthetic racial." [r-1]]=],"PSYCIAN"},
+      {[[You pick up Tester's Dragon link, "Synthetic racial."]],"DRAGON"},
+      {[[You pick up Tester's Secian link, "Synthetic racial."]],"SECIAN"},
+    }
+    local history=History.new(100,0); local entries,expected,originals={},{},{}
+    local function add(value,category)
+      value.schema=1; value.timestamp="2026-10-24T12:00:00Z"; value.character="Synthetic Keeper"
+      value.message="Synthetic fixture "..(#entries+1); value.speaker="Tester"
+      entries[#entries+1]=value; expected[#entries]=category
+      originals[#entries]={}; for key,item in pairs(value) do originals[#entries][key]=item end
+    end
+    for _,category in ipairs({"PRIVATE","WHISPER"}) do
+      for _,source in ipairs({"builtin","gmcp","custom"}) do
+        for _,row in ipairs(rows) do add({category=category,source=source,line=row[1]},row[2]) end
+      end
+    end
+    local broadcastCount=#entries
+    for _,category in ipairs({"PRIVATE","WHISPER","CONTACT","MENTAL","ESP"}) do
+      add({category=category,source="builtin",line=[[Tester thinks to you, "Synthetic direct."]]},"MENTAL")
+    end
+    add({category="WHISPER",source="builtin",line=[[Tester whispers to you, "Synthetic quiet."]]},"WHISPER")
+    add({category="MENTAL",source="outgoing",target="Tester"},"MENTAL")
+    add({category="PRIVATE",source="custom",line=[[Tester says, "You pick up Other's Dragon link, 'Quoted.'"]]},"PRIVATE")
+    add({category="PRIVATE",source="custom",line="Intentional custom private message."},"PRIVATE")
+    if mode=="hydrate" then assert(history:hydrate(entries))
+    else for index,value in ipairs(entries) do assert(history:append(value,index*4)) end end
+    local lastKey,lastEpoch=history.lastKey,history.lastEpoch
+    local hidden={MENTAL=false,PSYCIAN=false,DRAGON=false,SECIAN=false,WHISPER=false,PRIVATE=false}
+    local private=history:entries("PRIVATE",hidden)
+    local links=history:entries(Channels.linkFilter,hidden,true)
+    eq(#links,broadcastCount); eq(#private,#entries-broadcastCount)
+    eq(#history:entries(Channels.linkFilter,hidden,false),0)
+    eq(#history:entries("ALL"),#entries); eq(#history:entries("ALL",hidden),0)
+    local seen={}
+    for index,value in ipairs(links) do
+      eq(value.message,entries[index].message); eq(value.category,expected[index])
+      eq(value.line,entries[index].line); eq(value.source,entries[index].source)
+      eq(seen[value.message],nil); seen[value.message]="LINK"
+    end
+    for index,value in ipairs(private) do
+      local rawIndex=broadcastCount+index
+      eq(value.message,entries[rawIndex].message); eq(value.category,expected[rawIndex])
+      eq(seen[value.message],nil); seen[value.message]="PRIVATE"
+    end
+    for index,value in ipairs(entries) do
+      eq(history.items[index],value)
+      for key,item in pairs(originals[index]) do eq(value[key],item) end
+      for key,item in pairs(value) do eq(originals[index][key],item) end
+    end
+    eq(#history.items,#entries); eq(history.lastKey,lastKey); eq(history.lastEpoch,lastEpoch)
+  end)
+end
+
+
 -- Policy fixtures are synthetic; no profile data or real conversations are used.
 test("PRIVATE accepts whispers and exact incoming direct frames without matching metadata",function()
   eq(Channels.inPrivate(nil),false); eq(Channels.inPrivate(false),false)

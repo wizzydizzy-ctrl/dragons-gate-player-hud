@@ -95,14 +95,14 @@ test("quick command aliases refresh runes export counts and send renewals one se
     local hud=runtime({display={skill_filter=false}},f); _G.DGHUD.controller=hud; Main.installRunesApi(_G.DGHUD)
     local alias
     for _,entry in pairs(f.aliases) do if entry.pattern=="^(?i:shoprenew)$" then alias=entry.fn end end
-    assert(alias); assert(alias()); eq(f.sent[1],"info mag"); eq(hud.collector.active.command,"info magic")
+    assert(alias); assert(alias()); eq(f.sent[1],"info magic"); eq(hud.collector.active.command,"info magic")
     for _,line in ipairs({"You have the following elemental runes available to you...",
         "  disruption - 3 weaves remain   force - 20 weaves remain","  light - 19 weaves remain",">"}) do hud.collector:onLine(line) end
     eq(_G.DGHUD.runes.values.disruption,3); eq(_G.DGHUD.runes.disruption,3); eq(_G.disruption,3)
     eq(_G.DGHUD.runes.getRemaining("force"),20); eq(#f.sent,1)
     f:fireQuickTimer(); eq(f.sent[2],"shop renew disruption")
     f:fireQuickTimer(); eq(f.sent[3],"shop renew light"); eq(hud.quick_actions:busy(),false)
-    assert(hud:runQuickAction("shoprenewall")); eq(f.sent[4],"info mag")
+    assert(hud:runQuickAction("shoprenewall")); eq(f.sent[4],"info magic")
     eq(_G.disruption,nil); eq(_G.DGHUD.runes.getRemaining("disruption"),nil); eq(_G.DGHUD.runes.values.disruption,nil)
     hud.collector:onLine("You have the following elemental runes available to you...")
     hud.collector:onLine("  force - 100 weaves remain"); hud.collector:onLine(">")
@@ -158,12 +158,38 @@ local function fireRenewal(hud,f)
   local callback=assert(f.timers[timer.id]); f.timers[timer.id]=nil; callback()
 end
 
+for _,name in ipairs({"shoprenew","shoprenewall"}) do
+  test(name.." alias requests and sends info magic once through outgoing events",function()
+    withRuneRuntime(function(hud,f)
+      local requests={}; local request=hud.collector.request
+      function hud.collector:request(command,done)
+        requests[#requests+1]=command; return request(self,command,done)
+      end
+      function f:sendCommand(command)
+        self.sent[#self.sent+1]=command
+        for _,event in pairs(self.events) do if event.name=="sysDataSendRequest" then event.fn(nil,command) end end
+        return true
+      end
+      local alias
+      for _,entry in pairs(f.aliases) do if entry.pattern=="^(?i:"..name..")$" then alias=entry.fn end end
+      assert(alias); assert(alias())
+      eq(#requests,1); eq(requests[1],"info magic")
+      eq(#f.sent,1); eq(f.sent[1],"info magic"); eq(hud.collector.active.command,"info magic")
+      eq(hud.quick_actions:busy(),true)
+      for _,line in ipairs({runeHeader," force - 0 weaves remain",">"}) do hud.collector:onLine(line) end
+      eq(#f.sent,1); fireRenewal(hud,f)
+      hud.collector:onLine(">")
+      eq(#requests,1); eq(#f.sent,2); eq(f.sent[2],"shop renew force"); eq(hud.quick_actions:busy(),false)
+    end)
+  end)
+end
+
 test("shoprenewall clears old variables and publishes elementals once before the full magic tail finishes",function()
   withRuneRuntime(function(hud,f)
     hud.collector:onOutgoing("info magic")
     for _,line in ipairs({runeHeader," force - 3 weaves remain   healing - 14 weaves remain",">"}) do hud.collector:onLine(line) end
     eq(_G.force,3); eq(_G.healing,14)
-    assert(hud:runQuickAction("shoprenewall")); eq(f.sent[1],"info mag")
+    assert(hud:runQuickAction("shoprenewall")); eq(f.sent[1],"info magic")
     eq(_G.force,nil); eq(_G.healing,nil); eq(next(_G.DGHUD.runes.values),nil)
     eq(_G.DGHUD.runes.getRemaining("force"),nil); eq(#_G.DGHUD.runes.all(),0)
     eq(#f.view.state.runes.items,0)
@@ -431,7 +457,7 @@ test("quick settings retain explicit OFF through unrelated saves and request int
     local restored,g=runtime({display=f.saved}); eq(restored:quickActionEnabled("shoprenew"),false)
     eq(restored:runQuickAction("shoprenew"),nil); eq(#g.sent,0)
     local enabled=restored:skillSettings(); enabled.shoprenew=true; assert(restored:setSkillSettings(enabled))
-    assert(restored:runQuickAction("shoprenew")); eq(g.sent[1],"info mag")
+    assert(restored:runQuickAction("shoprenew")); eq(g.sent[1],"info magic")
     restored.collector:onOutgoing("skill")
     eq(restored.quick_actions:busy(),false)
     restored.collector:onLine("Skill Remain Level"); restored.collector:onLine("Sharp Weapons 0 2"); restored.collector:onLine(">")

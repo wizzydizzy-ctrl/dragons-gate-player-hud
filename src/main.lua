@@ -1735,7 +1735,7 @@ function Main:start()
       local saved=self.rune_variables:save(parsed.items)
       if not saved then
         self.rune_variables:clear(); snapshot.runes={items={}}
-        if self.adapter.reportCommandError then self.adapter:reportCommandError("Rune counts could not be confirmed. Run info mag again.") end
+        if self.adapter.reportCommandError then self.adapter:reportCommandError("Rune counts could not be confirmed. Run info magic again.") end
       end
     end
     if key=="time" then self:onClockSync(snapshot.time); return end
